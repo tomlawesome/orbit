@@ -333,3 +333,63 @@ describe("#1781 system packages (creditsView)", () => {
     expect(entry?.sourceHost).toBe("pkgs.alpinelinux.org");
   });
 });
+
+describe("#1848 W-F1 apk source link", () => {
+  const purlRef = (locator) => [{ referenceCategory: "PACKAGE-MANAGER", referenceType: "purl", referenceLocator: locator }];
+  const apkSource = (name, locator, homepage = "NOASSERTION") => {
+    const [one] = librariesOf({
+      packages: [{ name, versionInfo: "1.0-r0", licenseDeclared: "MIT", supplier: "NOASSERTION", homepage, externalRefs: purlRef(locator) }],
+    });
+    return one;
+  };
+  const search = "https://pkgs.alpinelinux.org/packages";
+
+  it("links a community package (ffmpeg) to the package search, not a /main/ page", () => {
+    const one = apkSource("ffmpeg", "pkg:apk/alpine/ffmpeg@6.1.2-r1?arch=x86_64&distro=alpine-3.22.1");
+    expect(one.source).toBe(`${search}?name=ffmpeg&branch=v3.22&arch=x86_64`);
+    expect(one.source).not.toContain("/main/");
+    expect(one.source).not.toContain("/community/");
+    expect(one.kind).toBe("apk");
+  });
+
+  it("keeps a real arch such as aarch64", () => {
+    const one = apkSource("ffmpeg", "pkg:apk/alpine/ffmpeg@6.1.2-r1?arch=aarch64&distro=alpine-3.21.3");
+    expect(one.source).toBe(`${search}?name=ffmpeg&branch=v3.21&arch=aarch64`);
+  });
+
+  it("maps noarch to x86_64", () => {
+    const one = apkSource("tzdata", "pkg:apk/alpine/tzdata@2025b-r0?arch=noarch&distro=alpine-3.22.1");
+    expect(one.source).toBe(`${search}?name=tzdata&branch=v3.22&arch=x86_64`);
+  });
+
+  it("uses x86_64 when the arch qualifier is missing", () => {
+    const one = apkSource("tzdata", "pkg:apk/alpine/tzdata@2025b-r0?distro=alpine-3.22.1");
+    expect(one.source).toBe(`${search}?name=tzdata&branch=v3.22&arch=x86_64`);
+  });
+
+  it("uses the edge branch when the distro qualifier is missing", () => {
+    const one = apkSource("ffmpeg", "pkg:apk/alpine/ffmpeg@6.1.2-r1?arch=x86_64");
+    expect(one.source).toBe(`${search}?name=ffmpeg&branch=edge&arch=x86_64`);
+  });
+
+  it("URL-encodes a name that needs it", () => {
+    const one = apkSource("c++-lib", "pkg:apk/alpine/c%2B%2B-lib@1.0-r0?arch=x86_64&distro=alpine-3.22.1");
+    expect(one.source).toBe(`${search}?name=${encodeURIComponent("c++-lib")}&branch=v3.22&arch=x86_64`);
+    expect(one.source).toContain("name=c%2B%2B-lib");
+    expect(one.source).not.toContain("/main/");
+  });
+
+  it("lets an http(s) homepage win", () => {
+    const one = apkSource("ffmpeg", "pkg:apk/alpine/ffmpeg@6.1.2-r1?arch=x86_64&distro=alpine-3.22.1", "https://ffmpeg.org/");
+    expect(one.source).toBe("https://ffmpeg.org/");
+    expect(one.kind).toBe("apk");
+  });
+
+  it("leaves an npm package linked to npmjs.com", () => {
+    const [one] = librariesOf({
+      packages: [{ name: "jose", versionInfo: "6.2.12", licenseDeclared: "MIT", supplier: "NOASSERTION", homepage: "NOASSERTION", externalRefs: purlRef("pkg:npm/jose@6.2.12") }],
+    });
+    expect(one.source).toBe("https://www.npmjs.com/package/jose");
+    expect(one.kind).toBe("npm");
+  });
+});

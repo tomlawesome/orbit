@@ -591,14 +591,14 @@ variables:
     esac
     return 1
   }
-  # The narrow lanes (#889). A change confined to the ignore/policy files, or
+  # The narrow lanes (#889). A change confined to the ignore file, or
   # to the pipeline's own definition, runs a named handful of jobs and nothing
   # else; every other change is `full`, which admits everything and leaves the
   # classifier's per-job axes to decide as before. `classify` has already
   # collapsed ORBIT_LANE to `full` for a delivery push and for the merge
   # request into `main`, so this never re-checks the branch.
   #
-  #   ignore_policy  .gitleaksignore, supply-chain/licence-policy.yml
+  #   ignore_policy  .gitleaksignore
   #                  -> gitleaks, licence_policy, private-details,
   #                     supply_chain_source
   #   ci             .gitlab-ci.yml, scripts/ci/, the classifier and the two
@@ -1741,7 +1741,8 @@ signing_image_age:
     - *not_on_main_push
     - *not_scheduled
     - when: on_success
-      allow_failure: true
+  # Only this job-level setting tolerates a failure. A rule-level allow_failure
+  # replaces it and would let every failure through, not only exit code 3.
   allow_failure:
     exit_codes: 3
   script:

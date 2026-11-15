@@ -1327,7 +1327,8 @@ export const imapIngestionAttachments = pgTable("imap_ingestion_attachments", {
 }, (table) => [
   /* #1778: one copy of a file a mail carries twice. A UNIQUE constraint, as
      the one it replaces was (0000_baseline); NULLs (rows the backfill has not
-     reached) never collide. */
+     reached) never collide, so `commitStagedAttachment` also dedupes against
+     the plain hash until the backfill reaches the row. */
   unique("imap_attachment_message_index_unique").on(table.messageId, table.contentIndex),
   index("imap_attachment_message_status_idx").on(table.messageId, table.status),
 ]);

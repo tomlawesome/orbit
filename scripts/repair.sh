@@ -4183,7 +4183,7 @@ do_restore_compose_file() {
   compose_image_tmp="$(mktemp "./.${compose_file}.repair.XXXXXX")" || { compose_image_tmp=""; return 1; }
   if ! read_image_deployment_asset "$image" "$compose_file" "$compose_image_tmp" ||
     ! chmod 0644 -- "$compose_image_tmp" ||
-    ! { [[ "$(id -u)" != 0 ]] || chown --reference=. -- "$compose_image_tmp"; }; then
+    ! own_as_folder "$compose_image_tmp"; then
     discard_image_compose
     return 1
   fi
@@ -4486,7 +4486,8 @@ do_restore_configuration_rollback() {
   # operator's evidence in the one case that does end with .env-orbit
   # changed and the action reporting failed, the rollback-copy removal below.
   staged="$(mktemp "${environment_file}.repair-restore.XXXXXX" 2>/dev/null)" || return 1
-  if ! cp -- "$rollback_path" "$staged" 2>/dev/null || ! chmod 600 -- "$staged" 2>/dev/null; then
+  if ! cp -- "$rollback_path" "$staged" 2>/dev/null || ! chmod 600 -- "$staged" 2>/dev/null ||
+    ! own_as_folder "$staged" 2>/dev/null; then
     rm -f -- "$staged"
     return 1
   fi
@@ -4565,7 +4566,15 @@ restart_compose_service() {
 # decision, 2026-11-13): it cannot be rolled back, and the plan says so.
 # Then the done-marker is asked again (#1834, owner decision 10a): usable,
 # the undo copy, its folder when empty, and the record go; otherwise they
-# stay and one line names the copy, and the next run asks again.
+# stay and one line names the copy, and the next run asks again. Run as root,
+# every file it leaves behind takes the deployment folder's owner, as
+# restore-compose-file does (#1844). Each file is written and chowned
+# directly, never through a symlink (FIX-S1): the step record and every file
+# written into a folder someone else may own (an adopted undo folder
+# included) go to a name mktemp chooses and are renamed into place, the chown
+# is --no-dereference, and a new undo folder gets its marker and copies while
+# it is still root's and is given to the folder's owner only once they are in
+# it.
 readonly smtp_retirement_record=".orbit-smtp-retirement"
 # Written into the undo copy's folder before the copy, naming that folder, so
 # a run killed before the step record leaves a copy the next run can adopt
@@ -4653,11 +4662,33 @@ mail_sending_gate_holds() {
 smtp_copy_dir=""
 smtp_record_step=""
 
-# smtp_write_record <step>: the step record, written beside its target and
-# renamed; it names the undo copy's folder when one is known.
+# As root, give a path the deployment folder's owner (restore-compose-file's
+# rule): the folder's user must still be able to read what this run leaves
+# behind. As any other user, a no-op. Never through a symlink: a link swapped
+# in at the name is re-owned itself, its target untouched (FIX-S1).
+own_as_folder() {
+  [[ "$(id -u)" != 0 ]] || chown --no-dereference --reference=. -- "$@"
+}
+
+# smtp_write_record <step>: the step record (step=, and copy= naming the undo
+# copy's folder when one is known), written to a name mktemp chooses (created
+# O_EXCL, mode 600) and renamed over the record, so no fixed name a planted
+# symlink could sit at is ever opened for writing (FIX-S1).
 smtp_write_record() {
-  ( umask 077 && { printf 'step=%s\n' "$1" && if [[ -n "$smtp_copy_dir" ]]; then printf 'copy=%s\n' "$smtp_copy_dir"; fi; } > "${smtp_retirement_record}.tmp" ) &&
-    mv -f -- "${smtp_retirement_record}.tmp" "$smtp_retirement_record"
+  local tmp
+  tmp="$(mktemp "./${smtp_retirement_record}.XXXXXX")" || return 1
+  if ! { printf 'step=%s\n' "$1" && if [[ -n "$smtp_copy_dir" ]]; then printf 'copy=%s\n' "$smtp_copy_dir"; fi; } > "$tmp" ||
+    ! own_as_folder "$tmp" || ! mv -f -- "$tmp" "$smtp_retirement_record"; then
+    rm -f -- "$tmp"
+    return 1
+  fi
+}
+
+# Removes do_retire_smtp_lines's rewritten copy, if one was made. It reads and
+# clears the caller's `local tmp`, which bash's dynamic scoping allows.
+smtp_discard_rewrite() {
+  [[ -z "$tmp" ]] || rm -f -- "$tmp"
+  tmp=""
 }
 
 # smtp_read_record: sets $smtp_record_step and $smtp_copy_dir from the step
@@ -4679,14 +4710,16 @@ smtp_read_record() {
 }
 
 # smtp_discard_copy: the change is confirmed. Removes the files the
-# retirement wrote into the undo copy's folder (.env-orbit's lines and its
-# temporary file, the copy marker and, from repair.sh, the overlay), the
+# retirement wrote into the undo copy's folder (.env-orbit's lines, the copy
+# marker and, from repair.sh, the overlay, with any temporary file a killed
+# run left for either, the older fixed name included), the
 # folder when nothing else is in it, then the step record. Anything else in
 # the folder stays.
 smtp_discard_copy() {
   if [[ -n "$smtp_copy_dir" && ! -L orbit-install-backups && -d "$smtp_copy_dir" && ! -L "$smtp_copy_dir" ]]; then
     rm -f -- "$smtp_copy_dir/.env-orbit" "$smtp_copy_dir/$smtp_overlay_file" "$smtp_copy_dir/$smtp_copy_marker" \
-      "$smtp_copy_dir/.env-orbit.smtp-copy.tmp" || return 1
+      "$smtp_copy_dir/.env-orbit.smtp-copy.tmp" "$smtp_copy_dir"/.env-orbit.smtp-copy.?????? \
+      "$smtp_copy_dir/$smtp_overlay_file".smtp-copy.?????? || return 1
     rmdir -- "$smtp_copy_dir" 2>/dev/null || true
   fi
   rm -f -- "$smtp_retirement_record"
@@ -4720,16 +4753,34 @@ smtp_find_orphan_copy() {
 }
 
 # smtp_write_copy <folder>: the undo copy of the lines the retirement removes
-# from .env-orbit, written to a temporary file in <folder> and renamed over
-# <folder>/.env-orbit, so an existing copy (a hard link included) is
-# replaced, never written through (#1834).
+# from .env-orbit, written to a temporary file in <folder> whose name mktemp
+# chooses (mode 600) and renamed over <folder>/.env-orbit, so an existing
+# copy (a hard link or a symlink included) is replaced, never written through
+# (#1834, FIX-S1); then given the folder's owner, --no-dereference, so a link
+# swapped in after the rename is re-owned itself, its target untouched.
 smtp_write_copy() {
-  local tmp="$1/.env-orbit.smtp-copy.tmp"
-  rm -f -- "$tmp" &&
-    ( umask 077 && smtp_env_rewrite backup < "$environment_file" > "$tmp" ) &&
-    mv -f -- "$tmp" "$1/.env-orbit" && return 0
-  rm -f -- "$tmp"
-  return 1
+  local tmp
+  tmp="$(mktemp "$1/.env-orbit.smtp-copy.XXXXXX")" || return 1
+  if ! smtp_env_rewrite backup < "$environment_file" > "$tmp" || ! mv -fT -- "$tmp" "$1/.env-orbit"; then
+    rm -f -- "$tmp"
+    return 1
+  fi
+  own_as_folder "$1/.env-orbit"
+}
+
+# smtp_copy_overlay <folder>: the mail overlay, when it is a regular file,
+# copied with its mode into <folder> the same way: to a mktemp name (cp
+# removes that name and creates it afresh), renamed over
+# <folder>/docker-compose.mail.yml, then given the folder's owner (FIX-S1).
+smtp_copy_overlay() {
+  local tmp
+  [[ -f "$smtp_overlay_file" && ! -L "$smtp_overlay_file" ]] || return 0
+  tmp="$(mktemp "$1/${smtp_overlay_file}.smtp-copy.XXXXXX")" || return 1
+  if ! cp -a --remove-destination -- "$smtp_overlay_file" "$tmp" || ! mv -fT -- "$tmp" "$1/$smtp_overlay_file"; then
+    rm -f -- "$tmp"
+    return 1
+  fi
+  own_as_folder "$1/$smtp_overlay_file"
 }
 
 # smtp_confirm_or_keep: after the secret is gone, asks the gate again.
@@ -4750,21 +4801,28 @@ smtp_confirm_or_keep() {
 # smtp_backup_dir: makes this run's undo-copy folder,
 # orbit-install-backups/<UTC stamp>-repair (-2..-9 when the name exists),
 # every level mode 700, in the installer's own backups folder; it goes once
-# the retirement is confirmed (smtp_discard_copy). Sets $smtp_backup_dir.
+# the retirement is confirmed (smtp_discard_copy). Sets $smtp_backup_dir, and
+# $smtp_backup_root_made to 1 when this run made orbit-install-backups. Gives
+# neither folder away: the caller does that once the marker and the copies
+# are in the dated folder, so nobody but this run can create an entry in it
+# while it writes there (FIX-S1).
+readonly smtp_backup_root="orbit-install-backups"
 smtp_backup_dir=""
+smtp_backup_root_made=0
 smtp_backup_dir() {
-  local root="orbit-install-backups" stamp suffix
+  local stamp suffix
   stamp="$(date -u +%Y%m%dT%H%M%SZ)" && [[ "$stamp" =~ ^[0-9]{8}T[0-9]{6}Z$ ]] || return 1
-  if [[ -L "$root" ]]; then
+  if [[ -L "$smtp_backup_root" ]]; then
     return 1
-  elif [[ -d "$root" ]]; then
-    [[ -O "$root" ]] && chmod 700 -- "$root" || return 1
+  elif [[ -d "$smtp_backup_root" ]]; then
+    [[ -O "$smtp_backup_root" ]] && chmod 700 -- "$smtp_backup_root" || return 1
   else
-    mkdir -m 700 -- "$root" || return 1
+    mkdir -m 700 -- "$smtp_backup_root" || return 1
+    smtp_backup_root_made=1
   fi
   for suffix in "" -2 -3 -4 -5 -6 -7 -8 -9; do
-    if mkdir -m 700 -- "$root/${stamp}-repair${suffix}" 2>/dev/null; then
-      smtp_backup_dir="$root/${stamp}-repair${suffix}"
+    if mkdir -m 700 -- "$smtp_backup_root/${stamp}-repair${suffix}" 2>/dev/null; then
+      smtp_backup_dir="$smtp_backup_root/${stamp}-repair${suffix}"
       return 0
     fi
   done
@@ -4808,20 +4866,25 @@ do_retire_smtp_lines() {
   # checksum is compared once more just before the rename, so the backup and
   # the rewrite come from the same bytes and an edit made meanwhile is never
   # lost.
-  local rewrite=0 tmp="${environment_file}.retire-smtp.tmp" sum_read
+  local rewrite=0 tmp="" sum_read
   if smtp_lines_present || smtp_overlay_listed; then
     rewrite=1
     sum_read="$(smtp_env_sum)" || sum_read=""
-    rm -f -- "$tmp"
     if [[ -z "$sum_read" ]] ||
-      ! ( umask 077 && smtp_env_rewrite retire < "$environment_file" > "$tmp" ) ||
+      ! tmp="$(mktemp "${environment_file}.retire-smtp.XXXXXX")" ||
+      ! smtp_env_rewrite retire < "$environment_file" > "$tmp" ||
       ! chmod 600 -- "$tmp"; then
-      rm -f -- "$tmp"
+      smtp_discard_rewrite
       printf 'Orbit repair: retire-smtp-lines left %s as it was: its COMPOSE_FILE line could not be rewritten safely; remove docker-compose.mail.yml from it by hand.\n' "$environment_file" >&2
       return 1
     fi
+    if ! own_as_folder "$tmp"; then
+      smtp_discard_rewrite
+      printf 'Orbit repair: retire-smtp-lines left %s as it was: the rewritten copy could not be given the folder'"'"'s owner.\n' "$environment_file" >&2
+      return 1
+    fi
     if [[ "$(smtp_env_sum)" != "$sum_read" ]]; then
-      rm -f -- "$tmp"
+      smtp_discard_rewrite
       printf 'Orbit repair: retire-smtp-lines refused, nothing was changed: %s changed while it was being read; run repair again.\n' "$environment_file" >&2
       return 1
     fi
@@ -4831,6 +4894,11 @@ do_retire_smtp_lines() {
     # left a marked folder; it is adopted (its copy rewritten while
     # .env-orbit still holds the SMTP lines), never copied a second time.
     # Otherwise the marker naming the new folder goes first, then the copy.
+    # Every file is given the folder's owner, and the dated folder (and
+    # orbit-install-backups, when this run made it) only once the marker and
+    # the copies are in it (FIX-S1). An adopted folder may already be the
+    # owner's, so smtp_write_copy and smtp_copy_overlay write through mktemp
+    # names and rename; own_as_folder never follows a link.
     local adopted=0
     if smtp_find_orphan_copy; then
       adopted=1
@@ -4838,10 +4906,12 @@ do_retire_smtp_lines() {
     fi
     if ! { { [[ "$adopted" == 1 ]] || { smtp_backup_dir &&
       ( umask 077 && printf 'copy=%s\n' "$smtp_backup_dir" > "$smtp_backup_dir/$smtp_copy_marker" ); }; } &&
+      own_as_folder "$smtp_backup_dir/$smtp_copy_marker" &&
       { [[ "$adopted" == 1 && "$rewrite" != 1 ]] || smtp_write_copy "$smtp_backup_dir"; } &&
-      { [[ ! -f "$smtp_overlay_file" || -L "$smtp_overlay_file" ]] ||
-        { rm -f -- "$smtp_backup_dir/$smtp_overlay_file" && cp -a -- "$smtp_overlay_file" "$smtp_backup_dir/$smtp_overlay_file"; }; }; }; then
-      rm -f -- "$tmp"
+      smtp_copy_overlay "$smtp_backup_dir" &&
+      own_as_folder "$smtp_backup_dir" &&
+      { [[ "$smtp_backup_root_made" != 1 ]] || own_as_folder "$smtp_backup_root"; }; }; then
+      smtp_discard_rewrite
       [[ -z "$smtp_backup_dir" || "$adopted" == 1 ]] || rm -rf -- "$smtp_backup_dir"
       printf 'Orbit repair: retire-smtp-lines refused, nothing was changed: the backup of %s could not be made in orbit-install-backups.\n' "$environment_file" >&2
       return 1
@@ -4850,19 +4920,19 @@ do_retire_smtp_lines() {
     printf 'Orbit repair: retire-smtp-lines copied the lines it removes from %s (never SMTP_PASSWORD=) and the mail overlay into %s/%s, until mail sending is confirmed\n' \
       "$environment_file" "$PWD" "$smtp_backup_dir" >&2 || true
     if ! smtp_write_record backed-up; then
-      rm -f -- "$tmp"
+      smtp_discard_rewrite
       printf 'Orbit repair: retire-smtp-lines left %s as it was: its step record could not be written.\n' "$environment_file" >&2
       return 1
     fi
   fi
   if [[ "$rewrite" == 1 ]]; then
     if [[ "$(smtp_env_sum)" != "$sum_read" ]]; then
-      rm -f -- "$tmp"
+      smtp_discard_rewrite
       printf 'Orbit repair: retire-smtp-lines left %s as it was: it changed while it was being rewritten; run repair again.\n' "$environment_file" >&2
       return 1
     fi
     if ! mv -f -- "$tmp" "$environment_file"; then
-      rm -f -- "$tmp"
+      smtp_discard_rewrite
       printf 'Orbit repair: retire-smtp-lines left %s as it was: the rewritten copy could not be renamed over it.\n' "$environment_file" >&2
       return 1
     fi
@@ -5441,7 +5511,8 @@ do_checkpoint_step() {
 }
 
 # Step 2. Generates a fresh credential, stages it to the FIXED
-# $staged_postgres_password_path BEFORE touching the database (see "Step
+# $staged_postgres_password_path, by rename from a mktemp name in the same
+# folder, BEFORE touching the database (see "Step
 # iterator" above for why), then rotates the database role over a
 # local-socket (trust-auth) connection so no prior knowledge of the
 # database's current password is ever required.
@@ -5451,18 +5522,15 @@ do_rotate_credential_step() {
   is_real_non_symlink_directory "$secrets_directory" || return 1
   has_mode "$secrets_directory" 700 || return 1
 
-  local new_password="" status=0
+  local new_password="" status=0 staged_tmp=""
   new_password="$(generate_hex_secret)" || return 1
-
-  printf '%s\n' "$new_password" > "$staged_postgres_password_path" || {
+  staged_tmp="$(mktemp "$secrets_directory/.installing.XXXXXX")" || { new_password=""; return 1; }
+  if ! printf '%s\n' "$new_password" > "$staged_tmp" || ! chmod 600 -- "$staged_tmp" ||
+    ! mv -f -- "$staged_tmp" "$staged_postgres_password_path"; then
     new_password=""
+    rm -f -- "$staged_tmp"
     return 1
-  }
-  chmod 600 -- "$staged_postgres_password_path" || {
-    new_password=""
-    rm -f -- "$staged_postgres_password_path"
-    return 1
-  }
+  fi
 
   # Delivered over psql's stdin (`-f -`), never as a `-c`/argv value — see
   # "Step iterator" above for the full rationale, including why both

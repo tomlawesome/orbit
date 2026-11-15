@@ -203,6 +203,7 @@ fi
 
 release_manifest_work_dir=""
 engine_work_dir=""
+update_readiness_work_dir=""
 cosign_usable=0
 compose_project_name=""
 installer_ui_loaded=0
@@ -581,6 +582,9 @@ cleanup() {
   if [[ -n "$engine_work_dir" ]] && ! rm -rf -- "$engine_work_dir"; then
     printf 'Orbit installer: could not remove a temporary directory: %s.\n' "$engine_work_dir" >&2 || true
     exit_status=1
+  fi
+  if [[ -n "$update_readiness_work_dir" ]]; then
+    rm -rf -- "$update_readiness_work_dir" || true
   fi
   if [[ -n "$release_manifest_work_dir" ]] && ! rm -rf -- "$release_manifest_work_dir"; then
     printf 'Orbit installer: could not remove a temporary directory: %s.\n' "$release_manifest_work_dir" >&2 || true
@@ -2715,21 +2719,39 @@ check_update_path() {
 # answering, anything but a clean answer refuses (fail closed). The one-off
 # sends only reads.
 
+# read_compose_project_name <compose-manifest>
+#
+# docker-compose.yml's own top-level `name:`, or return 1. Identical text in
+# repair.sh and the other operator scripts (#1842);
+# scripts/compose-project-name-resolution.test.mjs proves that.
+read_compose_project_name() {
+  local compose_manifest="$1" line value
+  [[ -f "$compose_manifest" ]] || return 1
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" =~ ^name:[[:space:]]*(.*)$ ]]; then
+      value="${BASH_REMATCH[1]%%#*}"
+      value="$(printf '%s' "$value" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+      value="${value%\"}"
+      value="${value#\"}"
+      value="${value%\'}"
+      value="${value#\'}"
+      [[ -n "$value" ]] || return 1
+      printf '%s' "$value"
+      return 0
+    fi
+  done < "$compose_manifest"
+  return 1
+}
+
 # The running project's name, with restore.sh's derive_compose_project_name
 # precedence: .env-orbit, the caller's environment, docker-compose.yml's
 # top-level name:, the directory's basename.
 update_readiness_project_name() {
-  local candidate line
+  local candidate
   candidate="$(read_environment_value COMPOSE_PROJECT_NAME 2>/dev/null || true)"
   [[ "$candidate" =~ ^[a-z0-9][a-z0-9_-]*$ ]] || candidate="${COMPOSE_PROJECT_NAME:-}"
   if [[ ! "$candidate" =~ ^[a-z0-9][a-z0-9_-]*$ && -f docker-compose.yml ]]; then
-    candidate=""
-    while IFS= read -r line || [[ -n "$line" ]]; do
-      if [[ "$line" =~ ^name:[[:space:]]*(.*)$ ]]; then
-        candidate="$(printf '%s' "${BASH_REMATCH[1]%%#*}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^["'\'']//' -e 's/["'\'']$//')"
-        break
-      fi
-    done < docker-compose.yml
+    candidate="$(read_compose_project_name docker-compose.yml 2>/dev/null || true)"
   fi
   if [[ ! "$candidate" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
     candidate="$(basename -- "$target_dir" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9_-' '-')"
@@ -2740,6 +2762,40 @@ update_readiness_project_name() {
 }
 
 readonly update_readiness_timeout_seconds=60
+readonly update_readiness_output_cap=16384
+
+# remove_update_readiness_one_off <name>: bounded, failure ignored (a
+# one-off already gone is fine).
+remove_update_readiness_one_off() {
+  timeout --signal=TERM --kill-after=1s 10s docker rm -f "$1" </dev/null >/dev/null 2>&1 || true
+}
+
+# stop_update_readiness_one_off <subshell-pid> <name>: after an interrupt.
+# TERM to timeout, which passes it on to the one-off; a one-off still there
+# after 10 s is killed; then its container is removed. Every step bounded.
+stop_update_readiness_one_off() {
+  local subshell_pid="$1" name="$2" timeout_pid="" tries
+  # The subshell writes timeout's pid first thing; give it a moment.
+  for ((tries = 0; tries < 20; tries++)); do
+    timeout_pid="$(cat -- "$update_readiness_work_dir/timeout.pid" 2>/dev/null || true)"
+    [[ ! "$timeout_pid" =~ ^[0-9]+$ ]] || break
+    kill -0 "$subshell_pid" 2>/dev/null || break
+    sleep 0.1
+  done
+  [[ "$timeout_pid" =~ ^[0-9]+$ ]] || timeout_pid=""
+  [[ -z "$timeout_pid" ]] || kill -TERM "$timeout_pid" 2>/dev/null || true
+  for ((tries = 0; tries < 100; tries++)); do
+    kill -0 "$subshell_pid" 2>/dev/null || break
+    sleep 0.1
+  done
+  if kill -0 "$subshell_pid" 2>/dev/null; then
+    [[ -z "$timeout_pid" ]] || kill -KILL "$timeout_pid" 2>/dev/null || true
+    kill -KILL "$subshell_pid" 2>/dev/null || true
+  fi
+  wait "$subshell_pid" 2>/dev/null || true
+  remove_update_readiness_one_off "$name"
+}
+
 readonly update_readiness_could_not_check="Orbit could not check whether the database is ready for this release; see the lines above."
 
 check_update_readiness() {
@@ -2775,10 +2831,53 @@ check_update_readiness() {
   # the timeout's exit 124 is "could not check", as any other failure.
   local -a compose_argv
   compose_command_line
-  output="$(timeout --signal=TERM --kill-after=10s "${update_readiness_timeout_seconds}s" \
-    "${compose_argv[@]}" run --rm --no-deps -T -v "${target_dir}:/orbit-deploy:ro" \
-    --entrypoint node orbit-app /opt/orbit/cli/orbit.js update --preflight --dir /orbit-deploy </dev/null)" || status=$?
+  # #1842: run in the background and poll, so an interrupt is acted on while
+  # the one-off lives (bash runs a trap only once its foreground command
+  # ends); named, so a one-off the timeout or an interrupt cut off can be
+  # removed; its stdout capped, and the rest drained so the one-off's own
+  # status stands, so output that never stops cannot fill the installer's
+  # memory (the timeout bounds it). A ':' in the folder was refused at the
+  # start, and a ',' means nothing to `compose run -v`.
+  local preflight_name="orbit-update-preflight-$$" preflight_pid interrupted=""
+  update_readiness_work_dir="$(mktemp -d "${TMPDIR:-/tmp}/orbit-update-preflight.XXXXXX")" ||
+    fail_with update-readiness retry "$update_readiness_could_not_check"
+  # Saved to a file, not $(trap -p): the current shell's traps, on any bash.
+  trap -p INT TERM HUP >"$update_readiness_work_dir/traps" ||
+    fail_with update-readiness retry "$update_readiness_could_not_check"
+  # Set before the fork, so no signal finds the old traps with a one-off
+  # already running.
+  trap 'interrupted=130' INT; trap 'interrupted=143' TERM; trap 'interrupted=129' HUP
+  (
+    trap - INT TERM HUP
+    set +e # the one-off's own status, not the reader's
+    # The first element writes its own pid and becomes timeout, so an
+    # interrupt can reach timeout, which passes it on to the one-off.
+    { printf '%s' "$BASHPID" >"$update_readiness_work_dir/timeout.pid"
+      exec timeout --signal=TERM --kill-after=10s "${update_readiness_timeout_seconds}s" \
+        "${compose_argv[@]}" run --rm --no-deps -T --name "$preflight_name" -v "${target_dir}:/orbit-deploy:ro" \
+        --entrypoint node orbit-app /opt/orbit/cli/orbit.js update --preflight --dir /orbit-deploy </dev/null; } |
+      { head -c "$update_readiness_output_cap"; cat >/dev/null; } >"$update_readiness_work_dir/output"
+    exit "${PIPESTATUS[0]}"
+  ) &
+  preflight_pid=$!
+  while [[ -z "$interrupted" ]] && kill -0 "$preflight_pid" 2>/dev/null; do
+    sleep 0.1
+  done
+  if [[ -n "$interrupted" ]]; then
+    stop_update_readiness_one_off "$preflight_pid" "$preflight_name"
+    exit "$interrupted"
+  fi
+  status=0
+  wait "$preflight_pid" || status=$?
+  trap - INT TERM HUP
+  eval "$(<"$update_readiness_work_dir/traps")"
+  # A signal between the loop and the restore: nothing is running now.
+  [[ -z "$interrupted" ]] || exit "$interrupted"
+  output="$(<"$update_readiness_work_dir/output")" || output=""
+  rm -rf -- "$update_readiness_work_dir" || true
+  update_readiness_work_dir=""
   ((status != 0)) || return 0
+  ((status < 128 && status != 124)) || remove_update_readiness_one_off "$preflight_name"
   ((status != 124)) ||
     installer_failure_notes+=("The update readiness check did not finish within ${update_readiness_timeout_seconds} s, so it was stopped.")
   # The engine's lines, bounded and without control characters, as notes

@@ -1060,7 +1060,7 @@ describe("runInstall: services a profile change drops (#1542)", () => {
     expect(outcome).toMatchObject({ status: "ok", selectedProfile: "standard", droppedServices: ["orbit-tika", "orbit-ollama"] });
   });
 
-  it("names nothing when the wizard preserves the profile", async () => {
+  it("names only orbit-ollama, outside the processing profile, when the wizard preserves it", async () => {
     const target = recognised(["COMPOSE_PROFILES=processing", "TIKA_URL=http://orbit-tika:9998"]);
     const terminal = scriptedTerminal(["update", "preserve", "apply"]);
     const { outcome } = await run(target, { interactive: true, facts }, { terminal });

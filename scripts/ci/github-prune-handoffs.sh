@@ -10,14 +10,16 @@
 #
 # Only releases whose tag is exactly handoff-<40 hex> and that are older than
 # the limit are deleted, with their tags (a published release makes its tag,
-# and deleting the release leaves it behind). A draft is never deleted,
-# whatever its dates: another pipeline may be uploading to it, and its
-# created_at is the tagged commit's date, so it cannot be aged. Nothing else
-# is touched, whatever its age, and the current commit's handoff
-# (CI_COMMIT_SHA) never is.
+# and deleting the release leaves it behind). Nothing else is touched,
+# whatever its age, and the current commit's handoff (CI_COMMIT_SHA) never is.
 #
-# Age: by published_at. A release's created_at is the date of the commit it
-# tags, so a fresh handoff of an old commit would look old by it.
+# Age: a published release by published_at. A release's created_at is the
+# date of the commit it tags, so a fresh handoff of an old commit would look
+# old by it. A draft (a handoff_to_github job that failed and was never
+# retried; #1848 D-S5) by its newest asset's updated_at, the last time GitHub
+# received a file for it. A draft with no assets holds nothing and is left:
+# that is also the state a retried upload passes through after clearing its
+# old files, so a draft being uploaded to is never deleted.
 #
 # The tag goes before the release, so a failed tag delete stops the run with
 # the release still listed, and the next run tries both again. GitHub answers
@@ -58,9 +60,22 @@ releases="$(gh_releases)"
 old=()
 while IFS=$'\t' read -r id tag draft _ published; do
   [[ -n "$id" && "$tag" =~ ^handoff-[0-9a-f]{40}$ ]] || continue
-  [[ "$tag" != "handoff-${current}" && "$draft" != true ]] || continue
+  [[ "$tag" != "handoff-${current}" ]] || continue
   [[ "$id" =~ ^[0-9]+$ ]] || fail "GitHub gave a release id that is not a number for ${tag}"
-  if [[ -z "$published" ]] || ! epoch="$(date -u -d "$published" +%s 2> /dev/null)"; then
+  if [[ "$draft" == true ]]; then
+    # Read as its own step, so a failed read stops the run (set -e). One line
+    # per asset, prefixed so an asset with no updated_at is still a line.
+    asset_times="$(gh_pages "${gh_api}/repos/${gh_repo}/releases/${id}/assets" '"at " + (r.updated_at ?? "")')"
+    [[ -n "$asset_times" ]] || continue
+    epoch=0
+    while IFS= read -r updated; do
+      updated="${updated#at }"
+      if [[ -z "$updated" ]] || ! updated_epoch="$(date -u -d "$updated" +%s 2> /dev/null)"; then
+        fail "cannot read when an asset of the draft ${tag} was last updated (updated_at: ${updated:-<missing>})"
+      fi
+      ((updated_epoch <= epoch)) || epoch="$updated_epoch"
+    done <<< "$asset_times"
+  elif [[ -z "$published" ]] || ! epoch="$(date -u -d "$published" +%s 2> /dev/null)"; then
     fail "cannot read when ${tag} was published: ${published:-<missing>}"
   fi
   if ((epoch < cutoff)); then old+=("${id}"$'\t'"${tag}"); fi

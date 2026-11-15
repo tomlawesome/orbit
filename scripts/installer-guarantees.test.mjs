@@ -2,7 +2,12 @@ import { existsSync, readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
-import { staleInstallShCitations } from "./installer-guarantee-citations.mjs";
+import {
+  citationContentProblems,
+  citedFileLines,
+  mainScriptCitationProblems,
+  staleInstallShCitations,
+} from "./installer-guarantee-citations.mjs";
 
 /*
  * #587: docs/installer-guarantees.md's per-script counts, family totals and
@@ -318,4 +323,137 @@ describe("install.sh citations in the guarantee catalogue (#1481)", () => {
     ).replaceAll("\r\n", "\n");
     expect(staleInstallShCitations(catalogue, installShReal)).toEqual([]);
   });
+});
+
+/*
+ * #1846: "main script" citations name top-level code. Each must lie outside
+ * every function body and start and end on a code line, and, for the rows in
+ * the fixed list below, the cited lines must hold the code the guarantee
+ * describes. `index` is the segment's position among the guarantee's
+ * install.sh citations.
+ */
+describe("install.sh main-script citations in the guarantee catalogue (#1846)", () => {
+  // Lines 1-2 filler, `alpha` at 4-6, top-level code at 8-9, blank at 7 and 10.
+  const installSh = [
+    "#!/usr/bin/env bash",
+    "set -euo pipefail",
+    "alpha() {",
+    "  echo inside",
+    "}",
+    "",
+    "recheck_volume=1",
+    "echo changed during installation",
+    "",
+    "echo end",
+    "",
+  ].join("\n");
+  const doc = (...entries) =>
+    ["## install.sh (the installer)", "", ...entries.map((e, i) => `${i + 1}. ${e}`), ""].join("\n");
+  const entry = (citation) => `Does a thing. \u2014 ${citation} \u2014 category: x \u2014 criticality: LOW`;
+
+  it("accepts a main-script range on top-level code", () => {
+    expect(
+      mainScriptCitationProblems(doc(entry("install.sh:7-8 (main script, check)")), installSh),
+    ).toEqual([]);
+  });
+
+  it("reports a main-script range inside a function body", () => {
+    const problems = mainScriptCitationProblems(doc(entry("install.sh:3-5 (main script, check)")), installSh);
+    expect(problems.map((p) => p.problem)).toEqual(["lines overlap function alpha"]);
+  });
+
+  it("reports a main-script range that starts or ends on a blank line", () => {
+    const problems = mainScriptCitationProblems(doc(entry("install.sh:6-8 (main script, check)")), installSh);
+    expect(problems.map((p) => p.problem)).toEqual(["first line is blank"]);
+    const trailing = mainScriptCitationProblems(doc(entry("install.sh:7-9 (main script, check)")), installSh);
+    expect(trailing.map((p) => p.problem)).toEqual(["last line is blank"]);
+  });
+
+  it("checks a bare range that precedes a main-script one, and ignores function citations", () => {
+    const text = doc(entry("install.sh:6, 7-8 (main script, reads); install.sh:3-5 (alpha)"));
+    expect(mainScriptCitationProblems(text, installSh).map((p) => p.problem)).toEqual(["first line is blank", "last line is blank"]);
+  });
+
+  it("reports code the cited lines lack, and a missing citation", () => {
+    const text = doc(entry("install.sh:6-7 (main script, check)"));
+    const problems = citationContentProblems(text, installSh, [
+      { guarantee: "install.sh #1", index: 0, contains: ["recheck_volume=", "changed during installation"] },
+      { guarantee: "install.sh #1", index: 1, contains: ["x"] },
+    ]);
+    expect(problems.map((p) => p.problem)).toEqual(["lines lack changed during installation", "citation not found"]);
+    expect(
+      citationContentProblems(doc(entry("install.sh:7-8 (main script, check)")), installSh, [
+        { guarantee: "install.sh #1", index: 0, contains: ["recheck_volume=", "changed during installation"] },
+      ]),
+    ).toEqual([]);
+  });
+
+  const installShReal = readFileSync(new URL("./install.sh", import.meta.url), "utf8").replaceAll("\r\n", "\n");
+
+  it("every main-script citation in the real catalogue lies outside functions and on code lines", () => {
+    expect(mainScriptCitationProblems(catalogue, installShReal)).toEqual([]);
+  });
+
+  it("install.sh #39 cites the docker-compose.yml lines of the model-pull service and its loopback OLLAMA_HOST (#1852)", () => {
+    const compose = readFileSync(new URL("../docker-compose.yml", import.meta.url), "utf8").replaceAll("\r\n", "\n");
+    const cited = citedFileLines(catalogue, compose, "install.sh #39", "docker-compose.yml");
+    expect(cited, "install.sh #39 has no docker-compose.yml citation").not.toBeNull();
+    expect(cited).toContain("orbit-ollama-model-pull:");
+    expect(cited).toContain("OLLAMA_HOST: 127.0.0.1");
+  });
+
+  // Fixed list from the #1846 spec; substrings are literal text of install.sh.
+  const expectations = [
+    { guarantee: "install.sh #17", index: 0, contains: ["recheck_volume=", "changed during installation"] },
+    {
+      guarantee: "install.sh #22",
+      index: 0,
+      contains: ["requested_action\" == repair", "exit 3"],
+    },
+    {
+      guarantee: "install.sh #40",
+      index: 0,
+      contains: ["command -v docker", "docker compose version", "command -v timeout"],
+    },
+    { guarantee: "install.sh #41", index: 0, contains: ["manifest_digest=", "^sha256:"] },
+    {
+      guarantee: "install.sh #41",
+      index: 1,
+      contains: ["docker pull", "RepoDigests", "digest_confirmed=1", "did not return an immutable digest"],
+    },
+    {
+      guarantee: "install.sh #42",
+      index: 0,
+      contains: ["org.opencontainers.image.revision", "does not record the source revision"],
+    },
+    {
+      guarantee: "install.sh #42",
+      index: 1,
+      contains: [
+        "io.orbit.deployment-assets",
+        "built before Orbit bundled its deployment assets",
+        "somewhere other than",
+      ],
+    },
+    {
+      guarantee: "install.sh #43",
+      index: 0,
+      contains: ["org.opencontainers.image.version", "$semver_pattern"],
+    },
+    { guarantee: "install.sh #44", index: 0, contains: ["--banner", "could not render its canonical banner"] },
+    { guarantee: "install.sh #55", index: 0, contains: ["compose config --quiet", "configuration is invalid"] },
+    { guarantee: "install.sh #56", index: 0, contains: ["# --- after the commit", "rollback_armed=0"] },
+    { guarantee: "Summary #4", index: 0, contains: ["@sha256:"] },
+    { guarantee: "Summary #6", index: 0, contains: ["semver_pattern="] },
+    { guarantee: "Summary #6", index: 1, contains: ["org.opencontainers.image.version", "$semver_pattern"] },
+    { guarantee: "Summary #7", index: 0, contains: ["^sha256:"] },
+    { guarantee: "Summary #7", index: 1, contains: ["applied_digest="] },
+    { guarantee: "Summary #10", index: 0, contains: ["requested_action\" == repair", "exit 3"] },
+  ];
+
+  for (const row of expectations) {
+    it(`${row.guarantee} citation ${row.index} contains the code it names`, () => {
+      expect(citationContentProblems(catalogue, installShReal, [row])).toEqual([]);
+    });
+  }
 });
