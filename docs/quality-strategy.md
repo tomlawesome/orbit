@@ -464,7 +464,7 @@ for each.
 
 | Lane | The change touches only | Jobs it runs |
 | --- | --- | --- |
-| documentation (`risk=fast`) | prose, issue templates, policy files and unit-only tests | `classify`, `fast`, `base_image`, `gitleaks`, `licence_policy` where the file is one it reads |
+| documentation (`risk=fast`) | prose, issue templates, policy files and unit-only tests | `classify`, `fast`, `base_image`, `gitleaks`, `licence_policy` where the file is one it reads; a change to `supply-chain/licence-policy.yml` also runs the image build (`build_image`) and the system jobs, because the Dockerfile fails the build on an apk licence that file does not allow (#1823) |
 | ignore/policy (#889) | `.gitleaksignore` | `classify`, `gitleaks`, `licence_policy`, `supply_chain_source` |
 | CI definition (#889) | `.gitlab-ci.yml`, `scripts/ci/`, the classifier and the tests that read the pipeline file | `classify`, `fast`, `fast_checks`, `fast_docker`, `gitleaks`, `supply_chain_source` |
 
