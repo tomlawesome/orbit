@@ -29,18 +29,58 @@
 // real pty), as in install.backups.test.mjs; stdout and stderr arrive merged
 // there. An answer is typed once the CANNOT line appears; EOF is Ctrl-D (\x04)
 // at the start of a line.
+//
+// Review fixes (code at 8b8c8f65): operators update with ./update.sh, which
+// passes no arguments, so ORBIT_REMOVE_OLD_UNDO_COPIES=yes (exactly "yes")
+// acts as the flag and the hint names it, never scripts/install.sh; the
+// prompt needs both /dev/tty and a terminal on stderr; the answer read is
+// bounded; ORBIT_CONFIGURE_PROMPTS=machine is unattended; a symlinked
+// orbit-install-backups is never followed; a failed removal says it could
+// not be fully removed, never "kept"; the prompt follows the CANNOT line and
+// carries a [y/N]-style marker. Unattended runs go through `setsid -w`, with
+// no controlling terminal, so they prove unattended behaviour even when the
+// suite runs from a developer's terminal.
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
-import { PROCESS_TEST_TIMEOUT_MS } from "./process-budget.mjs";
-import { makePreprovisionedDeployment, makeTarget, recognisedVolume, runInstall, runInstallOnTerminal } from "./install-test-support.mjs";
+import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "./process-budget.mjs";
+import {
+  baseEnvironment,
+  installScript,
+  makeFakeBin,
+  makePreprovisionedDeployment,
+  makeTarget,
+  readOptional,
+  recognisedVolume,
+  runInstallOnTerminal,
+} from "./install-test-support.mjs";
 
 vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS * 2 });
 
 const FLAG = "--remove-old-undo-copies";
+const ENV_FORM = "ORBIT_REMOVE_OLD_UNDO_COPIES";
+const HINT = `${ENV_FORM}=yes ./update.sh`;
+const NO_DEFAULT_MARKER = /\[(?:y|yes)\/(?:N|No|NO)\]/u;
+
+/** runInstall, but under `setsid -w`: no controlling terminal, so /dev/tty cannot be opened, wherever the suite runs. */
+function runDetached(targetDir, envOverrides = {}, args = []) {
+  const binDir = makeFakeBin();
+  const logDir = mkdtempSync(join(tmpdir(), "orbit-install-log-"));
+  const result = failOnProcessDeadline(
+    spawnSync("setsid", ["-w", "bash", installScript, ...args], {
+      cwd: targetDir,
+      encoding: "utf8",
+      env: { ...baseEnvironment(binDir, logDir), ...envOverrides },
+      ...processGuard(),
+    }),
+    { label: "runDetached" },
+  );
+  return { ...result, calls: readOptional(join(logDir, "calls.log")) };
+}
 const FAKE_PASSWORD = "TEST-NOT-A-REAL-PASSWORD";
 const FULL_ENV_COPY = ["APP_URL=https://orbit.example.test", "SMTP_HOST=smtp.example.test", `SMTP_PASSWORD=${FAKE_PASSWORD}`, ""].join("\n");
 
@@ -73,7 +113,7 @@ const writeFolder = (dir, files) => {
 function installedFolder() {
   const targetDir = makeTarget();
   makePreprovisionedDeployment(targetDir);
-  expect(runInstall(targetDir, {}, ["--plain", "--install"]).status).toBe(0);
+  expect(runDetached(targetDir, {}, ["--plain", "--install"]).status).toBe(0);
   return targetDir;
 }
 
@@ -138,9 +178,10 @@ const updateEnv = (extra = {}) => {
   const own = recognisedVolume("orbit");
   return { FAKE_VOLUMES: own.volume, FAKE_PS: JSON.stringify(own.ps), FAKE_CONTAINER_IMAGES: JSON.stringify(own.images), ...extra };
 };
-const update = (targetDir, args = [], extra = {}) => runInstall(targetDir, updateEnv(extra), ["--plain", "--update", ...args]);
-const updateOnTerminal = (targetDir, answer) =>
-  runInstallOnTerminal(targetDir, updateEnv(), answer === undefined ? [] : [{ after: "CANNOT", input: answer }], ["--plain", "--update"]);
+const update = (targetDir, args = [], extra = {}) => runDetached(targetDir, updateEnv(extra), ["--plain", "--update", ...args]);
+/** On a pty; `shellArgs` are appended to the command line as written (a redirection included). */
+const updateOnTerminal = (targetDir, answer, extra = {}, shellArgs = []) =>
+  runInstallOnTerminal(targetDir, updateEnv(extra), answer === undefined ? [] : [{ after: "CANNOT", input: answer }], ["--plain", "--update", ...shellArgs]);
 
 const lines = (text) => text.replace(/\r/gu, "").split("\n");
 const mentioning = (text, name) => lines(text).filter((entry) => entry.includes(`orbit-install-backups/${name}`));
@@ -175,12 +216,13 @@ describe("install.sh --plain --update: old undo copies, unattended (#1834 slice 
     expect(untouched(targetDir)).toBe(before);
   });
 
-  it("prints exactly one line saying how to remove them: re-run interactively, or pass the flag", () => {
+  it(`prints exactly one line saying how to remove them: re-run interactively, or ${HINT}; never scripts/install.sh`, () => {
     const targetDir = withOldCopies(installedFolder());
     const result = update(targetDir);
-    const how = lines(result.stderr).filter((entry) => entry.includes(FLAG));
+    const how = lines(result.stderr).filter((entry) => entry.includes(HINT));
     expect(how).toHaveLength(1);
     expect(how[0]).toMatch(/interactiv|terminal/iu);
+    expect(lines(result.stderr).filter((entry) => entry.includes("scripts/install.sh"))).toEqual([]);
     for (const name of Object.keys(QUALIFYING)) expect(removedLines(result.stderr, name)).toEqual([]);
   });
 
@@ -225,6 +267,9 @@ describe("install.sh --plain --update: old undo copies, on a terminal (#1834 sli
     expect(output).toMatch(/permanent/iu);
     const cannotAt = output.indexOf(cannotLines(output)[0]);
     for (const name of Object.keys(QUALIFYING)) expect(output.indexOf(`orbit-install-backups/${name}`)).toBeLessThan(cannotAt);
+    const markerAt = output.search(NO_DEFAULT_MARKER);
+    expect(markerAt, "the prompt carries a [y/N]-style marker").toBeGreaterThan(-1);
+    expect(markerAt, "the prompt comes after the CANNOT line").toBeGreaterThan(cannotAt + cannotLines(output)[0].length);
     expect(result.promptedInteractions).toBe(1);
     expect(qualifyingLeft(targetDir)).toEqual([]);
     for (const name of Object.keys(QUALIFYING)) expect(removedLines(output, name), `one removal line for ${name}`).toHaveLength(1);
@@ -239,6 +284,9 @@ describe("install.sh --plain --update: old undo copies, on a terminal (#1834 sli
     ['"y"', "y\r"],
     ['"YES"', "YES\r"],
     ['"no"', "no\r"],
+    ['" yes"', " yes\r"],
+    ['"yes please"', "yes please\r"],
+    ['"yes" followed by 9,997 more characters (a 10,000-character line)', `yes${"x".repeat(9997)}\r`],
   ]) {
     it(`${label} means no: the prompt is shown, nothing is removed, and the update still succeeds`, async () => {
       const targetDir = withOldCopies(installedFolder());
@@ -253,6 +301,100 @@ describe("install.sh --plain --update: old undo copies, on a terminal (#1834 sli
       expect(untouched(targetDir)).toBe(before);
     });
   }
+});
+
+describe("install.sh --plain --update: a terminal that does not make the run interactive (#1834 slice 5 review)", () => {
+  it("stderr sent to a file on a pty: list and hint only, no prompt, no wait, nothing removed", async () => {
+    const targetDir = withOldCopies(installedFolder());
+    const errFile = join(mkdtempSync(join(tmpdir(), "orbit-prune-stderr-")), "stderr.log");
+    const before = untouched(targetDir);
+    const result = await updateOnTerminal(targetDir, "yes\r", {}, [`2>${errFile}`]);
+    expect(result.status).toBe(0);
+    const stderr = readOptional(errFile).replace(/\r/gu, "");
+    expectListed(stderr);
+    expect(lines(stderr).filter((entry) => entry.includes(HINT))).toHaveLength(1);
+    expect(`${stderr}\n${result.stdout}`).not.toMatch(NO_DEFAULT_MARKER);
+    expect(result.promptedInteractions).toBe(0);
+    expect(qualifyingLeft(targetDir)).toEqual(Object.keys(QUALIFYING));
+    expect(untouched(targetDir)).toBe(before);
+  });
+
+  it("ORBIT_CONFIGURE_PROMPTS=machine on a terminal: unattended, list and hint only, nothing removed", async () => {
+    const targetDir = withOldCopies(installedFolder());
+    const result = await updateOnTerminal(targetDir, "yes\r", { ORBIT_CONFIGURE_PROMPTS: "machine" });
+    expect(result.status).toBe(0);
+    const output = result.stdout.replace(/\r/gu, "");
+    expectListed(output);
+    expect(lines(output).filter((entry) => entry.includes(HINT))).toHaveLength(1);
+    expect(output).not.toMatch(NO_DEFAULT_MARKER);
+    expect(qualifyingLeft(targetDir)).toEqual(Object.keys(QUALIFYING));
+  });
+});
+
+describe(`install.sh --plain --update with ${ENV_FORM} (#1834 slice 5 review)`, () => {
+  it(`${ENV_FORM}=yes acts exactly as ${FLAG}: lists, states CANNOT, removes exactly the qualifying folders`, () => {
+    const targetDir = withOldCopies(installedFolder());
+    const before = untouched(targetDir);
+    const result = update(targetDir, [], { [ENV_FORM]: "yes" });
+    expect(result.status).toBe(0);
+    expectListed(result.stderr);
+    expect(cannotLines(result.stderr).length).toBeGreaterThanOrEqual(1);
+    expect(qualifyingLeft(targetDir)).toEqual([]);
+    for (const name of Object.keys(QUALIFYING)) expect(removedLines(result.stderr, name)).toHaveLength(1);
+    expectNotRemovedListed(result.stderr);
+    expect(untouched(targetDir)).toBe(before);
+    expect(lines(result.stderr).filter((entry) => entry.includes(HINT))).toEqual([]);
+  });
+
+  for (const value of ["YES", "1", "true", "y", " yes", ""]) {
+    it(`${ENV_FORM}=${JSON.stringify(value)} is ignored: list and hint only, nothing removed`, () => {
+      const targetDir = withOldCopies(installedFolder());
+      const result = update(targetDir, [], { [ENV_FORM]: value });
+      expect(result.status).toBe(0);
+      expectListed(result.stderr);
+      expect(lines(result.stderr).filter((entry) => entry.includes(HINT))).toHaveLength(1);
+      expect(qualifyingLeft(targetDir)).toEqual(Object.keys(QUALIFYING));
+    });
+  }
+});
+
+describe("install.sh --plain --update: removal edge cases (#1834 slice 5 review)", () => {
+  it("never follows a symlinked orbit-install-backups: nothing listed from it (or it says skipped), its target untouched", () => {
+    const targetDir = installedFolder();
+    const elsewhere = mkdtempSync(join(tmpdir(), "orbit-prune-elsewhere-"));
+    for (const [name, files] of Object.entries(QUALIFYING)) writeFolder(join(elsewhere, name), files);
+    symlinkSync(elsewhere, backups(targetDir));
+    const snap = () =>
+      spawnSync("bash", ["-c", 'cd "$1" && find . -printf "%p %y %m\\n" | LC_ALL=C sort && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum', "snap", elsewhere], {
+        encoding: "utf8",
+      }).stdout;
+    const before = snap();
+    const result = update(targetDir, [FLAG], { [ENV_FORM]: "yes" });
+    expect(snap()).toBe(before);
+    for (const name of Object.keys(QUALIFYING)) {
+      expect(removedLines(result.stderr, name)).toEqual([]);
+      for (const entry of lines(result.stderr).filter((text) => text.includes(name))) expect(entry).toMatch(/skipped/iu);
+    }
+  });
+
+  it('a removal that fails: the update still exits 0, and the line says the folder could not be fully removed, never "kept"', () => {
+    const targetDir = installedFolder();
+    const stuck = join(backups(targetDir), "20250102T030405Z");
+    writeFolder(stuck, QUALIFYING["20250102T030405Z"]);
+    // Its own folder cannot be written, so its file cannot be deleted.
+    chmodSync(stuck, 0o500);
+    try {
+      const result = update(targetDir, [FLAG]);
+      expect(result.status).toBe(0);
+      const said = mentioning(result.stderr, "20250102T030405Z").filter((entry) => /could not be fully removed/iu.test(entry));
+      expect(said, mentioning(result.stderr, "20250102T030405Z").join(" | ")).toHaveLength(1);
+      expect(said[0]).not.toMatch(/\bkept\b/iu);
+      expect(removedLines(result.stderr, "20250102T030405Z").filter((entry) => !/could not/iu.test(entry))).toEqual([]);
+      expect(resultBlock(result.stdout)).toContain("Orbit is ready.");
+    } finally {
+      chmodSync(stuck, 0o700);
+    }
+  });
 });
 
 describe(`install.sh --plain --update ${FLAG} (#1834 slice 5)`, () => {
