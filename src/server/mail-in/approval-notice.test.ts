@@ -111,7 +111,7 @@ function notice(overrides: { row?: Record<string, unknown>; subs?: unknown[]; re
   const row = { ...baseRow, ...overrides.row };
   const steps: Step[] = [[{ id: "n1" }], [row]];
   if (overrides.subs) steps.push(overrides.subs);
-  steps.push((_op, ops) => {
+  steps.push((_op: Op, ops: Op[]) => {
     const written = noticeUpdates(ops).at(-1) ?? (row.changes as Record<string, unknown>);
     return overrides.record ? overrides.record(ops) : [{ changes: written, householdId: "h1", receiptStatus: "pending_review", receiptHouseholdId: "h1" }];
   });

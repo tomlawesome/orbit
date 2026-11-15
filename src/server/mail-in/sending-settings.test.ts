@@ -44,7 +44,7 @@ vi.mock("./mailbox-config", () => {
 });
 vi.mock("@/server/notification-worker", async (original) => ({
   ...(await original<typeof import("@/server/notification-worker")>()),
-  verifySmtpProviderConnection: vi.fn(async () => state.verify),
+  verifySmtpProviderConnection: vi.fn(async (_config: { smtpUrl: string; smtpFrom: string }) => state.verify),
 }));
 
 const settings = await import("./sending-settings");
@@ -110,7 +110,7 @@ const readyMailbox = { configured: true, host: "imap.example.test", user: "box@e
 
 function secretRow(password: string, host = "smtp.example.test", user = "mailer") {
   const encrypted = encryptMailInSecret(Buffer.from(password, "utf8"), { secretId: "sec1", kind: "smtp_password", host, user }, KEY, "k1");
-  return { id: "sec1", keyId: "k1", ciphertext: encrypted.ciphertext, ...encrypted.envelope };
+  return { id: "sec1", ciphertext: encrypted.ciphertext, ...encrypted.envelope };
 }
 
 const use = (steps: Step[]) => {
@@ -408,7 +408,7 @@ describe("setSendingSettings", () => {
     const { ops } = use([[], []]);
     const result = await settings.setSendingSettings("admin", null, accountInput);
     expect(result).toMatchObject({ outcome: "smtp_rejected", settings: { configured: false } });
-    const candidate = vi.mocked(verifySmtpProviderConnection).mock.calls[0]![0];
+    const candidate = vi.mocked(verifySmtpProviderConnection).mock.calls[0]![0]!;
     expect(candidate.smtpUrl).toBe("smtps://me%40example.test:typed-pw@smtp.example.test:465");
     expect(candidate.smtpFrom).toBe('"Orbit, Home" <orbit@example.test>');
     expect(ops.filter((op) => op.kind !== "select")).toHaveLength(0);
@@ -456,7 +456,7 @@ describe("setSendingSettings", () => {
   it("through the mailbox it stores no password and resets to the standard submission settings", async () => {
     const script = use([[accountRow], [{ providerProfile: "gmail" }], [accountRow], [{ id: "row1" }], [mailboxRow], [], []]);
     await settings.setSendingSettings("admin", 3, mailboxInput);
-    const candidate = vi.mocked(verifySmtpProviderConnection).mock.calls[0]![0];
+    const candidate = vi.mocked(verifySmtpProviderConnection).mock.calls[0]![0]!;
     const url = new URL(candidate.smtpUrl);
     expect([url.protocol, decodeURIComponent(url.username), url.password, url.hostname, url.port]).toEqual(["smtp:", "box@example.test", "box-pass", "smtp.gmail.com", "587"]);
     expect(inserts(script.ops, mailInSecrets)).toHaveLength(0);
