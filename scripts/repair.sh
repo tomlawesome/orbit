@@ -1207,7 +1207,7 @@ set -Eeuo pipefail
 # always the FIRST step and every later step is skipped entirely on its
 # failure.
 #
-# Checkpoint storage — local-only, owner-only, kept until manually deleted
+# Checkpoint storage — local-only, owner-only, removed after a clean re-check
 # --------------------------------------------------------------------------
 # The bundle is written into a freshly created, mode-0700 directory
 # (`.orbit-repair-checkpoint.XXXXXX`, a sibling naming convention to the
@@ -1215,13 +1215,18 @@ set -Eeuo pipefail
 # prefixes, distinct so it is never mistaken for either by a later
 # diagnosis) as a mode-0600 file. Unlike the stage-one private recovery
 # directory (`cleanup_recovery_dir`, always removed at the end of every
-# `--execute` run), the checkpoint directory is NEVER removed by this
-# script — it is local-only, kept until the operator manually deletes it,
-# per the owner's explicit "no ad-hoc download hosting from a broken box"
-# decision (the recovered app's normal export/download flow is the intended
-# way to get a copy off the machine, not this checkpoint). Its path is never
-# printed on stdout (the enum-only contract holds); it IS printed as human
-# guidance on stderr, both right after a successful checkpoint and again (if
+# `--execute` run), the checkpoint directory outlives the run until a full
+# re-diagnosis comes back clean: `settle_credential_checkpoints` removes it
+# then, in the same run, and otherwise keeps and names it so a later clean
+# `--execute` run removes it (#1834, owner decision 11b; ADR-0014 amendment
+# 2026-11-15). It holds the OLD password, which after the ALTER ROLE opens
+# nothing but a volume snapshot the operator took themselves. It stays
+# local-only, per the owner's explicit "no ad-hoc download hosting from a
+# broken box" decision (the recovered app's normal export/download flow is
+# the intended way to get a copy off the machine, not this checkpoint). Its
+# path is never printed on stdout (the enum-only contract holds); it IS
+# printed as human guidance on stderr, right after a successful checkpoint,
+# at settle time, and again (if
 # applicable) inside any later step-failure guidance — see "Any step
 # failure" below.
 #
@@ -5301,7 +5306,7 @@ do_checkpoint_step() {
   recovered_hex=""
   checkpoint_bundle_path="$bundle_path"
   printf 'Orbit repair: pre-rotation checkpoint created and verified at %s\n' "$checkpoint_dir" >&2
-  printf 'Orbit repair: (passphrase-encrypted, ORBKEK01 format; keep the passphrase and this file — Orbit never stores the passphrase — until you have confirmed the rotation succeeded.)\n' >&2
+  printf 'Orbit repair: (passphrase-encrypted, ORBKEK01 format; keep the passphrase — Orbit never stores it — until this file is gone; repair removes it once a re-check is clean.)\n' >&2
   return 0
 }
 
@@ -5907,6 +5912,49 @@ run_safe_batch() {
   fi
 }
 
+# Credential checkpoint removal (#1834, owner decision 11b, 2026-11-14;
+# ADR-0014 amendment 2026-11-15). Called once per --execute run, after that
+# run's own full re-diagnosis; --check and --plan never call it. $1 is 1 only
+# when that re-diagnosis reported `diagnosis result=healthy` (no credential
+# finding, services ready) and no action in this run failed — "Orbit
+# started" is never enough. Every `.orbit-repair-checkpoint.*` directory
+# (this run's, or one kept by an earlier run) is then removed: it holds the
+# OLD database password, which after the ALTER ROLE opens nothing but a
+# volume snapshot the operator took themselves. Otherwise each is kept,
+# named on stderr, and the next step given; a later clean run removes it.
+# Only a real directory holding nothing but the bundle is removed; anything
+# else under that name is named and left for the operator.
+settle_credential_checkpoints() {
+  local clean="$1" dir
+  for dir in ./.orbit-repair-checkpoint.*; do
+    [[ -e "$dir" || -L "$dir" ]] || continue
+    if [[ "$clean" == 1 ]] && is_real_non_symlink_directory "$dir" && is_removable_checkpoint_dir "$dir"; then
+      if rm -rf -- "$dir"; then
+        printf 'Orbit repair: the re-check is clean, so the pre-rotation credential checkpoint %s (the old database password) was removed.\n' "$dir" >&2
+        continue
+      fi
+    fi
+    if [[ "$clean" == 1 ]]; then
+      printf 'Orbit repair: the credential checkpoint %s was kept: it is not the shape repair created (or could not be removed); check its contents and delete it yourself.\n' "$dir" >&2
+    else
+      printf 'Orbit repair: the pre-rotation credential checkpoint %s was kept, because this run'"'"'s re-check is not clean.\n' "$dir" >&2
+      printf 'Orbit repair: next step: fix what the re-check reports, then re-run "repair.sh --execute"; a run whose re-check is clean removes the checkpoint.\n' >&2
+    fi
+  done
+}
+
+# True when $1 holds nothing but the checkpoint bundle (a regular file), or
+# nothing at all (a run killed between mktemp and the bundle write).
+is_removable_checkpoint_dir() {
+  local entry
+  for entry in "$1"/* "$1"/.[!.]* "$1"/..?*; do
+    [[ -e "$entry" || -L "$entry" ]] || continue
+    [[ "$entry" == "$1/postgres-password.orbkek" ]] || return 1
+    is_regular_non_symlink_file "$entry" || return 1
+  done
+  return 0
+}
+
 execute_repair() {
   local entry action fclass ftarget
 
@@ -5932,6 +5980,7 @@ execute_repair() {
     fi
     run_diagnosis
     print_check_lines
+    settle_credential_checkpoints 0
     exit 5
   fi
 
@@ -5953,6 +6002,7 @@ execute_repair() {
       printf 'dangerous result=refused done=0 failed=0 reason=deployment-version-unsupported\n'
     fi
     print_check_lines
+    settle_credential_checkpoints 0
     exit 6
   fi
 
@@ -5965,6 +6015,12 @@ execute_repair() {
   cleanup_recovery_dir
   run_diagnosis
   print_check_lines
+
+  local recheck_clean=0
+  if [[ "$check_worst" == healthy && "$safe_batch_exit_code" != 4 && "$dangerous_exit_code" != 4 ]]; then
+    recheck_clean=1
+  fi
+  settle_credential_checkpoints "$recheck_clean"
 
   # Final exit code — see "EXIT CODES (--execute --dangerous)" above for the
   # full precedence table this implements. A real failure (4) in either

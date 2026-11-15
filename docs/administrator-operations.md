@@ -1253,10 +1253,15 @@ tells you which one you are in:
   output says which of these two states you are in; it never leaves you to
   guess.
 
-The checkpoint file is never deleted automatically — delete it yourself, by
-hand, once you have confirmed the rotation succeeded (or that you have
-recovered the original password from it). Keep the passphrase only until then;
-Orbit never stores it.
+The checkpoint holds the old password, which opens nothing once the rotation
+has landed. repair.sh removes it in the same run, after that run's full
+re-check comes back clean (`diagnosis result=healthy` and no step failed), and
+says so in one stderr line (`... checkpoint <path> ... was removed`). If the
+re-check is not clean it keeps the checkpoint, names it (`... checkpoint
+<path> was kept ...`) and tells you to re-run `repair.sh --execute` once the
+re-check's findings are fixed; the first later run whose own re-check is
+clean removes it. `--check` and `--plan` never remove it. Keep the passphrase
+only until the checkpoint is gone; Orbit never stores it.
 
 ## Repair and the Compose file
 

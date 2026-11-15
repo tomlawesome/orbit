@@ -218,8 +218,11 @@ AES-256-GCM) under an operator passphrase collected twice, hidden, over stdin
 only. The bundle is immediately decrypted back and compared byte-for-byte
 before anything else runs; any failure refuses the whole batch
 (`checkpoint-failed`, exit 4) with the database untouched. The bundle lives
-in a mode-0700 `.orbit-repair-checkpoint.*` directory, is never deleted by
-the script, and its path appears only as stderr guidance, never on stdout.
+in a mode-0700 `.orbit-repair-checkpoint.*` directory and its path appears
+only as stderr guidance, never on stdout. It was originally never deleted by
+the script; since the 2026-11-15 amendment below, an `--execute` run removes
+it once that run's own full re-check is clean, and keeps and names it
+otherwise.
 
 The 28P01 journey then runs as an ordered step iterator: checkpoint →
 generate a fresh 64-hex credential and stage it at a fixed mode-600 path →
@@ -309,8 +312,10 @@ that could drift.
   repair stream exists beside the installer-ui event grammar. Both
   duplications are deliberate isolation with a named maintenance cost, held
   honest by tests and the catalogue until engine convergence.
-- Checkpoint bundles accumulate until the operator deletes them; repair never
-  deletes recovery material it created for the operator.
+- Repair never deletes recovery material it created for the operator, with
+  one exception: the credential checkpoint, removed after a clean full
+  re-check in the same run (amendment 2026-11-15). A checkpoint whose
+  re-check is not clean is kept until a later clean run removes it.
 - Schema-class diagnosis depends on the application's stable
   `reason=database_mismatch`/`database_below_floor` log vocabulary — a
   cross-layer contract that now must be kept like any other. (Note,
@@ -482,3 +487,20 @@ starting Orbit is safe. The lock stays opened read-only and is never created.
 Not taken, left to the owner: probing with a write-opened descriptor, as the
 engine does, which would make the check work on NFSv4 but would have repair
 create or change a file in the backups folder.
+
+**2026-11-15 — repair removes its credential checkpoint after a clean
+re-check (issue #1834; owner decision 11b, 2026-11-14).** Decision 6 and its
+"never deletes recovery material" consequence are amended for the credential
+checkpoint only. An `--execute` run removes every
+`.orbit-repair-checkpoint.*` directory once that same run's full
+re-diagnosis is clean (`diagnosis result=healthy`: no credential finding,
+services ready) and no action in the run failed; "Orbit started" is never
+enough. Why: the checkpoint holds the *old* database password, and after the
+`ALTER ROLE` lands it opens nothing except a volume snapshot the operator
+took themselves, so keeping it only leaves a stale credential on disk. If
+the re-check is not clean, the checkpoint is kept, its path is named on
+stderr, and the run says to re-run repair; a later `--execute` run removes
+it after its own clean re-check. `--check` and `--plan` never remove it.
+Only a real directory holding nothing but the bundle is removed; anything
+else under that name is named and left alone. Every other piece of recovery
+material keeps decision 6's rule.
