@@ -374,3 +374,82 @@ describe("#1848 O-R1 an existing marker is read as today and never overwritten",
     expect(temporaryFiles(d)).toEqual([]);
   });
 });
+
+// #1848 (note 59242) O-F8: the unfinished-restore refusal names the exact
+// ORBIT_BACKUP_DIR value (the marked journal path minus
+// `/.orbit-restore/restore.journal`), shell-quoted, or none when the marked
+// path is not of that shape. Written from the specification alone.
+const JOURNAL_TAIL = "/.orbit-restore/restore.journal";
+const plantBackupsWithJournal = (name) => {
+  const b = join(scratch("orbit-other-backups-"), name);
+  mkdirSync(join(b, ".orbit-restore"), { recursive: true });
+  writeFileSync(join(b, ".orbit-restore", "restore.journal"), "format_version=1\nstate=checkpointed\n");
+  return b;
+};
+// The ORBIT_BACKUP_DIR=<word> assignment the message prints: one shell word (quotes and backslashes allowed).
+const printedAssignment = (stderr) =>
+  stderr.match(/ORBIT_BACKUP_DIR=(?:'[^']*'|"(?:[^"\\]|\\.)*"|\\.|[^\s'"\\])+/)?.[0];
+const evaluated = (assignment) => {
+  const r = spawnSync("bash", ["-c", `${assignment}; printf '%s' "$ORBIT_BACKUP_DIR"`], { encoding: "utf8", env: { PATH: process.env.PATH } });
+  return r.stdout;
+};
+
+describe("#1848 O-F8 the refusal names the ORBIT_BACKUP_DIR value to recover with", () => {
+  it.each([["plain", "backups-b"], ["with a space", "my backups b"]])(
+    "#1848 O-F8 a marker naming another backups folder (%s): the refusal gives ORBIT_BACKUP_DIR=<that folder>, not its .orbit-restore",
+    (_n, folder) => {
+      const d = makeDeployment();
+      const b = plantBackupsWithJournal(folder);
+      writeFileSync(d.marker, `${b}${JOURNAL_TAIL}\n`);
+      const result = run(d, ["--yes", bundleIn(d)], UNATTENDED);
+      expect(result.status).not.toBe(0);
+      noStop(result);
+      expect(result.stderr).toMatch(/unfinished/i);
+      const assignment = printedAssignment(result.stderr);
+      expect(assignment, `no ORBIT_BACKUP_DIR= value in: ${result.stderr}`).toBeDefined();
+      // Pasted into bash, the value is B exactly (spaces survive), never B/.orbit-restore.
+      expect(evaluated(assignment)).toBe(b);
+      expect(result.stderr).not.toContain(`ORBIT_BACKUP_DIR=${b}/.orbit-restore`);
+      expect(result.stderr).not.toMatch(/journal's folder/);
+      // Existing behaviour: Orbit was not stopped, the marker is kept.
+      expect(readFileSync(d.marker, "utf8")).toBe(`${b}${JOURNAL_TAIL}\n`);
+      expect(existsSync(join(b, ".orbit-restore", "restore.journal"))).toBe(true);
+    },
+  );
+
+  it("#1848 O-F8 --recover with the printed value reaches the marked journal (it is the folder restore.sh derives the journal from)", () => {
+    const d = makeDeployment();
+    const b = plantBackupsWithJournal("backups-b");
+    const journal = join(b, ".orbit-restore", "restore.journal");
+    writeFileSync(d.marker, `${b}${JOURNAL_TAIL}\n`);
+    const refused = run(d, ["--yes", bundleIn(d)], UNATTENDED);
+    const value = evaluated(printedAssignment(refused.stderr) ?? "ORBIT_BACKUP_DIR=");
+    expect(value).toBe(b);
+    const recovered = run(d, ["--recover"], { ORBIT_BACKUP_DIR: value, FAKE_JOURNAL: journal, FAKE_CURL_STATUS: "0" });
+    expect(recovered.stderr).not.toMatch(/unfinished/i);
+    expect(recovered.status, recovered.stderr).toBe(0);
+    expect(recovered.log).toContain("stop-saw-marker=");
+    expect(existsSync(journal)).toBe(false);
+    expect(existsSync(d.marker)).toBe(false);
+  });
+
+  it.each([
+    ["a different file name", (b) => join(b, ".orbit-restore", "other.journal")],
+    ["no .orbit-restore folder", (b) => join(b, "restore.journal")],
+    ["the journal folder only as a prefix", (b) => join(b, ".orbit-restore-x", "restore.journal")],
+  ])("#1848 O-F8 a marker naming an existing journal file not ending in %s names that path and gives no ORBIT_BACKUP_DIR value", (_n, pathOf) => {
+    const d = makeDeployment();
+    const b = scratch("orbit-odd-marker-");
+    const odd = pathOf(b);
+    mkdirSync(dirname(odd), { recursive: true });
+    writeFileSync(odd, "x\n");
+    writeFileSync(d.marker, `${odd}\n`);
+    const result = run(d, ["--yes", bundleIn(d)], UNATTENDED);
+    expect(result.status).not.toBe(0);
+    noStop(result);
+    expect(result.stderr).toMatch(/unfinished/i);
+    expect(result.stderr).toContain(odd);
+    expect(result.stderr).not.toContain("ORBIT_BACKUP_DIR=");
+    expect(readFileSync(d.marker, "utf8")).toBe(`${odd}\n`);
+  });
+});
