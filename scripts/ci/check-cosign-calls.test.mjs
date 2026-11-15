@@ -1097,3 +1097,47 @@ describe("escaped block-style keys (#1843, note 59986)", () => {
 ` });
   });
 });
+
+describe("anchored, tagged and explicit keys (#1843, note 59989)", () => {
+  const ci = ".gitlab-ci.yml";
+  const raw = String.raw;
+  const trig = (key) => `job:\n  trigger:\n    ${key}:\n      - remote: https://x\n`;
+
+  it("fails on an anchored escaped include key", () => {
+    fails({ [ci]: raw`${trig(String.raw`&a "\x69nclude"`)}` }, ci, 3);
+  });
+
+  it("fails on a tagged escaped include key", () => {
+    fails({ [ci]: trig(String.raw`!!str "\x69nclude"`) }, ci, 3);
+  });
+
+  it("fails on a tagged and anchored escaped key with spaces before the colon", () => {
+    fails({ [ci]: `job:\n  trigger:\n    !!str   &a   "\\x69nclude" :\n      - remote: https://x\n` }, ci, 3);
+  });
+
+  it("fails on an escaped anchored key inside a followed local include", () => {
+    fails({ [ci]: "include:\n  - local: ci/a.yml\n", "ci/a.yml": trig(String.raw`&a "\x69nclude"`) }, "ci/a.yml", 3);
+  });
+
+  it("fails on a harmless anchored key", () => {
+    fails({ [ci]: "job:\n  &k script:\n    - echo hi\n" }, ci, 2);
+  });
+
+  it("fails on a harmless tagged key", () => {
+    fails({ [ci]: "job:\n  !!str script:\n    - echo hi\n" }, ci, 2);
+  });
+
+  it("fails on an explicit key hiding an escaped include", () => {
+    fails({ [ci]: 'job:\n  trigger:\n    ?\n      "\\x69nclude"\n    : - remote: https://x\n' }, ci, 3);
+  });
+
+  it("fails on a harmless one-line explicit key", () => {
+    fails({ [ci]: "job:\n  ? script\n  : [echo hi]\n" }, ci, 2);
+  });
+
+  it("passes value anchors, merge keys and !reference tags as the repo uses them", () => {
+    passes({ [ci]: ".x: &x\n  script: [echo]\njob:\n  <<: *x\n" });
+    passes({ [ci]: ".x:\n  rules:\n    - if: $A\njob:\n  rules:\n    - !reference [.x, rules]\n" });
+    passes({ [ci]: ".x:\n  script: [echo]\njob:\n  script: !reference [.x, script]\n" });
+  });
+});
