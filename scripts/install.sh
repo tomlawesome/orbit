@@ -92,6 +92,9 @@ readonly tika_readiness_probe='fetch("http://orbit-tika:9998/version", { cache: 
 plain_mode=0
 simulate_mode=0
 requested_action=""
+# --remove-old-undo-copies: an update removes the old undo copies it lists
+# without asking (prune_old_undo_copies, #1834).
+remove_old_undo_copies=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --plain)
@@ -102,9 +105,13 @@ while [[ $# -gt 0 ]]; do
       simulate_mode=1
       shift
       ;;
+    --remove-old-undo-copies)
+      remove_old_undo_copies=1
+      shift
+      ;;
     --install|--update|--repair)
       [[ -z "$requested_action" ]] || {
-        printf 'Usage: %s [--plain] [--install|--update|--repair] | [--plain] --simulate\n' "$0" >&2
+        printf 'Usage: %s [--plain] [--install|--update|--repair] [--remove-old-undo-copies] | [--plain] --simulate\n' "$0" >&2
         exit 2
       }
       requested_action="${1#--}"
@@ -115,17 +122,17 @@ while [[ $# -gt 0 ]]; do
       break
       ;;
     *)
-      printf 'Usage: %s [--plain] [--install|--update|--repair] | [--plain] --simulate\n' "$0" >&2
+      printf 'Usage: %s [--plain] [--install|--update|--repair] [--remove-old-undo-copies] | [--plain] --simulate\n' "$0" >&2
       exit 2
       ;;
   esac
 done
 [[ $# -eq 0 ]] || {
-  printf 'Usage: %s [--plain] [--install|--update|--repair] | [--plain] --simulate\n' "$0" >&2
+  printf 'Usage: %s [--plain] [--install|--update|--repair] [--remove-old-undo-copies] | [--plain] --simulate\n' "$0" >&2
   exit 2
 }
 if [[ "$simulate_mode" == 1 && -n "$requested_action" ]]; then
-  printf 'Usage: %s [--plain] [--install|--update|--repair] | [--plain] --simulate\n' "$0" >&2
+  printf 'Usage: %s [--plain] [--install|--update|--repair] [--remove-old-undo-copies] | [--plain] --simulate\n' "$0" >&2
   printf 'Orbit installer: --simulate cannot be combined with --install, --update or --repair.\n' >&2
   exit 2
 fi
@@ -1975,6 +1982,128 @@ name_earlier_originals() {
   eval "$saved_options"
 }
 
+# The one-time clean-up of old undo copies (#1834 slice 5, owner decision
+# 10a, 2026-11-14). Earlier releases left dated folders in
+# orbit-install-backups holding undo copies, full .env-orbit copies with
+# secrets among them. As apt's `clean` and Homebrew's `cleanup` do, they are
+# removed only on request, never silently: an update lists them, and removes
+# them only on an exact "yes" typed at a terminal, after saying plainly that
+# it CANNOT be undone, or with --remove-old-undo-copies. Unattended, it lists
+# them and removes nothing.
+readonly undo_copy_folder_pattern='^[0-9]{8}T[0-9]{6}Z(-repair)?(-[2-9])?$'
+
+# undo_copy_folder_qualifies <folder>: <folder> is a real dated folder (not a
+# symlink) directly inside a real orbit-install-backups, readable, holding
+# nothing but the names the installer and repair.sh write there, each a
+# regular file: no symlink, no sub-folder, nothing else.
+undo_copy_folder_qualifies() {
+  local folder="$1" root="${target_dir}/orbit-install-backups" entry saved_options status=0
+  [[ "${folder%/*}" == "$root" && "${folder##*/}" =~ $undo_copy_folder_pattern ]] || return 1
+  [[ -d "$root" && ! -L "$root" && -d "$folder" && ! -L "$folder" && -r "$folder" && -x "$folder" ]] || return 1
+  saved_options="$(shopt -p nullglob dotglob)" || true
+  shopt -s nullglob dotglob
+  for entry in "$folder"/*; do
+    case "${entry##*/}" in
+      .env-orbit | "$smtp_overlay_file" | "$smtp_copy_marker" | .env-orbit.smtp-copy.tmp) ;;
+      *) status=1; break ;;
+    esac
+    is_regular_non_symlink_file "$entry" || { status=1; break; }
+  done
+  eval "$saved_options"
+  return "$status"
+}
+
+# undo_copy_size <folder>: the total size of its files, for a person to read.
+undo_copy_size() {
+  local file bytes total=0 saved_options
+  saved_options="$(shopt -p nullglob dotglob)" || true
+  shopt -s nullglob dotglob
+  for file in "$1"/*; do
+    bytes="$(wc -c < "$file" 2>/dev/null)" || bytes=0
+    total=$((total + ${bytes//[^0-9]/}))
+  done
+  eval "$saved_options"
+  if ((total < 1024)); then
+    printf '%d bytes' "$total"
+  elif ((total < 1048576)); then
+    printf '%d KiB' "$(((total + 1023) / 1024))"
+  else
+    printf '%d MiB' "$(((total + 1048575) / 1048576))"
+  fi
+}
+
+# prune_old_undo_copies: on an update, the candidates are the dated folders
+# directly inside orbit-install-backups, except this run's own folder, the
+# one the step record names, and, while a retirement is due, one its copy
+# marker names. Each is listed with its path, date and size; any other
+# dated folder is listed as not removed. Nothing to clean up: nothing is
+# printed. Never changes the update's result or exit code.
+prune_old_undo_copies() {
+  local root="${target_dir}/orbit-install-backups" saved_options folder name marker answer="" remove=0
+  local -a offered=() kept=()
+  local -A live=()
+  [[ "$target_was_empty" != 1 ]] || return 0
+  [[ -d "$root" && ! -L "$root" ]] || return 0
+  ! stopping || return 0
+  if [[ -n "$backup_dir" ]]; then live["${backup_dir##*/}"]=1; fi
+  smtp_read_record
+  if [[ -n "$smtp_copy_dir" ]]; then live["${smtp_copy_dir##*/}"]=1; fi
+
+  saved_options="$(shopt -p nullglob dotglob)" || true
+  shopt -s nullglob
+  shopt -u dotglob
+  for folder in "$root"/*; do
+    name="${folder##*/}"
+    [[ "$name" =~ $undo_copy_folder_pattern ]] || continue
+    [[ -z "${live[$name]:-}" ]] || continue
+    marker="$folder/$smtp_copy_marker"
+    if [[ -d "$folder" && ! -L "$folder" && -f "$marker" && ! -L "$marker" ]] &&
+      [[ "$(head -c 128 -- "$marker" 2>/dev/null)" == "copy=orbit-install-backups/$name" ]] && smtp_retirement_due; then
+      continue
+    fi
+    if undo_copy_folder_qualifies "$folder"; then offered+=("$folder"); else kept+=("$folder"); fi
+  done
+  eval "$saved_options"
+  ((${#offered[@]} > 0)) || return 0
+
+  {
+    printf 'Orbit installer: old undo copies from earlier updates and repairs are kept in %s. They can hold a copy of .env-orbit, secrets included:\n' "$(printf '%q' "$root")"
+    for folder in "${offered[@]}"; do
+      name="${folder##*/}"
+      printf '  %s  %s  %s\n' "$(printf '%q' "$folder")" \
+        "${name:0:4}-${name:4:2}-${name:6:2}T${name:9:2}:${name:11:2}:${name:13:2}Z" "$(undo_copy_size "$folder")"
+    done
+    for folder in "${kept[@]}"; do
+      printf '  %s  not removed: it holds something besides undo copies (another file, a sub-folder or a link). Check it yourself.\n' "$(printf '%q' "$folder")"
+    done
+  } >&2 || true
+
+  if [[ "$remove_old_undo_copies" == 1 ]]; then
+    printf 'Orbit installer: removing them is permanent. It CANNOT be undone: no other copy is kept.\n' >&2 || true
+    remove=1
+  elif [[ "${ORBIT_CONFIGURE_PROMPTS:-}" != machine ]] && has_controlling_terminal; then
+    printf 'Orbit installer: removing them is permanent. It CANNOT be undone: no other copy is kept.\n' >&2 || true
+    printf 'Type yes to remove them; anything else, or Enter, keeps them [no]: ' >&2 || true
+    IFS= read -r answer < /dev/tty || { answer=""; printf '\n' >&2 || true; }
+    answer="${answer%$'\r'}"
+    [[ "$answer" != yes ]] || remove=1
+  else
+    printf 'Orbit installer: nothing was deleted. To delete them, run the update again on a terminal (interactively) and answer yes, or run scripts/install.sh --update --remove-old-undo-copies.\n' >&2 || true
+  fi
+  [[ "$remove" == 1 ]] || return 0
+  ! stopping || return 0
+
+  for folder in "${offered[@]}"; do
+    # Checked again just before: still a real dated folder, directly inside a
+    # real orbit-install-backups, holding only undo copies.
+    if undo_copy_folder_qualifies "$folder" && rm -rf -- "$folder"; then
+      printf 'Orbit installer: removed %s\n' "$(printf '%q' "$folder")" >&2 || true
+    else
+      printf 'Orbit installer: kept %s: it changed since it was listed, or could not be deleted.\n' "$(printf '%q' "$folder")" >&2 || true
+    fi
+  done
+}
+
 prepare_service_images() {
   installer_ui_phase=preparation
   installer_ui_component=database
@@ -3164,6 +3293,7 @@ stop_disabled_scanner
 stop_dropped_services
 wait_for_deployment_readiness
 retire_smtp_lines
+prune_old_undo_copies || true
 
 installer_ui_phase=complete
 installer_ui_component=installer

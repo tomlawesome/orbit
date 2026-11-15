@@ -604,6 +604,39 @@ says the SMTP lines in .env-orbit could not be copied, so set sending up there.
 If the key cannot be read at that start, the card and the log say so, and the
 copy waits for the first start that can.
 
+### Old undo copies
+
+Earlier releases left their undo copies behind: dated folders in
+`orbit-install-backups/` (`<date>/`, `<date>-repair/`, with `-2` to `-9`
+when a name was taken), some holding a full copy of `.env-orbit`, secrets
+included. An update never removes them silently. It lists each one on
+stderr with its path, date and size, and removes them only when you ask.
+
+A folder is offered only when it holds nothing but the installer's and
+`repair.sh`'s undo-copy files (`.env-orbit`, `docker-compose.mail.yml`,
+`.orbit-smtp-undo`, `.env-orbit.smtp-copy.tmp`), all plain files. A dated
+folder holding anything else, a sub-folder or a link is listed as "not
+removed" and left alone. The update's own folder is never offered, and
+neither is a copy the SMTP retirement still needs (one named by
+`.orbit-smtp-retirement`, or a marked copy while the retirement is still
+due). `moved/`, `engine/` and `originals/`, recovery bundles, `backup.sh`
+archives and anything outside `orbit-install-backups/` are never touched.
+
+- **On a terminal**, after the list the update says plainly that removing
+  them is permanent and CANNOT be undone, then asks. Only `yes`, typed
+  exactly, removes them, one line per folder. Enter, end of input or any
+  other answer keeps them.
+- **Unattended** (no terminal, or the launcher's prompts), the update lists
+  them, removes nothing, and prints one line on how to remove them.
+- **`scripts/install.sh --update --remove-old-undo-copies`**, run from the
+  Orbit directory, removes them without asking. It still lists them and still
+  says it CANNOT be undone.
+
+When there is nothing to clean up, nothing is printed. Either way the
+update's result and exit code are the same. Removal is an ordinary delete:
+on an SSD or a journaled file system that is at best NIST SP 800-88 "clear",
+not sanitisation of the disk.
+
 ## Mailbox provider operation
 
 Mailbox ingestion is optional. An installation that does not use mail runs the
