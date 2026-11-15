@@ -130,7 +130,6 @@ const untouched = (targetDir) =>
       ...[...NOT_QUALIFYING, ...Object.keys(QUARANTINE), "operator-recovery", "orbit-backup-20250101T000000Z.tar"].map((name) => join(backups(targetDir), name)),
       join(targetDir, "orbit-backup-20250101T000000Z.tar"),
       join(targetDir, "20250102T030405Z"),
-      join(targetDir, ".env-orbit"),
     ],
     { encoding: "utf8" },
   ).stdout;
@@ -189,6 +188,19 @@ describe("install.sh --plain --update: old undo copies, unattended (#1834 slice 
     const targetDir = withOldCopies(installedFolder());
     const result = update(targetDir);
     expectNotRemovedListed(result.stderr);
+  });
+
+  it("lists a lone dated folder that does not qualify as not removed, with its path, and leaves it", () => {
+    const targetDir = installedFolder();
+    const lone = join(backups(targetDir), OTHER_FILE);
+    writeFolder(lone, { ".env-orbit": FULL_ENV_COPY, "notes.txt": "the operator's own note\n" });
+    const result = update(targetDir);
+    expect(result.status).toBe(0);
+    const listed = mentioning(result.stderr, OTHER_FILE);
+    expect(listed.some((entry) => /not removed/iu.test(entry)), `listed as not removed: ${listed.join(" | ")}`).toBe(true);
+    expect(removedLines(result.stderr, OTHER_FILE)).toEqual([]);
+    expect(readFileSync(join(lone, ".env-orbit"), "utf8")).toBe(FULL_ENV_COPY);
+    expect(readFileSync(join(lone, "notes.txt"), "utf8")).toBe("the operator's own note\n");
   });
 
   it("leaves the update's result and exit code as an update without old copies has them", () => {
