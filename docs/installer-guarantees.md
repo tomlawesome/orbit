@@ -963,7 +963,7 @@ and a separate `--recover` manual-recovery mode for crash safety.
 
 **Preflight / tooling / bundle validation**
 
-1. Requires Docker, Docker Compose v2, curl (for the health wait), and the env file present before any state is touched (openssl, sha256sum, tar, find, stat and sync are no longer needed on the host; the engine does that work).
+1. Requires Docker, Docker Compose v2, curl (for the health wait), and the env file present before any state is touched (openssl, sha256sum, tar, find and stat are no longer needed on the host; the engine does that work. The restore marker is written with the core `mktemp`, `ln` and `sync`, #1848 O-R1).
    `restore.sh:40-51` — category: input-validation — criticality: MEDIUM
 2. Document KEK must be a regular, non-symlink file containing exactly 64 hex chars, checked before restore proceeds.
    `restore.sh:53-58` — category: secret-handling — criticality: HIGH

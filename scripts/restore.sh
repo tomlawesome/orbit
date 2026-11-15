@@ -15,7 +15,7 @@ readonly backup_directory
 readonly secrets_directory="$repo_dir/.orbit-secrets"
 readonly engine_name="orbit-restore-engine-$$" # unique to this run, so the EXIT trap can `docker wait` for it
 readonly journal_path="$backup_directory/.orbit-restore/restore.journal"
-# #1823 O-S1: write-ahead marker naming the journal, in a fixed place for repair.sh; dropped once that journal is gone.
+# #1823 O-S1: write-ahead marker naming the journal, in a fixed place for repair.sh; dropped once that journal is gone. #1848 O-R1: written whole or not at all (temp file, sync, then ln).
 readonly marker_path="$repo_dir/.orbit-restore-pending"; marker_new=false
 marker_names() { local named=""; [[ -f "$marker_path" && ! -L "$marker_path" ]] && { IFS= read -r named <"$marker_path"; } 2>/dev/null; printf '%s' "$named"; }
 drop_marker() { local named; named="$(marker_names)"; [[ -n "$named" && ! -e "$named" && ! -L "$named" ]] || return 0; rm -f -- "$marker_path" || true; }
@@ -314,7 +314,7 @@ trap restart_app EXIT
 marked="$(marker_names)"
 [[ -n "$marked" || ! ( -e "$marker_path" || -L "$marker_path" ) ]] || fail 'checkpoint/marker failed; .orbit-restore-pending in this folder is not a readable restore marker, so Orbit was not stopped. Check it, and remove it only if no restore is unfinished.'
 [[ -z "$marked" || "$marked" == "$journal_path" ]] || { [[ ! -e "$marked" && ! -L "$marked" ]] || fail "checkpoint/marker failed; an earlier restore is unfinished (its journal is $marked), so Orbit was not stopped. Run bash scripts/restore.sh --recover with ORBIT_BACKUP_DIR set to that journal's folder."; rm -f -- "$marker_path"; }
-[[ -e "$marker_path" ]] || { (set -o noclobber; printf '%s\n' "$journal_path" >"$marker_path") 2>/dev/null || fail 'checkpoint/marker failed; could not write the restore marker, so Orbit was not stopped.'; marker_new=true; }
+[[ -e "$marker_path" ]] || { { marker_temporary="$(mktemp "$marker_path.XXXXXX")" && chmod "$(printf '%o' "$((0666 & ~0$(umask)))")" "$marker_temporary" && printf '%s\n' "$journal_path" >"$marker_temporary" && sync -- "$marker_temporary" && ln -- "$marker_temporary" "$marker_path"; } 2>/dev/null && marker_written=0 || marker_written=$?; rm -f -- "${marker_temporary:-}" 2>/dev/null || true; ((marker_written == 0)) || fail 'checkpoint/marker failed; could not write the restore marker, so Orbit was not stopped.'; marker_new=true; }
 compose stop orbit-app >/dev/null 2>&1 || fail 'checkpoint/stop failed; Orbit was not stopped for a consistent recovery point.'
 app_stopped=true
 status=0

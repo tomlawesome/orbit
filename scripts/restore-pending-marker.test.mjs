@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -269,5 +269,108 @@ describe("#1823 review: restore.sh marker lifecycle and refusals", () => {
     expect(result.status).not.toBe(0);
     noStop(result);
     expect(intact(d)).toBe(true);
+  });
+});
+
+// #1848 (note 59114) O-R1: the marker is written as a temporary file, synced,
+// then published with an exclusive link, so it only ever appears whole. Written
+// from the specification alone. A full disk is simulated with PATH shims that
+// make `ln` or `sync` exit 1.
+const temporaryFiles = (d) => readdirSync(d.deployDir).filter((n) => n.startsWith(".orbit-restore-pending."));
+const shimDir = (d, name, body) => {
+  const dir = join(d.deployDir, `shim-${name}`);
+  mkdirSync(dir);
+  writeFileSync(join(dir, name), `#!/usr/bin/env bash\n${body}\n`);
+  chmodSync(join(dir, name), 0o755);
+  return dir;
+};
+const withShim = (d, name, body) => ({ ...UNATTENDED, PATH: `${shimDir(d, name, body)}:${d.binDir}:${process.env.PATH}` });
+const FAILING_WRITE = { ln: "echo 'ln: No space left on device' >&2; exit 1", sync: "echo 'sync: No space left on device' >&2; exit 1" };
+const RESTORED = { FAKE_JOURNAL_STATE: "checkpointed", FAKE_ENGINE_STATUS: "1" };
+
+describe("#1848 O-R1 restore.sh writes the marker whole (temporary file, sync, exclusive link)", () => {
+  it("#1848 success: the marker holds exactly the journal path and a newline, and no temporary file is left", () => {
+    const d = makeDeployment();
+    const result = run(d, ["--yes", bundleIn(d)], { ...UNATTENDED, ...RESTORED });
+    expect(result.log).toContain("stop-saw-marker=");
+    expect(readFileSync(d.marker, "utf8")).toBe(`${d.journal}\n`);
+    expect(temporaryFiles(d)).toEqual([]);
+  });
+
+  it("#1848 success: no temporary file is left after a finished restore", () => {
+    const d = makeDeployment();
+    const result = run(d, ["--yes", bundleIn(d)], { ...UNATTENDED, FAKE_JOURNAL_STATE: "database-restored", FAKE_CURL_STATUS: "0" });
+    expect(result.status, result.stderr).toBe(0);
+    expect(existsSync(d.marker)).toBe(false);
+    expect(temporaryFiles(d)).toEqual([]);
+  });
+
+  it.each([["ln", "a failing ln (the publish step)"], ["sync", "a failing sync (after the file is written)"]])(
+    "#1848 %s fails: restore refuses before stopping Orbit and leaves no marker and no temporary file",
+    (name) => {
+      const d = makeDeployment();
+      const result = run(d, ["--yes", bundleIn(d)], { ...withShim(d, name, FAILING_WRITE[name]), ...RESTORED });
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("could not write the restore marker");
+      noStop(result);
+      expect(result.log).not.toContain("start");
+      expect(existsSync(d.marker)).toBe(false);
+      expect(temporaryFiles(d)).toEqual([]);
+      // A second restore is not blocked by a leftover empty marker.
+      const again = run(d, ["--yes", bundleIn(d)], { ...UNATTENDED, ...RESTORED });
+      expect(again.stderr).not.toContain("not a readable restore marker");
+      expect(again.log).toContain("stop-saw-marker=");
+    },
+  );
+
+  it("#1848 a write that fails after the file is created (sync fails once the temporary file holds the path) leaves no marker and no temporary file", () => {
+    const d = makeDeployment();
+    // `sync` fails only once the temporary file holds the journal path: the file exists and is non-empty.
+    const body = 'for f in "$@"; do [ -s "$f" ] && { echo "sync: write error" >&2; exit 1; }; done; exit 1';
+    const result = run(d, ["--yes", bundleIn(d)], { ...withShim(d, "sync", body), ...RESTORED });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("could not write the restore marker");
+    noStop(result);
+    expect(existsSync(d.marker)).toBe(false);
+    expect(temporaryFiles(d)).toEqual([]);
+  });
+});
+
+describe("#1848 O-R1 an existing marker is read as today and never overwritten", () => {
+  it("#1848 a marker naming this journal continues without writing a new marker (even when ln would fail)", () => {
+    const d = makeDeployment();
+    mkdirSync(dirname(d.journal), { recursive: true });
+    writeFileSync(d.journal, "format_version=1\nstate=checkpointed\n");
+    writeFileSync(d.marker, `${d.journal}\n`);
+    const result = run(d, ["--yes", bundleIn(d)], { ...withShim(d, "ln", FAILING_WRITE.ln), FAKE_STOP_STATUS: "1" });
+    expect(result.stderr).not.toContain("could not write the restore marker");
+    expect(result.log).toContain(`stop-saw-marker=${JSON.stringify(`${d.journal}\n`)}`);
+    expect(readFileSync(d.marker, "utf8")).toBe(`${d.journal}\n`);
+    expect(temporaryFiles(d)).toEqual([]);
+  });
+
+  it("#1848 a marker naming a different, existing journal is refused as unfinished and left alone, with no temporary file", () => {
+    const d = makeDeployment();
+    const other = plantOther(d);
+    writeFileSync(d.marker, `${other}\n`);
+    const result = run(d, ["--yes", bundleIn(d)], UNATTENDED);
+    expect(result.status).not.toBe(0);
+    noStop(result);
+    expect(result.stderr).toContain(other);
+    expect(result.stderr).toMatch(/unfinished/i);
+    expect(readFileSync(d.marker, "utf8")).toBe(`${other}\n`);
+    expect(temporaryFiles(d)).toEqual([]);
+  });
+
+  it("#1848 an empty marker left by the old code is still refused as not readable, and the file is kept", () => {
+    const d = makeDeployment();
+    writeFileSync(d.marker, "");
+    const result = run(d, ["--yes", bundleIn(d)], UNATTENDED);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("not a readable restore marker");
+    noStop(result);
+    expect(lstatSync(d.marker).isFile()).toBe(true);
+    expect(lstatSync(d.marker).size).toBe(0);
+    expect(temporaryFiles(d)).toEqual([]);
   });
 });

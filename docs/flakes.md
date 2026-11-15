@@ -7,6 +7,18 @@ fixing the cause deletes the heading in the same commit. Name a sharded browser
 job as GitLab does (`pipeline 3600 / rig_webkit 2/3`); the heading carries the
 test's own name, which does not move with the shard.
 
+## tests/unit/system-status-route.test.mjs "answers the real per-service state for a signed-in reader (positive case)"
+
+- 2026-11-15 · local, chore/next-4 on 635b8481 plus the #1848 O-R1 change · full `npx vitest run`, host load about 31 · timed out at 5 s with `connect ECONNREFUSED 127.0.0.1:3000`. A re-run of the file passed. First sighting.
+
+## tests/unit/v19-home-drawer-attach-id.test.mjs "keeps the id when the attach landed but the read failed, and sends it again on a re-pick"
+
+- 2026-11-15 · local, chore/next-4 on 635b8481 plus the #1848 O-R1 change · full `npx vitest run`, host load about 31 · timed out at 5 s. A re-run of the file passed. First sighting.
+
+## scripts/repair.test.mjs "restores the .orbit-config.rollback copy into .env-orbit, removes the rollback file, and ends healthy" (:3852)
+
+- 2026-11-15 · local, chore/next-4 on 635b8481 plus the #1848 O-R1 change · full `npx vitest run` on the shared host · `runRepair: the child was killed after its 30000ms deadline` after its stdout already showed both actions done and 0 failed. A re-run of the file passed. First sighting.
+
 ## tests/unit/admin-sending-route-1629.test.mjs "GET /api/admin/sending answers the sending half as sending, no-store, read for the caller's own id" (and the next test, as a knock-on)
 
 - 2026-11-13 · !1302 6028593c · pipeline 4068 / fast (job 50111, a retry) · the first test timed out at 5 s on its first `await route()`, the cold import of the route, on a loaded runner; the next test then got 200 for 403, as the timed-out test's still-running call took its one-shot mock. The same commit's first run passed the file (job 50081). First sighting.
