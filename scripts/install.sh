@@ -3088,7 +3088,7 @@ smtp_write_copy() {
   local tmp="$1/.env-orbit.smtp-copy.tmp"
   rm -f -- "$tmp" &&
     ( umask 077 && smtp_env_rewrite backup < "$environment_file" > "$tmp" ) &&
-    mv -f -- "$tmp" "$1/.env-orbit" && return 0
+    mv -f -- "$tmp" "$1/$environment_file" && return 0
   rm -f -- "$tmp"
   return 1
 }
