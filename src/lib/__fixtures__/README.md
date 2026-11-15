@@ -36,6 +36,11 @@ read `current`; a former `IMAP_*` key is `unknown configuration` /
 `configuration_unknown_key`; an unrecorded prior version or digest in the
 migration message is `none`, not `legacy/unknown`.
 
+#1834 (slice 2) edited `configuration-migration/matrix.json` by hand: the 15
+successful non-transaction `--migrate` cases now expect no rollback copy
+(`"rollback": null`), because the migration removes the copy once the new
+file is confirmed. Refusals, failures and transaction runs are unchanged.
+
 #1211 captured its three directories from `6448f07e` (the scripts unchanged since
 `d6a365a3`), before backup.sh, restore.sh and the recovery-bundle scripts
 became thin shells, with a throwaway script that ran each bash half the

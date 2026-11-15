@@ -11,7 +11,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import {
   CONFIGURATION_ROLLBACK_SUFFIX,
@@ -186,13 +186,12 @@ describe("classifyMigrationResult (#29)", () => {
 
 // #1834 slice 2: outside an install transaction the migration copies the
 // pre-migration file to `.env-orbit.orbit-config.rollback`. Once the new file
-// is confirmed good (strict re-parse, the run's applied version, digest and
-// Compose project, and `docker compose config --quiet` for the deployment
-// directory), all under the deploy lock, the copy is removed. If any check
-// fails the copy is kept, the live file is restored from it, and the run
-// fails with configuration_migration. Contract for the test seam:
-// `composeConfigCheck(deploymentDirectory) => boolean`, true meaning
-// `docker compose config --quiet` passed.
+// is confirmed good (strict re-parse, and the run's applied version, digest
+// and Compose project), all under the deploy lock, the copy is removed. If
+// any check fails the copy is kept, the live file is restored from it, and
+// the run fails with configuration_migration. No `docker compose config`
+// check: the engine runs in `docker run --network none` with no Docker
+// inside (issue note 59075).
 describe("standalone migration drops its rollback copy once the new file is confirmed (#1834)", () => {
   const LEGACY = `ORBIT_IMAGE=${IMAGE}\n# operator comment\nSMTP_HOST=mail.example\n`;
   const DIGEST = "sha256:" + "a".repeat(64);
@@ -204,9 +203,8 @@ describe("standalone migration drops its rollback copy once the new file is conf
       appliedVersion: "v1.2.3",
       appliedDigest: DIGEST,
       composeProjectName: "orbit",
-      composeConfigCheck: () => true,
       ...extra,
-    } as MigrateEnvironmentFileOptions;
+    };
   }
 
   const envFile = (dir: string) => join(dir, ".env-orbit");
@@ -221,27 +219,6 @@ describe("standalone migration drops its rollback copy once the new file is conf
     expect(readdirSync(dir)).toEqual([".env-orbit"]);
   });
 
-  it("runs the compose check once, for the deployment directory, on the new file, while the copy and the deploy lock are still held", () => {
-    const dir = deployment(LEGACY);
-    const seen: { directory: string; copyPresent: boolean; lockPresent: boolean; live: string }[] = [];
-    const composeConfigCheck = vi.fn((directory: string) => {
-      seen.push({
-        directory,
-        copyPresent: existsSync(copyOf(dir)),
-        lockPresent: existsSync(join(dir, ".orbit-engine.lock")),
-        live: readFileSync(envFile(dir), "utf8"),
-      });
-      return true;
-    });
-    expect(migrateEnvironmentFile(envFile(dir), standalone(dir, { composeConfigCheck } as never)).status).toBe(0);
-    expect(composeConfigCheck).toHaveBeenCalledTimes(1);
-    expect(seen[0].directory).toBe(dir);
-    expect(seen[0].copyPresent).toBe(true);
-    expect(seen[0].lockPresent).toBe(true);
-    expect(seen[0].live).toContain("ORBIT_CONFIG_APPLIED_VERSION=v1.2.3\n");
-    expect(existsSync(copyOf(dir))).toBe(false);
-  });
-
   function expectRestoredAndCopyKept(dir: string, result: { status: number; stdout: string; stderr: string }): void {
     expect(result.status).not.toBe(0);
     expect(result.stderr).toBe("configuration_migration\n");
@@ -254,12 +231,6 @@ describe("standalone migration drops its rollback copy once the new file is conf
     expect(readdirSync(dir).filter((name) => name.includes("migrating"))).toEqual([]);
     expect(existsSync(join(dir, ".orbit-engine.lock"))).toBe(false);
   }
-
-  it("keeps the copy and restores the live file when docker compose config fails", () => {
-    const dir = deployment(LEGACY);
-    const result = migrateEnvironmentFile(envFile(dir), standalone(dir, { composeConfigCheck: () => false } as never));
-    expectRestoredAndCopyKept(dir, result);
-  });
 
   // The rename seam lands the scratch file and then spoils it, standing in for
   // a write that did not produce what the migration meant to produce.
