@@ -98,19 +98,38 @@ tag="handoff-${ORBIT_COMMIT}"
 # Poll until the release is published and carries handoff-complete.json, which
 # GitLab uploads last. A draft is ignored: a read-only token is not shown one
 # anyway, and GitLab publishes only once every file is up.
+#
+# A failed read while waiting is "not yet" (#1848 SEC-D-S4): one brief GitHub
+# error must not end a wait of up to two hours. Three failed polls in a row end
+# it at once, so a lasting fault (a revoked token, a wrong repository) is
+# reported within minutes, not at the deadline.
+readonly MAX_FAILED_POLLS=3
+failed_polls=0
+read_error="${gh_tmp}/read-error"
 deadline=$((SECONDS + wait_minutes * 60))
 while :; do
-  mine="$(gh_releases | awk -F '\t' -v tag="$tag" '$2 == tag && $3 == "false"')"
-  found="$(grep -c . <<< "$mine" || :)"
-  ((found <= 1)) || fail "${found} published releases are named ${tag}; refusing to pick one"
-  if ((found == 1)); then
-    release_id="$(cut -f1 <<< "$mine")"
-    [[ "$release_id" =~ ^[0-9]+$ ]] || fail "GitHub gave no release id for ${tag}"
-    assets="$(gh_assets "$release_id")"
-    awk -F '\t' -v c="$COMPLETE" '$2 == c { found = 1 } END { exit !found }' <<< "$assets" && break
-    waiting="${tag} has no ${COMPLETE} yet"
+  if releases="$(gh_releases 2>"$read_error")" &&
+    mine="$(awk -F '\t' -v tag="$tag" '$2 == tag && $3 == "false"' <<< "$releases")" &&
+    found="$(grep -c . <<< "$mine" || :)" &&
+    { ((found <= 1)) || fail "${found} published releases are named ${tag}; refusing to pick one"; } &&
+    { ((found == 0)) || {
+      release_id="$(cut -f1 <<< "$mine")"
+      [[ "$release_id" =~ ^[0-9]+$ ]] || fail "GitHub gave no release id for ${tag}"
+      assets="$(gh_assets "$release_id" 2>"$read_error")"
+    }; }; then
+    failed_polls=0
+    if ((found == 1)); then
+      awk -F '\t' -v c="$COMPLETE" '$2 == c { found = 1 } END { exit !found }' <<< "$assets" && break
+      waiting="${tag} has no ${COMPLETE} yet"
+    else
+      waiting="no published ${tag} in ${gh_repo} yet"
+    fi
   else
-    waiting="no published ${tag} in ${gh_repo} yet"
+    failed_polls=$((failed_polls + 1))
+    last_error="$(tail -n 1 "$read_error" 2>/dev/null || :)"
+    ((failed_polls < MAX_FAILED_POLLS)) ||
+      fail "GitHub could not be read ${MAX_FAILED_POLLS} polls in a row: ${last_error:-no error text}"
+    waiting="GitHub could not be read (${failed_polls} of ${MAX_FAILED_POLLS} in a row): ${last_error:-no error text}"
   fi
   if ((SECONDS >= deadline)); then
     fail "gave up after ${wait_minutes} minutes: ${waiting}. GitLab's handoff_to_github job for ${ORBIT_COMMIT} uploads it last; if that job failed, retry it on GitLab, then re-run this with \`gh run rerun <id> --failed\`"

@@ -10,6 +10,7 @@ test's own name, which does not move with the shard.
 ## Full `npx vitest run`: mass timeouts at host load about 50 (host)
 
 - 2026-11-15 · local, chore/next-4 on 5b3cdc20 plus the #1848 D-F8 change (sidecar-freshness-issue.sh only) · load average 47-52 · 54 tests in 15 files hit their deadlines (`runRepair`/`runInstall` child killed, `Test timed out`, one 54 ms > 50 ms timer check): scripts/install.{readiness,renamed-folder,rollback,update-profile,update-retire-smtp,interrupts-journal}, scripts/repair-{preconditions-1804,restore-guard,retire-smtp-1817,start-services}, scripts/ci/{import-door,upgrade-versions}, scripts/gitlab-ci-lanes, scripts/web-build-stamp, src/server/portable-archive-container. The 15 files re-run with 4 workers passed 740/740. First sighting.
+- 2026-11-15 · local, chore/next-4 on 26da27ce plus the #1848 SEC-D-S4 change (github-await-handoff.sh only) · full `npx vitest run`, load average about 40 · 9 tests in 6 files timed out (check-svelte-server-parse child deadline, `Hook timed out`, `Test timed out`): scripts/check-svelte-server-parse, scripts/web-build-stamp, tests/unit/administration-{failed-card,mail-settings}-screens, tests/unit/v19-mail-sender-check, tests/unit/v19-tour-chapter-the-item. Re-run with 4 workers: 178/178. Second sighting.
 
 ## tests/unit/administration-archive-storage-screens-1792.test.mjs (file-level)
 
@@ -53,10 +54,11 @@ test's own name, which does not move with the shard.
 - 2026-11-10 · fix/1803-repair-restore-guard 749f7a65 (repair.sh and docs only, nowhere near the administration screens) · local `scripts/test-backend.sh`, shared host under load · the file's `beforeAll` timed out at 10s; the file alone passed on the rerun (with the file below, 59/59). First sighting.
 - 2026-11-11 · fix/1794-index-js-writer 263eced6 (test-harness edits nowhere near the administration screens) · local `scripts/test-backend.sh`, shared host under load · the same `beforeAll` timed out at 10s; the file alone passed on the rerun (21/21). Second sighting.
 
-## tests/unit/administration-mail-settings-screens.test.mjs (file-level)
+## tests/unit/administration-mail-settings-screens.test.mjs (file-level) (#1851)
 
 - 2026-11-10 · fix/1803-repair-restore-guard 749f7a65, same run as above · local `scripts/test-backend.sh`, shared host under load · failed at file level alongside the sighting above; passed on the rerun. First sighting.
 - 2026-11-15 · local, chore/next-4 on 9c7361cf plus the #1848 W-F1 change (About page apk links only) · full `npx vitest run` on the loaded shared host · failed at file level; a re-run of the file passed. Second sighting.
+- 2026-11-15 · local, chore/next-4 on 26da27ce plus the #1848 SEC-D-S4 change (github-await-handoff.sh only) · full `npx vitest run`, load average about 40 · `Hook timed out in 10000ms` in beforeAll (:130); a re-run passed. Third sighting: #1851.
 
 ## scripts/repair-compose-from-image.test.mjs "repair.sh --check drift report ... shows exactly 20 differing lines and says more were not shown when there are more than 20"
 

@@ -442,3 +442,112 @@ describe("github-await-handoff.sh, evidence checks", () => {
     }
   });
 });
+
+/*
+ * #1848 SEC-D-S4: while waiting, a failed read of GitHub (a 5xx after curl's own
+ * retries: --retry 2, so three attempts, 3 s apart) is not fatal; three polls in
+ * a row that cannot read GitHub end the run at once. curl retries a failed GET
+ * itself, so one failed poll is three failing requests to the same path.
+ */
+describe("github-await-handoff.sh, a flaky GitHub (#1848 SEC-D-S4)", () => {
+  const ATTEMPTS = 3; // the first try and curl's --retry 2
+  const isReleaseList = (r) => r.method === "GET" && /\/releases$/u.test(r.path);
+  const isAssetList = (r) => r.method === "GET" && /\/releases\/\d+\/assets$/u.test(r.path);
+
+  /**
+   * Answers each poll as the plan says ("fail": every attempt of that poll is a
+   * 500; "ok": answered normally), then normally for good. A poll is one
+   * request to a matching path when "ok" (the fake has under a page of
+   * releases) and ATTEMPTS requests when "fail". `onDone` runs when the plan is
+   * used up, before the next request is answered.
+   */
+  function flaky(plan, matches, onDone = () => undefined) {
+    let index = 0;
+    let attempts = 0;
+    fake.failWhen = (record) => {
+      if (!matches(record)) return undefined;
+      if (index >= plan.length) return undefined;
+      if (plan[index] === "ok") {
+        index += 1;
+        if (index >= plan.length) onDone();
+        return undefined;
+      }
+      attempts += 1;
+      if (attempts >= ATTEMPTS) {
+        attempts = 0;
+        index += 1;
+        if (index >= plan.length) onDone();
+      }
+      return 500;
+    };
+  }
+
+  it("keeps waiting after one failed releases read, names it, and then succeeds", async () => {
+    stage();
+    flaky(["fail"], isReleaseList);
+    const result = await run();
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("GitHub could not be read (1 of 3 in a row)");
+    expect(result.outputs.digest).toBe(DIGEST);
+  });
+
+  it("keeps waiting after one failed assets read, and then succeeds", async () => {
+    stage();
+    flaky(["fail"], isAssetList);
+    const result = await run();
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("GitHub could not be read (1 of 3 in a row)");
+    expect(result.outputs.digest).toBe(DIGEST);
+  });
+
+  it("ends the run at once after 3 failed reads in a row, well before the deadline", async () => {
+    stage();
+    flaky(["fail", "fail", "fail", "fail", "fail"], isReleaseList);
+    const started = Date.now();
+    const result = await run({ extra: { ORBIT_WAIT_MINUTES: "120" } });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("GitHub could not be read 3 polls in a row");
+    expect(result.stderr).not.toContain("gave up after");
+    expect(result.stdout).toContain("(1 of 3 in a row)");
+    expect(result.stdout).toContain("(2 of 3 in a row)");
+    expect(Date.now() - started).toBeLessThan(60_000);
+    // Three polls, three attempts each: it did not go on polling.
+    expect(fake.requests.filter(isReleaseList).length).toBe(3 * ATTEMPTS);
+    expect(result.rawOutput).toBe("");
+  });
+
+  it("ends the run at once after 3 failed assets reads in a row", async () => {
+    stage();
+    flaky(["fail", "fail", "fail", "fail", "fail"], isAssetList);
+    const result = await run({ extra: { ORBIT_WAIT_MINUTES: "120" } });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("GitHub could not be read 3 polls in a row");
+    expect(result.rawOutput).toBe("");
+  });
+
+  it("counts a successful read as a reset: fail, fail, ok but not ready, fail, fail, then ready succeeds", async () => {
+    const { addComplete } = stage({ complete: false });
+    flaky(["fail", "fail", "ok", "fail", "fail"], isReleaseList, addComplete);
+    const result = await run();
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stderr).not.toContain("polls in a row");
+    expect(result.stdout).toContain("(2 of 3 in a row)");
+    expect(result.outputs.digest).toBe(DIGEST);
+  });
+
+  it("still ends at the deadline, with its own message, when GitHub keeps failing and the wait is 0 minutes", async () => {
+    stage();
+    flaky(Array(10).fill("fail"), isReleaseList);
+    const result = await run({ extra: { ORBIT_WAIT_MINUTES: "0" } });
+    expect(result.status).not.toBe(0);
+    expect(result.rawOutput).toBe("");
+  });
+
+  it("still refuses more than one published release with the name at once", async () => {
+    stage();
+    stage();
+    const result = await run();
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("refusing to pick one");
+  });
+});
