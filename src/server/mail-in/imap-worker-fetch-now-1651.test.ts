@@ -196,14 +196,12 @@ describe("the real timer reset (#1651 review 2)", () => {
     expect(mocks.cycles).toBe(before + 1);
   });
 
-  it("arms exactly one timer, a full interval away, when the worker was never started", async () => {
+  it("runs one check and leaves no timer armed when the poller was never started (#1799 L2)", async () => {
     await runNow();
-    expect(vi.getTimerCount()).toBe(1);
-    const before = mocks.cycles;
-    await vi.advanceTimersByTimeAsync(POLL_MS - 1);
-    expect(mocks.cycles).toBe(before);
-    await vi.advanceTimersByTimeAsync(2);
-    expect(mocks.cycles).toBe(before + 1);
+    expect(mocks.cycles).toBe(1);
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(POLL_MS * 3);
+    expect(mocks.cycles, "no poll follows a press on a process that never started its poller").toBe(1);
   });
 
   it("still arms exactly one timer when the cycle throws", async () => {

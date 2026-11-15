@@ -1,4 +1,4 @@
-import { bigint, boolean, check, customType, date, foreignKey, index, integer, jsonb, pgEnum, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { bigint, boolean, check, customType, date, foreignKey, index, integer, jsonb, pgEnum, pgTable, primaryKey, text, timestamp, unique, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 /** Raw encrypted bytes; postgres.js already maps `bytea` to/from `Buffer`. */
@@ -63,12 +63,15 @@ export const imapNotificationKind = pgEnum("imap_notification_kind", ["receipt",
 export const reviewedIntakeOperationStatus = pgEnum("reviewed_intake_operation_status", ["processing", "pending_attachment", "completed", "recoverable", "failed"]);
 export const reviewedIntakeOperationSource = pgEnum("reviewed_intake_operation_source", ["direct_upload", "mailbox_draft"]);
 export const reviewedIntakeAttachmentState = pgEnum("reviewed_intake_attachment_state", ["not_requested", "pending", "attached"]);
+/* `oauth_refresh_token`: unused since #1780 (Outlook dropped); kept, no migration. */
 export const mailInSecretKind = pgEnum("mail_in_secret_kind", ["imap_password", "alias_key", "oauth_refresh_token", "smtp_password"]);
 export const mailSendingVia = pgEnum("mail_sending_via", ["mailbox", "account"]);
 export const mailSendingSecurity = pgEnum("mail_sending_security", ["starttls", "implicit_tls"]);
 export const mailSendingSource = pgEnum("mail_sending_source", ["ui", "imported"]);
+/* `outlook`: unused since #1780; a stored row reads as `other`. Kept, no migration. */
 export const mailInProviderProfile = pgEnum("mail_in_provider_profile", ["mailcow", "gmail", "outlook", "other"]);
 export const mailInSenderSource = pgEnum("mail_in_sender_source", ["account", "sso", "manual"]);
+/* `xoauth2`: unused since #1780; kept, no migration. */
 export const mailInAuthMethod = pgEnum("mail_in_auth_method", ["password", "xoauth2"]);
 
 const auditColumns = {
@@ -147,8 +150,8 @@ export const userPreferences = pgTable("user_preferences", {
  * check constraint forbids a second row and whose ON DELETE RESTRICT foreign
  * key makes the database itself refuse to delete the current primary user —
  * a missed application check cannot orphan the instance. Empty only before
- * the first administrator exists; the #259 bootstrap and the 0027 migration
- * both seed it.
+ * the first administrator exists: a fresh database has no seeded row; the #259
+ * bootstrap writes it.
  */
 export const instanceAuthority = pgTable("instance_authority", {
   singleton: boolean("singleton").primaryKey().default(true),
@@ -225,7 +228,7 @@ export const maintenanceUpdates = pgTable("maintenance_updates", {
 /**
  * The instance's one maintenance configuration (#235, ADR-0013 decision 1):
  * the `instance_authority` singleton shape, but with no foreign key of its
- * own, so unlike that table the 0028 migration seeds the inactive row
+ * own, so unlike that table the baseline migration (0000) seeds the inactive row
  * unconditionally and the guard read is always a plain primary-key lookup.
  * `id` exists solely to give `audit_log.entity_id` something stable to
  * point at.
@@ -284,8 +287,8 @@ export const instanceContact = pgTable("instance_contact", {
  * choice, held inside the same hard bounds the configuration has (1 MiB to
  * 100 MiB, src/server/documents/config.ts), which the CHECK repeats so no
  * writer can store anything past them. Follows `instance_contact`'s shape
- * (0033): singleton primary key, `id` for `audit_log.entity_id`, `version`
- * gating every administrator write, and a row the 0049 migration seeds
+ * (baseline migration 0000): singleton primary key, `id` for `audit_log.entity_id`, `version`
+ * gating every administrator write, and a row the baseline migration seeds
  * unconditionally.
  */
 export const instanceUploadLimit = pgTable("instance_upload_limit", {
@@ -347,7 +350,7 @@ export const instanceArchiveRetention = pgTable("instance_archive_retention", {
 /**
  * The last answer of each of the two live mail tests (#1071): "test this
  * mailbox" (the IMAP verify and the relay half together) and "test the
- * relay". Follows `instance_contact`'s singleton shape (0033) — the 0047
+ * relay". Follows `instance_contact`'s singleton shape (0000) — the baseline
  * migration seeds the one row unconditionally, no version column, since a
  * test result is only ever overwritten by the next run of the same test,
  * never edited by two people at once.
@@ -950,6 +953,7 @@ export const auditLog = pgTable("audit_log", {
   changes: jsonb("changes").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
+  // Also how #1398's approval notices are reached, from their receipts.
   index("audit_household_entity_idx").on(table.householdId, table.entityType, table.entityId),
   // Supports readWorkspace's item-activity feed query (entityType filter +
   // createdAt-descending scan), the only remaining unbounded audit_log read.
@@ -963,7 +967,7 @@ export const portableArchives = pgTable("portable_archives", {
   requestedByUserId: uuid("requested_by_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   storageKey: text("storage_key").notNull().unique(),
   contentSha256: text("content_sha256").notNull(),
-  // bigint since 0010 (#1390): a v2 archive follows the household quota, past int4's 2 GiB.
+  // bigint since 0012 (#1390): a v2 archive follows the household quota, past int4's 2 GiB.
   sizeBytes: bigint("size_bytes", { mode: "number" }).notNull(),
   includesDocuments: boolean("includes_documents").notNull().default(false),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
@@ -992,7 +996,7 @@ export const portableArchiveImports = pgTable("portable_archive_imports", {
   outcome: text("outcome"),
   createdSectionIds: uuid("created_section_ids").array().notNull().default([]),
   createdItemIds: uuid("created_item_ids").array().notNull().default([]),
-  /** The lease's heartbeat (#1390): renewed after each document is staged; null on rows written before 0010. */
+  /** The lease's heartbeat (#1390): renewed after each document is staged; null on rows written before 0012. */
   leaseRenewedAt: timestamp("lease_renewed_at", { withTimezone: true }),
 }, (table) => [
   index("portable_archive_import_household_idx").on(table.householdId, table.finishedAt),
@@ -1005,7 +1009,6 @@ export const imapIngestionMessages = pgTable("imap_ingestion_messages", {
   mailbox: text("mailbox").notNull(),
   mailboxUidValidity: text("mailbox_uid_validity").notNull(),
   mailboxUid: integer("mailbox_uid").notNull(),
-  contentSha256: text("content_sha256").notNull(),
   recipientAliasSha256: text("recipient_alias_sha256").notNull(),
   recipientAliasGeneration: integer("recipient_alias_generation"),
   userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
@@ -1058,9 +1061,19 @@ export const imapIngestionMessages = pgTable("imap_ingestion_messages", {
   receiptSentAt: timestamp("receipt_sent_at", { withTimezone: true }),
   receiptFailureCode: text("receipt_failure_code"),
   receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+  /**
+   * #1650 (owner decision 51): set when the message came from an address on
+   * the member's list that is not yet checked. The mail is kept in their
+   * inbox but cannot be added to Orbit until that address is checked, which
+   * clears this. Deliberately no foreign key: a sender row that goes away
+   * without its held mail being detached leaves this pointing at nothing,
+   * and the mail stays held (fails closed) rather than becoming addable.
+   */
+  heldSenderAddressId: uuid("held_sender_address_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
+  index("imap_message_held_sender_idx").on(table.heldSenderAddressId).where(sql`${table.heldSenderAddressId} IS NOT NULL`),
   uniqueIndex("imap_message_mailbox_uid_unique").on(table.mailbox, table.mailboxUidValidity, table.mailboxUid),
   uniqueIndex("imap_message_approval_operation_unique").on(table.approvalOperationId),
   uniqueIndex("imap_message_approval_result_unique").on(table.approvalResultId),
@@ -1069,7 +1082,6 @@ export const imapIngestionMessages = pgTable("imap_ingestion_messages", {
   index("imap_message_expiry_idx").on(table.status, table.expiresAt),
   index("imap_message_approved_item_idx").on(table.approvedItemId),
   index("imap_receipt_claim_idx").on(table.receiptStatus, table.receiptLockedAt, table.createdAt),
-  index("imap_message_recipient_content_idx").on(table.userId, table.contentSha256),
   index("imap_attachment_processing_claim_idx").on(table.status, table.attachmentProcessingLockedAt, table.createdAt),
   check("imap_message_attributed_by_valid", sql`${table.attributedBy} IS NULL OR ${table.attributedBy} IN ('sender', 'sender_and_alias')`),
 ]);
@@ -1150,9 +1162,16 @@ export const mailInRelays = pgTable("mail_in_relays", {
  *
  * A sender address is a CLAIM, not a credential: no row here attributes
  * anything until `verified_at` is set, because one member claiming another's
- * address would otherwise be enough to receive their forwarded documents. The
- * address is unique across the instance for the same reason — one address
- * attributes to exactly one member, so attribution is never a guess.
+ * address would otherwise be enough to receive their forwarded documents. A
+ * VERIFIED address is unique across the instance for the same reason: one
+ * address attributes to exactly one member, so attribution is never a guess.
+ * Unverified rows are not exclusive (#1650): several members may list one
+ * address unchecked, and the first to verify holds it.
+ *
+ * A member has up to five rows (#1650): the seeded sign-in row (`account` or
+ * `sso`), which follows the registered address and is never removable, and
+ * the extra ones they add (`manual`), removed 14 days after they were added
+ * if still unchecked.
  */
 export const mailInSenderAddresses = pgTable("mail_in_sender_addresses", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -1173,10 +1192,10 @@ export const mailInSenderAddresses = pgTable("mail_in_sender_addresses", {
   verificationTokenDigest: text("verification_token_digest"),
   verificationExpiresAt: timestamp("verification_expires_at", { withTimezone: true }),
   /**
-   * When the check email was last handed to the mailer, newest last, at most
-   * five entries (#1403 D2): the member's rate limit, one a minute and five in
-   * a rolling day, kept here so a restart does not forget it (the reasoning of
-   * `local_credentials.locked_until`, ADR-0023 section 4).
+   * When the check email for this row was last handed to the mailer, newest
+   * last, at most five entries (#1403 D2). Since #1650 the member's rate limit
+   * reads `mail_in_sender_check_sends` as well, which removing a row does not
+   * empty; these times are kept for the row's own history.
    */
   checkSentAt: timestamp("check_sent_at", { withTimezone: true }).array().notNull().default(sql`'{}'::timestamptz[]`),
   /**
@@ -1190,10 +1209,29 @@ export const mailInSenderAddresses = pgTable("mail_in_sender_addresses", {
   lastForwardUnsignedAt: timestamp("last_forward_unsigned_at", { withTimezone: true }),
   ...auditColumns,
 }, (table) => [
-  // Carries "one account per sender address" (#969).
-  uniqueIndex("mail_in_sender_address_unique_index").on(table.addressIndex),
+  // Carries "one account per sender address" (#969), narrowed by #1650 to the
+  // VERIFIED row: an unverified row is a claim that holds nothing, so several
+  // members may list one address unchecked, and verifying is first come.
+  uniqueIndex("mail_in_sender_address_unique_index").on(table.addressIndex).where(sql`${table.verifiedAt} IS NOT NULL`),
+  // ...and one member cannot list the same address twice (#1650).
+  uniqueIndex("mail_in_sender_address_user_unique_index").on(table.userId, table.addressIndex),
   index("mail_in_sender_address_user_idx").on(table.userId, table.verifiedAt),
   check("mail_in_sender_address_verification_pair", sql`(${table.verificationTokenDigest} IS NULL) = (${table.verificationExpiresAt} IS NULL)`),
+]);
+
+/**
+ * Every check email handed to the mailer, per member (#1650 review): the rate
+ * limit (one a minute, five in a rolling day; #1403 D2) is the MEMBER'S, so it
+ * is kept where removing a sending-address row, or the 14-day sweep, cannot
+ * erase it. No address, only who and when. Rows older than a day are pruned
+ * when the member next sends.
+ */
+export const mailInSenderCheckSends = pgTable("mail_in_sender_check_sends", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  sentAt: timestamp("sent_at", { withTimezone: true }).notNull(),
+}, (table) => [
+  index("mail_in_sender_check_send_user_idx").on(table.userId, table.sentAt),
 ]);
 
 /**
@@ -1247,7 +1285,26 @@ export const imapIngestionAttachments = pgTable("imap_ingestion_attachments", {
   displayName: text("display_name").notNull(),
   mediaType: text("media_type").notNull(),
   sizeBytes: integer("size_bytes").notNull(),
-  contentSha256: text("content_sha256").notNull(),
+  /**
+   * The plaintext SHA-256 of an attachment held before #1778. The maintenance
+   * backfill seals it into `content_sha256_sealed`, indexes it into
+   * `content_index` and empties it row by row, and a later release drops it
+   * (#1835). New rows never set it.
+   */
+  contentSha256: text("content_sha256"),
+  /**
+   * The lowercase hex SHA-256 of the attachment, sealed under the receipt's
+   * scope key (column key `imap_ingestion_attachments.content_sha256`, bound
+   * to the row id; ADR-0024, #1778): the instance key while the receipt has
+   * no household, re-keyed to the household when it is attributed. Null only
+   * on a row the backfill has not reached yet, which still has `content_sha256`.
+   */
+  contentSha256Sealed: text("content_sha256_sealed"),
+  /**
+   * Blind index of `<messageId>:<sha256>` under the INSTANCE key, never
+   * re-keyed (#1778). Its one reader is the per-mail unique below.
+   */
+  contentIndex: text("content_index"),
   storageKey: text("storage_key").notNull().unique(),
   ciphertextSize: integer("ciphertext_size").notNull(),
   envelopeVersion: integer("envelope_version").notNull(),
@@ -1268,7 +1325,11 @@ export const imapIngestionAttachments = pgTable("imap_ingestion_attachments", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
-  uniqueIndex("imap_attachment_message_hash_unique").on(table.messageId, table.contentSha256),
+  /* #1778: one copy of a file a mail carries twice. A UNIQUE constraint, as
+     the one it replaces was (0000_baseline); NULLs (rows the backfill has not
+     reached) never collide, so `commitStagedAttachment` also dedupes against
+     the plain hash until the backfill reaches the row. */
+  unique("imap_attachment_message_index_unique").on(table.messageId, table.contentIndex),
   index("imap_attachment_message_status_idx").on(table.messageId, table.status),
 ]);
 

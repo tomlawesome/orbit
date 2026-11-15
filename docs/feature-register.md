@@ -48,7 +48,7 @@ documents retained. Both sources use one editable draft-and-approval flow.
    or `To` headers alone are never sufficient. Messages whose forwarding path
    strips required identity evidence are quarantined for explicit association.
 3. Orbit places accepted messages into that user's private, durable ingestion
-   queue. IMAP UIDVALIDITY and UID plus a content hash make reconnects and
+   queue. IMAP UIDVALIDITY and UID make reconnects and
    retries idempotent.
 4. It examines the subject, message body and attachments, prioritising the
    documents themselves when extracting policy, provider, reference, cost,

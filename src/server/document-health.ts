@@ -1,8 +1,9 @@
 import { access, mkdir } from "node:fs/promises";
 import { constants } from "node:fs";
-import { eq, notInArray, or, sql } from "drizzle-orm";
+import { and, eq, inArray, notInArray, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { documentJobs, documentPreviews, documentStagingObjects, documents, imapIngestionMessages, items } from "@/db/schema";
+import { auditLog, documentJobs, documentPreviews, documentStagingObjects, documents, imapIngestionMessages, items } from "@/db/schema";
+import { APPROVAL_NOTICE_ENTITY } from "@/server/mail-in/approval-notice";
 import { countMetadataDamage, flushMetadataDamageSightings } from "@/server/metadata/damage-sightings";
 import { metadataCryptoAvailable } from "@/server/metadata/keys";
 import { getDocumentWorkerHealth } from "@/server/document-worker";
@@ -26,9 +27,9 @@ export interface DocumentHealth {
   worker: ReturnType<typeof getDocumentWorkerHealth>;
   scanRecovery: { retrying: number; failed: number; purgePending: number; nextExpiryAt: string | null };
   /** The kept page previews' total ciphertext (#1433 D20): Orbit's derived data, outside every quota, reported here. */
-  previewBytes: number;
+  previewBytes: number | null;
   /** Preview jobs not completed: documents whose pages are still being drawn, or whose drawing failed. */
-  previewsPending: number;
+  previewsPending: number | null;
   /**
    * Tier 1 metadata (#941, ADR-0024 decision 5), so a missing key reads as one
    * instance-wide condition rather than one blank field at a time.
@@ -65,8 +66,8 @@ const NO_METADATA_TROUBLE: DocumentHealth["metadata"] = {
 
 /**
  * How many rows hold an encrypted Tier 1 value, and how many damaged values
- * have been seen. The locked halves are live SQL and cheap — two counts over
- * an indexed null check — and are skipped entirely while the instance holds
+ * have been seen. The locked halves are live SQL and cheap — counts over a
+ * null check — and are skipped entirely while the instance holds
  * its key, because then nothing is locked and the answer is zero.
  */
 async function readMetadataHealth(): Promise<DocumentHealth["metadata"]> {
@@ -81,9 +82,29 @@ async function readMetadataHealth(): Promise<DocumentHealth["metadata"]> {
       ? getDb().select({ count: sql<number>`count(*)::int` }).from(items)
         .where(or(sql`${items.referenceEnc} is not null`, sql`${items.notesEnc} is not null`))
       : Promise.resolve([{ count: 0 }]),
+    // A receipt counts once (#1823 A-F2): one holding both a proposal and a
+    // queued "could not add" notice (#1398, its title under the same key) is
+    // one receipt, so the two tests sit in one where clause.
     locked
       ? getDb().select({ count: sql<number>`count(*)::int` }).from(imapIngestionMessages)
-        .where(or(sql`${imapIngestionMessages.proposalEnc} is not null`, sql`${imapIngestionMessages.fieldEvidenceEnc} is not null`, sql`${imapIngestionMessages.approvalRequestEnc} is not null`))
+        .where(or(
+          sql`${imapIngestionMessages.proposalEnc} is not null`,
+          sql`${imapIngestionMessages.fieldEvidenceEnc} is not null`,
+          sql`${imapIngestionMessages.approvalRequestEnc} is not null`,
+          and(
+            inArray(imapIngestionMessages.status, ["pending_review", "approving", "recoverable"]),
+            // A limit-1 scalar subquery, not EXISTS: under this OR the planner
+            // turns EXISTS into a hashed subplan that reads the notices by
+            // entity_type alone, a whole-index scan of the audit log (#1787).
+            // A correlated scalar lookup stays on the household_id index.
+            sql`(${getDb().select({ one: sql`1` }).from(auditLog).where(and(
+              eq(auditLog.householdId, imapIngestionMessages.householdId),
+              eq(auditLog.entityType, APPROVAL_NOTICE_ENTITY),
+              eq(auditLog.entityId, imapIngestionMessages.id),
+              sql`${auditLog.changes}->>'titleEnc' is not null`,
+            )).limit(1)}) is not null`,
+          ),
+        ))
       : Promise.resolve([{ count: 0 }]),
   ]);
   return {
@@ -163,8 +184,8 @@ export function toPublicDocumentHealth(health: DocumentHealth): DocumentHealth {
       lastReconciliationAt: health.worker.lastReconciliationAt,
     },
     scanRecovery: health.scanRecovery ?? { retrying: 0, failed: 0, purgePending: 0, nextExpiryAt: null },
-    previewBytes: Number(health.previewBytes ?? 0),
-    previewsPending: Number(health.previewsPending ?? 0),
+    previewBytes: health.previewBytes === null ? null : Number(health.previewBytes ?? 0),
+    previewsPending: health.previewsPending === null ? null : Number(health.previewsPending ?? 0),
     // Numbers and one boolean, projected field by field like everything above
     // it: whatever a future caller puts on the internal shape, only these six
     // values can reach an administrator's browser.
@@ -217,7 +238,7 @@ export async function getDocumentHealth(): Promise<DocumentHealth> {
       // An absent profile is a design state, so it is never probed at all.
       model === undefined ? Promise.resolve(null) : pingExtractionModel(),
       getDb().select({ bytes: sql<number>`coalesce(sum(${documentPreviews.ciphertextSize}), 0)` }).from(documentPreviews).where(eq(documentPreviews.status, "drawn")),
-      getDb().select({ count: sql<number>`count(*)` }).from(documentJobs).where(sql`${documentJobs.kind} = 'preview' and ${documentJobs.status} <> 'completed'`),
+      getDb().select({ count: sql<number>`count(*)` }).from(documentJobs).where(sql`${documentJobs.kind} = 'preview' and ${documentJobs.status} not in ('completed', 'cancelled')`),
     ]);
     const modelExtraction = modelExtractionState({
       configured: model !== undefined,
@@ -261,8 +282,8 @@ export async function getDocumentHealth(): Promise<DocumentHealth> {
       quota: { usedBytes: 0, limitBytes: 0 },
       worker,
       scanRecovery: { retrying: 0, failed: 0, purgePending: 0, nextExpiryAt: null },
-      previewBytes: 0,
-      previewsPending: 0,
+      previewBytes: null,
+      previewsPending: null,
       metadata,
     };
   }

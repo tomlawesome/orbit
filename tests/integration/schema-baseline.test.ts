@@ -232,7 +232,16 @@ describe("dead schema the owner approved dropping (#1403 slice E)", () => {
       [user.id, index],
     );
     await insertSender("sender-index");
-    await expect(insertSender("sender-index")).rejects.toMatchObject({ constraint_name: "mail_in_sender_address_unique_index" });
+    /* Since 0016 (#1650) one member cannot list an address twice... */
+    await expect(insertSender("sender-index")).rejects.toMatchObject({ constraint_name: "mail_in_sender_address_user_unique_index" });
+    /* ...and only a VERIFIED row is exclusive across members: two verified rows hit the partial index. */
+    const [other] = await insertUser("sender-other-account");
+    const insertVerified = (userId: string) => database.client.unsafe(
+      `INSERT INTO "mail_in_sender_addresses" ("user_id", "address_enc", "address_index", "verified_at") VALUES ($1, 'mdv1.a.b.c', 'verified-index', now())`,
+      [userId],
+    );
+    await insertVerified(user.id);
+    await expect(insertVerified(other.id)).rejects.toMatchObject({ constraint_name: "mail_in_sender_address_unique_index" });
 
     let digest = 0;
     const insertInvitation = (index: string) => database.client.unsafe(

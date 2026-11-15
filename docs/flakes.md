@@ -7,6 +7,28 @@ fixing the cause deletes the heading in the same commit. Name a sharded browser
 job as GitLab does (`pipeline 3600 / rig_webkit 2/3`); the heading carries the
 test's own name, which does not move with the shard.
 
+## tests/unit/admin-sending-route-1629.test.mjs "GET /api/admin/sending answers the sending half as sending, no-store, read for the caller's own id" (and the next test, as a knock-on)
+
+- 2026-11-13 · !1302 6028593c · pipeline 4068 / fast (job 50111, a retry) · the first test timed out at 5 s on its first `await route()`, the cold import of the route, on a loaded runner; the next test then got 200 for 403, as the timed-out test's still-running call took its one-shot mock. The same commit's first run passed the file (job 50081). First sighting.
+
+## web/tests/rig/kept-previews-1433.spec.js "each page turn in the reader of a kept 3-page document completes within 1 s" (:106)
+
+- 2026-11-12 · dev nightly · pipeline 3998 / rig_chromium 1/2 (rig-desktop) · "turning to page 2" (back from page 3) took 1,372 ms against the 1,000 ms limit; rig-phone passed in 2/2. Locally on batch-b fb5afbb3, 6 of 6 passed (`--repeat-each=3`, desk and phone). First sighting.
+
+## scripts/ci/upgrade-cell.test.mjs "upgrade-cell.sh: oidc stand-in provider (#1750)" (two tests of the block, the same 5s timeout)
+
+- 2026-11-09 · fix/1535-repair-start e227e22b · local `scripts/test-backend.sh` (395s), shared host under load · "starts the tests/oidc sidecar with the stand-in issuer before step 4" timed out at the 5s default; the file alone passed on the rerun. First sighting.
+- 2026-11-09 · feat/1419-held-view d37a4df7 · local `scripts/test-backend.sh` (408s), shared host under load · "stops the sidecar in clean-up after a failure in the old install (step 4)" timed out at the 5s default; the file alone passed on the rerun (59/59). Second sighting.
+
+## tests/unit/administration-failed-card-screens.test.mjs (beforeAll, :145)
+
+- 2026-11-10 · fix/1803-repair-restore-guard 749f7a65 (repair.sh and docs only, nowhere near the administration screens) · local `scripts/test-backend.sh`, shared host under load · the file's `beforeAll` timed out at 10s; the file alone passed on the rerun (with the file below, 59/59). First sighting.
+- 2026-11-11 · fix/1794-index-js-writer 263eced6 (test-harness edits nowhere near the administration screens) · local `scripts/test-backend.sh`, shared host under load · the same `beforeAll` timed out at 10s; the file alone passed on the rerun (21/21). Second sighting.
+
+## tests/unit/administration-mail-settings-screens.test.mjs (file-level)
+
+- 2026-11-10 · fix/1803-repair-restore-guard 749f7a65, same run as above · local `scripts/test-backend.sh`, shared host under load · failed at file level alongside the sighting above; passed on the rerun. First sighting.
+
 ## scripts/repair-compose-from-image.test.mjs "repair.sh --check drift report ... shows exactly 20 differing lines and says more were not shown when there are more than 20"
 
 - 2026-11-05 · fix/v038-batch-a-intake 8c2d0d58 (+ CI-rule edits nowhere near repair.sh) · local `pnpm exec vitest run scripts/ci/ scripts/*.test.mjs`, shared host under load · failed once; the file alone passed on the rerun (92/92). First sighting.
@@ -387,6 +409,7 @@ timeout on this one case rather than a global raise.
 ## scripts/ci/upgrade-versions.test.mjs "prints the exact KEY=value lines, in order, for a readable diff that touches nothing relevant", 60s timeout (host)
 
 - 2026-11-04 · aa7202d3 (#1612 lower-layer tests, none near CI scripts) · local full `pnpm exec vitest run`, loaded host · timed out at 60s (75 s); passed alone afterwards. First sighting.
+- 2026-11-11 · fix/1810-mediums (batch-a 0a7cf63b + #1810 mail-in sender fixes, nowhere near CI scripts) · local `scripts/test-backend.sh` fast gate, shared host · "Test timed out in 60000ms"; the file passed alone on the rerun (with its pair, 64/64). Second sighting.
 
 ## sidecar-pins-sync-guard test, 5s timeout (host)
 
@@ -463,10 +486,10 @@ timeout on this one case rather than a global raise.
 
 - 2026-11-05 · dbc2e3ba (chore/batch-a-intake-1, !1174) · pipeline 3615 / `film_webkit` job 46467 · "execution took longer than 35m0s"; 22 of the pocket-webkit specs had passed and the last running was `tour-pocket-webkit.spec.js:1418` (chapter 8, at 390x844, 46 s in). host load; code unchanged since 3614. First sighting. #1546 (CI sharding) removes these kills.
 
-## scripts/ci/backmerge-skip-adoption.test.mjs "a simulated back-merge merge request (#1698) creates the same jobs as without the skip when BACKMERGE_EMPTY=false, and on every other event"
-
-- 2026-11-10 · fix/1792-audit-c 1ce8836c (+ unit-test and config-contract edits nowhere near the CI rules) · local `npx vitest run`, shared host at load average ~25 · "Test timed out in 5000ms"; the file alone passed 3 of 3 on the rerun (15/15, about 4.1 s each, near the 5 s default). First sighting.
-
 ## tests/unit/archive-slot-upload-spool-1792.test.mjs "L4: ... a spooled preview waits (not 200, not 429) while another import processes, an export is still refused at once, and the waiters are served first come first served"
 
 - 2026-11-11 · chore/1801-repins (batch-b 6d00597b + a base-image pin and supply-chain policy data, nowhere near the archive slot) · pipeline 3955 / `fast` job 49133 · "the slot went to the one that waited longest first": got owner-1, owner-4, owner-2. Likely cause: the test waits only until owner-2's spool has started, not finished, so under load owner-4's spool can finish and queue first. Passed in pipeline 3949 on the same batch-b code. First sighting.
+
+## src/server/documents/pdf-structure-sandbox-poppler.test.ts "line 14: with check 1 / view 1, a render holding the view slot does not delay a structure check" (after-test check, :108)
+
+- 2026-11-12 · chore/v039-batch-b-ci d92e92b6 (Dockerfile pin and JSON policy only, nowhere near the PDF sandbox) · pipeline 4032 / fast (job 49856) · "§1.5 line 16: a child still in flight after the test: expected 1 to be +0"; the retried job 49859 passed. First sighting.

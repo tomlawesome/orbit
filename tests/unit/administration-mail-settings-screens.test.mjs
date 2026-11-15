@@ -267,7 +267,7 @@ describe.each(LAYOUTS)("administration %s: no trusted authserv-id any more (#168
     expect(textOf(layout)).not.toContain("mx.provider.test");
   });
 
-  it.each(["mailcow", "other", "gmail", "outlook"])("shows no DKIM-only warning for the %s profile with nothing set", async (providerProfile) => {
+  it.each(["mailcow", "other", "gmail"])("shows no DKIM-only warning for the %s profile with nothing set", async (providerProfile) => {
     await mountWith(screen({ providerProfile, trustedAuthservId: "", effectiveAuthservId: "" }));
     expect(textOf(layout)).not.toMatch(/only forwards with a valid DKIM signature/iu);
     expect(textOf(layout)).not.toMatch(/no mail will be matched/iu);

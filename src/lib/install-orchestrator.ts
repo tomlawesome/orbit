@@ -107,9 +107,9 @@ export interface InstallContext {
   channel: string;
   /** COMPOSE_PROJECT_NAME from the shell's environment, if any. */
   requestedComposeProjectName?: string;
-  /** ORBIT_INSTALL_PROFILE from the launcher (#1504); read on a fresh install whenever the profile wizard is not shown (no terminal, --plain, or an action named on the command line). */
+  /** ORBIT_INSTALL_PROFILE from the launcher (#1504); read whenever the profile wizard is not shown (no terminal, --plain, or an action named on the command line). On a fresh install it picks the profile (standard when unset). On an update, unset keeps the existing profile; a requestable value changes a standard or processing deployment and is refused over a local-model one (resolveNonInteractiveProfileSelection). */
   requestedProfile?: string;
-  /** ORBIT_INSTALL_SCANNER (#1170): `on` or `off`, read like requestedProfile (fresh install, no wizard); ignored on an update. */
+  /** ORBIT_INSTALL_SCANNER (#1170): `on` or `off`, read on the same terms as requestedProfile (no wizard) but only acted on for a fresh install; on an update it is ignored with a notice and the existing scanner setting is kept. */
   requestedScanner?: string;
   /** ORBIT_INSTALL_FOLDER_MOVED (#1576): `recreate` accepts making the containers again from this folder when they were made in a folder that is gone; ignored with no finding. */
   requestedFolderMoved?: string;
@@ -979,9 +979,10 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
       }
     }
 
-    // #1542: a profile change, from the wizard or ORBIT_INSTALL_PROFILE, can
-    // leave an optional service behind its now-inactive profile running.
-    const droppedServices = droppedProfileServices(profileResult.profile, profile.selectedProfile);
+    // #1542, #1803: on an update, every optional service outside the selected
+    // profile, so a profile change an earlier run did not finish stopping is
+    // put right now. A fresh install has no containers of its own to stop.
+    const droppedServices = targetWasEmpty ? [] : droppedProfileServices(profileResult.profile, profile.selectedProfile);
     return {
       status: "ok",
       fresh: targetWasEmpty,

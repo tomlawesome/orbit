@@ -14,6 +14,7 @@
    * type that both the type checker and the production bundler accept.
    */
   import { every, longDate, money, tminusOf } from "$lib/format.js";
+  import { HELD_WORD } from "$lib/data/workspace.js";
   import { DAMAGED, LOCKED, NOTES_WORDS, REFERENCE_WORDS, fieldState, itemLocked } from "$lib/data/metadata-status.js";
   import { sectionColourOf, typeColourOf } from "$lib/option-colour.js";
   import { importanceWords } from "$lib/editing/importance.js";
@@ -97,7 +98,7 @@
     <button type="button" class="paper" class:showing={on} data-doc-row aria-haspopup="dialog"
             aria-current={on ? "true" : undefined} aria-label="Open {paper.name}"
             onclick={(event) => onopenpaper?.(paper, event.currentTarget)}>
-      <span class="p-paper" aria-hidden="true">◆</span><span class="name">{paper.name}</span>{#if paper.meta}<span class="meta">{paper.meta}</span>{/if}
+      <span class="p-paper" aria-hidden="true">◆</span><span class="name">{paper.name}</span>{#if paper.meta}<span class="meta">{#if paper.scanHeld && paper.meta.endsWith(HELD_WORD)}{paper.meta.slice(0, -HELD_WORD.length)}<span class="held">{HELD_WORD}</span>{:else}{paper.meta}{/if}</span>{/if}
     </button>
   {:else}
     <div class="p-unlit"></div>
@@ -133,6 +134,8 @@
   /* name · size · added <date> (review round §6.f): what the data holds, no
      more; a part it lacks is left out, never a dash. */
   .paper .meta::before{content:"· "}
+  /* #1419, P: a held paper's word in the warm tone, held not wrong */
+  .paper .meta .held{color:var(--warm-text)}
   .note{margin:0;color:var(--ink-mid)}
   .note.quiet{color:var(--ink-quiet)}
   /* round 8: a section or type value in its own colour */

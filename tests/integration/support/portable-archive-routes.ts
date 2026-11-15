@@ -30,10 +30,12 @@ export interface UploadCall {
 }
 
 export function postUpload(handler: RouteHandler, call: UploadCall): Promise<Response> {
+  // A body of known length carries its Content-Length, as every real client sends it (#1820); a stream has none.
+  const length = call.body instanceof ArrayBuffer || ArrayBuffer.isView(call.body) ? call.body.byteLength : undefined;
   return callRouteForSession(handler, call.session, {
     url: `${ARCHIVE_ORIGIN}${call.path}`,
     method: "POST",
-    headers: { "content-type": call.contentType, ...(call.cookie ? { cookie: call.cookie } : {}) },
+    headers: { "content-type": call.contentType, ...(length === undefined ? {} : { "content-length": String(length) }), ...(call.cookie ? { cookie: call.cookie } : {}) },
     body: call.body,
   });
 }

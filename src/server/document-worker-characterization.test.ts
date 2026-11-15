@@ -62,6 +62,7 @@ const mocks = vi.hoisted(() => ({
   createDocumentUnsealer: vi.fn(),
   createDocumentSealer: vi.fn(),
   scanFile: vi.fn(),
+  ping: vi.fn(),
   classifyStructure: vi.fn(),
   unsealToQuarantine: vi.fn(),
   readQuarantine: vi.fn(),
@@ -264,7 +265,8 @@ vi.mock("@/server/documents/crypto", async (importActual) => {
   };
 });
 
-vi.mock("@/server/documents/scanner", () => ({ scanFileWithClamAv: mocks.scanFile }));
+// #1419: the maintenance cycle pings the scanner; here it answers.
+vi.mock("@/server/documents/scanner", () => ({ scanFileWithClamAv: mocks.scanFile, pingClamAv: mocks.ping }));
 
 vi.mock("@/server/documents/validation", async (importActual) => ({
   ...await importActual<typeof import("@/server/documents/validation")>(),
@@ -405,6 +407,7 @@ function documentTransitions(): Array<Record<string, unknown> | undefined> {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.ping.mockResolvedValue(true);
   mocks.steps.length = 0;
   mocks.executed.length = 0;
   mocks.writes.length = 0;
@@ -537,9 +540,19 @@ describe("runDocumentMaintenanceCycle — phase order", () => {
     expect(mocks.steps).toEqual([
       // 1. Strand the documents interrupted mid-upload.
       "update:documents",
+      // The documents content-index backfill leaves no step here; the next is
+      // 1a. Seal mail-in attachment hashes left plain (#1778), right after it.
+      "select:imap_ingestion_attachments",
       // 2. Expire recovery stages past their retention window.
       "tx:begin",
       "select:document_staging_objects",
+      "tx:commit",
+      // The scanner answers. This process has never ended an outage, so its
+      // first healthy ping ends any the database holds open (#1810 A-F1,
+      // level-triggered reconciliation); later healthy pings write nothing.
+      "tx:begin",
+      "execute:advisoryLock",
+      "update:audit_log",
       "tx:commit",
       // 3. Retry the deletion of already-terminal staged bytes.
       "select:document_staging_objects",
@@ -874,6 +887,22 @@ describe("scanner recovery — fail-closed scanning order", () => {
     expect(jobWrite?.values).toMatchObject({ status: "retry", lastError: "scanner_unavailable", leaseToken: null });
   });
 
+  it("keeps the job in retry, never failed, when the scanner is unavailable at the attempt ceiling", async () => {
+    mocks.ping.mockResolvedValue(false); // #1419: scanner down at the moment of the retry
+    armScanJob();
+    world.jobAttempts = 5;
+    mocks.scanFile.mockImplementation(async () => {
+      mocks.steps.push("scanner.scan");
+      return { status: "error", reason: "unavailable" };
+    });
+
+    await runDocumentMaintenanceCycle();
+
+    const jobWrite = mocks.writes.find((write) => write.table === "document_jobs" && write.operation === "update");
+    expect(jobWrite?.values).toMatchObject({ status: "retry", lastError: "scanner_unavailable", leaseToken: null });
+    expectNoPublish();
+  });
+
   it("fails the job terminally once the automatic attempt ceiling is reached", async () => {
     armScanJob();
     world.jobAttempts = 5;
@@ -906,6 +935,8 @@ describe("scanner recovery — fail-closed scanning order", () => {
       "select:document_staging_objects",
       "update:document_staging_objects",
       "update:documents",
+      // A staged mail-in transfer is settled in the same transaction (#1802).
+      "select:imap_ingestion_attachments",
       "update:reviewed_intake_operations",
       "insert:audit_log",
       "tx:commit",

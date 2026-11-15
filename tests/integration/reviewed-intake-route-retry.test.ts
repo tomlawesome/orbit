@@ -12,6 +12,7 @@ import { applyWorkspaceCommand } from "@/server/workspace-repository";
 import { cleanupIntegrationEnvironment, createIntegrationFixture, encryptedReceiptDraft, lockTheInstance } from "./support/fixtures";
 import { callRouteForSession, loadRoute } from "./support/request-event";
 import { syntheticPdf } from "../support/synthetic-documents";
+import { sealedHash } from "./support/imap-attachment-seed";
 
 /*
  * Approve retry (#1396, ADR-0005): approval is an idempotency-key operation
@@ -69,7 +70,7 @@ async function seedReceipt(fixture: Fixture, over: Record<string, unknown> = {})
   const id = typeof over.id === "string" ? over.id : randomUUID();
   await db().insert(imapIngestionMessages).values({
     id, mailbox: "private", mailboxUidValidity: `retry-${id.slice(0, 8)}`, mailboxUid: Math.floor(Math.random() * 1_000_000),
-    contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: "retry",
+    recipientAliasSha256: "retry",
     userId: fixture.users.member.id, householdId: fixture.household.id, draftVersion: 1, status: "pending_review",
     expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "pending",
     ...over,
@@ -84,7 +85,7 @@ async function seedAttachment(receiptId: string, userId: string, label: string, 
   });
   await db().insert(imapIngestionAttachments).values({
     id: held.id, messageId: receiptId, displayName: held.displayName, mediaType: held.mediaType, sizeBytes: held.sizeBytes,
-    contentSha256: held.contentSha256, storageKey: held.storageKey, ciphertextSize: held.ciphertextSize, ...held.envelope, status,
+    ...await sealedHash(receiptId, held.id, held.contentSha256), storageKey: held.storageKey, ciphertextSize: held.ciphertextSize, ...held.envelope, status,
   });
   return held.id;
 }
@@ -327,7 +328,7 @@ describe("approve retry: the review read hands back the pending pair (#1396)", (
 });
 
 describe("approve retry: validation runs before the claim (#1396)", () => {
-  it("a stale attachment selection is refused 404 with nothing bound and no item; the next tap succeeds", async () => {
+  it("a stale attachment selection is refused 409 with nothing bound and no item; the next tap succeeds (409 since #1823 A-F10)", async () => {
     const fixture = await createIntegrationFixture("reviewed-retry-stale-selection");
     const member = await fixture.session("member");
     const receiptId = await seedReceipt(fixture);
@@ -337,8 +338,8 @@ describe("approve retry: validation runs before the claim (#1396)", () => {
     const before = await householdItemIds(fixture);
     try {
       const refused = await approve(member, payloadFor(fixture, receiptId, operationId, { title: "Amended values", attachmentIds: [goodId, rejectedId] }));
-      expect(refused.status).toBe(404);
-      expect((await refused.json()).error.code).toBe("attachment_not_found");
+      expect(refused.status).toBe(409);
+      expect((await refused.json()).error.code).toBe("reviewed_intake_not_approvable");
       expect(await receiptRow(receiptId)).toMatchObject({
         status: "pending_review", approvalOperationId: null, approvalRequestSha256: null, approvedItemId: null,
       });

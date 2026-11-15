@@ -11,7 +11,7 @@ export const notes: ReleaseNotes = {
   ],
   forAdministrators: [
     { lead: "Mail setup", text: "Sending and receiving mail are set on one Mail card in Administration, stored encrypted." },
-    { lead: "No mail settings in .env-orbit", text: "Orbit now keeps its mail settings itself, so you no longer edit .env-orbit to set up or change mail." },
+    { lead: "No mail settings in .env-orbit", text: "Orbit now keeps its mail settings itself, so there is nothing to edit in .env-orbit to set up sending and receiving." },
     { lead: "Fetch now", text: "A Fetch now button checks the mailbox on demand." },
     { lead: "Email size limit", text: "Email coming into Orbit was capped at 25 MB, or less if the upload limit was lower. It now has its own size limit in Administration, up to 50 MB, so you can let in larger emails without also allowing larger uploads, or the other way round." },
     { lead: "Exports kept", text: "You set how long exports are kept, how many per household and how much space they may use, under Exports kept." },

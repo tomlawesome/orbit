@@ -103,11 +103,11 @@ const SCREENS = [
     },
   },
   {
-    name: "/settings/mail",
-    reach: signedIn("/settings/mail", "rest"),
+    name: "/settings#mail",
+    reach: signedIn("/settings", "mail"),
     ready: async (page) => {
-      await expect(page.getByRole("heading", { name: "Your relay", level: 1 })).toBeVisible();
-      await entrancesSettled(page.locator(".rl-pocket"));
+      await expect(page.getByRole("tab", { name: "your relay", exact: true })).toHaveAttribute("aria-selected", "true");
+      await entrancesSettled(page.locator(".st-pocket"));
     },
   },
   {

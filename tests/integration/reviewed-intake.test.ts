@@ -16,6 +16,7 @@ import { readUploadLimitSettings, setUploadLimit } from "@/server/upload-limit";
 import { assignImapReceiptHousehold, listImapInbox } from "@/server/mail-in/imap-inbox";
 import { cleanupIntegrationEnvironment, createIntegrationFixture, type IntegrationFixture } from "./support/fixtures";
 import { paddedPdfOfSize } from "../support/large-pdf";
+import { sealedHash } from "./support/imap-attachment-seed";
 
 afterAll(async () => {
   await cleanupIntegrationEnvironment();
@@ -31,7 +32,6 @@ describe("private reviewed intake approval boundary", () => {
       mailbox: "private-test-mailbox",
       mailboxUidValidity: "private-test-validity",
       mailboxUid: 99,
-      contentSha256: operation("aaaaaaaa"),
       recipientAliasSha256: operation("bbbbbbbb"),
       userId: member.userId,
       status: "pending_review",
@@ -73,7 +73,6 @@ describe("private reviewed intake approval boundary", () => {
       mailbox: "reviewed-intake-privacy-check",
       mailboxUidValidity: "reviewed-intake-privacy-check",
       mailboxUid: 1,
-      contentSha256: operation("eeeeeeee"),
       recipientAliasSha256: operation("ffffffff"),
       userId: member.userId,
       status: "pending_review",
@@ -139,13 +138,13 @@ describe("approving a mailbox draft with a held attachment reads it through a ve
       ...(maxBytes === undefined ? {} : { maxBytes }),
     });
     await getDb().insert(imapIngestionMessages).values({
-      id: receiptId, mailbox: "private", mailboxUidValidity: `held-${receiptId.slice(0, 8)}`, mailboxUid: 1, contentSha256: randomUUID().replaceAll("-", ""),
+      id: receiptId, mailbox: "private", mailboxUidValidity: `held-${receiptId.slice(0, 8)}`, mailboxUid: 1,
       recipientAliasSha256: `held-${receiptId.slice(0, 8)}`, userId: fixture.users.member.id, householdId: fixture.household.id,
       status: "pending_review", expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "pending",
     });
     await getDb().insert(imapIngestionAttachments).values({
       id: held.id, messageId: receiptId, displayName: held.displayName, mediaType: held.mediaType, sizeBytes: held.sizeBytes,
-      contentSha256: held.contentSha256, storageKey: held.storageKey, ciphertextSize: held.ciphertextSize, ...held.envelope, status: "stored",
+      ...await sealedHash(receiptId, held.id, held.contentSha256), storageKey: held.storageKey, ciphertextSize: held.ciphertextSize, ...held.envelope, status: "stored",
     });
     const input = {
       operationId: randomUUID(),

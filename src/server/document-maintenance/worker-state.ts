@@ -22,6 +22,8 @@ export const workerState = globalThis as typeof globalThis & {
   __orbitDocumentWorkerLastErrorAt?: string;
   __orbitDocumentWorkerLastErrorCode?: string;
   __orbitDocumentWorkerLastReconciliationAt?: string;
+  /** When the cycle last ran the scanner health check (#1419). */
+  __orbitDocumentWorkerLastScannerCheckAt?: string;
 };
 
 export function getDocumentWorkerHealth(): DocumentWorkerHealth {

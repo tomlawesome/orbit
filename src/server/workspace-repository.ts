@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, notInArray, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, notInArray, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   auditLog,
@@ -130,7 +130,8 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
     .where(and(
       inArray(portableArchiveImports.householdId, listedHouseholdIds),
       isNull(portableArchiveImports.finishedAt),
-      gt(portableArchiveImports.startedAt, new Date(Date.now() - PORTABLE_IMPORT_LEASE_MS)),
+      // Lease renewed (or started), as in workspace-access.ts (#1799).
+      sql`coalesce(${portableArchiveImports.leaseRenewedAt}, ${portableArchiveImports.startedAt}) > ${new Date(Date.now() - PORTABLE_IMPORT_LEASE_MS).toISOString()}::timestamptz`,
     )))
     .filter((row) => row.actorUserId !== userId)
     .map((row) => row.householdId));
@@ -396,12 +397,20 @@ export async function checkWorkspaceCommand(
 }
 
 /** Applies one validated, authorized command atomically, then returns canonical state. */
+/**
+ * A server-side check run first inside the command's own transaction (after
+ * the household lock); it throws to refuse the command. Never taken from a
+ * client: #1832 uses it as the fencing token for a mail approval's claim.
+ */
+export type CommandGuard = (transaction: Transaction) => Promise<void>;
+
 export async function applyWorkspaceCommand(
   userId: string,
   sessionId: string,
   command: WorkspaceCommand,
+  guard?: CommandGuard,
 ): Promise<WorkspaceState> {
-  await runWorkspaceCommand(userId, sessionId, command, false);
+  await runWorkspaceCommand(userId, sessionId, command, false, guard);
   if (command.type === "household.create") return readWorkspace(userId, sessionId, requireUuid(command.household.id, "Household"));
   const nextActiveId = command.type === "household.activate" ? command.householdId : undefined;
   return readWorkspace(userId, sessionId, nextActiveId);
@@ -455,6 +464,7 @@ async function runWorkspaceCommand(
   sessionId: string,
   command: WorkspaceCommand,
   dryRun: boolean,
+  guard?: CommandGuard,
 ): Promise<CommandPreview | undefined> {
   if (command.type === "household.create") {
     const householdId = requireUuid(command.household.id, "Household");
@@ -547,6 +557,7 @@ async function runWorkspaceCommand(
 
   await getDb().transaction(async (transaction) => {
     await acquireActiveHouseholdLock(transaction, householdId);
+    if (guard) await guard(transaction);
     const recordActivity = async (itemId: string, activity: ItemActivity, requireInsert = false) => {
       const entityId = requireUuid(itemId, "Item");
       const values = {

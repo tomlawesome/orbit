@@ -70,6 +70,16 @@ export function createReceiptActs({ view, operationIds, reload, say, busy, lande
       await rereadAfterLanded(reload, (words) => say(receipt.id, words));
       return true;
     } catch (error) {
+      /* #1398: the scanner flagged a file as the mail was added. The receipt
+         stays in review and the server now marks that file, so the inbox is
+         read again and the card itself says which one and offers the two
+         choices; only if that read fails is the refusal said here. */
+      if (/** @type {{ code?: unknown }} */ (error)?.code === "document_malware_detected") {
+        try {
+          await reload();
+          return false;
+        } catch { /* said below */ }
+      }
       say(receipt.id, wordsOf(error));
       return false;
     } finally {

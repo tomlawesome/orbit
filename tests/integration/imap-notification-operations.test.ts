@@ -28,13 +28,13 @@ describe("PostgreSQL mailbox notification lifecycle", () => {
       await fixture.disableUser("disabled");
       const activeMessages = await getDb().insert(imapIngestionMessages).values(Array.from({ length: 5 }, (_, index) => ({
         mailbox: "private", mailboxUidValidity: "bounded", mailboxUid: 200 + index,
-        contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: `bounded-${index}`,
+        recipientAliasSha256: `bounded-${index}`,
         userId: fixture.users.member.id, householdId: fixture.household.id, status: "pending_review" as const,
         expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "pending" as const,
       }))).returning({ id: imapIngestionMessages.id });
       const [disabledMessage] = await getDb().insert(imapIngestionMessages).values({
         mailbox: "private", mailboxUidValidity: "bounded-disabled", mailboxUid: 300,
-        contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: "bounded-disabled",
+        recipientAliasSha256: "bounded-disabled",
         userId: fixture.users.disabled.id, householdId: fixture.household.id, status: "pending_review",
         expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "pending",
       }).returning({ id: imapIngestionMessages.id });
@@ -59,7 +59,7 @@ describe("PostgreSQL mailbox notification lifecycle", () => {
     try {
       const messages = await getDb().insert(imapIngestionMessages).values(Array.from({ length: 4 }, (_, index) => ({
         mailbox: "private", mailboxUidValidity: "claims", mailboxUid: 400 + index,
-        contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: `claims-${index}`,
+        recipientAliasSha256: `claims-${index}`,
         userId: fixture.users.member.id, householdId: fixture.household.id, status: "pending_review" as const,
         expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "sent" as const,
       }))).returning({ id: imapIngestionMessages.id });
@@ -111,7 +111,7 @@ describe("PostgreSQL mailbox notification lifecycle", () => {
       await fixture.disableUser("disabled");
       const [message] = await getDb().insert(imapIngestionMessages).values({
         mailbox: "private", mailboxUidValidity: "disabled", mailboxUid: 500,
-        contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: "disabled",
+        recipientAliasSha256: "disabled",
         userId: fixture.users.disabled.id, householdId: fixture.household.id, status: "pending_review",
         expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "sent",
       }).returning({ id: imapIngestionMessages.id });
@@ -163,7 +163,7 @@ describe("administrator mailbox operation boundaries", () => {
       const messageId = randomUUID();
       const [message] = await getDb().insert(imapIngestionMessages).values({
         id: messageId, mailbox: "private", mailboxUidValidity: "admin-private", mailboxUid: 600,
-        contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: "admin-private",
+        recipientAliasSha256: "admin-private",
         userId: fixture.users.member.id, householdId: fixture.household.id, status: "pending_review",
         ...await encryptedReceiptDraft(fixture.household.id, messageId, { proposal: { title: "Private receipt marker" } }),
         expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "sent",

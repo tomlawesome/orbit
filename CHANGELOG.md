@@ -4,11 +4,42 @@ What changed in each Orbit release, for the people who run and use it.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and Orbit uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- When the scanner flags an attachment on mail waiting for review, the inbox card names it and offers Add without it or Discard everything; the flagged file is never added (#1398).
+
+### Changed
+
+- When Orbit cannot add a reviewed email, the email and push say so in one plain message with an Open your inbox button, and a locked key delays the notice instead of losing it (#1398).
+- Mail from a sending address you listed but have not checked is held, unopened, and added once you check the address; an address not checked within 14 days lapses and must be added again (#1810).
+- A household backup is never refused for the size of its documents, even after its storage limit was lowered; restoring one that will not fit says how to make room (#1799).
+- After Fetch now, the Mail card says only that the mailbox was checked, or why it could not be (#1799).
+- The fingerprint of each attachment held from mail is now stored encrypted, like a document's, and a received mail's own fingerprint is no longer stored; attachments already held are moved over in the background (#1778).
+- GitLab now hands each tested build to GitHub, through a separate public `orbit-handoff` repository whose key cannot change Orbit's own, and GitHub checks GitLab's signature before publishing it; GitHub no longer needs any access to GitLab, publishing holds read-only access to Orbit's repository, and GitLab's signature now travels with the image and covers the image's SBOM, so `cosign verify-attestation` can check it on `ghcr.io` (#1824).
+
+### Fixed
+
+- Repair no longer starts Orbit while a restore is unfinished or running, a database volume is missing or a container is restarting, and says what to do instead (#1804).
+- Repair will not start Orbit's services while it cannot tell whether their containers belong to this folder (#1798).
+- Finding the notices for mail that could not be added no longer reads the whole audit log every cycle, so large deployments stay quick (#1787).
+- On a phone, the small text in the Settings Planets group is now at least 12px (#1796).
+- Approving mail into an existing item, if retried after a database failure, could lose its attachments; the retry now adds them to the item before removing the held copies (#1820).
+- Repair no longer says a backup is running when it could not test the backup lock (for example with backups on an NFSv4 share); it says what failed and how to start Orbit (#1820).
+
+### Security
+
+- A copy of the database can no longer confirm that a member was sent a known file by mail (#1778).
+- An archive that would not fit the household's storage limit is refused as soon as its manifest has arrived, not after the whole upload (#1797).
+- Adding or checking a sending address no longer tells a member whether someone else has already verified it, and no check mail goes to an address another member holds (#1810).
+- An archive upload that stalls no longer keeps its whole declared size reserved on the disk for as long as the connection lasts, so one slow or malicious upload cannot make other households' exports and uploads fail with a disk-full error; space is reserved as the bytes arrive (#1820).
+
 ## [0.3.8] - 2026-11-11
 
 ### Added
 
-- Mail is set up on one guided Mail card in Administration, sending and receiving together, stored encrypted, with nothing to edit in `.env-orbit` (#1629).
+- Mail is set up on one guided Mail card in Administration, sending and receiving together, stored encrypted, with nothing to edit in `.env-orbit` to set either up (#1629).
 - Every email Orbit sends now uses Orbit's mail design, not only the invitation (#1648).
 - A Fetch now button on the Mail card checks the mailbox at once instead of waiting for the next interval (#1651).
 - An administrator sets the largest mail message separately from the upload limit (#1388).
@@ -43,7 +74,7 @@ and Orbit uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - An archive upload is stored before it is processed, so a slow upload no longer blocks every other household's export and import (#1792).
 - Exports are kept for six hours, two per household and within a space limit, all three set by an administrator under Exports kept (#1792).
-- A document's stored content fingerprint is now encrypted under the household's key, so a database dump can't show which files a household holds (#1771).
+- A document's stored content fingerprint is now encrypted under the household's key once the maintenance backfill has sealed it, so a database dump can't show which files a household holds; a household whose key is locked keeps plain fingerprints until it opens (#1771).
 
 ## [0.3.7] - 2026-11-07
 

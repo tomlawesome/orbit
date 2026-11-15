@@ -145,6 +145,8 @@ const test: TestUserConfig = {
           "scripts/read-environment-value.test.mjs",
           // Same reason (#1557): uses node:test. Run by scripts/test-backend.sh.
           "scripts/test-backend-build-path.test.mjs",
+          // Same reason (#1793): uses node:test. Run by scripts/test-backend.sh.
+          "scripts/test-backend-poppler-precheck.test.mjs",
           // Same reason (#1099): uses node:test. Run by scripts/test-backend.sh.
           "scripts/ci/coverage-floor-check.test.mjs",
           // Same reason (#1681): uses node:test, against the e2e stack's DKIM

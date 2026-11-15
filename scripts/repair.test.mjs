@@ -3,6 +3,7 @@ import {
   appendFileSync,
   chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -1073,10 +1074,16 @@ describe("scripts/repair.sh: what it is allowed to do to a deployment", () => {
     };
     const [startFn, startEnd] = body("do_start_services");
     const [recreateFn, recreateEnd] = body("do_recreate_services");
+    // #1817: retire-smtp-lines starts the stack on the rewritten .env-orbit, as the issue specifies.
+    const [retireFn, retireEnd] = body("do_retire_smtp_lines");
     let ups = 0;
     for (const match of repairScriptSource.matchAll(/docker compose[^\n]*(?:\\\n[^\n]*)*?\bup\b[^\n]*/gu)) {
       ups += 1;
-      if (match[0].includes("up -d --no-build --no-recreate")) {
+      if (/up -d --no-build( \\)?$/u.test(match[0])) {
+        expect(retireFn, "compose up outside do_retire_smtp_lines").toBeGreaterThan(-1);
+        expect(match.index).toBeGreaterThan(retireFn);
+        expect(match.index).toBeLessThan(retireEnd);
+      } else if (match[0].includes("up -d --no-build --no-recreate")) {
         expect(startFn, "compose up outside do_start_services").toBeGreaterThan(-1);
         expect(match.index).toBeGreaterThan(startFn);
         expect(match.index).toBeLessThan(startEnd);
@@ -1087,7 +1094,7 @@ describe("scripts/repair.sh: what it is allowed to do to a deployment", () => {
         expect(match.index).toBeLessThan(recreateEnd);
       }
     }
-    expect(ups).toBe(2);
+    expect(ups).toBe(3);
   });
 
   it("cycles a container only by restarting the one that is already there", () => {
@@ -2818,6 +2825,24 @@ describe("scripts/repair.sh: the ADR-0016 supported-version gate (#681 criterion
     expect(result.stdout).toContain("execution result=refused done=0 failed=0 reason=deployment-version-unsupported");
     expect(result.stdout).toContain("dangerous result=refused done=0 failed=0 reason=deployment-version-unsupported");
   });
+
+  // #1798 point 3: every stdout line repair.sh can emit matches a shape in
+  // STDOUT_LINE_PATTERNS, the refused execution line and its reason included.
+  it.each([
+    [["--execute", "--safe-only"]],
+    [["--execute", "--dangerous"]],
+    [["--execute", "--safe-only", "--dangerous"]],
+  ])("%j: every stdout line, the refused execution line included, matches STDOUT_LINE_PATTERNS", (args) => {
+    const targetDir = makeFixture();
+    writeVersionedEnv(targetDir, null);
+    chmodSync(join(targetDir, ".orbit-secrets", "postgres-password"), 0o644);
+
+    const result = runRepair(targetDir, args, {}, { input: "y\n", env: { ORBIT_REPAIR_PROMPTS: "machine" } });
+
+    expect(result.status).toBe(6);
+    expect(result.stdout).toContain("execution result=refused done=0 failed=0 reason=deployment-version-unsupported");
+    expectStdoutIsEnumOnly(result.stdout);
+  });
 });
 
 // --- Slice 3 (issue #261): --plan — a proposed, classified repair plan ----
@@ -3344,7 +3369,9 @@ describe("scripts/repair.sh --plan", () => {
     // database-unreachable -> manual (no automatic action).
     mkdirSync(join(targetDir, ".orbit-install-staging.xyz"), { mode: 0o700 });
 
-    const result = runRepair(targetDir, ["--plan"], { db: { present: false } });
+    // The database volume is kept (#1804 point 5): without it an absent
+    // database container also raises database-volume-missing, a second manual.
+    const result = runRepair(targetDir, ["--plan"], { db: { present: false }, volumes: ["repairtest_orbit-db-data"] });
 
     expect(result.status).toBe(3);
     const summary = lines(result.stdout).at(-1);
@@ -3842,6 +3869,74 @@ describe("scripts/repair.sh --execute --safe-only", () => {
     expect(result.stdout).toContain("diagnosis result=healthy");
   });
 
+  // O-S5 V3 (audit v0.3.9-c, #1844): run as root (sudo), the restored .env-orbit is
+  // given the deployment folder's owner (`chown --reference=.`, restore-compose-file's
+  // rule) before the rename. Root is simulated by shims ahead of the real tools on
+  // PATH: `id -u` prints 0; `chown` logs "<args> exists=<yes|no> link=<yes|no>"
+  // (both for its last argument, `link` being `-L`) and then runs the real chown
+  // (or, `fails`, exits 1). FIX-S1 (#1844): the call is --no-dereference.
+  function rootRestoreShims({ fails = false } = {}) {
+    const dir = scratchDir();
+    const log = join(dir, "chown.log");
+    const real = (name) => spawnSync("bash", ["-c", `command -v ${name}`], { encoding: "utf8" }).stdout.trim();
+    writeFileSync(join(dir, "id"), `#!/usr/bin/env bash\nif [[ $# -eq 1 && "$1" == -u ]]; then echo 0; exit 0; fi\nexec '${real("id")}' "$@"\n`);
+    chmodSync(join(dir, "id"), 0o755);
+    writeFileSync(
+      join(dir, "chown"),
+      `#!/usr/bin/env bash\nlast="\${@: -1}"\nif [[ -e "$last" || -L "$last" ]]; then there=yes; else there=no; fi\nif [[ -L "$last" ]]; then link=yes; else link=no; fi\nprintf '%s exists=%s link=%s\\n' "$*" "$there" "$link" >> '${log}'\n${fails ? "exit 1" : `exec '${real("chown")}' "$@"`}\n`,
+    );
+    chmodSync(join(dir, "chown"), 0o755);
+    return {
+      env: { PATH: `${dir}:${process.env.PATH}` },
+      calls: () => (existsSync(log) ? readFileSync(log, "utf8").split("\n").filter(Boolean) : []),
+    };
+  }
+
+  it("O-S5 V3: a root restore of .orbit-config.rollback gives .env-orbit the folder's owner before the rename", () => {
+    const targetDir = makeFixture();
+    const goodEnv = readFileSync(join(targetDir, ".env-orbit"), "utf8");
+    writeFileSync(join(targetDir, ".env-orbit.orbit-config.rollback"), goodEnv);
+    chmodSync(join(targetDir, ".env-orbit.orbit-config.rollback"), 0o600);
+    chmodSync(join(targetDir, ".env-orbit"), 0o644);
+    const shims = rootRestoreShims();
+
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], {}, { env: shims.env });
+
+    expect(result.stdout, result.stderr).toContain(
+      "execute action=restore-transaction resolves=configuration-migration-interrupted result=done",
+    );
+    expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toBe(goodEnv);
+    expect(mode(join(targetDir, ".env-orbit"))).toBe("600");
+    const calls = shims.calls();
+    for (const line of calls) expect(line, "a chown call not of the form --no-dereference --reference=. -- <path>, or one naming a symlink").toMatch(/^--no-dereference --reference=\. -- \S+ exists=(yes|no) link=no$/u);
+    const staged = calls.filter((line) => /^--no-dereference --reference=\. -- (\.\/)?\.env-orbit\.repair-restore\.\S+ exists=yes link=no$/u.test(line));
+    expect(staged, `chown calls:\n${calls.join("\n")}`).toHaveLength(1);
+  });
+
+  it("O-S5 V3: a chown that fails on the staged copy leaves .env-orbit as it was and reports failed", () => {
+    const targetDir = makeFixture();
+    const goodEnv = readFileSync(join(targetDir, ".env-orbit"), "utf8");
+    writeFileSync(join(targetDir, ".env-orbit.orbit-config.rollback"), goodEnv);
+    chmodSync(join(targetDir, ".env-orbit.orbit-config.rollback"), 0o600);
+    // Content-incomplete at mode 600, not mode 644: a 644 file also plans
+    // fix-permissions, which runs first in the same batch and makes it 600,
+    // so "its mode as before" could not be told apart from that action.
+    writeFileSync(join(targetDir, ".env-orbit"), "APP_URL=https://orbit.repair-test.internal\n");
+    chmodSync(join(targetDir, ".env-orbit"), 0o600);
+    const before = readFileSync(join(targetDir, ".env-orbit"));
+    const shims = rootRestoreShims({ fails: true });
+
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], {}, { env: shims.env });
+
+    expect(result.stdout, result.stderr).toContain(
+      "execute action=restore-transaction resolves=configuration-migration-interrupted result=failed",
+    );
+    expect(readFileSync(join(targetDir, ".env-orbit")).equals(before)).toBe(true);
+    expect(mode(join(targetDir, ".env-orbit"))).toBe("600");
+    expect(existsSync(join(targetDir, ".env-orbit.orbit-config.rollback"))).toBe(true);
+    expect(readdirSync(targetDir).filter((name) => name.startsWith(".env-orbit.repair-restore."))).toEqual([]);
+  });
+
   it("injected failure mid-restore: self-restores .env-orbit and reports failed (exit 4), leaving the rollback copy in place", () => {
     const targetDir = makeFixture();
     const goodEnv = readFileSync(join(targetDir, ".env-orbit"), "utf8");
@@ -4314,9 +4409,10 @@ const STDOUT_LINE_PATTERNS = [
   /^finding class=[a-z-]+ target=[a-z-]+ severity=(info|warn|fail)$/,
   /^diagnosis result=(healthy|attention|failed) checked=\d+ skipped=\d+$/,
   /^plan action=[a-z-]+ resolves=[a-z-]+ mutation=(none|reversible|credential-rotation|service-restart|service-start|containers) backup=(required|not-required) target=[a-z0-9-]+ rollback=(recovery-directory|prior-mode|not-required|credential-checkpoint) expect=(files-restored|permissions-safe|compose-file-restored|secret-recreated|authentication-restored|services-healthy|configuration-valid|operator-action)$/,
+  /^plan result=(empty|ready|manual-required) actions=\d+ manual=\d+$/,
   /^execute action=[a-z-]+ resolves=[a-z-]+ result=(done|failed|skipped)$/,
-  /^execution result=(empty|complete|unactionable|declined|failed) done=\d+ failed=\d+$/,
-  /^dangerous result=(empty|complete|refused|failed) done=\d+ failed=\d+ reason=(none|non-interactive|refused-by-operator|checkpoint-failed|step-failed)$/,
+  /^execution result=(empty|complete|unactionable|declined|failed|refused) done=\d+ failed=\d+( reason=deployment-version-unsupported)?$/,
+  /^dangerous result=(empty|complete|refused|failed) done=\d+ failed=\d+ reason=(none|non-interactive|refused-by-operator|checkpoint-failed|step-failed|deployment-version-unsupported)$/,
   /^prompt field=[a-z-]+ kind=(confirm|typed-word|secret) required=true attempt=\d+$/,
   /^prompt-accept field=[a-z-]+$/,
   /^prompt-reject field=[a-z-]+ reason=[a-z-]+$/,
@@ -4535,6 +4631,47 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("dangerous result=complete done=1 failed=0 reason=none");
     expect(result.stderr).toContain("attempt(s) remaining");
+  });
+
+  // FIX-S1 test 8 (audit v0.3.9-c, #1844, V13): the staged credential is written to a
+  // mktemp name and renamed into place, so a symlink the folder's owner planted at the
+  // fixed staged name is replaced, never written through. No root shims: the redirect
+  // follows a link as any user.
+  it("FIX-S1: a symlink planted at the staged credential name is not written through", () => {
+    const targetDir = makeCredentialMismatchFixture();
+    const outsideDir = scratchDir();
+    const outsidePath = join(outsideDir, "target");
+    writeFileSync(outsidePath, "KEEP\n");
+    chmodSync(outsidePath, 0o644);
+    const snap = (path) => {
+      const stat = statSync(path);
+      return { bytes: readFileSync(path).toString("hex"), mode: stat.mode & 0o7777, uid: stat.uid, gid: stat.gid };
+    };
+    const before = snap(outsidePath);
+    symlinkSync(outsidePath, stagedPasswordPath(targetDir));
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--dangerous"],
+      { db: { present: true, ready: true, authResult: "mismatch" } },
+      { input: `rotate\n${ROTATE_PASSPHRASE}\n${ROTATE_PASSPHRASE}\n`, env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
+    );
+
+    expect(existsSync(outsidePath), "the outside file is gone").toBe(true);
+    expect(snap(outsidePath), `written through the planted link: ${JSON.stringify(readFileSync(outsidePath, "utf8"))}`).toEqual(before);
+    expect(result.stdout, result.stderr).toContain("dangerous result=complete done=1 failed=0 reason=none");
+    const live = join(targetDir, ".orbit-secrets", "postgres-password");
+    expect(lstatSync(live).isFile(), "postgres-password is not a regular file").toBe(true);
+    expect(mode(live)).toBe("600");
+    expect(readFileSync(live, "utf8")).toMatch(/^[0-9a-f]{64}\n$/u);
+    let stagedLeft = true;
+    try {
+      lstatSync(stagedPasswordPath(targetDir));
+    } catch {
+      stagedLeft = false;
+    }
+    expect(stagedLeft, "the staged credential name is still there: it was not renamed into place").toBe(false);
+    expect(readdirSync(join(targetDir, ".orbit-secrets")).filter((name) => /^\.installing\..{6}$/u.test(name))).toEqual([]);
   });
 
   it("machine prompts: the typed-word field is bounded at exactly 3 attempts, then prompt-abort", () => {
@@ -6247,7 +6384,9 @@ describe("scripts/repair.sh: folder-moved and recreate-services (#1576 step 3)",
 
     it("folder-moved with services-not-running (db container absent) plans recreate-services and no start-services or restart-services", () => {
       const world = movedWorld();
-      const state = { db: { present: false } };
+      // The database volume is kept (#1804 point 5): without it the absent
+      // database container raises database-volume-missing, which blocks the recreate.
+      const state = { db: { present: false }, volumes: ["repairtest_orbit-db-data"] };
       const check = world.run(["--check"], state);
       expect(check.stdout).toContain(MOVED_FINDING);
       expect(check.stdout).toContain("finding class=services-not-running");
@@ -6259,7 +6398,7 @@ describe("scripts/repair.sh: folder-moved and recreate-services (#1576 step 3)",
 
     it("folder-moved with services-not-running: --execute --safe-only never runs a start-services step", () => {
       const world = movedWorld();
-      const result = world.run(["--execute", "--safe-only"], { db: { present: false } });
+      const result = world.run(["--execute", "--safe-only"], { db: { present: false }, volumes: ["repairtest_orbit-db-data"] });
       expect(result.stdout).not.toContain("execute action=start-services");
       expect(result.stdout).not.toContain("execute action=restart-services");
     });
@@ -6274,6 +6413,21 @@ describe("scripts/repair.sh: folder-moved and recreate-services (#1576 step 3)",
       expect(result.stdout).toContain("plan action=manual resolves=services-not-running");
       expect(result.stdout).not.toContain("plan action=start-services");
       expect(result.stderr).toMatch(/folder-elsewhere/);
+    });
+
+    // #1798 point 3 (pins what 46de07ec already did for the plan line).
+    it("plan and execute lines for recreate-services all match STDOUT_LINE_PATTERNS", () => {
+      const world = movedWorld({ withConfigure: false });
+      expectStdoutIsEnumOnly(world.run(["--plan"]).stdout);
+      expectStdoutIsEnumOnly(world.run(["--execute", "--safe-only"]).stdout);
+    });
+
+    it("plan lines for start-services match STDOUT_LINE_PATTERNS", () => {
+      const targetDir = makeFixture({ withConfigure: false });
+      const state = { db: { present: false }, app: { present: false }, volumes: ["repairtest_orbit-db-data"] };
+      const plan = runRepair(targetDir, ["--plan"], state);
+      expect(plan.stdout).toContain("plan action=start-services resolves=services-not-running mutation=service-start");
+      expectStdoutIsEnumOnly(plan.stdout);
     });
 
     it("does not mutate anything or recreate in --plan", () => {

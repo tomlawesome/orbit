@@ -21,6 +21,11 @@ const mocks = vi.hoisted(() => ({
   config: vi.fn(),
   unsealIntoBuffer: vi.fn(),
   createDocumentUnsealer: vi.fn(() => ({ update: vi.fn(), final: vi.fn() })),
+  deletes: [] as { table: string; where: unknown }[],
+  deletePreviewCiphertext: vi.fn(),
+  enqueuePreviewJob: vi.fn(),
+  storeDrawnPreview: vi.fn(),
+  drawDocumentPage: undefined as undefined | ((...args: unknown[]) => unknown),
 }));
 
 vi.mock("@/db", async () => {
@@ -45,7 +50,29 @@ vi.mock("@/db", async () => {
     return builder;
   }
 
+  // A transaction (the fix evicts under the document's lock) sees the same
+  // tables; deletes are recorded with their predicate for inspection.
+  const transactionScope: Record<string, unknown> = {
+    select: () => makeSelectBuilder(),
+    execute: () => Promise.resolve(Object.assign([{ "?column?": 1, lifecycle: "available", deleteAfter: null, delete_after: null }], { count: 1 })),
+    delete: (table: unknown) => ({
+      where: (where: unknown) => {
+        mocks.deletes.push({ table: getTableName(table as never), where });
+        const done = Promise.resolve([{ page: 1 }]);
+        return Object.assign(done, { returning: () => done });
+      },
+    }),
+    insert: (table: unknown) => ({
+      values: (values: Record<string, unknown>) => {
+        if (getTableName(table as never) === "audit_log") mocks.audits.push(values);
+        return Promise.resolve();
+      },
+    }),
+  };
   const fakeDb: Record<string, unknown> = {
+    transaction: async (work: (scope: unknown) => unknown) => work(transactionScope),
+    execute: transactionScope.execute,
+    delete: transactionScope.delete,
     select: () => makeSelectBuilder(),
     insert: (table: unknown) => ({
       values: (values: Record<string, unknown>) => {
@@ -70,6 +97,7 @@ vi.mock("@/server/documents/storage", () => {
   class LocalDocumentStorage {
     unsealIntoBuffer = mocks.unsealIntoBuffer;
     ciphertextExists = vi.fn();
+    deletePreviewCiphertext = mocks.deletePreviewCiphertext;
   }
   return {
     LocalDocumentStorage,
@@ -77,6 +105,20 @@ vi.mock("@/server/documents/storage", () => {
   };
 });
 
+vi.mock("@/server/documents/preview-store", async (importActual) => ({
+  ...await importActual<typeof import("@/server/documents/preview-store")>(),
+  storeDrawnPreview: mocks.storeDrawnPreview,
+}));
+vi.mock("@/server/document-maintenance/preview-queue", async (importActual) => ({
+  ...await importActual<typeof import("@/server/document-maintenance/preview-queue")>(),
+  enqueuePreviewJob: mocks.enqueuePreviewJob,
+}));
+vi.mock("@/server/documents/preview", async (importActual) => {
+  const actual = await importActual<typeof import("@/server/documents/preview")>();
+  return { ...actual, drawDocumentPage: (...args: Parameters<typeof actual.drawDocumentPage>) => (mocks.drawDocumentPage ?? actual.drawDocumentPage)(...args) };
+});
+
+import { PgDialect } from "drizzle-orm/pg-core";
 import { readDocumentPagePreview } from "./document-preview";
 
 const READER = "22222222-2222-4222-8222-222222222222";
@@ -157,6 +199,11 @@ beforeEach(() => {
   mocks.fromNames.length = 0;
   mocks.audits.length = 0;
   mocks.rows = {};
+  mocks.deletes.length = 0;
+  mocks.drawDocumentPage = undefined;
+  mocks.deletePreviewCiphertext.mockResolvedValue(undefined);
+  mocks.enqueuePreviewJob.mockResolvedValue(undefined);
+  mocks.storeDrawnPreview.mockResolvedValue(undefined);
   mocks.config.mockReturnValue(config);
 });
 
@@ -298,5 +345,118 @@ describe("readDocumentPagePreview", () => {
 
     expect(plaintext.every((byte) => byte === 0)).toBe(true);
     expect(scratch.entries()).toEqual([]);
+  });
+});
+
+/**
+ * Read repair of a kept page (#1803): a drawn row whose object is missing or
+ * fails its check is evicted and the page drawn now; any other read error is
+ * a 503 that keeps the row. Only effects are asserted (the row delete, the
+ * storage and queue calls, the answer, the audits).
+ */
+describe("a kept page that cannot be read", () => {
+  const STORAGE_KEY = "b".repeat(64);
+
+  function keptRow() {
+    return {
+      documentId: DOCUMENT,
+      page: 1,
+      status: "drawn",
+      refusal: null,
+      attempts: 1,
+      renderer: "poppler-1",
+      mediaType: "image/jpeg",
+      width: 100,
+      height: 140,
+      plaintextSize: 500,
+      ciphertextSize: 540,
+      storageKey: STORAGE_KEY,
+      envelopeVersion: 1,
+      keyId: config.keyId,
+      contentIv: Buffer.alloc(12),
+      contentAuthTag: Buffer.alloc(16),
+      wrappedDek: Buffer.alloc(32),
+      wrapIv: Buffer.alloc(12),
+      wrapAuthTag: Buffer.alloc(16),
+    };
+  }
+
+  /** A readable document with a stored page count and a kept page one whose read fails with `failure`. */
+  function arrangeKeptPageFailing(failure: unknown): void {
+    arrangeReadable(syntheticPdf("Read repair"), { pageCount: 1 });
+    mocks.rows.documents = [accessRow({ pageCount: 1 })];
+    mocks.rows.document_previews = [keptRow()];
+    mocks.unsealIntoBuffer.mockReset();
+    mocks.unsealIntoBuffer
+      .mockRejectedValueOnce(failure)
+      .mockResolvedValue(syntheticPdf("Read repair"));
+  }
+
+  function deletedPreviewRows() {
+    const dialect = new PgDialect();
+    return mocks.deletes.filter((entry) => entry.table === "document_previews").map((entry) => dialect.sqlToQuery(entry.where as never));
+  }
+
+  function expectEvictedByIdentity(): void {
+    const deleted = deletedPreviewRows();
+    expect(deleted).toHaveLength(1);
+    expect(deleted[0]!.params).toEqual(expect.arrayContaining([DOCUMENT, 1, STORAGE_KEY]));
+  }
+
+  async function damage() {
+    const { DocumentIntegrityError } = await import("@/server/documents/crypto");
+    return new DocumentIntegrityError();
+  }
+
+  it("U1: a kept page whose object is missing (ENOENT) is evicted and drawn now, with one audit, a queued job and no 503", async () => {
+    arrangeKeptPageFailing(Object.assign(new Error("gone"), { code: "ENOENT" }));
+
+    const preview = await readDocumentPagePreview(READER, DOCUMENT, 1);
+
+    expect(preview.mediaType).toBe("image/jpeg");
+    expect(preview.bytes.length).toBeGreaterThan(0);
+    expect(preview.width).toBeGreaterThan(0);
+    expect(preview.pageCount).toBe(1);
+    expect(mocks.audits.filter((audit) => audit.action === "document_previewed")).toHaveLength(1);
+    expectEvictedByIdentity();
+    expect(mocks.enqueuePreviewJob).toHaveBeenCalledTimes(1);
+    expect(mocks.enqueuePreviewJob).toHaveBeenCalledWith(expect.anything(), DOCUMENT);
+  });
+
+  it("U2: a kept page that fails its integrity check is evicted (row and object), drawn now and kept again", async () => {
+    arrangeKeptPageFailing(await damage());
+
+    const preview = await readDocumentPagePreview(READER, DOCUMENT, 1);
+
+    expect(preview.mediaType).toBe("image/jpeg");
+    expect(preview.bytes.length).toBeGreaterThan(0);
+    expect(mocks.audits.filter((audit) => audit.action === "document_previewed")).toHaveLength(1);
+    expectEvictedByIdentity();
+    expect(mocks.enqueuePreviewJob).toHaveBeenCalledWith(expect.anything(), DOCUMENT);
+    expect(mocks.deletePreviewCiphertext).toHaveBeenCalledWith(STORAGE_KEY);
+    expect(mocks.storeDrawnPreview).toHaveBeenCalledTimes(1);
+  });
+
+  it("U3: any other read error (EACCES) answers 503 document_unavailable and sheds nothing, draws nothing, audits nothing", async () => {
+    arrangeKeptPageFailing(Object.assign(new Error("denied"), { code: "EACCES" }));
+    const draw = vi.fn();
+    mocks.drawDocumentPage = draw;
+
+    await expect(readDocumentPagePreview(READER, DOCUMENT, 1)).rejects.toMatchObject({ code: "document_unavailable", status: 503 });
+
+    expect(deletedPreviewRows()).toEqual([]);
+    expect(mocks.deletePreviewCiphertext).not.toHaveBeenCalled();
+    expect(mocks.enqueuePreviewJob).not.toHaveBeenCalled();
+    expect(draw).not.toHaveBeenCalled();
+    expect(mocks.audits).toEqual([]);
+  });
+
+  it("U4: the row is evicted before the draw, so a busy renderer answers 503 document_preview_busy with the row already gone", async () => {
+    arrangeKeptPageFailing(await damage());
+    mocks.drawDocumentPage = vi.fn(async () => ({ outcome: "busy" }));
+
+    await expect(readDocumentPagePreview(READER, DOCUMENT, 1)).rejects.toMatchObject({ code: "document_preview_busy", status: 503 });
+
+    expectEvictedByIdentity();
   });
 });

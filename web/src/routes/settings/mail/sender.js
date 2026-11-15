@@ -1,5 +1,6 @@
+import { senderDaysShown } from "$lib/data/inbox.js";
 import { WorkspaceError } from "$lib/data/workspace.js";
-import { clockOf, dayMonth, localZone } from "$lib/format.js";
+import { clockOf, dayMonth, localZone, plural } from "$lib/format.js";
 
 /*
  * The sender check's words (#1410, ADR-0017 decision 7c, design note 36064),
@@ -63,11 +64,16 @@ const NOT_REACHED = "not sent — Orbit could not reach your relay. try again";
 /** What a refused press says: the engine's own words, exactly as they arrived (ADR-0034
  *  decision 4). Only when there is no answer, or none with usable words, is it the browser's.
  *  @param {unknown} error
+ *  @param {string} [unreached]  the browser's words for this press, when the engine said none
  *  @returns {string} */
-export function refusalWords(error) {
+export function refusalWords(error, unreached = NOT_REACHED) {
   const spoken = error instanceof WorkspaceError ? error.message.trim() : "";
-  return spoken || NOT_REACHED;
+  return spoken || unreached;
 }
+
+/** The browser's words when an add or a remove (#1650) got no worded answer. */
+export const NOT_ADDED = "not added — Orbit could not reach your relay. try again";
+export const NOT_REMOVED = "not removed — Orbit could not reach your relay. try again";
 
 /** The engine's word that the address is checked already, as a status line (good news, not a
  *  refusal), or null for any other answer. Its own words; the constant only stands in when it sent none.
@@ -92,3 +98,68 @@ export function clearLanding() {
   url.searchParams.delete("sender");
   window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
 }
+
+/*
+ * More than one sending address (#1650, design note 49429; note 54816 for the
+ * days left). The sign-in row keeps the words above; the extra rows, the add
+ * input and its limit say these, on the desk and the phone alike.
+ */
+
+/** Five addresses at most, the sign-in one included (the server's `MAX_SENDER_ADDRESSES_PER_USER`). */
+export const SENDER_LIMIT = 5;
+export const ADD_PLACEHOLDER = "another address you send from";
+export const AT_LIMIT = "five is the most";
+export const SEND_CHECK = "send check";
+export const REMOVE = "remove";
+/* #1810 W-S1/S2: remove arms first, as rotate does on the same tab (lib/arm.js). */
+export const REMOVE_ARMED = "tap again to remove";
+const COME_BACK = "to use it again, add it back and open a new check email";
+
+/** The line under an armed row: what the second tap loses (W-S3) and how to come back.
+ *  @param {{ heldMail?: number }} row
+ *  @returns {string} */
+export function removeArmedWords(row) {
+  const held = row.heldMail ?? 0;
+  if (held < 1) return COME_BACK;
+  return `${plural(held, "arrival")} held for this address ${held === 1 ? "is" : "are"} lost for good · ${COME_BACK}`;
+}
+export const ADD = "add";
+
+/** @typedef {import("$lib/data/workspace.js").RelaySenderRow} SenderRow */
+
+/** The member's extra rows, in the order the server lists them; never the sign-in row.
+ *  @param {readonly SenderRow[] | undefined} senders
+ *  @returns {SenderRow[]} */
+export const extrasOf = (senders) => (senders ?? []).filter((row) => row.source === "manual");
+
+/** Whether the list is full, so `add` is held with the caption.
+ *  @param {readonly SenderRow[] | undefined} senders */
+export const atLimit = (senders) => (senders ?? []).length >= SENDER_LIMIT;
+
+/** What an extra row's state says, and its tone: checked, a check sent, or unchecked,
+ *  with the whole days left before an unchecked row is removed (note 54816).
+ *  @param {SenderRow} row
+ *  @param {number} [now]
+ *  @returns {{ says: string, tone: "ok" | "warm", canCheck: boolean }} */
+export function extraRow(row, now = Date.now()) {
+  /* A row Orbit cannot read is kept, never deleted on a read (#1810 item 4):
+     it says so, and the member may remove it. */
+  if (row.metadataStatus?.address === "metadata_integrity_failed") return { says: "can't be read \u00b7 remove and add it again", tone: "warm", canCheck: false };
+  if (row.verified) {
+    return row.lastForwardSigned === false
+      ? { says: checkRow(row, now).says, tone: "warm", canCheck: false }
+      : { says: "checked", tone: "ok", canCheck: false };
+  }
+  const live = row.verificationPending && !(row.expiresAt && Date.parse(row.expiresAt) <= now);
+  const days = row.daysLeft === null || row.daysLeft === undefined ? null : senderDaysShown(row.daysLeft);
+  const left = days === null ? "" : ` · removed in ${days} ${days === 1 ? "day" : "days"}`;
+  return { says: `${live ? "check sent" : "unchecked"}${left}`, tone: "warm", canCheck: true };
+}
+
+/** The list once a check has gone to one row: that row's link is out until `expiresAt`.
+ *  @param {readonly SenderRow[]} senders
+ *  @param {string} id
+ *  @param {string | null} expiresAt
+ *  @returns {SenderRow[]} */
+export const withCheckSent = (senders, id, expiresAt) =>
+  senders.map((row) => (row.id === id ? { ...row, verificationPending: true, expiresAt } : row));

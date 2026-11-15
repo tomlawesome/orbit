@@ -1,6 +1,7 @@
 <script>
   import { onMount } from "svelte";
   import { readInboxScreen } from "$lib/data/workspace.js";
+  import { heldForSenderCheck, heldWords } from "$lib/data/inbox.js";
   import { ago, agoLong, dayMonth, dayMonthYear } from "$lib/format.js";
   import { daysWords } from "$lib/data/engine-limits.js";
   import { LOCKED, fieldState, receiptWords } from "$lib/data/metadata-status.js";
@@ -64,14 +65,18 @@
   });
 
   /**
-   * Only `id` is ever read here, so this takes anything with one -- a review
-   * receipt or a failed-to-process entry alike, both of which call in.
-   * @param {{ id: string }} receipt
+   * Only `id` is ever read here, and whether it is held for a sender check
+   * (#1650), so this takes anything with one -- a review receipt or a
+   * failed-to-process entry alike, both of which call in.
+   * @param {{ id: string, needsSenderCheck?: boolean, classification?: string }} receipt
    * @param {"approve" | "dismiss"} act
    * @param {HTMLElement | null} button
    */
   async function tap(receipt, act, button) {
     problem = null;
+    /* #1650: held mail cannot be added; its control is shaded, and a press that
+       reaches here anyway sends nothing. */
+    if (act === "approve" && heldForSenderCheck(receipt)) return;
     if (!arm.tap(`${receipt.id}:${act}`, button)) return;
     await receiptActs.decide(receipt, act);
   }
@@ -149,6 +154,8 @@
       <div class="group">
         <h2>For your review · {view.review.length}</h2>
         {#each view.review as receipt (receipt.id)}
+          {@const flagged = papersOf(receipt).filter((paper) => paper.flagged).length}
+          {@const without = flagged > 1 ? "Add without them" : "Add without it"}
           <div class="receipt">
             <div class="head">
               <span class="dot" aria-hidden="true"></span>
@@ -170,7 +177,14 @@
               {:else}
                 <span class="attach">◆ {paper.name}{#if paper.clean} · <span class="clean">scanned clean</span>{/if}</span>
               {/if}
-              {#if paper.held}
+              {#if paper.flagged}
+                <!-- #1398 (placement note 56231): under the paper it is about,
+                     in the #1437 line's grammar; a virus is the card's one red. -->
+                <div class="dupline flag" role="alert"><span class="bead" aria-hidden="true"></span>
+                  <p><b>The scanner flagged a virus or malware inside attachment: "{paper.name}"</b></p>
+                  <p>{without} adds the mail and its other attachments; Discard everything drops the mail and all its attachments. {flagged > 1 ? "The flagged files are never added." : "The flagged file is never added."}</p>
+                </div>
+              {:else if paper.held}
                 {@const held = paper.held}
                 <!-- #1437 (design/v19/duplicate-alert/round-1, A): under the
                      paper it is about, in the receipt's own grammar. No new
@@ -195,16 +209,27 @@
             {#if receipt.classification === "retry"}
               <div class="twotap" style="margin-top:10px">{receipt.message}</div>
             {/if}
+            <!-- #1650 (notes 54816, 55326): held until the sending address is
+                 checked. In the same quiet mono: the remedy is the member's. -->
+            {#if heldForSenderCheck(receipt)}
+              <div class="twotap" style="margin-top:10px">{heldWords(receipt)}</div>
+            {/if}
             <div class="actions">
+              {#if heldForSenderCheck(receipt)}
+                <button class="yes" disabled>Add to orbit</button>
+              {:else}
               <button class="yes" disabled={busy === receipt.id || locked(receipt)} onclick={(event) => tap(receipt, "approve", event.currentTarget)}>
-                {isArmed(receipt, "approve") ? "tap again to approve" : "Add to orbit"}
+                {#if flagged}{isArmed(receipt, "approve") ? "tap again to add" : without}{:else}{isArmed(receipt, "approve") ? "tap again to approve" : "Add to orbit"}{/if}
               </button>
+              {/if}
               <button disabled={busy === receipt.id} onclick={(event) => tap(receipt, "dismiss", event.currentTarget)}>
-                {isArmed(receipt, "dismiss") ? "tap again to dismiss" : "Dismiss"}
+                {#if flagged}{isArmed(receipt, "dismiss") ? "tap again to discard" : "Discard everything"}{:else}{isArmed(receipt, "dismiss") ? "tap again to dismiss" : "Dismiss"}{/if}
               </button>
               <span class="twotap">— both ask twice</span>
               {#if !locked(receipt)}
+                {#if !heldForSenderCheck(receipt)}
                 <a href={resolve(`/home?item=${encodeURIComponent(receipt.id)}`)}>review &amp; amend →</a>
+                {/if}
               {/if}
             </div>
             {#if problem && problemId === receipt.id}
@@ -279,7 +304,7 @@
             </button>
             <span><span class="live">{view.relay.status}</span>{view.lastCaught ? ` · last caught ${ago(view.lastCaught, view.now)}` : ""}</span>
           </div>
-          <a href={resolve("/settings/mail")}>your relay →</a>
+          <a href={`${resolve("/settings")}#mail`}>your relay →</a>
         </div>
       </div>
     {/if}

@@ -60,7 +60,9 @@ import { outgoingMailConfig } from "./sending-settings";
 type Transaction = Parameters<Parameters<ReturnType<typeof getDb>["transaction"]>[0]>[0];
 
 /** The four provider profiles ADR-0017 decision 1 names; `other` is the default. */
-export const mailboxProviderProfiles = ["mailcow", "gmail", "outlook", "other"] as const;
+/* Outlook/Hotmail is no longer offered (#1780): Outlook.com and Hotmail refuse
+   password sign-in (owner, 2026-11-08). A stored `outlook` row reads as `other` (providerProfileOf). */
+export const mailboxProviderProfiles = ["mailcow", "gmail", "other"] as const;
 export type MailboxProviderProfile = typeof mailboxProviderProfiles[number];
 
 /**
@@ -425,6 +427,11 @@ export async function setMailboxSettings(
   dependencies: MailboxSettingsDependencies = {},
 ): Promise<{ outcome: MailboxVerificationOutcome; settings: MailboxSettingsView }> {
   await requireInstanceAdministrator(actorUserId);
+  /* The route's schema already refuses these; this also covers callers that
+     skip it, since the database enum still accepts `outlook` (#1780). */
+  if (!(mailboxProviderProfiles as readonly string[]).includes(input.providerProfile)) {
+    throw new AppError("mailbox_provider_invalid", "Choose mailcow, gmail or other", 400);
+  }
   const now = dependencies.now?.() ?? new Date();
   const existing = await readMailboxRow();
   if (existing && expectedVersion !== existing.version) {

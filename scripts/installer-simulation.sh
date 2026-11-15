@@ -221,7 +221,7 @@ case "$scenario_choice" in
       installer_ui_emit complete installer completed deployment-ready complete
       printf '\nSimulation summary (synthetic; nothing was deployed):\n'
       printf 'Profile: %s\n' "$profile_choice"
-      printf 'Scanner: still starting (first signature download); uploads are refused until it is ready.\n'
+      printf 'Scanner: still starting (first signature download); uploads are held until it is ready.\n'
     else
       sim_fail optional clamav optional-unavailable orbit-clamav
     fi

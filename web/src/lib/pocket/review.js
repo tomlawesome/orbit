@@ -15,7 +15,7 @@ import { dayMonthYear, money, plural, sizeLabel } from "$lib/format.js";
  *   fieldEvidence?: Record<string, { source: string, confidence: string }> | null,
  *   metadataStatus?: { proposal?: string, fieldEvidence?: string } | null,
  *   attachments?: { id?: string, displayName?: string, sizeBytes?: number,
- *     mediaType?: string, scanState?: "clean" | "unknown", alreadyHeld?: import('$lib/data/workspace.js').AlreadyHeld }[] | null,
+ *     mediaType?: string, scanState?: "clean" | "flagged" | "unknown", alreadyHeld?: import('$lib/data/workspace.js').AlreadyHeld }[] | null,
  *   attachmentCount?: number,
  *   receivedAt?: string | null,
  *   expiresAt?: string | null,
@@ -99,16 +99,20 @@ export const stagedPreviewHref = (receiptId, attachmentId) =>
  * `reckoning`'s households and today. Neither key is there otherwise.
  * @param {Reviewable} mail
  * @param {{ households?: { items?: { id: string, dueDate?: string | null }[] }[], today?: string }} [reckoning]
+ * #1398: an attachment the scanner flagged while the member added the mail
+ * (`scanState: "flagged"`) carries `flagged: true` and is neither drawable nor
+ * clean: the card names it with no view link. The key is absent otherwise.
  * @returns {{ id: string | null, name: string, meta: string, drawable: boolean, clean: boolean,
- *   held?: import("$lib/data/workspace.js").AlreadyHeld, renewal?: number | null }[]}
+ *   held?: import("$lib/data/workspace.js").AlreadyHeld, renewal?: number | null, flagged?: true }[]}
  */
 export const papersOf = (mail, reckoning = {}) =>
   mail.attachments?.map((a) => ({
     id: a.id ?? null,
     name: a.displayName ?? "document",
     meta: sizeLabel(a.sizeBytes ?? 0),
-    drawable: Boolean(a.id) && a.mediaType === "application/pdf",
+    drawable: Boolean(a.id) && a.mediaType === "application/pdf" && a.scanState !== "flagged",
     clean: a.scanState === "clean",
+    ...(a.scanState === "flagged" ? { flagged: /** @type {const} */ (true) } : {}),
     ...(a.alreadyHeld
       ? { held: a.alreadyHeld, renewal: renewalDays(a.alreadyHeld, reckoning.households ?? [], reckoning.today ?? "") }
       : {}),

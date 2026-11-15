@@ -11,7 +11,7 @@ import { createPageLoader, runtime, settle } from "../support/svelte-page.mjs";
  * button with aria-haspopup="dialog" showing the profile) that opens the
  * chooser card (web/src/lib/editing/ChooserCard.svelte) on its tiles
  * (Tiles.svelte, a radiogroup), the chooser's own body for a short fixed list
- * (the four profiles of PROVIDER_PROFILES: mailcow, gmail, outlook, other).
+ * (the three profiles of PROVIDER_PROFILES: mailcow, gmail, other).
  * Whichever of tiles or pick-list the build uses, it is the chooser card's
  * own: a role=dialog named "Choose provider".
  *
@@ -91,7 +91,7 @@ describe("administration: the mail provider profile is the chooser card's, not a
       const chooser = [...document.querySelectorAll('[role="dialog"]')].find((one) => /^Choose provider/iu.test(one.getAttribute("aria-label") ?? ""));
       expect(chooser, "the chooser card named Choose provider stands").toBeDefined();
       const names = [...(chooser?.querySelectorAll('[role="radio"]') ?? [])].map((one) => (one.textContent ?? "").trim().toLowerCase());
-      expect(names, "one tile for each profile").toEqual(["mailcow", "gmail", "outlook", "other"]);
+      expect(names, "one tile for each profile").toEqual(["mailcow", "gmail", "other"]);
     });
   });
 });

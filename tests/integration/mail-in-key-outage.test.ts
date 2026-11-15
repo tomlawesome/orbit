@@ -46,7 +46,6 @@ async function insertReceipt(input: {
     mailbox: "key-outage",
     mailboxUidValidity: "1",
     mailboxUid: input.mailboxUid,
-    contentSha256: randomUUID().replaceAll("-", ""),
     recipientAliasSha256: `key-outage-${input.mailboxUid}`,
     userId: input.userId,
     status: input.status ?? "pending_review",
