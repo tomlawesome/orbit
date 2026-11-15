@@ -567,13 +567,15 @@ its safe batch (the plan lists it as `retire-smtp-lines`, for the finding
 `smtp-lines-retirable`). Either one first asks Orbit, inside its container,
 whether outgoing mail is in its own Mail settings, and acts only when it is:
 
-1. It backs up `.env-orbit` in a dated folder only you can read, which stays
-   (Update: `orbit-install-backups/<date>/`; Repair:
+1. It copies the lines it is about to remove or change from `.env-orbit`
+   into an undo copy in a dated folder only you can read (Update:
+   `orbit-install-backups/<date>/`; Repair:
    `orbit-install-backups/<date>-repair/`, with the overlay, named when it
-   runs), leaving any `SMTP_PASSWORD=` line out of the copy, then rewrites
-   it without the `SMTP_*` lines and without `docker-compose.mail.yml` in
-   `COMPOSE_FILE`. Commented lines and every
-   other line stay as they were.
+   runs). The copy holds only the `SMTP_*` lines, never `SMTP_PASSWORD=`,
+   and a `COMPOSE_FILE` line naming `docker-compose.mail.yml`; no other line
+   of `.env-orbit` is copied. It then rewrites `.env-orbit` without the
+   `SMTP_*` lines and without `docker-compose.mail.yml` in `COMPOSE_FILE`.
+   Commented lines and every other line stay as they were.
 2. It restarts Orbit on the rewritten file (`up -d --no-build`) and waits until
    it is ready.
 3. It deletes `docker-compose.mail.yml` and `.orbit-secrets/smtp-password`. The
@@ -582,7 +584,11 @@ whether outgoing mail is in its own Mail settings, and acts only when it is:
 
 Update then prints: "Outgoing mail: SMTP credentials were migrated to Orbit's
 mail settings. They were removed from .env-orbit and deleted from the secrets
-folder." If a step is interrupted, the next run picks up where it stopped (the
+folder." It then asks Orbit once more; when Orbit still confirms outgoing
+mail, the undo copy, its folder when nothing else is in it, and
+`.orbit-smtp-retirement` are removed in the same run. When it cannot confirm,
+they are kept, one line names the copy and says why, and the next run asks
+again and removes them. If a step is interrupted, the next run picks up where it stopped (the
 file `.orbit-smtp-retirement` records how far it got), and the password file
 stays until Orbit has restarted without it. When Orbit holds no outgoing mail
 settings yet, runs an older image, or cannot be asked, nothing is changed and

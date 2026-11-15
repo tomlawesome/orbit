@@ -2647,13 +2647,22 @@ check_update_readiness() {
 # steps resumes on the next run. repair.sh's retire-smtp-lines runs the same
 # steps (it is standalone, so the code is a same-shape copy).
 #
-# Order: back up .env-orbit (any inline SMTP_PASSWORD= line left out of the
-# copy), rewrite it without the SMTP_* keys and without the mail overlay in
-# COMPOSE_FILE, start the stack on it and wait until it is ready, then delete
-# the overlay and .orbit-secrets/smtp-password. Nothing the running stack
-# mounts goes before the stack stops mounting it. The secret is deleted, never
-# copied (owner decision, 2026-11-13). Unsure at any point: leave everything
-# as it is; the next update asks again.
+# Order: copy the lines the rewrite removes or changes into an undo copy (the
+# SMTP_* lines except SMTP_PASSWORD=, and a COMPOSE_FILE line naming the
+# overlay; nothing else of .env-orbit), rewrite it without the SMTP_* keys and
+# without the mail overlay in COMPOSE_FILE, start the stack on it and wait
+# until it is ready, then delete the overlay and .orbit-secrets/smtp-password.
+# Nothing the running stack mounts goes before the stack stops mounting it.
+# The secret is deleted, never copied (owner decision, 2026-11-13). Unsure at
+# any point: leave everything as it is; the next update asks again.
+#
+# The undo copy lasts only until the change is confirmed (#1834, owner
+# decision 10a, 2026-11-14): once the secret is gone, `orbit
+# mail-sending-status` is asked again, and a usable answer removes the copy,
+# its folder when nothing else is in it, and the step record. Otherwise the
+# copy and the record stay, one line names the copy, and the next run asks
+# again and removes them, never making a new copy. The record names the copy's
+# folder (copy=orbit-install-backups/<name>).
 readonly smtp_retirement_record=".orbit-smtp-retirement"
 readonly smtp_secret_file=".orbit-secrets/smtp-password"
 readonly smtp_overlay_file="docker-compose.mail.yml"
@@ -2663,10 +2672,12 @@ readonly smtp_completion_line="Outgoing mail: SMTP credentials were migrated to 
 # smtp_env_rewrite <retire|backup> < .env-orbit > copy
 #
 # retire: drops the SMTP_* keys (src/lib/config-contract.ts's list) and the
-# mail overlay's entry in COMPOSE_FILE; backup: drops only SMTP_PASSWORD= lines.
-# Commented lines and every other line are copied byte for byte (a CR
-# included). Exits 3, writing nothing usable, when a COMPOSE_FILE line naming
-# the overlay is not a plain colon-separated list or would be left empty.
+# mail overlay's entry in COMPOSE_FILE; commented lines and every other line
+# are copied byte for byte (a CR included). backup: keeps only the lines
+# retire drops or rewrites, as they were (#1834): the SMTP_* lines except
+# SMTP_PASSWORD=, and a COMPOSE_FILE line naming the overlay. Exits 3, writing
+# nothing usable, when a COMPOSE_FILE line naming the overlay is not a plain
+# colon-separated list or would be left empty.
 smtp_env_rewrite() {
   awk -v mode="$1" '
     BEGIN { keys["SMTP_HOST"]; keys["SMTP_PORT"]; keys["SMTP_SECURITY"]; keys["SMTP_USER"]
@@ -2674,7 +2685,10 @@ smtp_env_rewrite() {
     {
       key = $0; sub(/=.*/, "", key)
       if (index($0, "=") == 0) key = ""
-      if (mode == "backup") { if (key == "SMTP_PASSWORD") next; print; next }
+      if (mode == "backup") {
+        if ((key in keys && key != "SMTP_PASSWORD") || (key == "COMPOSE_FILE" && $0 ~ /docker-compose\.mail\.yml/)) print
+        next
+      }
       if (key in keys) next
       if (key == "COMPOSE_FILE" && $0 ~ /docker-compose\.mail\.yml/) {
         cr = ""; value = substr($0, 14)
@@ -2730,10 +2744,61 @@ mail_sending_gate_holds() {
   [[ "${BASH_REMATCH[1]}" != none ]]
 }
 
-# smtp_write_record <step>: the step record, written beside its target and renamed.
+# The undo copy's folder, relative to the deployment folder, once made or read
+# back from the step record; empty when none is known. The step, as read back.
+smtp_copy_dir=""
+smtp_record_step=""
+
+# smtp_write_record <step>: the step record, written beside its target and
+# renamed; it names the undo copy's folder when one is known.
 smtp_write_record() {
-  ( umask 077 && printf 'step=%s\n' "$1" > "${smtp_retirement_record}.tmp" ) &&
+  ( umask 077 && { printf 'step=%s\n' "$1" && if [[ -n "$smtp_copy_dir" ]]; then printf 'copy=%s\n' "$smtp_copy_dir"; fi; } > "${smtp_retirement_record}.tmp" ) &&
     mv -f -- "${smtp_retirement_record}.tmp" "$smtp_retirement_record"
+}
+
+# smtp_read_record: sets $smtp_record_step and $smtp_copy_dir from the step
+# record. A copy= line naming anything but a dated folder directly inside
+# orbit-install-backups is ignored, so nothing outside it is ever removed.
+smtp_read_record() {
+  local entry
+  smtp_record_step=""
+  smtp_copy_dir=""
+  if [[ ! -f "$smtp_retirement_record" || -L "$smtp_retirement_record" ]]; then return 0; fi
+  while IFS= read -r entry || [[ -n "$entry" ]]; do
+    if [[ "$entry" == step=* ]]; then
+      smtp_record_step="${entry#step=}"
+    elif [[ "$entry" =~ ^copy=(orbit-install-backups/[0-9]{8}T[0-9]{6}Z(-repair)?(-[2-9])?)$ ]]; then
+      smtp_copy_dir="${BASH_REMATCH[1]}"
+    fi
+  done < "$smtp_retirement_record"
+  return 0
+}
+
+# smtp_discard_copy: the change is confirmed. Removes the files the
+# retirement wrote into the undo copy's folder (.env-orbit's lines and, from
+# repair.sh, the overlay), the folder when nothing else is in it, then the
+# step record. Anything else in the folder stays.
+smtp_discard_copy() {
+  if [[ -n "$smtp_copy_dir" && ! -L orbit-install-backups && -d "$smtp_copy_dir" && ! -L "$smtp_copy_dir" ]]; then
+    rm -f -- "$smtp_copy_dir/.env-orbit" "$smtp_copy_dir/$smtp_overlay_file" || return 1
+    rmdir -- "$smtp_copy_dir" 2>/dev/null || true
+  fi
+  rm -f -- "$smtp_retirement_record"
+}
+
+# smtp_confirm_or_keep: after the secret is gone, asks the gate again.
+# Usable: the undo copy and the record go. Otherwise both stay, and one line
+# names the copy; the next update asks again.
+smtp_confirm_or_keep() {
+  local copy="${target_dir}/${smtp_copy_dir}/.env-orbit"
+  if ! stopping && mail_sending_gate_holds; then
+    smtp_discard_copy && return 0
+    printf 'Orbit installer: outgoing mail: the undo copy %s could not be removed; the next update tries again.\n' "$copy" >&2 || true
+    return 0
+  fi
+  if [[ -n "$smtp_copy_dir" && -f "$smtp_copy_dir/.env-orbit" ]]; then
+    printf 'Orbit installer: outgoing mail: the undo copy %s was kept, because mail sending could not be confirmed after the SMTP password file was deleted; the next update removes it once it is.\n' "$copy" >&2 || true
+  fi
 }
 
 # smtp_retirement_note <why>: one line to stderr; nothing was deleted.
@@ -2758,9 +2823,19 @@ retire_smtp_lines() {
   smtp_retirement_due || return 0
   ! stopping || return 0
   mail_sending_gate_holds || return 0
+  smtp_read_record
 
-  # 1. The backup, once per retirement: a resumed run keeps the first copy,
-  # the one taken before anything changed.
+  # A retirement that finished but was not confirmed: the gate holds now, so
+  # its undo copy goes; nothing new is copied.
+  if [[ "$smtp_record_step" == retired ]] && ! smtp_lines_present && ! smtp_overlay_listed &&
+    [[ ! -e "$smtp_secret_file" && ! -L "$smtp_secret_file" ]]; then
+    smtp_discard_copy ||
+      printf 'Orbit installer: outgoing mail: the undo copy %s could not be removed; the next update tries again.\n' "${target_dir}/${smtp_copy_dir}/.env-orbit" >&2 || true
+    return 0
+  fi
+
+  # 1. The undo copy, once per retirement: a resumed run keeps the first
+  # copy, the one taken before anything changed.
   if [[ ! -e "$smtp_retirement_record" ]]; then
     [[ -n "$backup_root" ]] || backup_root="${target_dir}/orbit-install-backups"
     if ! prepare_backup_dir optional 2>/dev/null ||
@@ -2768,6 +2843,7 @@ retire_smtp_lines() {
       smtp_retirement_note "the SMTP lines were left in .env-orbit: a backup of it could not be made."
       return 0
     fi
+    smtp_copy_dir="${backup_dir#"$target_dir"/}"
     smtp_write_record backed-up || { smtp_retirement_note "the SMTP lines were left in .env-orbit: the step record could not be written."; return 0; }
   fi
   if smtp_lines_present || smtp_overlay_listed; then
@@ -2799,9 +2875,11 @@ retire_smtp_lines() {
   # 3. Nothing mounts them now. The secret is deleted, never copied.
   rm -f -- "$smtp_overlay_file" "$smtp_secret_file" || { smtp_retirement_note "the SMTP password file could not be deleted."; return 0; }
 
-  # 4.
+  # 4. Done; the undo copy goes once Orbit confirms mail sending without the
+  # secret (#1834).
   printf '%s\n' "$smtp_completion_line" || true
-  rm -f -- "$smtp_retirement_record"
+  smtp_write_record retired || true
+  smtp_confirm_or_keep
 }
 
 check_update_path "$release_manifest_path"
