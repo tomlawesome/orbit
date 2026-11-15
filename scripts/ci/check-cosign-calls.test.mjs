@@ -795,3 +795,45 @@ describe("includes from other projects are never fetched or scanned (#1843, owne
     });
   });
 });
+
+describe("component: and template: includes (#1843, owner decision on note 37b follow-up)", () => {
+  const sha = "0123456789abcdef0123456789abcdef01234567";
+  const ci = ".gitlab-ci.yml";
+  const notScanned = /not scanned/i;
+  const comp = (ref) => `include:\n  - component: gitlab.example.com/ai/other/build@${ref}\n`;
+
+  it("accepts a component pinned to a 40-hex sha and prints a not-scanned line naming it", () => {
+    const result = run(fixture({ [ci]: comp(sha) }));
+    assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
+    const lines = (result.stdout + result.stderr).split("\n").filter((l) => notScanned.test(l));
+    assert.equal(lines.length, 1, `expected one not-scanned line, got:\n${result.stdout}${result.stderr}`);
+    assert.ok(lines[0].includes("ai/other/build"), lines[0]);
+    assert.ok(lines[0].includes(sha), lines[0]);
+  });
+
+  for (const [what, ref] of [["a version tag @1.0.0", "1.0.0"], ["a branch @main", "main"], ["@~latest", "~latest"], ["a short sha", "0123456"]]) {
+    it(`fails on a component pinned to ${what}`, () => {
+      fails({ [ci]: comp(ref) }, ci, 2);
+    });
+  }
+
+  it("fails on a component with no @ref", () => {
+    fails({ [ci]: "include:\n  - component: gitlab.example.com/ai/other/build\n" }, ci, 2);
+  });
+
+  it("fails on an unpinned component in a nested local include, naming that file", () => {
+    fails({ [ci]: "include:\n  - local: sub/a.yml\n", "sub/a.yml": comp("main") }, "sub/a.yml", 2);
+  });
+
+  it("fails on a template: include", () => {
+    fails({ [ci]: "include:\n  - template: Jobs/SAST.gitlab-ci.yml\n" }, ci, 2);
+  });
+
+  it("fails on a template: include as a single mapping", () => {
+    fails({ [ci]: "include:\n  template: Jobs/SAST.gitlab-ci.yml\n" }, ci, 2);
+  });
+
+  it("fails on a template: include in a nested local include, naming that file", () => {
+    fails({ [ci]: "include:\n  - local: sub/a.yml\n", "sub/a.yml": "include:\n  - template: Jobs/SAST.gitlab-ci.yml\n" }, "sub/a.yml", 2);
+  });
+});
