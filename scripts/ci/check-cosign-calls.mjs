@@ -94,7 +94,9 @@
  * must be an unquoted project path (group/project), never a URL. In every
  * followed CI file, a flow value ({ or [ after key: or - ) that names
  * include or trigger fails at its line wherever it sits (#1843 note 59980),
- * so a one-line or anchored flow job cannot hide one. An include: key
+ * so a one-line or anchored flow job cannot hide one; inside its double
+ * quotes a backslash escapes the next character, and a double-quoted key
+ * holding a backslash (an escape such as \x69, or a fold) fails too. An include: key
  * anywhere else is ignored, as GitLab ignores it. Known limits (Low):
  * `trigger:\n  - include: x`, which GitLab rejects, and a job-level
  * `<<: *j`, whose anchored body is itself scanned.
@@ -868,15 +870,31 @@ function refuseFlowIncludes(lines, fail) {
     let text = "";
     let depth = 0;
     let q = null;
+    let escaped = false; // the double-quoted string being read holds a backslash
+    let escapedKey = false;
     let j = i;
     let k = m[0].length - 1;
     for (; j < lines.length; j++, k = 0) {
       const line = lines[j];
       for (; k < line.length; k++) {
         const c = line[k];
+        if (q === '"' && c === "\\") {
+          // An escape: the next character (or the line break it folds) is not the closing quote.
+          escaped = true;
+          text += c + (line[k + 1] ?? "");
+          k++;
+          continue;
+        }
         if (q) {
-          if (c === q) q = null;
-        } else if (c === '"' || c === "'") q = c;
+          if (c === q) {
+            q = null;
+            // A double-quoted key with escapes can spell include or trigger without the word.
+            if (escaped && /^\s*:/.test(line.slice(k + 1))) escapedKey = true;
+          }
+        } else if (c === '"' || c === "'") {
+          q = c;
+          escaped = false;
+        }
         else if (c === "#" && /\s/.test(line[k - 1] ?? " ")) break;
         else if (c === "[" || c === "{") depth++;
         else if (c === "]" || c === "}") depth--;
@@ -887,6 +905,7 @@ function refuseFlowIncludes(lines, fail) {
       text += "\n";
     }
     if (/\b(?:include|trigger)\b/.test(text)) fail(i, `a flow value naming include or trigger ${SUBSET}; write it in block style`);
+    else if (escapedKey) fail(i, `a flow value with a double-quoted key holding a backslash escape (which can spell include or trigger) ${SUBSET}`);
     i = Math.max(i, j);
   }
 }
