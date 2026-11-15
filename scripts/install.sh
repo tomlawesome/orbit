@@ -1958,6 +1958,23 @@ release_rollback_copies() {
   return 0
 }
 
+# name_earlier_originals
+#
+# A run killed hard leaves its originals/ (the operator's own files, copied
+# before the engine ran) in its dated folder. Every later run names each one
+# on stderr and never removes it, as with moved/ (#1834 slice 4).
+name_earlier_originals() {
+  local root="${target_dir}/orbit-install-backups" saved_options path
+  [[ -d "$root" && ! -L "$root" ]] || return 0
+  saved_options="$(shopt -p nullglob)" || true
+  shopt -s nullglob
+  for path in "$root"/*/originals; do
+    [[ -d "$path" && ! -L "$path" && ! -L "$(dirname -- "$path")" ]] || continue
+    printf "Orbit installer: an earlier run's copy of this folder's original files is kept in %s; the installer never removes it. Remove it yourself once you no longer need it.\n" "$(printf '%q' "$path")" >&2 || true
+  done
+  eval "$saved_options"
+}
+
 prepare_service_images() {
   installer_ui_phase=preparation
   installer_ui_component=database
@@ -2664,6 +2681,10 @@ check_update_readiness() {
 # again and removes them, never making a new copy. The record names the copy's
 # folder (copy=orbit-install-backups/<name>).
 readonly smtp_retirement_record=".orbit-smtp-retirement"
+# Written into the undo copy's folder before the copy, naming that folder, so
+# a run killed before the step record leaves a copy the next run can adopt
+# (#1834 slice 4); a dated folder without it is never taken for one.
+readonly smtp_copy_marker=".orbit-smtp-undo"
 readonly smtp_secret_file=".orbit-secrets/smtp-password"
 readonly smtp_overlay_file="docker-compose.mail.yml"
 readonly mail_sending_status_timeout_seconds=30
@@ -2775,12 +2796,12 @@ smtp_read_record() {
 }
 
 # smtp_discard_copy: the change is confirmed. Removes the files the
-# retirement wrote into the undo copy's folder (.env-orbit's lines and, from
-# repair.sh, the overlay), the folder when nothing else is in it, then the
-# step record. Anything else in the folder stays.
+# retirement wrote into the undo copy's folder (.env-orbit's lines, the copy
+# marker and, from repair.sh, the overlay), the folder when nothing else is
+# in it, then the step record. Anything else in the folder stays.
 smtp_discard_copy() {
   if [[ -n "$smtp_copy_dir" && ! -L orbit-install-backups && -d "$smtp_copy_dir" && ! -L "$smtp_copy_dir" ]]; then
-    rm -f -- "$smtp_copy_dir/.env-orbit" "$smtp_copy_dir/$smtp_overlay_file" || return 1
+    rm -f -- "$smtp_copy_dir/.env-orbit" "$smtp_copy_dir/$smtp_overlay_file" "$smtp_copy_dir/$smtp_copy_marker" || return 1
     rmdir -- "$smtp_copy_dir" 2>/dev/null || true
   fi
   rm -f -- "$smtp_retirement_record"
@@ -2799,6 +2820,30 @@ smtp_confirm_or_keep() {
   if [[ -n "$smtp_copy_dir" && -f "$smtp_copy_dir/.env-orbit" ]]; then
     printf 'Orbit installer: outgoing mail: the undo copy %s was kept, because mail sending could not be confirmed after the SMTP password file was deleted; the next update removes it once it is.\n' "$copy" >&2 || true
   fi
+}
+
+# smtp_find_orphan_copy: with no step record, the newest dated folder in
+# orbit-install-backups whose copy marker is a regular file naming that same
+# folder is a killed run's undo copy; sets $smtp_copy_dir to it. A folder
+# without the marker (a hand-made one included), or whose copy is a link, is
+# never taken.
+smtp_find_orphan_copy() {
+  local saved_options folder name marker found=""
+  smtp_copy_dir=""
+  [[ -d orbit-install-backups && ! -L orbit-install-backups ]] || return 1
+  saved_options="$(shopt -p nullglob dotglob)" || true
+  shopt -s nullglob
+  shopt -u dotglob
+  for folder in orbit-install-backups/*; do
+    name="${folder#orbit-install-backups/}"
+    [[ "$name" =~ ^[0-9]{8}T[0-9]{6}Z(-repair)?(-[2-9])?$ && -d "$folder" && ! -L "$folder" ]] || continue
+    marker="$folder/$smtp_copy_marker"
+    [[ -f "$marker" && ! -L "$marker" && ! -L "$folder/.env-orbit" && "$(head -c 128 -- "$marker")" == "copy=$folder" ]] || continue
+    found="$folder"
+  done
+  eval "$saved_options"
+  [[ -n "$found" ]] || return 1
+  smtp_copy_dir="$found"
 }
 
 # smtp_retirement_note <why>: one line to stderr; nothing was deleted.
@@ -2835,15 +2880,28 @@ retire_smtp_lines() {
   fi
 
   # 1. The undo copy, once per retirement: a resumed run keeps the first
-  # copy, the one taken before anything changed.
+  # copy, the one taken before anything changed. The marker naming the copy
+  # goes first, then the copy, then the step record (#1834 slice 4): a run
+  # killed before the record leaves a marked folder, which the next run
+  # adopts, rewriting the copy while .env-orbit still holds the SMTP lines,
+  # so there is never a second copy.
   if [[ ! -e "$smtp_retirement_record" ]]; then
-    [[ -n "$backup_root" ]] || backup_root="${target_dir}/orbit-install-backups"
-    if ! prepare_backup_dir optional 2>/dev/null ||
-      ! ( umask 077 && smtp_env_rewrite backup < "$environment_file" > "${backup_dir}/.env-orbit" ); then
-      smtp_retirement_note "the SMTP lines were left in .env-orbit: a backup of it could not be made."
-      return 0
+    if smtp_find_orphan_copy; then
+      if { smtp_lines_present || smtp_overlay_listed; } &&
+        ! ( umask 077 && smtp_env_rewrite backup < "$environment_file" > "${smtp_copy_dir}/.env-orbit" ); then
+        smtp_retirement_note "the SMTP lines were left in .env-orbit: a backup of it could not be made."
+        return 0
+      fi
+    else
+      [[ -n "$backup_root" ]] || backup_root="${target_dir}/orbit-install-backups"
+      if ! prepare_backup_dir optional 2>/dev/null ||
+        ! ( umask 077 && printf 'copy=%s\n' "${backup_dir#"$target_dir"/}" > "${backup_dir}/${smtp_copy_marker}" ) ||
+        ! ( umask 077 && smtp_env_rewrite backup < "$environment_file" > "${backup_dir}/.env-orbit" ); then
+        smtp_retirement_note "the SMTP lines were left in .env-orbit: a backup of it could not be made."
+        return 0
+      fi
+      smtp_copy_dir="${backup_dir#"$target_dir"/}"
     fi
-    smtp_copy_dir="${backup_dir#"$target_dir"/}"
     smtp_write_record backed-up || { smtp_retirement_note "the SMTP lines were left in .env-orbit: the step record could not be written."; return 0; }
   fi
   if smtp_lines_present || smtp_overlay_listed; then
@@ -2882,6 +2940,7 @@ retire_smtp_lines() {
   smtp_confirm_or_keep
 }
 
+name_earlier_originals
 check_update_path "$release_manifest_path"
 
 resolved_reference="${image_repository}@${manifest_digest}"

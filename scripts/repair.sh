@@ -4216,6 +4216,27 @@ restore_transaction_self_restore() {
   done
 }
 
+# #1834 slice 4: true only when the staging folder saved at least one original
+# and each saved original (on the fixed allowlist) is the same type and bytes
+# as its live path; modes are not compared. Symlinks on either side never match.
+restore_transaction_originals_match_live() {
+  local staging_root="$1" path backup_path saved=0
+  for path in "${restore_transaction_paths[@]}"; do
+    backup_path="$staging_root/rollback/original/$path"
+    [[ -e "$backup_path" || -L "$backup_path" ]] || continue
+    saved=1
+    [[ ! -L "$backup_path" && ! -L "$path" && ! -L "$(dirname -- "$path")" ]] || return 1
+    if [[ -f "$backup_path" ]]; then
+      [[ -f "$path" ]] && cmp -s -- "$backup_path" "$path" || return 1
+    elif [[ -d "$backup_path" ]]; then
+      [[ -d "$path" ]] && diff -r --no-dereference -q -- "$backup_path" "$path" >/dev/null 2>&1 || return 1
+    else
+      return 1
+    fi
+  done
+  [[ "$saved" == 1 ]]
+}
+
 do_restore_transaction() {
   local -a staging_matches=()
   local -a touched=()
@@ -4233,6 +4254,15 @@ do_restore_transaction() {
   has_mode "$staging_root/rollback" 700 || return 1
   is_real_non_symlink_directory "$staging_root/rollback/original" || return 1
   has_mode "$staging_root/rollback/original" 700 || return 1
+
+  # #1834 slice 4: a staging folder whose every saved original equals its
+  # live path byte for byte would restore nothing, committed or not, so it is
+  # removed rather than refused; one that differs anywhere falls through.
+  if restore_transaction_originals_match_live "$staging_root"; then
+    rm -rf -- "$staging_root" || return 1
+    printf 'Orbit repair: removed %s; every file it saved matches the live file byte for byte.\n' "$staging_root" >&2
+    return 0
+  fi
 
   # install.sh writes $staging_root/committed the moment its own transaction
   # commits (immediately before the long image-pull/health-wait phase — see
@@ -4496,6 +4526,10 @@ restart_compose_service() {
 # the undo copy, its folder when empty, and the record go; otherwise they
 # stay and one line names the copy, and the next run asks again.
 readonly smtp_retirement_record=".orbit-smtp-retirement"
+# Written into the undo copy's folder before the copy, naming that folder, so
+# a run killed before the step record leaves a copy the next run can adopt
+# (#1834 slice 4); a dated folder without it is never taken for one.
+readonly smtp_copy_marker=".orbit-smtp-undo"
 readonly smtp_secret_file=".orbit-secrets/smtp-password"
 readonly smtp_overlay_file="docker-compose.mail.yml"
 readonly mail_sending_status_timeout=30s
@@ -4604,12 +4638,12 @@ smtp_read_record() {
 }
 
 # smtp_discard_copy: the change is confirmed. Removes the files the
-# retirement wrote into the undo copy's folder (.env-orbit's lines and, from
-# repair.sh, the overlay), the folder when nothing else is in it, then the
-# step record. Anything else in the folder stays.
+# retirement wrote into the undo copy's folder (.env-orbit's lines, the copy
+# marker and, from repair.sh, the overlay), the folder when nothing else is
+# in it, then the step record. Anything else in the folder stays.
 smtp_discard_copy() {
   if [[ -n "$smtp_copy_dir" && ! -L orbit-install-backups && -d "$smtp_copy_dir" && ! -L "$smtp_copy_dir" ]]; then
-    rm -f -- "$smtp_copy_dir/.env-orbit" "$smtp_copy_dir/$smtp_overlay_file" || return 1
+    rm -f -- "$smtp_copy_dir/.env-orbit" "$smtp_copy_dir/$smtp_overlay_file" "$smtp_copy_dir/$smtp_copy_marker" || return 1
     rmdir -- "$smtp_copy_dir" 2>/dev/null || true
   fi
   rm -f -- "$smtp_retirement_record"

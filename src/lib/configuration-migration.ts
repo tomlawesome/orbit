@@ -273,6 +273,21 @@ function migrateLocked(file: string, options: MigrateEnvironmentFileOptions, rel
     composeProjectPresent &&
     currentProject === desiredProject
   ) {
+    // #1834: a run killed after its rename, or one whose removal failed,
+    // leaves a copy nothing points at. The file has just passed the strict
+    // parse, so a regular mode-600 copy is dropped; anything else refuses.
+    if (!options.transaction) {
+      const leftoverCopy = `${file}${CONFIGURATION_ROLLBACK_SUFFIX}`;
+      const stray = lstatSync(leftoverCopy, { throwIfNoEntry: false });
+      if (stray) {
+        if (!stray.isFile() || (stray.mode & 0o777) !== 0o600) return failure("configuration_migration");
+        try {
+          rmSync(leftoverCopy, { force: true });
+        } catch {
+          return failure("configuration_migration");
+        }
+      }
+    }
     return {
       status: 0,
       stdout: `Orbit configuration: already current schema v1 version ${desiredVersion} digest ${desiredDigest}\n`,
