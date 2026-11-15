@@ -249,8 +249,10 @@ not its functions: `restore-transaction` recognizes the
 `.orbit-install-staging.*` layout, restores only paths on the mirrored
 literal managed-path allowlist (never paths enumerated from the staging
 directory, so tampered staging cannot smuggle targets), refuses symlinked
-parents on both sides, refuses outright when the `committed` marker is
-present, and removes the staging directory only on full success. The delta
+parents on both sides, refuses when the `committed` marker is present (except
+for a staging folder that exactly matches the live files with no engine
+transaction active, which is removed instead; see the 2026-11-15 amendment),
+and removes the staging directory only on full success. The delta
 slice extends the same discipline to `configuration.sh`'s
 `.orbit-config.rollback` boundary: restore it only when the live `.env-orbit`
 fails validation and the rollback copy passes — deterministic, no guessing.
@@ -506,4 +508,10 @@ Only a real, readable directory holding nothing but the bundle is removed;
 anything else under that name is named and left alone. When repair refuses
 the deployment's version (exit 6), the kept line's next step is to fix the
 version, since a re-run would refuse the same way. Every other piece of recovery
-material keeps decision 6's rule.
+material keeps decision 6's rule, with one more exception (issue #1834, slice
+4): an `.orbit-install-staging.*` folder from a killed run is removed, even
+when marked committed, when no engine transaction is active (no
+`.orbit-engine.lock`, or a regular file older than the engine's ten-minute
+reclaim age) and every saved file matches the live one exactly (no managed
+path live without a saved original, no differing mode). Otherwise the
+restore-transaction rules above apply unchanged.

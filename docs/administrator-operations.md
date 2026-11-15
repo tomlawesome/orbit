@@ -634,8 +634,7 @@ archives and anything outside `orbit-install-backups/` are never touched.
   how to remove them.
 - **`ORBIT_REMOVE_OLD_UNDO_COPIES=yes ./update.sh`** removes them without
   asking. Only the exact value `yes` counts. It still lists them and still
-  says it CANNOT be undone. `scripts/install.sh --update
-  --remove-old-undo-copies` does the same.
+  says it CANNOT be undone.
 
 A folder that cannot be deleted completely is named as "could not be fully
 removed"; the update still succeeds.
@@ -1301,8 +1300,13 @@ says so in one stderr line (`... checkpoint <path> ... was removed`). If the
 re-check is not clean it keeps the checkpoint, names it (`... checkpoint
 <path> was kept ...`) and tells you to re-run `repair.sh --execute` once the
 re-check's findings are fixed; the first later run whose own re-check is
-clean removes it. `--check` and `--plan` never remove it. Keep the passphrase
-only until the checkpoint is gone; Orbit never stores it.
+clean removes it. If the run stopped because repair refuses the deployment's
+version (exit 6, version unsupported), the checkpoint is kept and the next
+step it prints is to fix the version first (reinstall, or set `.env-orbit` to
+an Orbit release; see [ADR-0016](adr/0016-release-identity-and-installer-era-boundary.md));
+re-running `--execute` would refuse the same way, and the first later run
+whose re-check is clean removes it. `--check` and `--plan` never remove it.
+Keep the passphrase only until the checkpoint is gone; Orbit never stores it.
 
 ## Repair and the Compose file
 

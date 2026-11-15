@@ -4218,9 +4218,12 @@ restore_transaction_self_restore() {
 
 # #1834 slice 4: true only when no engine transaction may be live: there is
 # no .orbit-engine.lock, or it is a regular file older than the engine's own
-# stale age (src/lib/deploy-lock.ts DEPLOY_LOCK_STALE_MS, ten minutes) that
-# no process holds with flock (checked when flock is on PATH). The lock file
-# is opened read-only, so it is never created.
+# stale age (src/lib/deploy-lock.ts DEPLOY_LOCK_STALE_MS, ten minutes). The
+# engine takes that lock with an exclusive create (O_EXCL) and reclaims it by
+# age; it never uses flock, so the age rule is the real protection and the
+# flock probe below adds none: it only notices some other process that
+# happens to hold flock on the file. The lock file is opened read-only, so it
+# is never created.
 readonly engine_lock_path=".orbit-engine.lock"
 readonly engine_lock_stale_seconds=600
 engine_lock_idle() {
