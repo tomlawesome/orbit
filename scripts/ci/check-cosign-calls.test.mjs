@@ -1024,3 +1024,32 @@ describe("flow values naming include or trigger (#1843, third review pass)", () 
     assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
   });
 });
+
+describe("escaped quotes and escaped keys in flow values (#1843, review of 5c2b11cf)", () => {
+  const ci = ".gitlab-ci.yml";
+  const raw = String.raw;
+
+  it("fails when text after an escaped quote hides a trigger include", () => {
+    fails({ [ci]: raw`job: {a: "x\"}", trigger: {include: [{remote: "https://x"}]}}` + "\n" }, ci, 1);
+  });
+
+  it("passes an escaped quote inside a flow string with nothing risky after it", () => {
+    passes({ [ci]: raw`job: {a: "x\"}", b: c}` + "\n" });
+  });
+
+  it("fails on escaped-key trigger and include in a flow value", () => {
+    fails({ [ci]: raw`job: {"\x74rigger": {"\x69nclude": [{remote: "https://x"}]}}` + "\n" }, ci, 1);
+  });
+
+  it("fails on an escaped include key", () => {
+    fails({ [ci]: raw`job: {"\x69nclude": x}` + "\n" }, ci, 1);
+  });
+
+  it("fails on a key folded across lines with a backslash in a multi-line flow", () => {
+    fails({ [ci]: 'job: {"inc\\\nlude": x,\n  b: c}\n' }, ci);
+  });
+
+  it("passes a double-quoted flow key with no backslash that does not name include or trigger", () => {
+    passes({ [ci]: 'job: {"stage": test}\n' });
+  });
+});
