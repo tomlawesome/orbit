@@ -3836,16 +3836,26 @@ describe("scripts/repair.sh --execute --safe-only", () => {
   // its contents byte for byte; otherwise it is kept and named.
   const stagingLeft = (targetDir) =>
     spawnSync("bash", ["-c", `ls -d '${targetDir}'/.orbit-install-staging.* 2>/dev/null`], { encoding: "utf8" }).stdout;
-  // A staging folder whose rollback/original holds byte-identical copies of the live .env-orbit, docker-compose.yml and .orbit-secrets.
-  function makeMatchingStaging(targetDir, { committed }) {
+  // Repair's fixed allowlist (restore_transaction_paths in repair.sh).
+  const RESTORE_TRANSACTION_PATHS = [
+    "docker-compose.yml", "docker-compose.mail.yml", "docker-compose.kek-rotation.yml", "docker-compose.no-document-key.yml",
+    "docker-compose.scanner-off.yml", ".env-orbit.example", "config/tika-config.json", "scripts/configure.sh",
+    "scripts/installer-ui.sh", "scripts/backup.sh", "scripts/restore.sh", "scripts/repair.sh",
+    "scripts/export-recovery-bundle.sh", "scripts/import-recovery-bundle.sh", "scripts/end-maintenance.sh", "update.sh",
+    ".env-orbit", ".orbit-secrets", ".orbit-files",
+  ];
+  // A staging folder whose rollback/original holds a `cp -a` copy (bytes and modes) of every
+  // allowlisted path that exists live, so none of them reads as created by the transaction.
+  // `omit` leaves those paths without a saved original.
+  function makeMatchingStaging(targetDir, { committed, omit = [] }) {
     const stagingDir = makeStagingTransaction(targetDir, { committed });
-    for (const name of [".env-orbit", "docker-compose.yml"]) {
-      const copy = join(stagingDir, "rollback", "original", name);
-      writeFileSync(copy, readFileSync(join(targetDir, name)));
-      chmodSync(copy, mode(join(targetDir, name)) === "600" ? 0o600 : 0o644);
+    const original = join(stagingDir, "rollback", "original");
+    for (const path of RESTORE_TRANSACTION_PATHS) {
+      if (omit.includes(path) || !existsSync(join(targetDir, path))) continue;
+      mkdirSync(dirname(join(original, path)), { recursive: true });
+      expect(spawnSync("cp", ["-a", "--", join(targetDir, path), join(original, path)]).status).toBe(0);
     }
-    // Every live managed path has an original, so none of them reads as created by the transaction.
-    expect(spawnSync("cp", ["-a", "--", join(targetDir, ".orbit-secrets"), join(stagingDir, "rollback", "original", ".orbit-secrets")]).status).toBe(0);
+    chmodSync(original, 0o700);
     return stagingDir;
   }
   const liveState = (targetDir) => ({
@@ -3905,6 +3915,73 @@ describe("scripts/repair.sh --execute --safe-only", () => {
     const result = runRepair(targetDir, ["--execute", "--safe-only"]);
     expect(result.stdout).not.toContain("execute action=restore-transaction resolves=staging-evidence-present result=done");
     expect(statSync(stagingDir).isDirectory()).toBe(true);
+    expect(result.stderr).toContain(".orbit-install-staging.abc123");
+  });
+
+  // Review of a7aa25e5 (#1834 slice 4): the byte-match removal is not a match when an engine
+  // transaction may be live, when a live managed path has no saved original, or when a mode differs.
+  const hasStaging = (targetDir) => stagingLeft(targetDir) !== "";
+
+  it("slice 4 review: a matching staging folder is kept and named while the deploy lock (.orbit-engine.lock) is freshly held by another run", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    makeMatchingStaging(targetDir, { committed: true });
+    // What acquireDeployLock leaves while its holder runs: an O_EXCL file naming the holder, written just now.
+    writeFileSync(join(targetDir, ".orbit-engine.lock"), "4242:another-run\n", { mode: 0o600 });
+    const result = runRepair(targetDir, ["--execute", "--safe-only"]);
+    expect(result.stdout).not.toContain("execute action=restore-transaction resolves=staging-evidence-present result=done");
+    expect(hasStaging(targetDir)).toBe(true);
+    expect(result.stderr).toContain(".orbit-install-staging.abc123");
+  });
+
+  it("slice 4 review: a matching staging folder is kept and named while another process holds .orbit-engine.lock with flock", async () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    makeMatchingStaging(targetDir, { committed: true });
+    const lockPath = join(targetDir, ".orbit-engine.lock");
+    const holder = spawn("flock", ["--exclusive", lockPath, "bash", "-c", "echo held; sleep 60"], { stdio: ["ignore", "pipe", "ignore"] });
+    try {
+      await new Promise((resolve, reject) => {
+        holder.stdout.once("data", resolve);
+        holder.once("exit", () => reject(new Error("the flock holder exited before taking the lock")));
+      });
+      const result = runRepair(targetDir, ["--execute", "--safe-only"]);
+      expect(result.stdout).not.toContain("execute action=restore-transaction resolves=staging-evidence-present result=done");
+      expect(hasStaging(targetDir)).toBe(true);
+      expect(result.stderr).toContain(".orbit-install-staging.abc123");
+    } finally {
+      holder.kill("SIGKILL");
+    }
+  });
+
+  it("slice 4 review: a live docker-compose.mail.yml with no saved original is not a match: a committed folder is refused as before and nothing is removed", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    makeMatchingStaging(targetDir, { committed: true });
+    writeFileSync(join(targetDir, "docker-compose.mail.yml"), "services: {}\n");
+    const result = runRepair(targetDir, ["--execute", "--safe-only"]);
+    expect(result.stdout).toContain("execute action=restore-transaction resolves=staging-evidence-present result=failed");
+    expect(result.stderr).toContain("refusing restore-transaction");
+    expect(hasStaging(targetDir)).toBe(true);
+    expect(readFileSync(join(targetDir, "docker-compose.mail.yml"), "utf8")).toBe("services: {}\n");
+  });
+
+  it("slice 4 review: a live .orbit-secrets with no saved original is not a match: an unmarked folder takes the normal path (refused unattended) and nothing is removed", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    makeMatchingStaging(targetDir, { committed: false, omit: [".orbit-secrets"] });
+    const before = liveState(targetDir);
+    const result = runRepair(targetDir, ["--execute", "--safe-only"]);
+    expect(result.stderr).toContain("this is never automatic");
+    expect(result.stdout).not.toContain("execute action=restore-transaction resolves=staging-evidence-present result=done");
+    expect(hasStaging(targetDir)).toBe(true);
+    expect(liveState(targetDir)).toEqual(before);
+  });
+
+  it("slice 4 review: same bytes but a different mode is not a match: a committed folder is refused as before and kept", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    const stagingDir = makeMatchingStaging(targetDir, { committed: true });
+    expect(mode(join(targetDir, ".env-orbit"))).toBe("600");
+    chmodSync(join(stagingDir, "rollback", "original", ".env-orbit"), 0o644);
+    const result = runRepair(targetDir, ["--execute", "--safe-only"]);
+    expect(result.stdout).toContain("execute action=restore-transaction resolves=staging-evidence-present result=failed");
+    expect(hasStaging(targetDir)).toBe(true);
     expect(result.stderr).toContain(".orbit-install-staging.abc123");
   });
 

@@ -25,7 +25,7 @@
 // secret is gone; otherwise it is kept and named, and the next run removes it.
 
 import { spawnSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -552,4 +552,27 @@ describe("install.sh --plain --update: an SMTP undo copy left by a killed run (#
     expect(completionLines(next)).toEqual([COMPLETION_LINE]);
     expect(kept()).toBe(before);
   });
+});
+
+// Review of a7aa25e5 (#1834 slice 4): adopting a killed run's copy rewrites it, and that rewrite
+// must never write through a hard link into another file.
+describe("install.sh --plain --update: adopting a killed run's SMTP copy never writes through a hard link (#1834 slice 4 review)", () => {
+  for (const [label, statusAfter] of [["mail sending confirmed", {}], ["mail sending not confirmed", GATE_FAILS_AFTER]]) {
+    it(`the marked folder's .env-orbit is a hard link to another file: that file is unchanged after the run (${label})`, () => {
+      const targetDir = withSmtpLines(installedFolder());
+      expect(killedUpdate(targetDir, "after").signal).toBe("SIGKILL");
+      const [copy] = undoCopies(targetDir);
+      expect(copy).toBeDefined();
+      // Another file on the same filesystem, outside the backups folder.
+      const victim = join(targetDir, "operator-notes.txt");
+      writeFileSync(victim, "the operator's own notes\n", { mode: 0o600 });
+      rmSync(copy);
+      linkSync(victim, copy);
+      expect(statSync(victim).nlink).toBe(2);
+
+      const next = update(targetDir, line("imported", true), statusAfter);
+      expect(next.status).toBe(0);
+      expect(readFileSync(victim, "utf8")).toBe("the operator's own notes\n");
+    });
+  }
 });

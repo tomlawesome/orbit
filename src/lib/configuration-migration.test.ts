@@ -326,9 +326,9 @@ describe("standalone migration drops its rollback copy once the new file is conf
     stderr: "",
   };
 
-  it("already current with a leftover copy (mode 600) and a file that passes the strict parse: the copy is removed, the file untouched", () => {
+  it("already current with a leftover copy (mode 600) byte-identical to a file that passes the strict parse: the copy is removed, the file untouched", () => {
     const { dir, migrated } = currentWithLeftover();
-    writeFileSync(copyOf(dir), LEGACY, { mode: 0o600 });
+    writeFileSync(copyOf(dir), migrated, { mode: 0o600 });
     const result = migrateEnvironmentFile(envFile(dir), standalone(dir));
     expect(result).toEqual(ALREADY_CURRENT);
     expect(existsSync(copyOf(dir))).toBe(false);
@@ -336,36 +336,52 @@ describe("standalone migration drops its rollback copy once the new file is conf
     expect(readdirSync(dir)).toEqual([".env-orbit"]);
   });
 
-  it("already current with a leftover copy whose content differs from the file: the copy is still removed (the file is confirmed current)", () => {
-    const { dir, migrated } = currentWithLeftover();
-    writeFileSync(copyOf(dir), "ORBIT_IMAGE=something-else\n", { mode: 0o600 });
-    const result = migrateEnvironmentFile(envFile(dir), standalone(dir));
-    expect(result).toEqual(ALREADY_CURRENT);
-    expect(existsSync(copyOf(dir))).toBe(false);
-    expect(readFileSync(envFile(dir), "utf8")).toBe(migrated);
-  });
+  // Review of a7aa25e5: a copy that differs (the pre-migration file a killed run leaves) is kept and named.
+  for (const [label, content] of [
+    ["the pre-migration file a killed run leaves", LEGACY],
+    ["some other content", "ORBIT_IMAGE=something-else\n"],
+  ] as const) {
+    it(`already current with a leftover copy that differs (${label}): kept, one stderr line names it and the next step, still "already current" with exit 0`, () => {
+      const { dir, migrated } = currentWithLeftover();
+      writeFileSync(copyOf(dir), content, { mode: 0o600 });
+      const result = migrateEnvironmentFile(envFile(dir), standalone(dir));
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe(ALREADY_CURRENT.stdout);
+      const lines = result.stderr.split("\n").filter(Boolean);
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain(copyOf(dir));
+      expect(lines[0]).toMatch(/remove/iu);
+      expect(lines[0]).toMatch(/working/iu);
+      expect(lines[0]).toMatch(/repair/iu);
+      expect(readFileSync(copyOf(dir), "utf8")).toBe(content);
+      expect(lstatSync(copyOf(dir)).mode & 0o777).toBe(0o600);
+      expect(readFileSync(envFile(dir), "utf8")).toBe(migrated);
+    });
+  }
 
   it("already current with a leftover copy that is a symlink: refused, the link, its target and the file untouched", () => {
     const { dir, migrated } = currentWithLeftover();
     const outside = mkdtempSync(join(tmpdir(), "orbit-migration-outside-"));
     dirs.push(outside);
     const linkTarget = join(outside, "elsewhere");
-    writeFileSync(linkTarget, LEGACY, { mode: 0o600 });
+    // Byte-identical to the live file, so only the symlink rule can refuse it.
+    writeFileSync(linkTarget, migrated, { mode: 0o600 });
     symlinkSync(linkTarget, copyOf(dir));
     const result = migrateEnvironmentFile(envFile(dir), standalone(dir));
     expect(result).toEqual({ status: 1, stdout: "", stderr: "configuration_migration\n" });
     expect(lstatSync(copyOf(dir)).isSymbolicLink()).toBe(true);
-    expect(readFileSync(linkTarget, "utf8")).toBe(LEGACY);
+    expect(readFileSync(linkTarget, "utf8")).toBe(migrated);
     expect(readFileSync(envFile(dir), "utf8")).toBe(migrated);
   });
 
   it("already current with a leftover copy that is not mode 600: refused, the copy and the file untouched", () => {
     const { dir, migrated } = currentWithLeftover();
-    writeFileSync(copyOf(dir), LEGACY, { mode: 0o644 });
+    // Byte-identical to the live file, so only the mode rule can refuse it.
+    writeFileSync(copyOf(dir), migrated, { mode: 0o644 });
     chmodSync(copyOf(dir), 0o644);
     const result = migrateEnvironmentFile(envFile(dir), standalone(dir));
     expect(result).toEqual({ status: 1, stdout: "", stderr: "configuration_migration\n" });
-    expect(readFileSync(copyOf(dir), "utf8")).toBe(LEGACY);
+    expect(readFileSync(copyOf(dir), "utf8")).toBe(migrated);
     expect(lstatSync(copyOf(dir)).mode & 0o777).toBe(0o644);
     expect(readFileSync(envFile(dir), "utf8")).toBe(migrated);
   });

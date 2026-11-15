@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { appendFileSync, chmodSync, existsSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -486,5 +486,77 @@ describe("#1817 rewrite: quoted values and CRLF line endings survive a Repair re
     for (const kept of KEEP) expect(env, JSON.stringify(kept)).toContain(kept);
     expect(env).not.toMatch(/^SMTP_[A-Z_]+=/mu);
     expect(env).not.toMatch(/^COMPOSE_FILE=.*docker-compose\.mail\.yml/mu);
+  });
+});
+
+// #1834 slice 4, review of a7aa25e5: Repair after an install killed between the SMTP copy and
+// its step record. The state is planted as install.sh (a7aa25e5) leaves it: a dated folder with
+// the marker .orbit-smtp-undo naming that folder ("copy=orbit-install-backups/<name>"), then the
+// copy, and no step record. Repair adopts it exactly as install does: no second copy.
+const ORPHAN = "orbit-install-backups/20260101T000000Z";
+function withKilledInstallOrphan({ markerNames = ORPHAN, markerIsSymlink = false } = {}) {
+  const targetDir = withMail();
+  const folder = join(targetDir, ORPHAN);
+  mkdirSync(folder, { recursive: true, mode: 0o700 });
+  chmodSync(join(targetDir, "orbit-install-backups"), 0o700);
+  chmodSync(folder, 0o700);
+  const marker = join(folder, ".orbit-smtp-undo");
+  if (markerIsSymlink) {
+    const outside = mkdtempSync(join(tmpdir(), "orbit-marker-outside-"));
+    writeFileSync(join(outside, "marker"), `copy=${markerNames}\n`, { mode: 0o600 });
+    symlinkSync(join(outside, "marker"), marker);
+  } else {
+    writeFileSync(marker, `copy=${markerNames}\n`, { mode: 0o600 });
+  }
+  writeFileSync(join(folder, ".env-orbit"), `${REMOVED_LINES.join("\n")}\n`, { mode: 0o600 });
+  expect(existsSync(join(targetDir, RECORD))).toBe(false);
+  return { targetDir, folder, copy: join(folder, ".env-orbit") };
+}
+/** Every file under `folder` with its bytes, as one comparable string. */
+const folderBytes = (folder) =>
+  spawnSync("bash", ["-c", 'find . -mindepth 1 -printf "%p %y %m\\n" | LC_ALL=C sort; find . -type f -print0 | LC_ALL=C sort -z | xargs -0 -r sha256sum'], { cwd: folder, encoding: "utf8" }).stdout;
+
+describe("#1834 slice 4 review: Repair adopts the SMTP copy a killed install left", () => {
+  it("mail sending confirmed: the adopted copy, its marker and its folder are gone, and no other copy is left", () => {
+    const { targetDir, folder } = withKilledInstallOrphan();
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], { ...IMPORTED, ...MACHINE });
+    expect(result.stdout).toContain("execute action=retire-smtp-lines resolves=smtp-lines-retirable result=done");
+    expect(envBackups(targetDir)).toEqual([]);
+    expect(existsSync(folder)).toBe(false);
+    expect(existsSync(join(targetDir, RECORD))).toBe(false);
+  });
+
+  it("mail sending not confirmed: exactly one copy, the adopted one, holding the removed lines; no second folder", () => {
+    const { targetDir, copy } = withKilledInstallOrphan();
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], { ...IMPORTED, ...GATE_FAILS_AFTER, ...MACHINE });
+    expect(result.stdout).toContain("execute action=retire-smtp-lines resolves=smtp-lines-retirable result=done");
+    expect(envBackups(targetDir)).toEqual([copy]);
+    expect(readFileSync(copy, "utf8").split("\n").filter(Boolean)).toEqual(REMOVED_LINES);
+    expect(backupFolders(targetDir)).toEqual(["20260101T000000Z"]);
+    expect(existsSync(join(targetDir, RECORD))).toBe(true);
+  });
+
+  for (const [label, options] of [
+    ["a marker that names a different folder", { markerNames: "orbit-install-backups/20250101T000000Z" }],
+    ["a symlinked marker", { markerIsSymlink: true }],
+  ]) {
+    it(`${label} is never adopted: that folder is left byte for byte`, () => {
+      const { targetDir, folder } = withKilledInstallOrphan(options);
+      const before = folderBytes(folder);
+      const result = runRepair(targetDir, ["--execute", "--safe-only"], { ...IMPORTED, ...GATE_FAILS_AFTER, ...MACHINE });
+      expect(result.stdout).toContain("execute action=retire-smtp-lines resolves=smtp-lines-retirable result=done");
+      expect(folderBytes(folder)).toBe(before);
+    });
+  }
+
+  it("the adopted copy is a hard link to another file: that file is unchanged after the run", () => {
+    const { targetDir, copy } = withKilledInstallOrphan();
+    const victim = join(targetDir, "operator-notes.txt");
+    writeFileSync(victim, "the operator's own notes\n", { mode: 0o600 });
+    spawnSync("rm", ["-f", "--", copy]);
+    linkSync(victim, copy);
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], { ...IMPORTED, ...GATE_FAILS_AFTER, ...MACHINE });
+    expect(result.status).not.toBeNull();
+    expect(readFileSync(victim, "utf8")).toBe("the operator's own notes\n");
   });
 });
