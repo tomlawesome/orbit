@@ -49,7 +49,7 @@ export type ConfigurationFailureCode =
 export interface ConfigurationCommandResult {
   status: number;
   stdout: string;
-  /** The single failure code configuration.sh printed on stderr (empty on success). */
+  /** The single failure code configuration.sh printed on stderr (on success empty, or one line naming a kept leftover copy, #1834). */
   stderr: string;
   /** The setting an unknown-key or secret-conflict refusal is about; never printed, so the stdout/stderr contract is unchanged. */
   key?: string;
@@ -274,24 +274,38 @@ function migrateLocked(file: string, options: MigrateEnvironmentFileOptions, rel
     currentProject === desiredProject
   ) {
     // #1834: a run killed after its rename, or one whose removal failed,
-    // leaves a copy nothing points at. The file has just passed the strict
-    // parse, so a regular mode-600 copy is dropped; anything else refuses.
+    // leaves a copy nothing points at. A symlink or a copy not at mode 600
+    // refuses. A regular copy byte-identical to the file (which has just
+    // passed the strict parse) is dropped; one that differs may be the only
+    // good copy Repair's configuration-migration-interrupted class needs, so
+    // it is kept and named.
+    let stderr = "";
     if (!options.transaction) {
       const leftoverCopy = `${file}${CONFIGURATION_ROLLBACK_SUFFIX}`;
       const stray = lstatSync(leftoverCopy, { throwIfNoEntry: false });
       if (stray) {
         if (!stray.isFile() || (stray.mode & 0o777) !== 0o600) return failure("configuration_migration");
+        let identical = false;
         try {
-          rmSync(leftoverCopy, { force: true });
+          identical = readFileSync(leftoverCopy).equals(parsed.raw);
         } catch {
-          return failure("configuration_migration");
+          identical = false;
+        }
+        if (identical) {
+          try {
+            rmSync(leftoverCopy, { force: true });
+          } catch {
+            return failure("configuration_migration");
+          }
+        } else {
+          stderr = `Orbit configuration: kept ${leftoverCopy}: it differs from the current file and may be the only copy of the earlier one; remove it once Orbit is working, or run Repair (scripts/repair.sh --check) if it is not.\n`;
         }
       }
     }
     return {
       status: 0,
       stdout: `Orbit configuration: already current schema v1 version ${desiredVersion} digest ${desiredDigest}\n`,
-      stderr: "",
+      stderr,
     };
   }
 

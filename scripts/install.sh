@@ -2796,15 +2796,57 @@ smtp_read_record() {
 }
 
 # smtp_discard_copy: the change is confirmed. Removes the files the
-# retirement wrote into the undo copy's folder (.env-orbit's lines, the copy
-# marker and, from repair.sh, the overlay), the folder when nothing else is
-# in it, then the step record. Anything else in the folder stays.
+# retirement wrote into the undo copy's folder (.env-orbit's lines and its
+# temporary file, the copy marker and, from repair.sh, the overlay), the
+# folder when nothing else is in it, then the step record. Anything else in
+# the folder stays.
 smtp_discard_copy() {
   if [[ -n "$smtp_copy_dir" && ! -L orbit-install-backups && -d "$smtp_copy_dir" && ! -L "$smtp_copy_dir" ]]; then
-    rm -f -- "$smtp_copy_dir/.env-orbit" "$smtp_copy_dir/$smtp_overlay_file" "$smtp_copy_dir/$smtp_copy_marker" || return 1
+    rm -f -- "$smtp_copy_dir/.env-orbit" "$smtp_copy_dir/$smtp_overlay_file" "$smtp_copy_dir/$smtp_copy_marker" \
+      "$smtp_copy_dir/.env-orbit.smtp-copy.tmp" || return 1
     rmdir -- "$smtp_copy_dir" 2>/dev/null || true
   fi
   rm -f -- "$smtp_retirement_record"
+}
+
+# smtp_find_orphan_copy: with no step record, the newest dated folder in
+# orbit-install-backups whose copy marker is a regular file naming that same
+# folder is a killed run's undo copy; sets $smtp_copy_dir to it. A folder
+# without the marker (a hand-made one included), with a symlinked marker, or
+# whose copy is a link or not a file, is never taken.
+smtp_find_orphan_copy() {
+  local saved_options folder name marker found=""
+  smtp_copy_dir=""
+  [[ -d orbit-install-backups && ! -L orbit-install-backups ]] || return 1
+  saved_options="$(shopt -p nullglob dotglob)" || true
+  shopt -s nullglob
+  shopt -u dotglob
+  for folder in orbit-install-backups/*; do
+    name="${folder#orbit-install-backups/}"
+    [[ "$name" =~ ^[0-9]{8}T[0-9]{6}Z(-repair)?(-[2-9])?$ && -d "$folder" && ! -L "$folder" ]] || continue
+    marker="$folder/$smtp_copy_marker"
+    [[ -f "$marker" && ! -L "$marker" && "$(head -c 128 -- "$marker")" == "copy=$folder" ]] || continue
+    if [[ -L "$folder/.env-orbit" ]] || { [[ -e "$folder/.env-orbit" ]] && [[ ! -f "$folder/.env-orbit" ]]; }; then
+      continue
+    fi
+    found="$folder"
+  done
+  eval "$saved_options"
+  [[ -n "$found" ]] || return 1
+  smtp_copy_dir="$found"
+}
+
+# smtp_write_copy <folder>: the undo copy of the lines the retirement removes
+# from .env-orbit, written to a temporary file in <folder> and renamed over
+# <folder>/.env-orbit, so an existing copy (a hard link included) is
+# replaced, never written through (#1834).
+smtp_write_copy() {
+  local tmp="$1/.env-orbit.smtp-copy.tmp"
+  rm -f -- "$tmp" &&
+    ( umask 077 && smtp_env_rewrite backup < "$environment_file" > "$tmp" ) &&
+    mv -f -- "$tmp" "$1/.env-orbit" && return 0
+  rm -f -- "$tmp"
+  return 1
 }
 
 # smtp_confirm_or_keep: after the secret is gone, asks the gate again.
@@ -2820,30 +2862,6 @@ smtp_confirm_or_keep() {
   if [[ -n "$smtp_copy_dir" && -f "$smtp_copy_dir/.env-orbit" ]]; then
     printf 'Orbit installer: outgoing mail: the undo copy %s was kept, because mail sending could not be confirmed after the SMTP password file was deleted; the next update removes it once it is.\n' "$copy" >&2 || true
   fi
-}
-
-# smtp_find_orphan_copy: with no step record, the newest dated folder in
-# orbit-install-backups whose copy marker is a regular file naming that same
-# folder is a killed run's undo copy; sets $smtp_copy_dir to it. A folder
-# without the marker (a hand-made one included), or whose copy is a link, is
-# never taken.
-smtp_find_orphan_copy() {
-  local saved_options folder name marker found=""
-  smtp_copy_dir=""
-  [[ -d orbit-install-backups && ! -L orbit-install-backups ]] || return 1
-  saved_options="$(shopt -p nullglob dotglob)" || true
-  shopt -s nullglob
-  shopt -u dotglob
-  for folder in orbit-install-backups/*; do
-    name="${folder#orbit-install-backups/}"
-    [[ "$name" =~ ^[0-9]{8}T[0-9]{6}Z(-repair)?(-[2-9])?$ && -d "$folder" && ! -L "$folder" ]] || continue
-    marker="$folder/$smtp_copy_marker"
-    [[ -f "$marker" && ! -L "$marker" && ! -L "$folder/.env-orbit" && "$(head -c 128 -- "$marker")" == "copy=$folder" ]] || continue
-    found="$folder"
-  done
-  eval "$saved_options"
-  [[ -n "$found" ]] || return 1
-  smtp_copy_dir="$found"
 }
 
 # smtp_retirement_note <why>: one line to stderr; nothing was deleted.
@@ -2887,8 +2905,7 @@ retire_smtp_lines() {
   # so there is never a second copy.
   if [[ ! -e "$smtp_retirement_record" ]]; then
     if smtp_find_orphan_copy; then
-      if { smtp_lines_present || smtp_overlay_listed; } &&
-        ! ( umask 077 && smtp_env_rewrite backup < "$environment_file" > "${smtp_copy_dir}/.env-orbit" ); then
+      if { smtp_lines_present || smtp_overlay_listed; } && ! smtp_write_copy "$smtp_copy_dir"; then
         smtp_retirement_note "the SMTP lines were left in .env-orbit: a backup of it could not be made."
         return 0
       fi
@@ -2896,7 +2913,7 @@ retire_smtp_lines() {
       [[ -n "$backup_root" ]] || backup_root="${target_dir}/orbit-install-backups"
       if ! prepare_backup_dir optional 2>/dev/null ||
         ! ( umask 077 && printf 'copy=%s\n' "${backup_dir#"$target_dir"/}" > "${backup_dir}/${smtp_copy_marker}" ) ||
-        ! ( umask 077 && smtp_env_rewrite backup < "$environment_file" > "${backup_dir}/.env-orbit" ); then
+        ! smtp_write_copy "$backup_dir"; then
         smtp_retirement_note "the SMTP lines were left in .env-orbit: a backup of it could not be made."
         return 0
       fi

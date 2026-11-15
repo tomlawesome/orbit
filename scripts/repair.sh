@@ -4216,20 +4216,58 @@ restore_transaction_self_restore() {
   done
 }
 
-# #1834 slice 4: true only when the staging folder saved at least one original
-# and each saved original (on the fixed allowlist) is the same type and bytes
-# as its live path; modes are not compared. Symlinks on either side never match.
+# #1834 slice 4: true only when no engine transaction may be live: there is
+# no .orbit-engine.lock, or it is a regular file older than the engine's own
+# stale age (src/lib/deploy-lock.ts DEPLOY_LOCK_STALE_MS, ten minutes) that
+# no process holds with flock (checked when flock is on PATH). The lock file
+# is opened read-only, so it is never created.
+readonly engine_lock_path=".orbit-engine.lock"
+readonly engine_lock_stale_seconds=600
+engine_lock_idle() {
+  local fd mtime now status=0
+  [[ -e "$engine_lock_path" || -L "$engine_lock_path" ]] || return 0
+  [[ ! -L "$engine_lock_path" && -f "$engine_lock_path" && -r "$engine_lock_path" ]] || return 1
+  mtime="$(stat -c %Y -- "$engine_lock_path" 2>/dev/null)" && now="$(date +%s)" || return 1
+  ((now - mtime > engine_lock_stale_seconds)) || return 1
+  if command -v flock >/dev/null 2>&1; then
+    { exec {fd}<"$engine_lock_path"; } 2>/dev/null || return 1
+    flock -n "$fd" >/dev/null 2>&1 || status=$?
+    exec {fd}<&-
+    [[ "$status" == 0 ]] || return 1
+  fi
+  return 0
+}
+
+# #1834 slice 4: the modes and types of a tree's entries, one line each,
+# sorted, for comparing a saved folder with its live one.
+restore_transaction_tree_modes() {
+  (cd -- "$1" && find . -mindepth 1 -printf '%P %y %m\n' | LC_ALL=C sort)
+}
+
+# #1834 slice 4: true only when a restore would change nothing: the staging
+# folder saved at least one original, and every path on the fixed allowlist
+# either exists on neither side or exists on both with the same type, mode
+# and bytes (a folder entry by entry). A live path with no saved original
+# was created by the transaction, so it is not a match. Symlinks on either
+# side, or a symlinked parent, never match.
 restore_transaction_originals_match_live() {
-  local staging_root="$1" path backup_path saved=0
+  local staging_root="$1" path backup_path saved=0 had_backup have_live
   for path in "${restore_transaction_paths[@]}"; do
     backup_path="$staging_root/rollback/original/$path"
-    [[ -e "$backup_path" || -L "$backup_path" ]] || continue
+    had_backup=0
+    [[ -e "$backup_path" || -L "$backup_path" ]] && had_backup=1
+    have_live=0
+    [[ -e "$path" || -L "$path" ]] && have_live=1
+    [[ "$had_backup" == "$have_live" ]] || return 1
+    [[ "$had_backup" == 1 ]] || continue
     saved=1
     [[ ! -L "$backup_path" && ! -L "$path" && ! -L "$(dirname -- "$path")" ]] || return 1
+    [[ "$(stat -c %a -- "$backup_path")" == "$(stat -c %a -- "$path")" ]] || return 1
     if [[ -f "$backup_path" ]]; then
       [[ -f "$path" ]] && cmp -s -- "$backup_path" "$path" || return 1
     elif [[ -d "$backup_path" ]]; then
       [[ -d "$path" ]] && diff -r --no-dereference -q -- "$backup_path" "$path" >/dev/null 2>&1 || return 1
+      [[ "$(restore_transaction_tree_modes "$backup_path")" == "$(restore_transaction_tree_modes "$path")" ]] || return 1
     else
       return 1
     fi
@@ -4255,12 +4293,12 @@ do_restore_transaction() {
   is_real_non_symlink_directory "$staging_root/rollback/original" || return 1
   has_mode "$staging_root/rollback/original" 700 || return 1
 
-  # #1834 slice 4: a staging folder whose every saved original equals its
-  # live path byte for byte would restore nothing, committed or not, so it is
-  # removed rather than refused; one that differs anywhere falls through.
-  if restore_transaction_originals_match_live "$staging_root"; then
+  # #1834 slice 4: with no engine transaction live, a staging folder whose
+  # restore would change nothing (committed or not) is removed rather than
+  # refused; anything else falls through to the refusals and the restore.
+  if engine_lock_idle && restore_transaction_originals_match_live "$staging_root"; then
     rm -rf -- "$staging_root" || return 1
-    printf 'Orbit repair: removed %s; every file it saved matches the live file byte for byte.\n' "$staging_root" >&2
+    printf 'Orbit repair: removed %s; no install is running and restoring from it would change nothing (every saved file matches the live one).\n' "$staging_root" >&2
     return 0
   fi
 
@@ -4638,15 +4676,57 @@ smtp_read_record() {
 }
 
 # smtp_discard_copy: the change is confirmed. Removes the files the
-# retirement wrote into the undo copy's folder (.env-orbit's lines, the copy
-# marker and, from repair.sh, the overlay), the folder when nothing else is
-# in it, then the step record. Anything else in the folder stays.
+# retirement wrote into the undo copy's folder (.env-orbit's lines and its
+# temporary file, the copy marker and, from repair.sh, the overlay), the
+# folder when nothing else is in it, then the step record. Anything else in
+# the folder stays.
 smtp_discard_copy() {
   if [[ -n "$smtp_copy_dir" && ! -L orbit-install-backups && -d "$smtp_copy_dir" && ! -L "$smtp_copy_dir" ]]; then
-    rm -f -- "$smtp_copy_dir/.env-orbit" "$smtp_copy_dir/$smtp_overlay_file" "$smtp_copy_dir/$smtp_copy_marker" || return 1
+    rm -f -- "$smtp_copy_dir/.env-orbit" "$smtp_copy_dir/$smtp_overlay_file" "$smtp_copy_dir/$smtp_copy_marker" \
+      "$smtp_copy_dir/.env-orbit.smtp-copy.tmp" || return 1
     rmdir -- "$smtp_copy_dir" 2>/dev/null || true
   fi
   rm -f -- "$smtp_retirement_record"
+}
+
+# smtp_find_orphan_copy: with no step record, the newest dated folder in
+# orbit-install-backups whose copy marker is a regular file naming that same
+# folder is a killed run's undo copy; sets $smtp_copy_dir to it. A folder
+# without the marker (a hand-made one included), with a symlinked marker, or
+# whose copy is a link or not a file, is never taken.
+smtp_find_orphan_copy() {
+  local saved_options folder name marker found=""
+  smtp_copy_dir=""
+  [[ -d orbit-install-backups && ! -L orbit-install-backups ]] || return 1
+  saved_options="$(shopt -p nullglob dotglob)" || true
+  shopt -s nullglob
+  shopt -u dotglob
+  for folder in orbit-install-backups/*; do
+    name="${folder#orbit-install-backups/}"
+    [[ "$name" =~ ^[0-9]{8}T[0-9]{6}Z(-repair)?(-[2-9])?$ && -d "$folder" && ! -L "$folder" ]] || continue
+    marker="$folder/$smtp_copy_marker"
+    [[ -f "$marker" && ! -L "$marker" && "$(head -c 128 -- "$marker")" == "copy=$folder" ]] || continue
+    if [[ -L "$folder/.env-orbit" ]] || { [[ -e "$folder/.env-orbit" ]] && [[ ! -f "$folder/.env-orbit" ]]; }; then
+      continue
+    fi
+    found="$folder"
+  done
+  eval "$saved_options"
+  [[ -n "$found" ]] || return 1
+  smtp_copy_dir="$found"
+}
+
+# smtp_write_copy <folder>: the undo copy of the lines the retirement removes
+# from .env-orbit, written to a temporary file in <folder> and renamed over
+# <folder>/.env-orbit, so an existing copy (a hard link included) is
+# replaced, never written through (#1834).
+smtp_write_copy() {
+  local tmp="$1/.env-orbit.smtp-copy.tmp"
+  rm -f -- "$tmp" &&
+    ( umask 077 && smtp_env_rewrite backup < "$environment_file" > "$tmp" ) &&
+    mv -f -- "$tmp" "$1/.env-orbit" && return 0
+  rm -f -- "$tmp"
+  return 1
 }
 
 # smtp_confirm_or_keep: after the secret is gone, asks the gate again.
@@ -4744,11 +4824,22 @@ do_retire_smtp_lines() {
     fi
   fi
   if [[ ! -e "$smtp_retirement_record" ]]; then
-    if ! smtp_backup_dir ||
-      ! ( umask 077 && smtp_env_rewrite backup < "$environment_file" > "$smtp_backup_dir/$environment_file" ) ||
-      { [[ -f "$smtp_overlay_file" && ! -L "$smtp_overlay_file" ]] && ! cp -a -- "$smtp_overlay_file" "$smtp_backup_dir/$smtp_overlay_file"; }; then
+    # #1834 slice 4: as install.sh does, a run killed before its step record
+    # left a marked folder; it is adopted (its copy rewritten while
+    # .env-orbit still holds the SMTP lines), never copied a second time.
+    # Otherwise the marker naming the new folder goes first, then the copy.
+    local adopted=0
+    if smtp_find_orphan_copy; then
+      adopted=1
+      smtp_backup_dir="$smtp_copy_dir"
+    fi
+    if ! { { [[ "$adopted" == 1 ]] || { smtp_backup_dir &&
+      ( umask 077 && printf 'copy=%s\n' "$smtp_backup_dir" > "$smtp_backup_dir/$smtp_copy_marker" ); }; } &&
+      { [[ "$adopted" == 1 && "$rewrite" != 1 ]] || smtp_write_copy "$smtp_backup_dir"; } &&
+      { [[ ! -f "$smtp_overlay_file" || -L "$smtp_overlay_file" ]] ||
+        { rm -f -- "$smtp_backup_dir/$smtp_overlay_file" && cp -a -- "$smtp_overlay_file" "$smtp_backup_dir/$smtp_overlay_file"; }; }; }; then
       rm -f -- "$tmp"
-      [[ -z "$smtp_backup_dir" ]] || rm -rf -- "$smtp_backup_dir"
+      [[ -z "$smtp_backup_dir" || "$adopted" == 1 ]] || rm -rf -- "$smtp_backup_dir"
       printf 'Orbit repair: retire-smtp-lines refused, nothing was changed: the backup of %s could not be made in orbit-install-backups.\n' "$environment_file" >&2
       return 1
     fi
