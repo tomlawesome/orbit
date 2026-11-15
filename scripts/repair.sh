@@ -629,12 +629,15 @@ set -Eeuo pipefail
 #     (one bounded `compose exec -T orbit-app`, a read of the database) says
 #     source=imported or ui and the SMTP_* lines, the mail overlay's
 #     COMPOSE_FILE entry or .orbit-secrets/smtp-password remain (the shipped
-#     overlay file alone does not count). It copies .env-orbit (any inline
-#     SMTP_PASSWORD= line left out) and the overlay into a dated folder that
-#     lasts, orbit-install-backups/<stamp>-repair (mode 700, named on
-#     stderr), rewrites .env-orbit without the lines and the entry (a
-#     temporary file renamed over it), runs `up -d --no-build`, waits until
-#     Orbit answers the same again, then deletes the overlay and the secret.
+#     overlay file alone does not count). It copies the lines it removes
+#     from .env-orbit (never SMTP_PASSWORD= or any other line) and the
+#     overlay into an undo copy, orbit-install-backups/<stamp>-repair (mode
+#     700, named on stderr), rewrites .env-orbit without the lines and the
+#     entry (a temporary file renamed over it), runs `up -d --no-build`,
+#     waits until Orbit answers the same again, then deletes the overlay and
+#     the secret. It then asks again (#1834): a usable answer removes the
+#     undo copy, its folder when empty, and the step record; otherwise they
+#     stay, one stderr line names the copy, and the next run removes them.
 #     The secret is never copied, so it cannot be rolled back (owner
 #     decision 2, 2026-11-13); the plan line is followed by a stderr line
 #     saying so. A crash between steps leaves the step record
@@ -642,7 +645,7 @@ set -Eeuo pipefail
 #     until the stack has restarted without it. At execution it checks the
 #     restore journal and the backup/restore lock first, as do_start_services
 #     does, refuses with nothing changed if either says no, and holds the
-#     lock from the rewrite until the secret is deleted (#1848 O-F1).
+#     lock from the rewrite until the undo copy is dealt with (#1848 O-F1).
 #
 #   rerun-configuration           <- configuration-incomplete,
 #                                    configuration-invalid
@@ -1207,7 +1210,7 @@ set -Eeuo pipefail
 # always the FIRST step and every later step is skipped entirely on its
 # failure.
 #
-# Checkpoint storage — local-only, owner-only, kept until manually deleted
+# Checkpoint storage — local-only, owner-only, removed after a clean re-check
 # --------------------------------------------------------------------------
 # The bundle is written into a freshly created, mode-0700 directory
 # (`.orbit-repair-checkpoint.XXXXXX`, a sibling naming convention to the
@@ -1215,13 +1218,18 @@ set -Eeuo pipefail
 # prefixes, distinct so it is never mistaken for either by a later
 # diagnosis) as a mode-0600 file. Unlike the stage-one private recovery
 # directory (`cleanup_recovery_dir`, always removed at the end of every
-# `--execute` run), the checkpoint directory is NEVER removed by this
-# script — it is local-only, kept until the operator manually deletes it,
-# per the owner's explicit "no ad-hoc download hosting from a broken box"
-# decision (the recovered app's normal export/download flow is the intended
-# way to get a copy off the machine, not this checkpoint). Its path is never
-# printed on stdout (the enum-only contract holds); it IS printed as human
-# guidance on stderr, both right after a successful checkpoint and again (if
+# `--execute` run), the checkpoint directory outlives the run until a full
+# re-diagnosis comes back clean: `settle_credential_checkpoints` removes it
+# then, in the same run, and otherwise keeps and names it so a later clean
+# `--execute` run removes it (#1834, owner decision 11b; ADR-0014 amendment
+# 2026-11-15). It holds the OLD password, which after the ALTER ROLE opens
+# nothing but a volume snapshot the operator took themselves. It stays
+# local-only, per the owner's explicit "no ad-hoc download hosting from a
+# broken box" decision (the recovered app's normal export/download flow is
+# the intended way to get a copy off the machine, not this checkpoint). Its
+# path is never printed on stdout (the enum-only contract holds); it IS
+# printed as human guidance on stderr, right after a successful checkpoint,
+# at settle time, and again (if
 # applicable) inside any later step-failure guidance — see "Any step
 # failure" below.
 #
@@ -1904,11 +1912,12 @@ readonly -A backup_for_action=(
 #   prior-mode             the action is a mode change; the undo is the mode
 #                          the file had before
 #   backup-folder-except-secret
-#                          (#1817) .env-orbit (any SMTP_PASSWORD= line left
-#                          out) and the mail overlay are copied first into a
-#                          dated folder that lasts,
+#                          (#1817) the lines removed from .env-orbit (never
+#                          SMTP_PASSWORD=) and the mail overlay are copied
+#                          first into an undo copy,
 #                          orbit-install-backups/<stamp>-repair (mode 700,
-#                          named on stderr); the SMTP password file is
+#                          named on stderr), removed once mail sending is
+#                          confirmed (#1834); the SMTP password file is
 #                          deleted and never copied, so it cannot be rolled
 #                          back (owner decision, 2026-11-13)
 #   not-required           the action leaves nothing to roll back —
@@ -2051,6 +2060,7 @@ dangerous_exit_code=0
 dangerous_failure_reason=none
 checkpoint_bundle_path=""
 checkpoint_passphrase=""
+run_checkpoint_dirs=()
 rotate_pg_user=""
 rotate_pg_db=""
 rotate_db_id=""
@@ -4211,6 +4221,68 @@ restore_transaction_self_restore() {
   done
 }
 
+# #1834 slice 4: true only when no engine transaction may be live: there is
+# no .orbit-engine.lock, or it is a regular file older than the engine's own
+# stale age (src/lib/deploy-lock.ts DEPLOY_LOCK_STALE_MS, ten minutes). The
+# engine takes that lock with an exclusive create (O_EXCL) and reclaims it by
+# age; it never uses flock, so the age rule is the real protection and the
+# flock probe below adds none: it only notices some other process that
+# happens to hold flock on the file. The lock file is opened read-only, so it
+# is never created.
+readonly engine_lock_path=".orbit-engine.lock"
+readonly engine_lock_stale_seconds=600
+engine_lock_idle() {
+  local fd mtime now status=0
+  [[ -e "$engine_lock_path" || -L "$engine_lock_path" ]] || return 0
+  [[ ! -L "$engine_lock_path" && -f "$engine_lock_path" && -r "$engine_lock_path" ]] || return 1
+  mtime="$(stat -c %Y -- "$engine_lock_path" 2>/dev/null)" && now="$(date +%s)" || return 1
+  ((now - mtime > engine_lock_stale_seconds)) || return 1
+  if command -v flock >/dev/null 2>&1; then
+    { exec {fd}<"$engine_lock_path"; } 2>/dev/null || return 1
+    flock -n "$fd" >/dev/null 2>&1 || status=$?
+    exec {fd}<&-
+    [[ "$status" == 0 ]] || return 1
+  fi
+  return 0
+}
+
+# #1834 slice 4: the modes and types of a tree's entries, one line each,
+# sorted, for comparing a saved folder with its live one.
+restore_transaction_tree_modes() {
+  (cd -- "$1" && find . -mindepth 1 -printf '%P %y %m\n' | LC_ALL=C sort)
+}
+
+# #1834 slice 4: true only when a restore would change nothing: the staging
+# folder saved at least one original, and every path on the fixed allowlist
+# either exists on neither side or exists on both with the same type, mode
+# and bytes (a folder entry by entry). A live path with no saved original
+# was created by the transaction, so it is not a match. Symlinks on either
+# side, or a symlinked parent, never match.
+restore_transaction_originals_match_live() {
+  local staging_root="$1" path backup_path saved=0 had_backup have_live
+  for path in "${restore_transaction_paths[@]}"; do
+    backup_path="$staging_root/rollback/original/$path"
+    had_backup=0
+    [[ -e "$backup_path" || -L "$backup_path" ]] && had_backup=1
+    have_live=0
+    [[ -e "$path" || -L "$path" ]] && have_live=1
+    [[ "$had_backup" == "$have_live" ]] || return 1
+    [[ "$had_backup" == 1 ]] || continue
+    saved=1
+    [[ ! -L "$backup_path" && ! -L "$path" && ! -L "$(dirname -- "$path")" ]] || return 1
+    [[ "$(stat -c %a -- "$backup_path")" == "$(stat -c %a -- "$path")" ]] || return 1
+    if [[ -f "$backup_path" ]]; then
+      [[ -f "$path" ]] && cmp -s -- "$backup_path" "$path" || return 1
+    elif [[ -d "$backup_path" ]]; then
+      [[ -d "$path" ]] && diff -r --no-dereference -q -- "$backup_path" "$path" >/dev/null 2>&1 || return 1
+      [[ "$(restore_transaction_tree_modes "$backup_path")" == "$(restore_transaction_tree_modes "$path")" ]] || return 1
+    else
+      return 1
+    fi
+  done
+  [[ "$saved" == 1 ]]
+}
+
 do_restore_transaction() {
   local -a staging_matches=()
   local -a touched=()
@@ -4228,6 +4300,15 @@ do_restore_transaction() {
   has_mode "$staging_root/rollback" 700 || return 1
   is_real_non_symlink_directory "$staging_root/rollback/original" || return 1
   has_mode "$staging_root/rollback/original" 700 || return 1
+
+  # #1834 slice 4: with no engine transaction live, a staging folder whose
+  # restore would change nothing (committed or not) is removed rather than
+  # refused; anything else falls through to the refusals and the restore.
+  if engine_lock_idle && restore_transaction_originals_match_live "$staging_root"; then
+    rm -rf -- "$staging_root" || return 1
+    printf 'Orbit repair: removed %s; no install is running and restoring from it would change nothing (every saved file matches the live one).\n' "$staging_root" >&2
+    return 0
+  fi
 
   # install.sh writes $staging_root/committed the moment its own transaction
   # commits (immediately before the long image-pull/health-wait phase — see
@@ -4479,22 +4560,31 @@ restart_compose_service() {
 # copy): gated on Orbit's own done-marker, each step idempotent, every file
 # written to a temporary file beside it and renamed over it, and the step
 # record .orbit-smtp-retirement saying how far a retirement got, so a crash
-# between steps resumes on the next run of either tool. Order: back up
-# .env-orbit and the overlay into a dated folder that lasts,
-# orbit-install-backups/<stamp>-repair/ (mode 700, named on stderr; any
-# inline SMTP_PASSWORD= line left out of the copy), rewrite .env-orbit
+# between steps resumes on the next run of either tool. Order: copy the
+# lines the rewrite removes from .env-orbit (never SMTP_PASSWORD= or any
+# other line) and the overlay into an undo copy,
+# orbit-install-backups/<stamp>-repair/ (mode 700, named on stderr), rewrite .env-orbit
 # without the SMTP_* keys and the overlay's COMPOSE_FILE entry (refused with
 # no change when .env-orbit changed after it was read), `up -d --no-build`,
 # wait until Orbit answers the done-marker again, then delete the overlay and
 # .orbit-secrets/smtp-password. The secret is deleted, never copied (owner
-# decision, 2026-11-13): it cannot be rolled back, and the plan says so. Run
-# as root, every file it leaves behind takes the deployment folder's owner,
-# as restore-compose-file does (#1844). Each file is written and chowned
-# directly, never through a symlink (FIX-S1): files in the deployment folder
-# are written to a name mktemp chooses, the chown is --no-dereference, and
-# the backup copies are written while their folder is still root's, which is
-# given to the folder's owner only once the copies are in it.
+# decision, 2026-11-13): it cannot be rolled back, and the plan says so.
+# Then the done-marker is asked again (#1834, owner decision 10a): usable,
+# the undo copy, its folder when empty, and the record go; otherwise they
+# stay and one line names the copy, and the next run asks again. Run as root,
+# every file it leaves behind takes the deployment folder's owner, as
+# restore-compose-file does (#1844). Each file is written and chowned
+# directly, never through a symlink (FIX-S1): the step record and every file
+# written into a folder someone else may own (an adopted undo folder
+# included) go to a name mktemp chooses and are renamed into place, the chown
+# is --no-dereference, and a new undo folder gets its marker and copies while
+# it is still root's and is given to the folder's owner only once they are in
+# it.
 readonly smtp_retirement_record=".orbit-smtp-retirement"
+# Written into the undo copy's folder before the copy, naming that folder, so
+# a run killed before the step record leaves a copy the next run can adopt
+# (#1834 slice 4); a dated folder without it is never taken for one.
+readonly smtp_copy_marker=".orbit-smtp-undo"
 readonly smtp_secret_file=".orbit-secrets/smtp-password"
 readonly smtp_overlay_file="docker-compose.mail.yml"
 readonly mail_sending_status_timeout=30s
@@ -4502,7 +4592,8 @@ readonly smtp_retirement_ready_seconds=120
 
 # smtp_env_rewrite <retire|backup> < .env-orbit > copy — install.sh's, byte for
 # byte: retire drops the SMTP_* keys (src/lib/config-contract.ts's list) and
-# the overlay's COMPOSE_FILE entry; backup drops only SMTP_PASSWORD= lines.
+# the overlay's COMPOSE_FILE entry; backup keeps only the lines retire drops
+# or rewrites, never SMTP_PASSWORD= (#1834).
 # Exits 3 when a COMPOSE_FILE line naming the overlay is not a plain
 # colon-separated list or would be left empty.
 smtp_env_rewrite() {
@@ -4512,7 +4603,10 @@ smtp_env_rewrite() {
     {
       key = $0; sub(/=.*/, "", key)
       if (index($0, "=") == 0) key = ""
-      if (mode == "backup") { if (key == "SMTP_PASSWORD") next; print; next }
+      if (mode == "backup") {
+        if ((key in keys && key != "SMTP_PASSWORD") || (key == "COMPOSE_FILE" && $0 ~ /docker-compose\.mail\.yml/)) print
+        next
+      }
       if (key in keys) next
       if (key == "COMPOSE_FILE" && $0 ~ /docker-compose\.mail\.yml/) {
         cr = ""; value = substr($0, 14)
@@ -4568,6 +4662,11 @@ mail_sending_gate_holds() {
   [[ "${BASH_REMATCH[1]}" != none ]]
 }
 
+# The undo copy's folder, relative to the deployment folder, once made or read
+# back from the step record; empty when none is known. The step, as read back.
+smtp_copy_dir=""
+smtp_record_step=""
+
 # As root, give a path the deployment folder's owner (restore-compose-file's
 # rule): the folder's user must still be able to read what this run leaves
 # behind. As any other user, a no-op. Never through a symlink: a link swapped
@@ -4576,14 +4675,15 @@ own_as_folder() {
   [[ "$(id -u)" != 0 ]] || chown --no-dereference --reference=. -- "$@"
 }
 
-# Writes the step record to a name mktemp chooses (created O_EXCL, mode 600)
-# and renames it over the record, so no fixed name a planted symlink could sit
-# at is ever opened for writing (FIX-S1).
+# smtp_write_record <step>: the step record (step=, and copy= naming the undo
+# copy's folder when one is known), written to a name mktemp chooses (created
+# O_EXCL, mode 600) and renamed over the record, so no fixed name a planted
+# symlink could sit at is ever opened for writing (FIX-S1).
 smtp_write_record() {
   local tmp
   tmp="$(mktemp "./${smtp_retirement_record}.XXXXXX")" || return 1
-  if ! printf 'step=%s\n' "$1" > "$tmp" || ! own_as_folder "$tmp" ||
-    ! mv -f -- "$tmp" "$smtp_retirement_record"; then
+  if ! { printf 'step=%s\n' "$1" && if [[ -n "$smtp_copy_dir" ]]; then printf 'copy=%s\n' "$smtp_copy_dir"; fi; } > "$tmp" ||
+    ! own_as_folder "$tmp" || ! mv -f -- "$tmp" "$smtp_retirement_record"; then
     rm -f -- "$tmp"
     return 1
   fi
@@ -4596,14 +4696,121 @@ smtp_discard_rewrite() {
   tmp=""
 }
 
-# smtp_backup_dir: makes this run's lasting backup folder,
+# smtp_read_record: sets $smtp_record_step and $smtp_copy_dir from the step
+# record. A copy= line naming anything but a dated folder directly inside
+# orbit-install-backups is ignored, so nothing outside it is ever removed.
+smtp_read_record() {
+  local entry
+  smtp_record_step=""
+  smtp_copy_dir=""
+  if [[ ! -f "$smtp_retirement_record" || -L "$smtp_retirement_record" ]]; then return 0; fi
+  while IFS= read -r entry || [[ -n "$entry" ]]; do
+    if [[ "$entry" == step=* ]]; then
+      smtp_record_step="${entry#step=}"
+    elif [[ "$entry" =~ ^copy=(orbit-install-backups/[0-9]{8}T[0-9]{6}Z(-repair)?(-[2-9])?)$ ]]; then
+      smtp_copy_dir="${BASH_REMATCH[1]}"
+    fi
+  done < "$smtp_retirement_record"
+  return 0
+}
+
+# smtp_discard_copy: the change is confirmed. Removes the files the
+# retirement wrote into the undo copy's folder (.env-orbit's lines, the copy
+# marker and, from repair.sh, the overlay, with any temporary file a killed
+# run left for either, the older fixed name included), the
+# folder when nothing else is in it, then the step record. Anything else in
+# the folder stays.
+smtp_discard_copy() {
+  if [[ -n "$smtp_copy_dir" && ! -L orbit-install-backups && -d "$smtp_copy_dir" && ! -L "$smtp_copy_dir" ]]; then
+    rm -f -- "$smtp_copy_dir/.env-orbit" "$smtp_copy_dir/$smtp_overlay_file" "$smtp_copy_dir/$smtp_copy_marker" \
+      "$smtp_copy_dir/.env-orbit.smtp-copy.tmp" "$smtp_copy_dir"/.env-orbit.smtp-copy.?????? \
+      "$smtp_copy_dir/$smtp_overlay_file".smtp-copy.?????? || return 1
+    rmdir -- "$smtp_copy_dir" 2>/dev/null || true
+  fi
+  rm -f -- "$smtp_retirement_record"
+}
+
+# smtp_find_orphan_copy: with no step record, the newest dated folder in
+# orbit-install-backups whose copy marker is a regular file naming that same
+# folder is a killed run's undo copy; sets $smtp_copy_dir to it. A folder
+# without the marker (a hand-made one included), with a symlinked marker, or
+# whose copy is a link or not a file, is never taken.
+smtp_find_orphan_copy() {
+  local saved_options folder name marker found=""
+  smtp_copy_dir=""
+  [[ -d orbit-install-backups && ! -L orbit-install-backups ]] || return 1
+  saved_options="$(shopt -p nullglob dotglob)" || true
+  shopt -s nullglob
+  shopt -u dotglob
+  for folder in orbit-install-backups/*; do
+    name="${folder#orbit-install-backups/}"
+    [[ "$name" =~ ^[0-9]{8}T[0-9]{6}Z(-repair)?(-[2-9])?$ && -d "$folder" && ! -L "$folder" ]] || continue
+    marker="$folder/$smtp_copy_marker"
+    [[ -f "$marker" && ! -L "$marker" && "$(head -c 128 -- "$marker")" == "copy=$folder" ]] || continue
+    if [[ -L "$folder/.env-orbit" ]] || { [[ -e "$folder/.env-orbit" ]] && [[ ! -f "$folder/.env-orbit" ]]; }; then
+      continue
+    fi
+    found="$folder"
+  done
+  eval "$saved_options"
+  [[ -n "$found" ]] || return 1
+  smtp_copy_dir="$found"
+}
+
+# smtp_write_copy <folder>: the undo copy of the lines the retirement removes
+# from .env-orbit, written to a temporary file in <folder> whose name mktemp
+# chooses (mode 600) and renamed over <folder>/.env-orbit, so an existing
+# copy (a hard link or a symlink included) is replaced, never written through
+# (#1834, FIX-S1); then given the folder's owner, --no-dereference, so a link
+# swapped in after the rename is re-owned itself, its target untouched.
+smtp_write_copy() {
+  local tmp
+  tmp="$(mktemp "$1/.env-orbit.smtp-copy.XXXXXX")" || return 1
+  if ! smtp_env_rewrite backup < "$environment_file" > "$tmp" || ! mv -fT -- "$tmp" "$1/.env-orbit"; then
+    rm -f -- "$tmp"
+    return 1
+  fi
+  own_as_folder "$1/.env-orbit"
+}
+
+# smtp_copy_overlay <folder>: the mail overlay, when it is a regular file,
+# copied with its mode into <folder> the same way: to a mktemp name (cp
+# removes that name and creates it afresh), renamed over
+# <folder>/docker-compose.mail.yml, then given the folder's owner (FIX-S1).
+smtp_copy_overlay() {
+  local tmp
+  [[ -f "$smtp_overlay_file" && ! -L "$smtp_overlay_file" ]] || return 0
+  tmp="$(mktemp "$1/${smtp_overlay_file}.smtp-copy.XXXXXX")" || return 1
+  if ! cp -a --remove-destination -- "$smtp_overlay_file" "$tmp" || ! mv -fT -- "$tmp" "$1/$smtp_overlay_file"; then
+    rm -f -- "$tmp"
+    return 1
+  fi
+  own_as_folder "$1/$smtp_overlay_file"
+}
+
+# smtp_confirm_or_keep: after the secret is gone, asks the gate again.
+# Usable: the undo copy and the record go. Otherwise both stay, and one line
+# names the copy; the next run of repair or an update asks again.
+smtp_confirm_or_keep() {
+  local copy="$PWD/${smtp_copy_dir}/.env-orbit"
+  if mail_sending_gate_holds; then
+    smtp_discard_copy && return 0
+    printf 'Orbit repair: retire-smtp-lines could not remove the undo copy %s; the next run tries again.\n' "$copy" >&2 || true
+    return 0
+  fi
+  if [[ -n "$smtp_copy_dir" && -f "$smtp_copy_dir/.env-orbit" ]]; then
+    printf 'Orbit repair: retire-smtp-lines kept the undo copy %s, because mail sending could not be confirmed after the SMTP password file was deleted; the next run of repair or an update removes it once it is.\n' "$copy" >&2 || true
+  fi
+}
+
+# smtp_backup_dir: makes this run's undo-copy folder,
 # orbit-install-backups/<UTC stamp>-repair (-2..-9 when the name exists),
-# every level mode 700, in the installer's own backups folder, which neither
-# tool ever cleans up from an earlier run. Sets $smtp_backup_dir, and
+# every level mode 700, in the installer's own backups folder; it goes once
+# the retirement is confirmed (smtp_discard_copy). Sets $smtp_backup_dir, and
 # $smtp_backup_root_made to 1 when this run made orbit-install-backups. Gives
-# neither folder away: the caller does that once the copies are in the dated
-# folder, so nobody but this run can create an entry in it while it writes
-# there (FIX-S1).
+# neither folder away: the caller does that once the marker and the copies
+# are in the dated folder, so nobody but this run can create an entry in it
+# while it writes there (FIX-S1).
 readonly smtp_backup_root="orbit-install-backups"
 smtp_backup_dir=""
 smtp_backup_root_made=0
@@ -4634,8 +4841,8 @@ smtp_env_sum() {
 }
 
 # Step 1 of retire-smtp-lines, run under the lock do_retire_smtp_lines holds:
-# 1. The rewrite, the lasting backup (the password left out) and the
-# record. The rewrite is made from .env-orbit as first read and checked
+# 1. The rewrite, the undo copy (only the lines the rewrite removes, never
+# SMTP_PASSWORD=) and the record. The rewrite is made from .env-orbit as first read and checked
 # against that read's checksum; the backup reads the file again, and the
 # checksum is compared once more just before the rename, so the backup and
 # the rewrite come from the same bytes and an edit made meanwhile is never
@@ -4665,18 +4872,34 @@ retire_smtp_prepare() {
     fi
   fi
   if [[ ! -e "$smtp_retirement_record" ]]; then
-    if ! smtp_backup_dir ||
-      ! ( umask 077 && smtp_env_rewrite backup < "$environment_file" > "$smtp_backup_dir/$environment_file" ) ||
-      ! own_as_folder "$smtp_backup_dir/$environment_file" ||
-      { [[ -f "$smtp_overlay_file" && ! -L "$smtp_overlay_file" ]] && ! cp -a -- "$smtp_overlay_file" "$smtp_backup_dir/$smtp_overlay_file"; } ||
-      ! own_as_folder "$smtp_backup_dir" ||
-      { [[ "$smtp_backup_root_made" == 1 ]] && ! own_as_folder "$smtp_backup_root"; }; then
+    # #1834 slice 4: as install.sh does, a run killed before its step record
+    # left a marked folder; it is adopted (its copy rewritten while
+    # .env-orbit still holds the SMTP lines), never copied a second time.
+    # Otherwise the marker naming the new folder goes first, then the copy.
+    # Every file is given the folder's owner, and the dated folder (and
+    # orbit-install-backups, when this run made it) only once the marker and
+    # the copies are in it (FIX-S1). An adopted folder may already be the
+    # owner's, so smtp_write_copy and smtp_copy_overlay write through mktemp
+    # names and rename; own_as_folder never follows a link.
+    local adopted=0
+    if smtp_find_orphan_copy; then
+      adopted=1
+      smtp_backup_dir="$smtp_copy_dir"
+    fi
+    if ! { { [[ "$adopted" == 1 ]] || { smtp_backup_dir &&
+      ( umask 077 && printf 'copy=%s\n' "$smtp_backup_dir" > "$smtp_backup_dir/$smtp_copy_marker" ); }; } &&
+      own_as_folder "$smtp_backup_dir/$smtp_copy_marker" &&
+      { [[ "$adopted" == 1 && "$rewrite" != 1 ]] || smtp_write_copy "$smtp_backup_dir"; } &&
+      smtp_copy_overlay "$smtp_backup_dir" &&
+      own_as_folder "$smtp_backup_dir" &&
+      { [[ "$smtp_backup_root_made" != 1 ]] || own_as_folder "$smtp_backup_root"; }; }; then
       smtp_discard_rewrite
-      [[ -z "$smtp_backup_dir" ]] || rm -rf -- "$smtp_backup_dir"
+      [[ -z "$smtp_backup_dir" || "$adopted" == 1 ]] || rm -rf -- "$smtp_backup_dir"
       printf 'Orbit repair: retire-smtp-lines refused, nothing was changed: the backup of %s could not be made in orbit-install-backups.\n' "$environment_file" >&2
       return 1
     fi
-    printf 'Orbit repair: retire-smtp-lines backed up %s (without any SMTP_PASSWORD= line) and the mail overlay in %s/%s\n' \
+    smtp_copy_dir="$smtp_backup_dir"
+    printf 'Orbit repair: retire-smtp-lines copied the lines it removes from %s (never SMTP_PASSWORD=) and the mail overlay into %s/%s, until mail sending is confirmed\n' \
       "$environment_file" "$PWD" "$smtp_backup_dir" >&2 || true
     if ! smtp_write_record backed-up; then
       smtp_discard_rewrite
@@ -4702,8 +4925,9 @@ retire_smtp_prepare() {
 # the other starts (do_start_services, do_recreate_services) hold. The
 # journal and the lock are checked before anything is written, since
 # .env-orbit is itself in the backup set, and the lock is held from the
-# rewrite through the restart to the secret's deletion; a backup or restore
-# that starts meanwhile sees it held and refuses. A refusal changes nothing.
+# rewrite through the restart to the undo copy's removal; a backup or
+# restore that starts meanwhile sees it held and refuses. A refusal changes
+# nothing.
 do_retire_smtp_lines() {
   local refusal="" detail="" status=0 deadline confirmed=0
 
@@ -4723,6 +4947,18 @@ do_retire_smtp_lines() {
     return 1
   fi
   # Every return from here on releases the lock.
+  smtp_read_record
+
+  # A retirement that finished but was not confirmed (#1834): only the
+  # confirmation is left, so its undo copy goes once the gate holds; nothing
+  # new is copied.
+  if [[ "$smtp_record_step" == retired ]] && ! smtp_lines_present && ! smtp_overlay_listed &&
+    [[ ! -e "$smtp_secret_file" && ! -L "$smtp_secret_file" ]]; then
+    smtp_confirm_or_keep
+    release_backup_restore_lock
+    return 0
+  fi
+
   retire_smtp_prepare || { release_backup_restore_lock; return 1; }
 
   # 2. Start the stack on the rewritten file. Until it is up, the running
@@ -4754,7 +4990,11 @@ do_retire_smtp_lines() {
 
   # 3. Nothing mounts them now. The secret is deleted, never copied.
   rm -f -- "$smtp_overlay_file" "$smtp_secret_file" || { release_backup_restore_lock; return 1; }
-  rm -f -- "$smtp_retirement_record" || { release_backup_restore_lock; return 1; }
+
+  # 4. The undo copy goes once Orbit confirms mail sending without the
+  # secret (#1834); otherwise it is kept and named.
+  smtp_write_record retired || true
+  smtp_confirm_or_keep
   release_backup_restore_lock
 }
 
@@ -5259,6 +5499,7 @@ do_checkpoint_step() {
     original_hex=""
     return 1
   }
+  run_checkpoint_dirs+=("$checkpoint_dir")
   chmod 700 -- "$checkpoint_dir" || {
     checkpoint_passphrase=""
     original_hex=""
@@ -5291,7 +5532,7 @@ do_checkpoint_step() {
   recovered_hex=""
   checkpoint_bundle_path="$bundle_path"
   printf 'Orbit repair: pre-rotation checkpoint created and verified at %s\n' "$checkpoint_dir" >&2
-  printf 'Orbit repair: (passphrase-encrypted, ORBKEK01 format; keep the passphrase and this file — Orbit never stores the passphrase — until you have confirmed the rotation succeeded.)\n' >&2
+  printf 'Orbit repair: (passphrase-encrypted, ORBKEK01 format; keep the passphrase — Orbit never stores it — until this file is gone; repair removes it once a re-check is clean.)\n' >&2
   return 0
 }
 
@@ -5895,6 +6136,75 @@ run_safe_batch() {
   fi
 }
 
+# Credential checkpoint removal (#1834, owner decision 11b, 2026-11-14;
+# ADR-0014 amendment 2026-11-15). Called once per --execute run, after that
+# run's own full re-diagnosis; --check and --plan never call it. $1 is 1 only
+# when that re-diagnosis reported `diagnosis result=healthy` (no credential
+# finding, services ready) and no action in this run failed — "Orbit
+# started" is never enough. $2 (optional) names why the run stopped early:
+# `version-unsupported` gives a next step that names the version problem,
+# since re-running --execute would refuse the same way.
+#
+# Only $run_checkpoint_dirs is considered: the `.orbit-repair-checkpoint.*`
+# entries that existed when this run started (snapshot_run_checkpoints) plus
+# the one this run created (do_checkpoint_step). A folder another run creates
+# mid-run belongs to that run and is left alone, unnamed. On a clean re-check
+# each is removed: it holds the OLD database password, which after the ALTER
+# ROLE opens nothing but a volume snapshot the operator took themselves.
+# Otherwise each is kept, named on stderr, and the next step given; a later
+# clean run removes it. Only a real, readable directory holding nothing but
+# the bundle is removed; anything else under that name is named and left for
+# the operator.
+settle_credential_checkpoints() {
+  local clean="$1" reason="${2:-}" dir
+  for dir in "${run_checkpoint_dirs[@]:-}"; do
+    [[ -n "$dir" ]] || continue
+    [[ -e "$dir" || -L "$dir" ]] || continue
+    if [[ "$clean" == 1 ]] && is_real_non_symlink_directory "$dir" && is_removable_checkpoint_dir "$dir"; then
+      if rm -rf -- "$dir"; then
+        printf 'Orbit repair: the re-check is clean, so the pre-rotation credential checkpoint %s (the old database password) was removed.\n' "$dir" >&2
+        continue
+      fi
+    fi
+    if [[ "$clean" == 1 ]]; then
+      printf 'Orbit repair: the credential checkpoint %s was kept: it is not the shape repair created, cannot be read, or could not be removed; check its contents and delete it yourself.\n' "$dir" >&2
+    elif [[ "$reason" == version-unsupported ]]; then
+      printf 'Orbit repair: the pre-rotation credential checkpoint %s was kept, because repair refused to act on this deployment'"'"'s version.\n' "$dir" >&2
+      printf 'Orbit repair: next step: fix the deployment version first (reinstall or update .env-orbit with an Orbit release, see docs/adr/0016); the first repair run after that whose re-check is clean removes the checkpoint.\n' >&2
+    else
+      printf 'Orbit repair: the pre-rotation credential checkpoint %s was kept, because this run'"'"'s re-check is not clean.\n' "$dir" >&2
+      printf 'Orbit repair: next step: fix what the re-check reports, then re-run "repair.sh --execute"; a run whose re-check is clean removes the checkpoint.\n' >&2
+    fi
+  done
+}
+
+# Records the `.orbit-repair-checkpoint.*` entries present when this run
+# starts, so settle_credential_checkpoints never touches one created later by
+# another run. do_checkpoint_step appends this run's own.
+snapshot_run_checkpoints() {
+  local dir
+  run_checkpoint_dirs=()
+  for dir in ./.orbit-repair-checkpoint.*; do
+    [[ -e "$dir" || -L "$dir" ]] || continue
+    run_checkpoint_dirs+=("$dir")
+  done
+}
+
+# True when $1 can be read and holds nothing but the checkpoint bundle (a
+# regular file), or nothing at all (a run killed between mktemp and the
+# bundle write). An unreadable folder cannot be listed, so it is never judged
+# removable.
+is_removable_checkpoint_dir() {
+  local entry
+  [[ -r "$1" && -x "$1" ]] || return 1
+  for entry in "$1"/* "$1"/.[!.]* "$1"/..?*; do
+    [[ -e "$entry" || -L "$entry" ]] || continue
+    [[ "$entry" == "$1/postgres-password.orbkek" ]] || return 1
+    is_regular_non_symlink_file "$entry" || return 1
+  done
+  return 0
+}
+
 execute_repair() {
   local entry action fclass ftarget
 
@@ -5903,6 +6213,7 @@ execute_repair() {
   checkpoint_bundle_path=""
   safe_batch_exit_code=0
   dangerous_exit_code=0
+  snapshot_run_checkpoints
 
   run_diagnosis
 
@@ -5920,6 +6231,7 @@ execute_repair() {
     fi
     run_diagnosis
     print_check_lines
+    settle_credential_checkpoints 0
     exit 5
   fi
 
@@ -5941,6 +6253,7 @@ execute_repair() {
       printf 'dangerous result=refused done=0 failed=0 reason=deployment-version-unsupported\n'
     fi
     print_check_lines
+    settle_credential_checkpoints 0 version-unsupported
     exit 6
   fi
 
@@ -5953,6 +6266,12 @@ execute_repair() {
   cleanup_recovery_dir
   run_diagnosis
   print_check_lines
+
+  local recheck_clean=0
+  if [[ "$check_worst" == healthy && "$safe_batch_exit_code" != 4 && "$dangerous_exit_code" != 4 ]]; then
+    recheck_clean=1
+  fi
+  settle_credential_checkpoints "$recheck_clean"
 
   # Final exit code — see "EXIT CODES (--execute --dangerous)" above for the
   # full precedence table this implements. A real failure (4) in either

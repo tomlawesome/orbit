@@ -1344,17 +1344,20 @@ planned (a `folder-moved` finding), neither `restart-services` nor
 `retire-smtp-lines` (#1817) resolves `smtp-lines-retirable` with
 `rollback=backup-folder-except-secret expect=smtp-lines-retired`, and runs
 only in the safe batch the operator chooses (`--execute --safe-only`); a run
-without `--safe-only` neither runs nor lists it. It copies `.env-orbit` (any
-inline `SMTP_PASSWORD=` line left out) and the overlay into a dated folder that
-lasts, `orbit-install-backups/<stamp>-repair/` (mode 700, its path named on
-stderr), rewrites `.env-orbit` without the `SMTP_*` keys and the overlay's
+without `--safe-only` neither runs nor lists it. It copies only the lines it
+removes from `.env-orbit` (never `SMTP_PASSWORD=` or any other line) and the
+overlay into an undo copy, `orbit-install-backups/<stamp>-repair/` (mode 700,
+its path named on stderr), rewrites `.env-orbit` without the `SMTP_*` keys and the overlay's
 `COMPOSE_FILE` entry (refused with no change if `.env-orbit` changed after it
 was read), runs `up -d --no-build`, waits until Orbit gives the same
 answer again, then deletes the overlay and `.orbit-secrets/smtp-password`. The
 secret is deleted, never copied, so it cannot be rolled back: `mutation` is
 `secret-deletion`, and every plan line for it is followed on stderr by a line
-saying so. A crash between steps leaves the step record `.orbit-smtp-retirement`
-and the next run resumes; the secret stays until the stack has restarted
+saying so. Once the secret is gone it asks Orbit again (#1834): a usable answer
+removes the undo copy, its folder when empty, and the step record; otherwise
+they stay and one stderr line names the copy, and the next run removes them. A
+crash between steps leaves the step record `.orbit-smtp-retirement` and the
+next run resumes; the secret stays until the stack has restarted
 without it.
 
 `manual` is not an action repair performs: it marks a finding a human must

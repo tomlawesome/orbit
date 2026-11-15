@@ -290,11 +290,17 @@ dated folder's `engine/` instead, and prints one command to stop them; run
 it, then install again.
 
 `orbit-install-backups/` is not a backup of your Orbit data (that is what
-`scripts/backup.sh` makes). It is readable only by you; the installer never
-reads, runs, moves or deletes anything in a folder from an earlier run, and
-later installs ignore it. A run removes only its own copy of your original
-files once they are put back, and its own dated folder when that leaves it
-empty. You can leave it there.
+`scripts/backup.sh` makes). It is readable only by you. A run removes its
+own copy of your original files once they are put back, and its own dated
+folder when that leaves it empty. Your own files that an install moved aside
+(`moved/`, `engine/`) and the copy of your original files from an earlier run
+(`originals/`) are never deleted; the installer names them and leaves them for
+you. Undo copies from changes to an existing install (the SMTP and
+configuration-migration copies, and Repair's credential checkpoint) are
+removed once the change is confirmed, and an update lists any left by earlier
+releases and removes them only when you say so. See guarantee 58 in the
+[guarantee catalogue](installer-guarantees.md) for exactly what is and is not
+removed. You can leave the folder there.
 
 ### If an update stops
 
