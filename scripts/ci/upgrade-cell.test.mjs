@@ -410,7 +410,7 @@ describe("upgrade-cell.sh: FAIL, every step", () => {
     expectFail(r, w, { step: "assert", assertion: "image-is-candidate" });
   });
 
-  it.each(["env-file-intact", "overlay-composed", "secret-file-referenced", "oidc-intact"])(
+  it.each(["env-file-intact", "smtp-lines-retired", "overlay-retired", "mail-settings-imported", "secret-file-referenced", "oidc-intact"])(
     "shape assert failure %s is passed through; readback never runs",
     (id) => {
       const w = buildWorld();
