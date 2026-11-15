@@ -1053,3 +1053,47 @@ describe("escaped quotes and escaped keys in flow values (#1843, review of 5c2b1
     passes({ [ci]: 'job: {"stage": test}\n' });
   });
 });
+
+describe("escaped block-style keys (#1843, note 59986)", () => {
+  const ci = ".gitlab-ci.yml";
+  const raw = String.raw;
+  const esc = raw`job:
+  "\x74rigger":
+    "\x69nclude":
+      - remote: https://x
+`;
+
+  it("fails on escaped trigger and include keys in block style", () => {
+    fails({ [ci]: esc }, ci, 2);
+  });
+
+  it("fails on a plain trigger with an escaped include key", () => {
+    fails({ [ci]: raw`job:
+  trigger:
+    "\x69nclude":
+      - remote: https://x
+` }, ci, 3);
+  });
+
+  it("fails on a harmless deep escaped key (fail closed)", () => {
+    fails({ [ci]: raw`job:
+  variables:
+    "A\x42": c
+` }, ci, 3);
+  });
+
+  it("fails on an escaped key inside a followed local include", () => {
+    fails({ [ci]: "include:\n  - local: ci/a.yml\n", "ci/a.yml": esc }, "ci/a.yml", 2);
+  });
+
+  it("passes a double-quoted key with no backslash", () => {
+    passes({ [ci]: 'job:\n  "script":\n    - echo hi\n' });
+  });
+
+  it("passes a backslash only in a value", () => {
+    passes({ [ci]: raw`job:
+  script:
+    - "echo \\x"
+` });
+  });
+});
