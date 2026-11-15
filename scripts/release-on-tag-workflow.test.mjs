@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
@@ -14,6 +15,8 @@ const workflow = readFileSync(new URL("../.github/workflows/release-on-tag.yml",
   "\n",
 );
 const getOrbitScript = readFileSync(new URL("./get-orbit.sh", import.meta.url), "utf8").replaceAll("\r\n", "\n");
+
+const classifier = new URL("./ci/classify-release-tag.sh", import.meta.url).pathname;
 
 const stepStart = (name) => workflow.indexOf(`- name: ${name}`);
 const step = (name) => {
@@ -32,45 +35,77 @@ describe("release-on-tag workflow", () => {
   });
 
   it("creates the release from the mirrored tag without recomputing anything", () => {
-    const create = step("Create the release if it does not already exist");
-    expect(create).toContain("gh release view");
+    const create = step("Create the release");
+    expect(create).toContain("repos/${GITHUB_REPOSITORY}/releases"); // lists drafts too, so a re-run finds its own draft
     expect(create).toContain("gh release create");
     expect(create).toContain("--verify-tag");
   });
 
-  // #1704: the stable body is the version's CHANGELOG.md section, and no
-  // release is made without one.
-  const branches = () => {
-    const create = step("Create the release if it does not already exist");
-    const match = /"prerelease" \]\]; then\n(?<pre>[\s\S]*?)\n\s+else\n(?<stable>[\s\S]*?)\n\s+fi\n\s+fi/u.exec(create);
-    expect(match, "prerelease/stable branches").not.toBeNull();
-    return { create, pre: match.groups.pre, stable: match.groups.stable };
-  };
+  // #1848: only a stable vX.Y.Z tag is ever released; the refusal runs first.
+  const allSteps = () => workflow.slice(workflow.indexOf("\n    steps:\n")).split(/\n(?=      - name:)/u).slice(1);
+  const stepIndex = (name) => allSteps().findIndex((text) => text.startsWith(`      - name: ${name}`));
+  const CREATE = "Create the release";
+  const CHECK = "Check the launcher assets against the manifest";
+  const ATTACH = "Attach the launcher and manifest to the release";
 
-  it("gives a stable release the CHANGELOG.md section as its notes, never generated notes (#1704)", () => {
-    const { create, stable } = branches();
-    expect(stable).toContain("gh release create");
-    expect(stable).toContain("--notes-file");
-    expect(stable).not.toContain("--generate-notes");
+  it("refuses anything but a stable tag right after checkout and before any gh release call (#1848)", () => {
+    const steps = allSteps();
+    const refuse = steps[1];
+    expect(steps[0]).toContain("actions/checkout@");
+    expect(refuse).toContain("bash scripts/ci/classify-release-tag.sh");
+    expect(refuse).toContain("stable");
+    expect(refuse).toContain("::error::");
+    expect(refuse).toMatch(/TAG: \$\{\{ github\.ref_name \}\}/u);
+    expect(refuse).toMatch(/exit 1/u);
+    expect(refuse).not.toContain("gh release");
+    const firstGh = workflow.indexOf("gh release");
+    expect(workflow.indexOf("classify-release-tag.sh")).toBeGreaterThanOrEqual(0);
+    expect(workflow.indexOf("classify-release-tag.sh")).toBeLessThan(firstGh);
+    expect(stepIndex("Create the release")).toBeGreaterThan(1);
+  });
+
+  it("has no pre-release branch: no --prerelease, --latest=false or --generate-notes anywhere (#1848)", () => {
+    const code = workflow.split("\n").filter((line) => !line.trimStart().startsWith("#")).join("\n");
+    expect(code).not.toContain("--prerelease");
+    expect(code).not.toContain("--latest=false");
+    expect(code).not.toContain("--generate-notes");
+  });
+
+  it("gives the release the CHANGELOG.md section as its notes (#1704)", () => {
+    const create = step(CREATE);
     expect(create).toContain("scripts/release-notes.mjs");
+    expect(create).toContain("--notes-file");
     expect(create.indexOf("scripts/release-notes.mjs")).toBeLessThan(create.indexOf("--notes-file"));
+    expect(create).toContain("repos/${GITHUB_REPOSITORY}/releases"); // lists drafts too, so a re-run finds its own draft
   });
 
-  it("keeps generated notes on the pre-release branch (#1704)", () => {
-    const { pre } = branches();
-    expect(pre).toContain("--prerelease");
-    expect(pre).toContain("--generate-notes");
-    expect(pre).not.toContain("--notes-file");
+  it("creates the release as a draft, only after the launcher assets check (#1848)", () => {
+    const create = step(CREATE);
+    expect(create).toMatch(/gh release create[\s\S]*--draft/u);
+    expect(create).toContain("--notes-file");
+    expect(create).toContain("--verify-tag");
+    expect(stepIndex(CHECK)).toBeGreaterThanOrEqual(0);
+    expect(stepIndex(CREATE)).toBeGreaterThan(stepIndex(CHECK));
+    expect(stepIndex(CREATE)).toBeLessThan(stepIndex(ATTACH));
   });
 
-  it("classifies the tag and never marks a pre-release tag Latest (#1121)", () => {
-    const create = step("Create the release if it does not already exist");
-    expect(create).toContain("bash scripts/ci/classify-release-tag.sh");
-    expect(create).toContain("--prerelease");
-    expect(create).toContain("--latest=false");
-    expect(stepStart("Check out the tagged commit and its preview/hotfix branches")).toBeLessThan(
-      stepStart("Create the release if it does not already exist"),
-    );
+  it("publishes the draft in the last step, after the upload (#1848)", () => {
+    const steps = allSteps();
+    const last = steps[steps.length - 1];
+    expect(last).toContain("gh release edit");
+    expect(last).toContain("--draft=false");
+    expect(last).toMatch(/TAG: \$\{\{ github\.ref_name \}\}/u);
+    expect(steps.length - 1).toBeGreaterThan(stepIndex(ATTACH));
+    expect(steps[stepIndex(ATTACH)]).toContain("gh release upload");
+    expect(steps[stepIndex(ATTACH)]).toContain("--clobber");
+    expect(steps[stepIndex(ATTACH)]).not.toContain("--draft=false");
+  });
+
+  it("classify-release-tag.sh says stable for vX.Y.Z and prerelease or refuses otherwise (#1848)", () => {
+    const run = (tag) => spawnSync("bash", [classifier, tag], { encoding: "utf8" });
+    expect(run("v1.2.3").stdout.trim()).toBe("stable");
+    expect(run("v1.3.0-e2e.1").stdout.trim()).toBe("prerelease");
+    expect(run("not-a-tag").status).not.toBe(0);
   });
 
   it("falls back to which mirrored branch contains the commit, preferring preview, when the tag names none", () => {
@@ -145,6 +180,7 @@ describe("release-on-tag workflow", () => {
     expect(stepStart("Check the launcher assets against the manifest")).toBeLessThan(
       stepStart("Attach the launcher and manifest to the release"),
     );
+    expect(stepStart("Check the launcher assets against the manifest")).toBeLessThan(stepStart("Create the release"));
   });
 
   // A stale launcher: the handoff is found by commit, but the signed manifest

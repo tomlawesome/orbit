@@ -50,7 +50,7 @@ base_url="${ORBIT_GET_BASE_URL:-https://github.com/tomlawesome/orbit}"
 channel="${ORBIT_CHANNEL:-latest}"
 version_pin="${ORBIT_VERSION:-}"
 if [[ -n "$version_pin" ]]; then
-  [[ "$version_pin" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]] || fail "ORBIT_VERSION must look like vX.Y.Z: ${version_pin}"
+  [[ "$version_pin" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "ORBIT_VERSION must look like vX.Y.Z: ${version_pin}"
   asset_base="${base_url}/releases/download/${version_pin}"
 elif [[ "$channel" == "latest" ]]; then
   asset_base="${base_url}/releases/latest/download"
@@ -113,7 +113,7 @@ fi
 manifest_value() { grep -F "\"$2\":" "$1" | sed -n 's/.*: *"\([^"]*\)".*/\1/p' | head -n1; }
 # The release manifest records the image label verbatim: vX.Y.Z.
 version="$(manifest_value "$manifest_json" version)"
-[[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]] || fail "the manifest has no valid version."
+[[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "the manifest has no valid version."
 # A validly signed manifest for a different release must not stand in for
 # the one asked for: an older signed release is still signed.
 if [[ -n "$version_pin" && "$version" != "$version_pin" ]]; then
