@@ -716,7 +716,7 @@ describe("#1823 review: repair creates the lock when it is missing", () => {
     expect(existsSync(lockOf(targetDir))).toBe(false);
   });
 
-  it("#1823 review: a lock that cannot be created refuses with the can't-check words and runs no compose start", () => {
+  it("#1823 review, #1848 O-F5: a lock that cannot be created refuses, naming the backups folder, and runs no compose start", () => {
     const targetDir = makeFixture();
     mkdirSync(join(targetDir, "backups"), { recursive: true });
     chmodSync(join(targetDir, "backups"), 0o500);
@@ -724,7 +724,8 @@ describe("#1823 review: repair creates the lock when it is missing", () => {
       const result = runRepair(targetDir, ["--execute", "--safe-only"], STOPPED);
       expect(result.stdout).toContain("execute action=start-services resolves=services-not-running result=failed");
       expect(result.status).toBe(4);
-      expect(result.stderr).toContain(CANT_CHECK);
+      expect(result.stderr).toContain(`can't create the backups folder ${join(targetDir, "backups")}`);
+      expect(result.stderr).not.toContain("can't be read");
       expect(composeUpCalls(result)).toEqual([]);
     } finally {
       chmodSync(join(targetDir, "backups"), 0o700);

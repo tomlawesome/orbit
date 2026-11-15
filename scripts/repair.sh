@@ -3523,8 +3523,10 @@ restore_journal_named() {
 
 # #1804 point 1, execution only: the backup/restore lock, held by backup.sh,
 # restore.sh and a recovery-bundle export (their engine). Prints `held`,
-# `unreadable`, `untestable <flock's words>` or nothing. A lock that is
-# anything but a regular, non-symlink, readable file is `unreadable` and never
+# `unreadable`, `untestable <flock's words>` or nothing (an acquire can also
+# leave `uncreatable`: the backups folder or lock file could not be made). A
+# lock that is anything but a regular, non-symlink, readable file is
+# `unreadable` and never
 # opened (a FIFO would block; review 5). A regular file is opened read-only,
 # so a lock file that vanishes is never created; one that then cannot be
 # opened is `unreadable` too. A non-blocking lock has three outcomes (audit
@@ -3556,7 +3558,8 @@ probe_backup_restore_lock() {
     # its own and run alongside (#1823 O-R2).
     [[ "${1:-}" == keep ]] || return 0
     if ! ( umask 077 && mkdir -p "$backup_directory" && : >>"$backup_restore_lock_path" ) 2>/dev/null; then
-      lock_probe_state=unreadable
+      # #1848 O-F5: the folder or its lock file can't be made; say so.
+      lock_probe_state=uncreatable
       return 0
     fi
   fi
@@ -3597,6 +3600,14 @@ lock_state_refusal() {
   if [[ "$lock_state" == unreadable ]]; then
     printf "repair can't check whether a backup, restore or export is running: the lock at %s can't be read" \
       "$backup_restore_lock_path"
+  elif [[ "$lock_state" == uncreatable ]]; then
+    if [[ -n "${ORBIT_BACKUP_DIR:-}" ]]; then
+      printf "the user running repair can't create the backups folder %s or write its lock file there; ORBIT_BACKUP_DIR points at it, so mount or create that folder and make it writable for the user running repair, or point ORBIT_BACKUP_DIR at the backups folder backup.sh uses, then re-run repair" \
+        "$backup_directory"
+    else
+      printf "the user running repair can't create the backups folder %s or write its lock file there; create that folder (the default ./backups) and make it writable for the user running repair, or set ORBIT_BACKUP_DIR to the backups folder backup.sh uses, then re-run repair" \
+        "$backup_directory"
+    fi
   elif [[ "$lock_state" == untestable* ]]; then
     # The Compose words are an argument so the source names no compose
     # start outside do_start_services, do_recreate_services or

@@ -1403,7 +1403,11 @@ acting:
   tested on that filesystem (flock said: ...)", with how to start Orbit by
   hand). Once past these checks, both actions take that lock themselves and
   hold it for the whole Compose call (#1823), so a backup or restore starting
-  meanwhile finds it held and is never reported as a running backup. Without `flock` the lock is not checked; the
+  meanwhile finds it held and is never reported as a running backup. When
+  the lock file does not exist and the backups folder or the lock file
+  cannot be created (#1848 O-F5), the refusal names the folder and says how
+  to fix it: create or mount it and make it writable, or point
+  `ORBIT_BACKUP_DIR` at the folder `backup.sh` uses. Without `flock` the lock is not checked; the
   journal still is.
 - `recreate-services`' Compose call is bounded with `--kill-after`, as
   `start-services`' is.
