@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
+import type { SQL } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
 import { log } from "@/lib/logger";
 import type { KeyFaultReason, KeyState } from "@/server/key-state";
 
@@ -21,9 +23,11 @@ type Inserted = { action: string; changes: Record<string, unknown>; [key: string
 function fakeDb(selects: unknown[][], options: { insertFails?: boolean; selectFails?: boolean } = {}) {
   const inserted: Inserted[] = [];
   const queue = [...selects];
+  const wheres: Array<{ sql: string; params: unknown[] }> = [];
   const chain = (): Record<string, unknown> => {
     const self: Record<string, unknown> = {};
-    for (const name of ["from", "where", "orderBy", "limit"]) self[name] = () => self;
+    for (const name of ["from", "orderBy", "limit"]) self[name] = () => self;
+    self.where = (condition: SQL) => { wheres.push(new PgDialect().sqlToQuery(condition)); return self; };
     self.then = (resolve: (value: unknown) => unknown, reject: (reason: unknown) => unknown) =>
       (options.selectFails ? Promise.reject(new Error("conn string postgres://u:secret@h/db")) : Promise.resolve(queue.shift() ?? [])).then(resolve, reject);
     return self;
@@ -38,7 +42,7 @@ function fakeDb(selects: unknown[][], options: { insertFails?: boolean; selectFa
     }),
   };
   mocks.getDb.mockReturnValue(db);
-  return { inserted };
+  return { inserted, wheres };
 }
 
 const logged = () => JSON.stringify([
@@ -122,21 +126,31 @@ describe("sendKeyAlert", () => {
     expect(Object.keys(inserted[0].changes).sort()).toEqual(["addressHash", "reason"]);
   });
 
-  it("does not record again when the same fault is already held since the last working-again record", async () => {
+  it("does not record again when the same fault is already held since the last working-again record, and reads only held rows newer than that record", async () => {
     const fault = { reason: "missing", addressHash: hash("ops@harlow.example") };
-    const { inserted } = fakeDb([[{ createdAt: new Date("2026-11-01T00:00:00Z") }], [{ changes: fault }]]);
+    const restoredAt = new Date("2026-11-01T00:00:00Z");
+    const { inserted, wheres } = fakeDb([[{ createdAt: restoredAt }], [{ changes: fault }]]);
     const { sendKeyAlert } = await import("@/server/key-alert");
     await sendKeyAlert({ verdict: "unusable", reason: "missing" });
     expect(inserted).toEqual([]);
+    expect(wheres[0].sql).toContain('"action" = $1');
+    expect(wheres[0].params).toEqual(["encryption_key_restored"]);
+    expect(wheres[1].sql).toContain('"action" = $1');
+    expect(wheres[1].sql).toContain('"created_at" > $2');
+    expect(wheres[1].params[0]).toBe("encryption_key_alert_held");
+    expect(new Date(wheres[1].params[1] as string).getTime()).toBe(restoredAt.getTime());
     expect(logged()).toContain("key_unavailable");
   });
 
   it("does not record again for a held fault when there has never been a working-again record", async () => {
     const fault = { reason: "unreadable", heldKeyId: "a", addressHash: hash("ops@harlow.example") };
-    const { inserted } = fakeDb([[], [{ changes: fault }]]);
+    const { inserted, wheres } = fakeDb([[], [{ changes: fault }]]);
     const { sendKeyAlert } = await import("@/server/key-alert");
     await sendKeyAlert({ verdict: "unusable", reason: "unreadable", heldKeyId: "a" });
     expect(inserted).toEqual([]);
+    expect(wheres[1].sql).toContain('"action" = $1');
+    expect(wheres[1].sql).not.toContain("created_at");
+    expect(wheres[1].params).toEqual(["encryption_key_alert_held"]);
   });
 
   it.each<[string, Record<string, unknown> | null, KeyState]>([
@@ -209,12 +223,14 @@ describe("sendKeyRestoredNotice", () => {
   });
 
   it("mails the operator once, saying what was wrong, then records it so a second start sends nothing", async () => {
-    const { inserted } = fakeDb([
+    const { inserted, wheres } = fakeDb([
       [{ action: "encryption_key_alert_held", changes: { reason: "mismatch" }, createdAt: faultAt }],
       [{ createdAt: new Date("2026-11-01T00:00:00Z") }],
     ]);
     const { sendKeyRestoredNotice } = await import("@/server/key-alert");
     await sendKeyRestoredNotice();
+    expect(wheres[0].params).toEqual(["encryption_key_alert_sent", "encryption_key_alert_held"]);
+    expect(wheres[1].params).toEqual(["encryption_key_restored"]);
     expect(mocks.sendBoundedMail).toHaveBeenCalledTimes(1);
     const [to, mail, mailer] = mocks.sendBoundedMail.mock.calls[0];
     expect(to).toBe("ops@harlow.example");
@@ -227,7 +243,8 @@ describe("sendKeyRestoredNotice", () => {
     expect(mail.html).toContain("orbit.harlow.example");
     expect(mail.html).not.toContain("href=");
     expect(inserted).toHaveLength(1);
-    expect(inserted[0]).toMatchObject({ action: "encryption_key_restored", changes: {} });
+    expect(inserted[0]).toMatchObject({ action: "encryption_key_restored" });
+    expect(inserted[0].changes).toStrictEqual({});
     expect(logged()).toContain("working-again notice sent");
   });
 

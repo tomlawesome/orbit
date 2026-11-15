@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ReleaseNotes } from "@/release-notes";
+import { PgDialect } from "drizzle-orm/pg-core";
+import type { SQL } from "drizzle-orm";
+import { releaseNotes, type ReleaseNotes } from "@/release-notes";
+import { selectReleaseNotes, selectWhatsNew } from "@/lib/whats-new";
 
 /**
  * The what's-new record (#1618). The database is a recording fake: selects
@@ -68,7 +71,9 @@ describe("recordNewAccountSeenVersion", () => {
     expect(writes.inserts[0].values).toEqual({ userId: "u1", whatsNewSeenVersion: "v1.2.0" });
     expect(writes.inserts[0].conflict).toBe("update");
     expect(writes.inserts[0].config?.set).toEqual({ whatsNewSeenVersion: "v1.2.0" });
-    expect(writes.inserts[0].config?.setWhere).toBeDefined();
+    const guard = new PgDialect().sqlToQuery(writes.inserts[0].config?.setWhere as SQL);
+    expect(guard.sql).toBe('"user_preferences"."whats_new_seen_version" IS NULL');
+    expect(guard.params).toEqual([]);
   });
 
   it("uses the executor it is given (the account creation's transaction) rather than the database", async () => {
@@ -138,8 +143,8 @@ describe("readWhatsNew", () => {
     fakeDb([[{ seen: "v0.0.0" }]]);
     const { readWhatsNew } = await import("@/server/whats-new");
     const answer = await readWhatsNew("u1", { runningVersion: "v0.0.1" });
+    expect(answer).toEqual(selectWhatsNew({ seen: "v0.0.0", running: "v0.0.1", isAdmin: false, notes: releaseNotes }));
     expect(answer.version).toBe("v0.0.1");
-    expect(Array.isArray(answer.releases)).toBe(true);
   });
 });
 
@@ -170,7 +175,12 @@ describe("readReleaseNotes", () => {
 
   it("works with no options, from the notes the repo carries", async () => {
     const { readReleaseNotes } = await import("@/server/whats-new");
-    expect((await readReleaseNotes("u1")).version).toBeNull();
+    const answer = await readReleaseNotes("u1");
+    expect(answer).toEqual(selectReleaseNotes({ running: null, isAdmin: false, notes: releaseNotes }));
+    expect(answer.version).toBeNull();
+    expect(answer.releases.map((release) => release.version)).toEqual(
+      selectReleaseNotes({ running: null, isAdmin: false, notes: releaseNotes }).releases.map((release) => release.version),
+    );
   });
 });
 

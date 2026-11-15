@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { SQL } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
 
 /**
  * The export-retention settings (#1792). The database is a recording fake;
@@ -31,11 +33,12 @@ interface Capture {
   sets: Array<Record<string, unknown>>;
   audits: Array<Record<string, unknown>>;
   forClauses: string[];
+  wheres: Array<{ sql: string; params: unknown[] }>;
 }
 
 /** Selects answer from `reads` in order; the transaction's first select is `locked`. */
 function fakeDb(options: { reads?: Array<Row | undefined>; locked?: Row | undefined; updated?: Array<{ id: string }>; retimed?: number }) {
-  const capture: Capture = { sets: [], audits: [], forClauses: [] };
+  const capture: Capture = { sets: [], audits: [], forClauses: [], wheres: [] };
   const reads = [...(options.reads ?? [])];
   const makeSelect = (answer: () => Row | undefined) => () => {
     const self: Record<string, unknown> = {};
@@ -56,7 +59,7 @@ function fakeDb(options: { reads?: Array<Row | undefined>; locked?: Row | undefi
         capture.sets.push(values);
         const call = updateCall++ % 2;
         return {
-          where: () => ({
+          where: (condition: SQL) => (capture.wheres.push(new PgDialect().sqlToQuery(condition)), {
             returning: async () => call === 0
               ? (options.updated ?? [{ id: "row-1" }])
               : Array.from({ length: options.retimed ?? 0 }, (_, index) => ({ id: `a${index}` })),
@@ -242,7 +245,13 @@ describe("setArchiveRetention", () => {
     const result = await setArchiveRetention("admin-1", 3, valid);
     expect(capture.sets[0]).toMatchObject({ retentionHours: 24, maxPerHousehold: 4, maxTotalBytes: 50 * GIB, version: 4 });
     expect(capture.sets[0].updatedAt).toBeInstanceOf(Date);
-    expect(capture.sets[1]).toHaveProperty("expiresAt");
+    const retime = new PgDialect().sqlToQuery(capture.sets[1].expiresAt as SQL);
+    expect(retime.sql).toContain('"created_at" + make_interval(hours => $1::int)');
+    expect(retime.params).toEqual([24]);
+    expect(capture.wheres[0].sql).toContain('"version" = $1');
+    expect(capture.wheres[0].params).toEqual([3]);
+    expect(capture.wheres[1].sql).toContain('"purged_at" is null');
+    expect(capture.forClauses).toEqual(["update"]);
     expect(capture.audits).toEqual([{
       householdId: null,
       actorUserId: "admin-1",
@@ -263,6 +272,7 @@ describe("setArchiveRetention", () => {
     const { setArchiveRetention } = await import("@/server/archive-retention");
     await setArchiveRetention("u1", 3, { retentionHours: 6, keepPerHousehold: 2, maxTotalGigabytes: 20 });
     expect(capture.sets[0]).toMatchObject({ retentionHours: null, maxPerHousehold: null, maxTotalBytes: null });
+    expect(new PgDialect().sqlToQuery(capture.sets[1].expiresAt as SQL).params).toEqual([6]);
   });
 
   it("stores only the values that differ when some equal their defaults", async () => {
