@@ -1,11 +1,11 @@
-import { spawnSync } from "node:child_process";
-import { appendFileSync, chmodSync, existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { appendFileSync, chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import { PROCESS_TEST_TIMEOUT_MS } from "./process-budget.mjs";
-import { composeUpCalls, makeFixture, repoDir, runRepair, scratchDir, scriptsDir, treeSnapshot } from "./repair-test-harness.mjs";
+import { composeUpCalls, makeFixture, repoDir, runRepair, runRepairBetweenPlanAndExecute, scratchDir, scriptsDir, stderrLines, treeSnapshot } from "./repair-test-harness.mjs";
 
 // #1817: repair.sh retires the SMTP lines once Orbit holds outgoing mail in its
 // own settings. Written from the issue's specification alone, before the change.
@@ -933,5 +933,285 @@ describe("FIX-S1 (#1844): the contract says nothing is written through a symlink
     const block = flat(source.slice(start, end).map((entry) => entry.replace(/^#\s?/u, "")).join(" "));
     expect(block).toContain("never through a symlink");
     expect(block).toContain("the deployment folder's owner");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #1848 O-F1 / O-F3 / O-S1: retire-smtp-lines runs behind the restore guard and
+// holds the backup/restore lock from before the rewrite to after the secret is
+// deleted, as start-services and recreate-services do. Written from the
+// specification (issue #1848, note 59822) alone, before the change.
+//
+// Helpers below are copied from repair-restore-guard.test.mjs (it exports
+// none): plantJournal, holdLock, flockShim, lockProbeEnv and their path helpers.
+// ---------------------------------------------------------------------------
+
+const backupsOf = (targetDir, backupDir) => backupDir ?? join(targetDir, "backups");
+const journalOf = (targetDir, backupDir) => join(backupsOf(targetDir, backupDir), ".orbit-restore", "restore.journal");
+const lockOf = (targetDir, backupDir) => join(backupsOf(targetDir, backupDir), ".orbit-backup-restore.lock");
+const markerOf = (targetDir) => join(targetDir, ".orbit-restore-pending");
+const recordOf = (targetDir) => join(targetDir, ".orbit-smtp-retirement");
+const envFor = (backupDir) => (backupDir ? { ORBIT_BACKUP_DIR: backupDir } : undefined);
+
+function plantJournal(targetDir, backupDir) {
+  mkdirSync(join(backupsOf(targetDir, backupDir), ".orbit-restore"), { recursive: true });
+  writeFileSync(journalOf(targetDir, backupDir), '{"step":"half-done"}\n');
+}
+
+function freeLock(targetDir) {
+  mkdirSync(join(targetDir, "backups"), { recursive: true });
+  writeFileSync(lockOf(targetDir), "");
+}
+
+// Holds `flock -x` on a lock file from a background process until released.
+async function holdLock(lockPath) {
+  mkdirSync(join(lockPath, ".."), { recursive: true });
+  // Its own process group: flock's child `sleep` inherits the locked descriptor,
+  // so release kills the whole group and waits until the lock is free again.
+  const holder = spawn("flock", ["-x", lockPath, "sleep", "60"], { stdio: "ignore", detached: true });
+  const deadline = Date.now() + 10_000;
+  while (spawnSync("flock", ["-n", lockPath, "true"]).status === 0) {
+    if (Date.now() > deadline) throw new Error("the background flock never took the lock");
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  return () => {
+    process.kill(-holder.pid, "SIGKILL");
+    const freeBy = Date.now() + 10_000;
+    while (spawnSync("flock", ["-n", lockPath, "true"]).status !== 0) {
+      if (Date.now() > freeBy) throw new Error("the background flock never let the lock go");
+      spawnSync("sleep", ["0.05"]);
+    }
+  };
+}
+
+// A fake `flock` ahead of the real one (for the repair child only).
+function flockShim(body, code) {
+  const shimDir = scratchDir("orbit-flock-shim-");
+  const shim = join(shimDir, "flock");
+  writeFileSync(shim, `#!/usr/bin/env bash\n${body}\nexit ${code}\n`);
+  chmodSync(shim, 0o755);
+  return { PATH: `${shimDir}:${process.env.PATH}` };
+}
+
+// A `printf` function injected through BASH_ENV into the fake docker wrapper
+// probes the lock with a second, independent `flock -n` when `compose ... up` runs.
+function lockProbeEnv(lockPath) {
+  const dir = scratchDir("orbit-lock-probe-");
+  const out = join(dir, "probe.log");
+  const rc = join(dir, "probe.sh");
+  writeFileSync(
+    rc,
+    `printf() {
+  if [[ -n "\${S:-}" && "\${1:-}" == '%s\\n' && "\${2:-}" == compose* && " \${2} " == *" up "* ]]; then
+    /usr/bin/flock -n '${lockPath}' true 2>/dev/null; case $? in 0) builtin printf 'free\\n' >> '${out}' ;; 1) builtin printf 'held\\n' >> '${out}' ;; *) builtin printf 'error\\n' >> '${out}' ;; esac
+  fi
+  builtin printf "$@"
+}
+`,
+  );
+  return { env: { BASH_ENV: rc }, probes: () => (existsSync(out) ? readFileSync(out, "utf8").split("\n").filter(Boolean) : []) };
+}
+
+const REFUSED = "Orbit repair: retire-smtp-lines refused, nothing was changed: ";
+const DONE_LINE = "execute action=retire-smtp-lines resolves=smtp-lines-retirable result=done";
+const FAILED_LINE = "execute action=retire-smtp-lines resolves=smtp-lines-retirable result=failed";
+const LOCK_REASON = "a backup, restore or export is running right now; wait for it to end, then re-run repair.";
+const CANT_CHECK = "repair can't check whether a backup, restore or export is running: the lock at";
+const JOURNAL_REFUSAL = "a restore has not been finished (journal at ";
+const RETIRE_OPTIONS = { ...IMPORTED };
+
+/** Every observable of a refused retire: lines, exit code, no compose up, nothing on disk changed. */
+function expectRefused(result, targetDir, before, reason) {
+  expect(result.stdout).toContain(FAILED_LINE);
+  expect(result.stdout).not.toContain(DONE_LINE);
+  expect(result.stdout).toContain("execution result=failed done=0 failed=1");
+  expect(result.status).toBe(4);
+  expect(stderrLines(result).join("\n")).toContain(`${REFUSED}${reason}`);
+  expect(composeUpCalls(result)).toEqual([]);
+  expect(treeSnapshot(targetDir)).toBe(before);
+  expect(envOf(targetDir)).toContain("SMTP_HOST=smtp.example.test");
+  expect(existsSync(secretPath(targetDir))).toBe(true);
+}
+
+/** A clean second run finishes: done, the secret and the finding gone. */
+function expectCleanRunFinishes(targetDir, env) {
+  const second = runRepair(targetDir, ["--execute", "--safe-only"], { ...IMPORTED, ...MACHINE, env: { ...MACHINE.env, ...env } });
+  expect(second.stdout).toContain(DONE_LINE);
+  expect(second.status).toBe(0);
+  expect(existsSync(secretPath(targetDir))).toBe(false);
+  expect(runRepair(targetDir, ["--check"], { ...IMPORTED, env }).stdout).not.toContain("smtp-lines-retirable");
+}
+
+describe("#1848 retire-smtp-lines is refused while a restore is unfinished", () => {
+  it("1: a journal planted at the confirmation prompt refuses with the restore-unfinished wording, changes nothing, exit 4", async () => {
+    const targetDir = withMail();
+    let before = "";
+    const result = await runRepairBetweenPlanAndExecute(targetDir, ["--execute", "--safe-only"], RETIRE_OPTIONS, () => {
+      plantJournal(targetDir);
+      before = treeSnapshot(targetDir);
+    });
+    expect(result.stdout).toContain("plan action=retire-smtp-lines resolves=smtp-lines-retirable");
+    expectRefused(result, targetDir, before, JOURNAL_REFUSAL);
+    expect(result.stderr).toContain(`${join(".orbit-restore", "restore.journal")}); run bash scripts/restore.sh --finish once Orbit is healthy, or --recover to roll it back.`);
+    expect(readFileSync(journalOf(targetDir), "utf8")).toBe('{"step":"half-done"}\n');
+  });
+
+  it("2: a .orbit-restore-pending marker planted at the prompt refuses the same way", async () => {
+    const targetDir = withMail();
+    const custom = scratchDir("orbit-backups-");
+    let before = "";
+    const result = await runRepairBetweenPlanAndExecute(targetDir, ["--execute", "--safe-only"], RETIRE_OPTIONS, () => {
+      plantJournal(targetDir, custom);
+      writeFileSync(markerOf(targetDir), `${journalOf(targetDir, custom)}\n`);
+      before = treeSnapshot(targetDir);
+    });
+    expect(result.stdout).toContain("plan action=retire-smtp-lines resolves=smtp-lines-retirable");
+    expectRefused(result, targetDir, before, JOURNAL_REFUSAL);
+    expect(result.stderr).toContain(journalOf(targetDir, custom));
+  });
+});
+
+describe("#1848 retire-smtp-lines is refused while the backup/restore lock cannot be had", () => {
+  it("3 and 6: a lock held by another process refuses with the running-right-now wording; once released a second run finishes", async () => {
+    const targetDir = withMail();
+    const release = await holdLock(lockOf(targetDir));
+    const before = treeSnapshot(targetDir);
+    try {
+      const result = runRepair(targetDir, ["--execute", "--safe-only"], { ...RETIRE_OPTIONS, ...MACHINE });
+      expectRefused(result, targetDir, before, LOCK_REASON);
+    } finally {
+      release();
+    }
+    expectCleanRunFinishes(targetDir);
+  });
+
+  it("3: the lock is looked for in ORBIT_BACKUP_DIR", async () => {
+    const targetDir = withMail();
+    const custom = scratchDir("orbit-backups-");
+    const release = await holdLock(lockOf(targetDir, custom));
+    const before = treeSnapshot(targetDir);
+    try {
+      const result = runRepair(targetDir, ["--execute", "--safe-only"], { ...RETIRE_OPTIONS, input: "y\n", env: { ...MACHINE.env, ...envFor(custom) } });
+      expectRefused(result, targetDir, before, LOCK_REASON);
+    } finally {
+      release();
+    }
+    expectCleanRunFinishes(targetDir, envFor(custom));
+  });
+
+  it("4: a lock that cannot be tested (flock exits 65) refuses with the can't-be-tested wording and changes nothing", () => {
+    const targetDir = withMail();
+    freeLock(targetDir);
+    const before = treeSnapshot(targetDir);
+    const shim = flockShim(`printf 'flock: %s: Bad file descriptor\\n' "\${@: -1}" >&2`, 65);
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], { ...RETIRE_OPTIONS, input: "y\n", env: { ...MACHINE.env, ...shim } });
+    expectRefused(result, targetDir, before, `${CANT_CHECK} ${lockOf(targetDir)} can't be tested on that filesystem (flock said: flock:`);
+    expect(result.stderr).toContain("Bad file descriptor");
+    expect(result.stderr).not.toContain("running right now");
+  });
+
+  it.skipIf(process.getuid?.() === 0)("5: a backups folder that cannot be searched is refused the same way and nothing changes", () => {
+    const targetDir = withMail();
+    const backups = join(targetDir, "backups");
+    mkdirSync(backups, { mode: 0o700 });
+    chmodSync(backups, 0o700);
+    const before = treeSnapshot(targetDir);
+    chmodSync(backups, 0o000);
+    try {
+      const result = runRepair(targetDir, ["--execute", "--safe-only"], { ...RETIRE_OPTIONS, ...MACHINE });
+      chmodSync(backups, 0o700);
+      expectRefused(result, targetDir, before, `repair can't check whether a backup, restore or export is running: ${backups} can't be searched`);
+    } finally {
+      chmodSync(backups, 0o700);
+    }
+  });
+});
+
+describe("#1848 the resume case goes through the same guard", () => {
+  it("7: a retirement interrupted at step=backed-up is refused while a journal exists, record and secret stay, and a later clean run finishes", () => {
+    const targetDir = withMail();
+    const crashed = runRepair(targetDir, ["--execute", "--safe-only"], { ...IMPORTED, upFails: true, ...MACHINE });
+    expect(crashed.stdout).not.toContain(DONE_LINE);
+    expect(existsSync(recordOf(targetDir))).toBe(true);
+    expect(envOf(targetDir)).not.toMatch(/^SMTP_/mu);
+    plantJournal(targetDir);
+    const before = treeSnapshot(targetDir);
+    const record = readFileSync(recordOf(targetDir), "utf8");
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], { ...IMPORTED, ...MACHINE });
+    expect(result.stdout).toContain(FAILED_LINE);
+    expect(result.stdout).toContain("execution result=failed done=0 failed=1");
+    expect(result.status).toBe(4);
+    expect(stderrLines(result).join("\n")).toContain(`${REFUSED}${JOURNAL_REFUSAL}`);
+    expect(composeUpCalls(result)).toEqual([]);
+    expect(treeSnapshot(targetDir)).toBe(before);
+    expect(readFileSync(recordOf(targetDir), "utf8")).toBe(record);
+    expect(existsSync(secretPath(targetDir))).toBe(true);
+    rmSync(join(targetDir, "backups", ".orbit-restore"), { recursive: true });
+    expectCleanRunFinishes(targetDir);
+    expect(existsSync(recordOf(targetDir))).toBe(false);
+  });
+});
+
+describe("#1848 the lock spans the whole retirement and is always released", () => {
+  it("8: the lock is held when compose up runs (flock -n fails) and is free after the run exits", () => {
+    const targetDir = withMail();
+    freeLock(targetDir);
+    const probe = lockProbeEnv(lockOf(targetDir));
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], { ...RETIRE_OPTIONS, input: "y\n", env: { ...MACHINE.env, ...probe.env } });
+    expect(result.stdout).toContain(DONE_LINE);
+    expect(probe.probes()).toEqual(["held"]);
+    expect(spawnSync("flock", ["-n", lockOf(targetDir), "true"]).status).toBe(0);
+  });
+
+  it("8: a refused run leaves the lock free too", async () => {
+    const targetDir = withMail();
+    const result = await runRepairBetweenPlanAndExecute(targetDir, ["--execute", "--safe-only"], RETIRE_OPTIONS, () => plantJournal(targetDir));
+    expect(result.status).toBe(4);
+    expect(spawnSync("flock", ["-n", lockOf(targetDir), "true"]).status).toBe(0);
+  });
+});
+
+describe("#1848 a refused retirement does not stop the batch, and leaks no lock", () => {
+  const permissionTrap = (targetDir) => chmodSync(join(targetDir, ".orbit-secrets", "session-secret"), 0o644);
+
+  it("10: another safe action in the same batch still shows result=done and the run exits 4", async () => {
+    const targetDir = withMail();
+    permissionTrap(targetDir);
+    const release = await holdLock(lockOf(targetDir));
+    try {
+      const result = runRepair(targetDir, ["--execute", "--safe-only"], { ...RETIRE_OPTIONS, ...MACHINE });
+      expect(result.stdout).toMatch(/^execute action=fix-permissions resolves=secret-permissions result=done$/mu);
+      expect(result.stdout).toContain(FAILED_LINE);
+      expect(result.stdout).toMatch(/^execution result=failed done=1 failed=1/mu);
+      expect(result.status).toBe(4);
+      expect(lstatSync(join(targetDir, ".orbit-secrets", "session-secret")).mode & 0o777).toBe(0o600);
+    } finally {
+      release();
+    }
+  });
+
+  // start-services needs Orbit's database stopped; the gate needs orbit-app running (a stopped app is no finding).
+  const BATCH = { db: "stopped", app: "running", mailStatus: answer("imported") };
+
+  it("12: a start-services in the same batch after a refused retirement is not refused as held (no lock handle leaks)", async () => {
+    const targetDir = withMail();
+    freeLock(targetDir);
+    // A refusal on retire's own checks (after the guard): the .env-orbit mode changes after the plan.
+    const result = await runRepairBetweenPlanAndExecute(targetDir, ["--execute", "--safe-only"], BATCH, () => chmodSync(join(targetDir, ".env-orbit"), 0o644));
+    expect(result.stdout).toContain(FAILED_LINE);
+    expect(result.stdout).toContain("execute action=start-services resolves=services-not-running result=done");
+    expect(result.stderr).not.toContain("running right now");
+    expect(result.stderr).not.toContain("start-services refused");
+    expect(spawnSync("flock", ["-n", lockOf(targetDir), "true"]).status).toBe(0);
+  });
+
+  it("12: a start-services in the same batch after a completed retirement is not refused as held", () => {
+    const targetDir = withMail();
+    freeLock(targetDir);
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], { ...BATCH, ...MACHINE });
+    expect(result.stdout).toContain(DONE_LINE);
+    expect(result.stdout).toContain("execute action=start-services resolves=services-not-running result=done");
+    expect(result.stderr).not.toContain("running right now");
+    expect(result.status).toBe(0);
   });
 });
