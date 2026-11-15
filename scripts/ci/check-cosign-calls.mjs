@@ -96,7 +96,9 @@
  * include or trigger fails at its line wherever it sits (#1843 note 59980),
  * so a one-line or anchored flow job cannot hide one; inside its double
  * quotes a backslash escapes the next character, and a double-quoted key
- * holding a backslash (an escape such as \x69, or a fold) fails too. An include: key
+ * holding a backslash (an escape such as \x69, or a fold) fails too. In
+ * block style, a double-quoted key holding a backslash fails at any depth
+ * (the first one is reported); a backslash in a value is fine. An include: key
  * anywhere else is ignored, as GitLab ignores it. Known limits (Low):
  * `trigger:\n  - include: x`, which GitLab rejects, and a job-level
  * `<<: *j`, whose anchored body is itself scanned.
@@ -846,7 +848,51 @@ function readIncludes(file, root) {
   }
   readTriggerIncludes(lines, root, { fail, notes, locals });
   refuseFlowIncludes(lines, fail);
+  refuseEscapedKeys(lines, fail);
   return { problems, notes, locals };
+}
+
+/**
+ * A double-quoted block-style key holding a backslash, at any depth, fails
+ * at the first such line (#1843 note 59986): an escape (\x69nclude) or a fold
+ * can spell include or trigger, and ordinary CI files need neither. A
+ * backslash in a value is fine; comments and block-scalar bodies are not read.
+ */
+function refuseEscapedKeys(lines, fail) {
+  const ind = (l) => l.length - l.trimStart().length;
+  let blockAt = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    if (blankOrComment(l)) continue;
+    if (blockAt >= 0 && ind(l) > blockAt) continue;
+    blockAt = /(?:^\s*-|:)\s+(?:[&!]\S*\s+)*[|>][-+0-9]*\s*(?:#.*)?$/.test(l) ? ind(l) : -1;
+    const m = /^\s*(?:[-?]\s+)*"/.exec(l);
+    if (!m) continue;
+    // Read the string to its closing quote, across lines, escapes skipped.
+    let escaped = false;
+    let j = i;
+    let k = m[0].length;
+    let after = null;
+    for (; j < lines.length && after === null; j++, k = 0) {
+      const line = lines[j];
+      for (; k < line.length; k++) {
+        if (line[k] === "\\") {
+          escaped = true;
+          k++;
+        } else if (line[k] === '"') {
+          after = line.slice(k + 1);
+          break;
+        }
+      }
+      if (after !== null) break;
+    }
+    // After ? (an explicit key) the string is a key wherever its colon sits.
+    if (escaped && (after === null || /\?\s/.test(m[0]) || /^\s*:(?:\s|$)/.test(after))) {
+      fail(i, `a double-quoted key holding a backslash (an escape or a fold, which can spell include or trigger) ${SUBSET}`);
+      return;
+    }
+    i = Math.max(i, j);
+  }
 }
 
 /**
