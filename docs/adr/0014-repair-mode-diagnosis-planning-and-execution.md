@@ -512,6 +512,6 @@ material keeps decision 6's rule, with one more exception (issue #1834, slice
 4): an `.orbit-install-staging.*` folder from a killed run is removed, even
 when marked committed, when no engine transaction is active (no
 `.orbit-engine.lock`, or a regular file older than the engine's ten-minute
-reclaim age) and every saved file matches the live one exactly (no managed
+reclaim age) the lock file is readable and no other process holds it, at least one original was saved, and every saved file matches the live one exactly (no managed
 path live without a saved original, no differing mode). Otherwise the
 restore-transaction rules above apply unchanged.
