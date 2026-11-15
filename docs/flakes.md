@@ -12,6 +12,14 @@ test's own name, which does not move with the shard.
 - 2026-11-15 · local, chore/next-4 on 5b3cdc20 plus the #1848 D-F8 change (sidecar-freshness-issue.sh only) · load average 47-52 · 54 tests in 15 files hit their deadlines (`runRepair`/`runInstall` child killed, `Test timed out`, one 54 ms > 50 ms timer check): scripts/install.{readiness,renamed-folder,rollback,update-profile,update-retire-smtp,interrupts-journal}, scripts/repair-{preconditions-1804,restore-guard,retire-smtp-1817,start-services}, scripts/ci/{import-door,upgrade-versions}, scripts/gitlab-ci-lanes, scripts/web-build-stamp, src/server/portable-archive-container. The 15 files re-run with 4 workers passed 740/740. First sighting.
 - 2026-11-15 · local, chore/next-4 on 26da27ce plus the #1848 SEC-D-S4 change (github-await-handoff.sh only) · full `npx vitest run`, load average about 40 · 9 tests in 6 files timed out (check-svelte-server-parse child deadline, `Hook timed out`, `Test timed out`): scripts/check-svelte-server-parse, scripts/web-build-stamp, tests/unit/administration-{failed-card,mail-settings}-screens, tests/unit/v19-mail-sender-check, tests/unit/v19-tour-chapter-the-item. Re-run with 4 workers: 178/178. Second sighting.
 
+## tests/integration/portable-archive-review-lease.test.ts "ruling 1: the heartbeat runs while one long document is being staged ... lease_renewed_at moves forward ..." (and the two ruling 9 tests after it, as a knock-on)
+
+- 2026-11-15 · !1325 dev 13eec37c · pipeline 4218 / integration 3/4 (job 51434) · timed out at 300 s on a loaded runner (job 888 s against ~500 s usual); the ruling 9 tests then failed with document_not_found. The same tree passed in pipeline 4211. First sighting.
+
+## src/server/documents/preview.test.ts "renderDocumentPagePreview (real pdftoppm/pdfinfo) > passes an already-raster PNG through, downscaling ..."
+
+- 2026-11-15 · !1325 dev 13eec37c · pipeline 4228 / fast (job 51590) · timed out at the 5s default on a loaded runner; retried as job 51647. First sighting.
+
 ## src/cli/orbit.mail-sending-status.test.ts "source=imported, imported from the environment: one line, exit 0" and "source=ui after an import ...: imported-from-environment stays true"
 
 - 2026-11-15 · local, chore/next-4 on 9c7361cf plus the #1848 W-F1 change (About page apk links only) · full `npx vitest run` on the loaded shared host · the first took 5.4 s; the second got its one expected line printed twice. A re-run of the file passed. First sighting.
