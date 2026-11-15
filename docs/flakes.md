@@ -524,3 +524,7 @@ timeout on this one case rather than a global raise.
 ## src/server/documents/pdf-structure-sandbox-poppler.test.ts "line 14: with check 1 / view 1, a render holding the view slot does not delay a structure check" (after-test check, :108)
 
 - 2026-11-12 · chore/v039-batch-b-ci d92e92b6 (Dockerfile pin and JSON policy only, nowhere near the PDF sandbox) · pipeline 4032 / fast (job 49856) · "§1.5 line 16: a child still in flight after the test: expected 1 to be +0"; the retried job 49859 passed. First sighting.
+
+## github-await-handoff.sh, a flaky GitHub › counts a successful read as a reset (scripts/ci/github-await-handoff.test.mjs)
+
+- 2026-11-15 · local, chore/next-4 on the dev merge plus the #1846 change (docs and the guarantees test only) · full `npx vitest run`, load average about 30 · `Test timed out in 30000ms`; the file re-run twice passed 53/53. First sighting.
