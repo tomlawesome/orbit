@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { PgDialect } from "drizzle-orm/pg-core";
+import type { SQL } from "drizzle-orm";
 import { auditLog, pushSubscriptions } from "@/db/schema";
+
+const render = (node: unknown) => new PgDialect().sqlToQuery(node as SQL);
 
 /**
  * The approval notice (#1398): the pure parts (its id, its words, its mail),
@@ -190,30 +194,64 @@ describe("ending notices", () => {
     expect(ops).toHaveLength(0);
   });
 
-  it("issues one update on the audit log for a receipt's notices and one for a purged household's", async () => {
-    const one = scriptedDb([]);
-    await endApprovalNotices(one.db, { id: "r1", householdId: "h1" });
-    expect(one.ops.filter((op) => op.kind === "update" && op.table === auditLog)).toHaveLength(1);
-    const two = scriptedDb([]);
-    await endHouseholdApprovalNotices(two.db, "h1");
-    expect(two.ops.filter((op) => op.kind === "update" && op.table === auditLog)).toHaveLength(1);
+  it("ends a receipt's pending channels, and only that receipt's notices in its household", async () => {
+    const { db, ops } = scriptedDb([]);
+    await endApprovalNotices(db, { id: "r1", householdId: "h1" });
+    const updates = ops.filter((op) => op.kind === "update" && op.table === auditLog);
+    expect(updates).toHaveLength(1);
+    const where = render(updates[0]!.args.where![0]);
+    expect(where.params).toEqual(["h1", APPROVAL_NOTICE_ENTITY, "r1"]);
+    expect(where.sql).toContain('"audit_log"."household_id" = $1');
+    expect(where.sql).toContain('"audit_log"."entity_type" = $2');
+    expect(where.sql).toContain('"audit_log"."entity_id" = $3');
+    expect(where.sql).toContain("'titleEnc' is not null");
+    expect(where.sql).toContain("in ('pending', 'sending')");
+    const set = render((updates[0]!.args.set![0] as { changes: unknown }).changes);
+    expect(set.sql).toContain("when \"audit_log\".\"changes\"->>'email' = 'pending' then 'skipped'");
+    expect(set.sql).toContain("when \"audit_log\".\"changes\"->>'push' = 'pending' then 'skipped'");
+    expect(set.sql).toContain("jsonb_build_object('titleEnc', null)");
+    expect(set.sql).toContain("= 'sending'");
+  });
+
+  it("ends every notice of a purged household, in flight or not, clearing the titles", async () => {
+    const { db, ops } = scriptedDb([]);
+    await endHouseholdApprovalNotices(db, "h9");
+    const updates = ops.filter((op) => op.kind === "update" && op.table === auditLog);
+    expect(updates).toHaveLength(1);
+    const where = render(updates[0]!.args.where![0]);
+    expect(where.params).toEqual(["h9", APPROVAL_NOTICE_ENTITY]);
+    expect(where.sql).toContain('"audit_log"."household_id" = $1');
+    expect(where.sql).toContain('"audit_log"."entity_type" = $2');
+    expect(where.sql).not.toContain("entity_id");
+    const set = render((updates[0]!.args.set![0] as { changes: unknown }).changes);
+    expect(set.sql).toContain("->>'email' in ('pending', 'sending') then 'skipped'");
+    expect(set.sql).toContain("->>'push' in ('pending', 'sending') then 'skipped'");
+    expect(set.sql).toContain("'titleEnc', null");
   });
 });
 
 describe("dueNoticesQuery", () => {
-  it("passes its limit on and excludes already-seen ids only when there are some", async () => {
+  it("passes its limit on and asks for unfinished notices that are due, on receipts still in review", async () => {
     const unseen = scriptedDb([[{ id: "a" }]]);
     expect(await dueNoticesQuery(unseen.db, NOW, [], 5)).toEqual([{ id: "a" }]);
     expect(unseen.ops[0]!.args.limit).toEqual([5]);
-    const leaves = (node: unknown): number => {
-      const chunks = (node as { queryChunks?: unknown[] }).queryChunks;
-      return Array.isArray(node) ? node.reduce<number>((sum, item) => sum + leaves(item), 0) : chunks ? chunks.reduce<number>((sum, item) => sum + leaves(item), 0) : 1;
-    };
-    const whereWithout = leaves(unseen.ops[0]!.args.where![0]);
+    const where = render(unseen.ops[0]!.args.where![0]);
+    expect(where.params).toEqual([...["pending_review", "approving"], NOW.toISOString()]);
+    expect(where.sql).toContain('"imap_ingestion_messages"."status" in ($1, $2)');
+    expect(where.sql).toContain("'email' in ('pending', 'sending')");
+    expect(where.sql).toContain("'push' in ('pending', 'sending')");
+    expect(where.sql).toContain("'nextAttemptAt' is null");
+    expect(where.sql).toContain("::timestamptz <= $3::timestamptz");
+    expect(where.sql).toContain("'waitingOn' = 'receipt'");
+    expect(where.sql).not.toContain("not in");
+  });
+
+  it("excludes the ids already looked at this cycle, and only then", async () => {
     const seen = scriptedDb([[]]);
-    await dueNoticesQuery(seen.db, NOW, ["a"], 5);
-    const whereWith = leaves(seen.ops[0]!.args.where![0]);
-    expect(whereWith).toBeGreaterThan(whereWithout);
+    await dueNoticesQuery(seen.db, NOW, ["a", "b"], 5);
+    const where = render(seen.ops[0]!.args.where![0]);
+    expect(where.sql).toContain('"audit_log"."id" not in ($4, $5)');
+    expect(where.params.slice(-2)).toEqual(["a", "b"]);
   });
 });
 
