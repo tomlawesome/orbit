@@ -616,7 +616,9 @@ A folder is offered only when it holds nothing but the installer's and
 `repair.sh`'s undo-copy files (`.env-orbit`, `docker-compose.mail.yml`,
 `.orbit-smtp-undo`, `.env-orbit.smtp-copy.tmp`), all plain files. A dated
 folder holding anything else, a sub-folder or a link is listed as "not
-removed" and left alone. The update's own folder is never offered, and
+removed" and left alone, even when nothing else is listed: it may hold an old
+copy of `.env-orbit`. With only such folders there is no question and no
+hint. The update's own folder is never offered, and
 neither is a copy the SMTP retirement still needs (one named by
 `.orbit-smtp-retirement`, or a marked copy while the retirement is still
 due). `moved/`, `engine/` and `originals/`, recovery bundles, `backup.sh`
@@ -632,7 +634,7 @@ archives and anything outside `orbit-install-backups/` are never touched.
   Orbit directory, removes them without asking. It still lists them and still
   says it CANNOT be undone.
 
-When there is nothing to clean up, nothing is printed. Either way the
+When there are no dated folders, nothing is printed. Either way the
 update's result and exit code are the same. Removal is an ordinary delete:
 on an SSD or a journaled file system that is at best NIST SP 800-88 "clear",
 not sanitisation of the disk.

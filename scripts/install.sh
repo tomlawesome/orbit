@@ -2036,8 +2036,8 @@ undo_copy_size() {
 # directly inside orbit-install-backups, except this run's own folder, the
 # one the step record names, and, while a retirement is due, one its copy
 # marker names. Each is listed with its path, date and size; any other
-# dated folder is listed as not removed. Nothing to clean up: nothing is
-# printed. Never changes the update's result or exit code.
+# dated folder is listed as not removed, even when none qualifies (then with
+# no prompt and no hint). Nothing to clean up: nothing is printed. Never changes the update's result or exit code.
 prune_old_undo_copies() {
   local root="${target_dir}/orbit-install-backups" saved_options folder name marker answer="" remove=0
   local -a offered=() kept=()
@@ -2064,19 +2064,23 @@ prune_old_undo_copies() {
     if undo_copy_folder_qualifies "$folder"; then offered+=("$folder"); else kept+=("$folder"); fi
   done
   eval "$saved_options"
-  ((${#offered[@]} > 0)) || return 0
 
+  # A dated folder that does not qualify is always named, even when nothing
+  # can be removed: it may hold an old full .env-orbit, secrets included.
   {
-    printf 'Orbit installer: old undo copies from earlier updates and repairs are kept in %s. They can hold a copy of .env-orbit, secrets included:\n' "$(printf '%q' "$root")"
-    for folder in "${offered[@]}"; do
-      name="${folder##*/}"
-      printf '  %s  %s  %s\n' "$(printf '%q' "$folder")" \
-        "${name:0:4}-${name:4:2}-${name:6:2}T${name:9:2}:${name:11:2}:${name:13:2}Z" "$(undo_copy_size "$folder")"
-    done
+    if ((${#offered[@]} > 0)); then
+      printf 'Orbit installer: old undo copies from earlier updates and repairs are kept in %s. They can hold a copy of .env-orbit, secrets included:\n' "$(printf '%q' "$root")"
+      for folder in "${offered[@]}"; do
+        name="${folder##*/}"
+        printf '  %s  %s  %s\n' "$(printf '%q' "$folder")" \
+          "${name:0:4}-${name:4:2}-${name:6:2}T${name:9:2}:${name:11:2}:${name:13:2}Z" "$(undo_copy_size "$folder")"
+      done
+    fi
     for folder in "${kept[@]}"; do
-      printf '  %s  not removed: it holds something besides undo copies (another file, a sub-folder or a link). Check it yourself.\n' "$(printf '%q' "$folder")"
+      printf '  %s  not removed: it holds something besides undo copies (another file, a sub-folder or a link) and may hold an old copy of .env-orbit. Check it yourself.\n' "$(printf '%q' "$folder")"
     done
   } >&2 || true
+  ((${#offered[@]} > 0)) || return 0
 
   if [[ "$remove_old_undo_copies" == 1 ]]; then
     printf 'Orbit installer: removing them is permanent. It CANNOT be undone: no other copy is kept.\n' >&2 || true
