@@ -4679,15 +4679,16 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
     // The staged intermediate file was moved into place, not left behind.
     expect(existsSync(stagedPasswordPath(targetDir))).toBe(false);
 
-    // The checkpoint bundle: ORBKEK01 format, correct permissions, kept
-    // (never cleaned up, unlike the stage-one private recovery directory).
-    const checkpointDir = findCheckpointDir(targetDir);
-    expect(checkpointDir).not.toBeNull();
-    expect(mode(checkpointDir)).toBe("700");
-    const bundlePath = findCheckpointBundle(targetDir);
-    expect(bundlePath).not.toBeNull();
-    expect(mode(bundlePath)).toBe("600");
-    expect(readFileSync(bundlePath).subarray(0, 8).toString("ascii")).toBe("ORBKEK01");
+    // #1834 (owner decision 11b, 2026-11-14): the checkpoint holds the OLD
+    // credential, which opens nothing once the ALTER ROLE has landed. This
+    // run's own full re-diagnosis came back clean (asserted above), so the
+    // checkpoint is removed in this same run, and stderr says so in exactly
+    // one line. Its ORBKEK01 format and modes while it exists are pinned by
+    // the "#1834 checkpoint kept" tests below, which leave it in place.
+    const checkpointLeftovers = readdirSync(targetDir).filter((name) => name.startsWith(".orbit-repair-checkpoint."));
+    expect(checkpointLeftovers).toEqual([]);
+    const removalLines = lines(result.stderr).filter((line) => /checkpoint/i.test(line) && /removed/i.test(line));
+    expect(removalLines).toHaveLength(1);
 
     // The restart step actually ran.
     const argvLog = readFileSync(argvLogPath, "utf8");
@@ -4717,8 +4718,8 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
     expect(result.stderr).not.toContain(newPassword);
     // repair.sh prints the checkpoint directory as the relative path it
     // created it under (never the absolute host path) — see "Privacy"
-    // above; assert on that basename rather than the absolute path.
-    expect(result.stderr).toContain(basename(checkpointDir));
+    // above; the creation line names it before the removal.
+    expect(result.stderr).toMatch(/checkpoint created and verified at \.\/\.orbit-repair-checkpoint\.[A-Za-z0-9]{6}/);
   });
 
   it("checkpoint precedes rotation: when the checkpoint itself cannot be created, no rotation SQL is ever sent (argv or stdin) and the credential is never touched", () => {
@@ -6545,3 +6546,157 @@ describe("scripts/repair.sh: folder-moved and recreate-services (#1576 step 3)",
 
 // Docs and guarantees for #1576 step 3 are pinned next to the repair stream
 // contract, in scripts/repair-stream-contract.test.mjs.
+
+// --- #1834 slice 3: the credential checkpoint is removed after a clean re-check
+//
+// Owner decision 11b (2026-11-14): "We need to be absolutely sure it's worked,
+// then remove it." The checkpoint holds the OLD database password; once the
+// ALTER ROLE lands it opens nothing but a volume snapshot the operator took
+// themselves. Repair removes it in the same run, only after that run's own
+// full re-diagnosis is clean (no postgres-password or database-credential
+// finding, services ready) and no action in the run failed. "Orbit started"
+// is never enough. Otherwise it is kept, named, and the next step is given;
+// a later --execute run whose own re-check is clean removes it. --check and
+// --plan never remove it. Reverses ADR-0014 section 6 for this one artefact.
+describe("scripts/repair.sh credential checkpoint removal after a clean re-check (#1834)", () => {
+  const checkpointDirs = (targetDir) =>
+    readdirSync(targetDir).filter((name) => name.startsWith(".orbit-repair-checkpoint."));
+  const removalLines = (stderr) => lines(stderr).filter((line) => /checkpoint/i.test(line) && /removed/i.test(line));
+  const rotateInput = { input: `rotate\n${ROTATE_PASSPHRASE}\n${ROTATE_PASSPHRASE}\n`, env: { ORBIT_REPAIR_TTY_INPUT: "1" } };
+
+  // Kept-checkpoint guidance: one stderr line names the checkpoint (relative
+  // path) and says it was kept, and stderr gives the next step (re-run repair).
+  function expectKeptAndNamed(result, checkpointName) {
+    const keptLines = lines(result.stderr).filter((line) => line.includes(checkpointName) && /kept/i.test(line));
+    expect(keptLines.length, `no stderr line names ${checkpointName} as kept:\n${result.stderr}`).toBeGreaterThanOrEqual(1);
+    expect(result.stderr).toMatch(/re-?run[^\n]*repair|repair[^\n]*--execute/i);
+    expect(removalLines(result.stderr)).toEqual([]);
+  }
+
+  // The rotation lands and Orbit restarts healthy, but the database still
+  // refuses the credential (no dbAuthMarkerPath, so the shim keeps answering
+  // `mismatch`): the re-check is not clean.
+  function rotateWithUncleanRecheck(targetDir) {
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--dangerous"],
+      { db: { present: true, ready: true, authResult: "mismatch" } },
+      rotateInput,
+    );
+    expect(result.stdout).toContain("execute action=rotate-database-credential resolves=database-credential-mismatch result=done");
+    expect(lines(result.stdout).filter((line) => line === "finding class=database-credential-mismatch target=database severity=fail").length).toBeGreaterThanOrEqual(1);
+    return result;
+  }
+
+  it("keeps the checkpoint when the re-check still reports the credential finding, even though the rotation ran and Orbit restarted healthy, and names it with the next step", () => {
+    const targetDir = makeCredentialMismatchFixture();
+
+    const result = rotateWithUncleanRecheck(targetDir);
+
+    // Orbit started (restart done, app healthy) — never enough on its own.
+    expect(lines(result.stdout).at(-1)).not.toMatch(/^diagnosis result=healthy/);
+    const kept = checkpointDirs(targetDir);
+    expect(kept).toHaveLength(1);
+    expect(existsSync(findCheckpointBundle(targetDir))).toBe(true);
+    expectKeptAndNamed(result, kept[0]);
+    expectStdoutIsEnumOnly(result.stdout);
+  });
+
+  it("keeps the checkpoint when the credential is accepted but services are not ready in the re-check", () => {
+    const targetDir = makeCredentialMismatchFixture();
+    const dbAuthMarkerPath = join(scratchDir(), "db-auth-marker");
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--dangerous"],
+      {
+        db: { present: true, ready: true, authResult: "mismatch" },
+        app: { present: true, image: FIXTURE_IMAGE, health: "unhealthy" },
+        dbAuthMarkerPath,
+      },
+      rotateInput,
+    );
+
+    expect(result.stdout).toContain("execute action=rotate-database-credential resolves=database-credential-mismatch result=done");
+    expect(existsSync(dbAuthMarkerPath)).toBe(true);
+    expect(lines(result.stdout).at(-1)).not.toMatch(/^diagnosis result=healthy/);
+    const kept = checkpointDirs(targetDir);
+    expect(kept).toHaveLength(1);
+    expectKeptAndNamed(result, kept[0]);
+  });
+
+  it("keeps the checkpoint when an action in the run failed, even if the re-check itself comes back clean", () => {
+    const targetDir = makeCredentialMismatchFixture();
+    const dbAuthMarkerPath = join(scratchDir(), "db-auth-marker");
+
+    // ALTER ROLE and update-config land (marker set, so the re-check's
+    // credential probe passes); only the restart fails.
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--dangerous"],
+      { db: { present: true, ready: true, authResult: "mismatch" }, dbAuthMarkerPath, restartFails: true },
+      rotateInput,
+    );
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("dangerous result=failed done=0 failed=1 reason=step-failed");
+    expect(existsSync(dbAuthMarkerPath)).toBe(true);
+    expect(result.stdout).not.toContain("finding class=database-credential-mismatch");
+    expect(checkpointDirs(targetDir)).toHaveLength(1);
+    expect(removalLines(result.stderr)).toEqual([]);
+  });
+
+  it("a later --execute run whose own re-check is clean removes the kept checkpoint and says so in one line", () => {
+    const targetDir = makeCredentialMismatchFixture();
+    rotateWithUncleanRecheck(targetDir);
+    expect(checkpointDirs(targetDir)).toHaveLength(1);
+
+    // The operator follows the next step; the database now accepts the
+    // rotated credential.
+    const dbAuthMarkerPath = join(scratchDir(), "db-auth-marker");
+    writeFileSync(dbAuthMarkerPath, "");
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], {
+      db: { present: true, ready: true, authResult: "mismatch" },
+      dbAuthMarkerPath,
+    });
+
+    expect(result.status).toBe(0);
+    expect(lines(result.stdout).at(-1)).toMatch(/^diagnosis result=healthy/);
+    expect(checkpointDirs(targetDir)).toEqual([]);
+    expect(removalLines(result.stderr)).toHaveLength(1);
+    expectStdoutIsEnumOnly(result.stdout);
+  });
+
+  it("a later --execute run whose re-check is still not clean keeps the checkpoint and names it again", () => {
+    const targetDir = makeCredentialMismatchFixture();
+    rotateWithUncleanRecheck(targetDir);
+    const [checkpointName] = checkpointDirs(targetDir);
+
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], {
+      db: { present: true, ready: true, authResult: "mismatch" },
+    });
+
+    expect(checkpointDirs(targetDir)).toEqual([checkpointName]);
+    expectKeptAndNamed(result, checkpointName);
+  });
+
+  for (const args of [["--check"], ["--plan"]]) {
+    it(`${args.join(" ")} never removes a kept checkpoint, even when the deployment is now healthy`, () => {
+      const targetDir = makeCredentialMismatchFixture();
+      rotateWithUncleanRecheck(targetDir);
+      const [checkpointName] = checkpointDirs(targetDir);
+
+      const dbAuthMarkerPath = join(scratchDir(), "db-auth-marker");
+      writeFileSync(dbAuthMarkerPath, "");
+      const result = runRepair(targetDir, args, {
+        db: { present: true, ready: true, authResult: "mismatch" },
+        dbAuthMarkerPath,
+      });
+
+      expect(result.status).toBe(0);
+      expect(checkpointDirs(targetDir)).toEqual([checkpointName]);
+      expect(existsSync(join(targetDir, checkpointName, "postgres-password.orbkek"))).toBe(true);
+      expect(removalLines(result.stderr)).toEqual([]);
+    });
+  }
+});
