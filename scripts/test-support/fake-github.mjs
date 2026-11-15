@@ -13,7 +13,7 @@ import { PROCESS_DEADLINE_MS } from "../process-budget.mjs";
  *  - a release's created_at is the date of the commit it tags (GitHub's
  *    documented behaviour), NOT when the release was made; published_at is
  *    when it was published (null for a draft). A new release made over the
- *    API takes `commitDate` (default: now) as created_at, and publishing it
+ *    API takes `commitDate` (default: 100 days ago) as created_at, and publishing it
  *    sets published_at to now;
  *  - the list is paginated (30 per page unless per_page says otherwise);
  *  - GET /releases/tags/<tag> never shows a draft;
