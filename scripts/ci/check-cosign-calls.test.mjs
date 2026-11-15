@@ -949,3 +949,43 @@ describe("code-file aliases, absolute paths and sh -c (#1843 review fix round)",
     passes({ "scripts/tool.mjs": 'import { execFile as ef } from "node:child_process";\nef("cosign", ["sign","--tlog-upload=false","x"]);\n' });
   });
 });
+
+describe("trigger includes (#1843, 37b applied to child pipelines)", () => {
+  const sha = "0123456789abcdef0123456789abcdef01234567";
+  const ci = ".gitlab-ci.yml";
+  const trig = (inc) => `job:\n  trigger:\n    include:${inc}\n`;
+  const clean = { "ci/b.yml": "job:\n  script:\n    - true\n" };
+  const bad = (name, body, line, file = ci, extra = {}) =>
+    it(`fails on ${name}`, () => {
+      fails({ [ci]: body, ...extra }, file, line);
+    });
+
+  bad("a project with ref: main", trig("\n      - project: a/b\n        ref: main\n        file: x.yml"), 4);
+  bad("a template:", trig("\n      - template: Jobs/x.yml"), 4);
+  bad("a remote:", trig("\n      - remote: https://x/y"), 4);
+  bad("a scalar URL", trig(" https://x"), 3);
+  bad("a flow mapping", trig(" {remote: https://x}"), 3);
+  bad("a flow list", trig(" [ci/b.yml]"), 3, ci, clean);
+  bad("an alias", trig(" *x"), 3);
+  bad("an alias local item", trig("\n      - local: *x"), 4);
+  bad("a scalar naming a missing file", trig(" ci/missing.yml"), 3);
+  bad("trigger: {include: ...} flow style", "job:\n  trigger: {include: ci/b.yml}\n", 2, ci, clean);
+
+  it("passes the scalar form naming a clean local file", () => {
+    passes({ [ci]: "job:\n  trigger:\n    include: ci/b.yml\n", ...clean });
+  });
+
+  it("passes the block form - local: ci/b.yml", () => {
+    passes({ [ci]: trig("\n      - local: ci/b.yml"), ...clean });
+  });
+
+  it("passes a pinned project under a trigger and prints a not-scanned line", () => {
+    const result = run(fixture({ [ci]: trig(`\n      - project: a/b\n        ref: ${sha}\n        file: x.yml`) }));
+    assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
+    assert.match(result.stdout + result.stderr, /not scanned/i);
+  });
+
+  it("scans the file reached through the scalar form: cosign sign is caught", () => {
+    fails({ [ci]: "job:\n  trigger:\n    include: ci/b.yml\n", "ci/b.yml": "job:\n  script:\n    - cosign sign x\n" }, "ci/b.yml", 3);
+  });
+});
