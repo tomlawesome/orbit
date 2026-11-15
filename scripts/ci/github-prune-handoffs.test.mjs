@@ -186,14 +186,79 @@ describe("github-prune-handoffs.sh", () => {
     expect([...fake.tags].sort()).toEqual(remaining());
   });
 
-  it("never deletes a draft, whatever its dates: another pipeline may be mid-upload", async () => {
-    fake.addRelease({ tag_name: sha("a"), created_at: daysAgo(400), draft: true });
-    fake.addRelease({ tag_name: sha("b"), created_at: daysAgo(2), draft: true });
-    published(sha("c"), 20);
-    const result = await prune();
-    expect(result.status, result.stderr).toBe(0);
-    expect(fake.deleted).toEqual([sha("c")]);
-    expect(remaining()).toEqual([sha("a"), sha("b")].sort());
+  describe("drafts are aged by their newest asset's updated_at (#1848 D-S5)", () => {
+    const draftWith = (tag, ages, extra = {}) => {
+      const rel = fake.addRelease({ tag_name: tag, created_at: daysAgo(1), draft: true, ...extra });
+      ages.forEach((age, i) => fake.addAsset(rel, `a${i}.bin`, "x", age === null ? age : daysAgo(age)));
+      return rel;
+    };
+
+    it("deletes a draft whose assets are all older than the limit: tag 422 then GET 404, then the release", async () => {
+      draftWith(sha("a"), [30, 20]);
+      const result = await prune();
+      expect(result.status, result.stderr).toBe(0);
+      expect(fake.requests.some((r) => r.method === "GET" && r.path.endsWith(`/git/refs/tags/${sha("a")}`))).toBe(true);
+      expect(fake.deleted).toEqual([sha("a")]);
+      expect(remaining()).toEqual([]);
+    });
+
+    it("deletes an old-asset draft whose tag exists (204), tag first", async () => {
+      draftWith(sha("a"), [30]);
+      fake.tags.add(sha("a"));
+      const result = await prune();
+      expect(result.status, result.stderr).toBe(0);
+      expect(fake.deletedTags).toEqual([sha("a")]);
+      expect(fake.deleted).toEqual([sha("a")]);
+      const t = fake.requests.find((r) => r.method === "DELETE" && r.path.includes("/git/refs/tags/"));
+      const d = fake.requests.find((r) => r.method === "DELETE" && /\/releases\/\d+$/u.test(r.path));
+      expect(t.seq).toBeLessThan(d.seq);
+    });
+
+    it("keeps a draft with a fresh asset", async () => {
+      draftWith(sha("a"), [1]);
+      const result = await prune();
+      expect(result.status, result.stderr).toBe(0);
+      expect(fake.mutations()).toEqual([]);
+    });
+
+    it("keeps a draft with mixed old and fresh assets: the newest decides", async () => {
+      draftWith(sha("a"), [60, 2, 40]);
+      const result = await prune();
+      expect(result.status, result.stderr).toBe(0);
+      expect(fake.mutations()).toEqual([]);
+    });
+
+    it("keeps a draft with no assets, even if created_at is ancient", async () => {
+      fake.addRelease({ tag_name: sha("a"), created_at: daysAgo(400), draft: true });
+      const result = await prune();
+      expect(result.status, result.stderr).toBe(0);
+      expect(fake.mutations()).toEqual([]);
+      expect(remaining()).toEqual([sha("a")]);
+    });
+
+    it("fails, deleting nothing, when an asset's updated_at is unreadable", async () => {
+      published(sha("c"), 40);
+      for (const bad of [undefined, "garbage", null]) {
+        const rel = fake.addRelease({ tag_name: sha("b"), created_at: daysAgo(1), draft: true });
+        fake.addAsset(rel, "a.bin", "x", daysAgo(30));
+        const asset = fake.addAsset(rel, "b.bin", "x", bad);
+        if (bad === undefined) delete asset.updated_at;
+        const result = await prune();
+        expect(result.status, String(bad)).not.toBe(0);
+        expect(result.stderr, String(bad)).toMatch(/updated_at/u);
+        expect(fake.deleted, String(bad)).toEqual([]);
+        fake.releases.splice(fake.releases.indexOf(rel), 1);
+      }
+    });
+
+    it("never deletes the current commit's draft, even with only old assets", async () => {
+      draftWith(sha("c"), [60]);
+      draftWith(sha("a"), [60]);
+      const result = await prune({ extra: { CI_COMMIT_SHA: "c".repeat(40) } });
+      expect(result.status, result.stderr).toBe(0);
+      expect(fake.deleted).toEqual([sha("a")]);
+      expect(remaining()).toEqual([sha("c")]);
+    });
   });
 
   it("matches the tag name, not the release title", async () => {

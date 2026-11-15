@@ -109,14 +109,19 @@ export function librariesOf(document) {
       : null;
     return typeof ref?.referenceLocator === "string" ? ref.referenceLocator : "";
   };
-  /** An apk package's page on pkgs.alpinelinux.org, from its purl's arch and release. */
+  /**
+   * An apk package's search on pkgs.alpinelinux.org, from its purl's arch and
+   * release. The search, not the package page: the apk database and the purl
+   * don't say which repository (main, community) holds it, and a wrong guess
+   * is a 404 (#1848 W-F1).
+   */
   const apkPage = (/** @type {any} */ one, /** @type {string} */ purl) => {
     const arch = /[?&]arch=([^&]+)/.exec(purl)?.[1];
     const release = /[?&]distro=alpine-(\d+\.\d+)/.exec(purl)?.[1];
     const name = encodeURIComponent(one.name);
     // noarch packages are listed under no single architecture; x86_64 is the one the image ships.
-    const where = release ? `v${release}` : "edge";
-    return `https://pkgs.alpinelinux.org/package/${where}/main/${!arch || arch === "noarch" ? "x86_64" : arch}/${name}`;
+    const branch = release ? `v${release}` : "edge";
+    return `https://pkgs.alpinelinux.org/packages?name=${name}&branch=${branch}&arch=${!arch || arch === "noarch" ? "x86_64" : arch}`;
   };
   const packages = /** @type {{ packages?: unknown }} */ (document)?.packages;
   if (!Array.isArray(packages)) return null;

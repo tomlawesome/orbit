@@ -7,6 +7,31 @@ fixing the cause deletes the heading in the same commit. Name a sharded browser
 job as GitLab does (`pipeline 3600 / rig_webkit 2/3`); the heading carries the
 test's own name, which does not move with the shard.
 
+## Full `npx vitest run`: mass timeouts at host load about 50 (host)
+
+- 2026-11-15 · local, chore/next-4 on 5b3cdc20 plus the #1848 D-F8 change (sidecar-freshness-issue.sh only) · load average 47-52 · 54 tests in 15 files hit their deadlines (`runRepair`/`runInstall` child killed, `Test timed out`, one 54 ms > 50 ms timer check): scripts/install.{readiness,renamed-folder,rollback,update-profile,update-retire-smtp,interrupts-journal}, scripts/repair-{preconditions-1804,restore-guard,retire-smtp-1817,start-services}, scripts/ci/{import-door,upgrade-versions}, scripts/gitlab-ci-lanes, scripts/web-build-stamp, src/server/portable-archive-container. The 15 files re-run with 4 workers passed 740/740. First sighting.
+- 2026-11-15 · local, chore/next-4 on 26da27ce plus the #1848 SEC-D-S4 change (github-await-handoff.sh only) · full `npx vitest run`, load average about 40 · 9 tests in 6 files timed out (check-svelte-server-parse child deadline, `Hook timed out`, `Test timed out`): scripts/check-svelte-server-parse, scripts/web-build-stamp, tests/unit/administration-{failed-card,mail-settings}-screens, tests/unit/v19-mail-sender-check, tests/unit/v19-tour-chapter-the-item. Re-run with 4 workers: 178/178. Second sighting.
+
+## src/cli/orbit.mail-sending-status.test.ts "source=imported, imported from the environment: one line, exit 0" and "source=ui after an import ...: imported-from-environment stays true"
+
+- 2026-11-15 · local, chore/next-4 on 9c7361cf plus the #1848 W-F1 change (About page apk links only) · full `npx vitest run` on the loaded shared host · the first took 5.4 s; the second got its one expected line printed twice. A re-run of the file passed. First sighting.
+
+## tests/integration/imap-attachment-processing.test.ts "records discard purge intent before an injected storage failure and retries safely"
+
+- 2026-11-15 · local, chore/next-4 at 33e1669d plus the #1848 A-F2 change (sender clock only) · all mail and imap integration files together on a loaded shared host · `Test timed out in 15000ms`. A re-run of the file passed 15/15. First sighting.
+
+## tests/unit/system-status-route.test.mjs "answers the real per-service state for a signed-in reader (positive case)"
+
+- 2026-11-15 · local, chore/next-4 on 635b8481 plus the #1848 O-R1 change · full `npx vitest run`, host load about 31 · timed out at 5 s with `connect ECONNREFUSED 127.0.0.1:3000`. A re-run of the file passed. First sighting.
+
+## tests/unit/v19-home-drawer-attach-id.test.mjs "keeps the id when the attach landed but the read failed, and sends it again on a re-pick"
+
+- 2026-11-15 · local, chore/next-4 on 635b8481 plus the #1848 O-R1 change · full `npx vitest run`, host load about 31 · timed out at 5 s. A re-run of the file passed. First sighting.
+
+## scripts/repair.test.mjs "restores the .orbit-config.rollback copy into .env-orbit, removes the rollback file, and ends healthy" (:3852)
+
+- 2026-11-15 · local, chore/next-4 on 635b8481 plus the #1848 O-R1 change · full `npx vitest run` on the shared host · `runRepair: the child was killed after its 30000ms deadline` after its stdout already showed both actions done and 0 failed. A re-run of the file passed. First sighting.
+
 ## tests/unit/admin-sending-route-1629.test.mjs "GET /api/admin/sending answers the sending half as sending, no-store, read for the caller's own id" (and the next test, as a knock-on)
 
 - 2026-11-13 · !1302 6028593c · pipeline 4068 / fast (job 50111, a retry) · the first test timed out at 5 s on its first `await route()`, the cold import of the route, on a loaded runner; the next test then got 200 for 403, as the timed-out test's still-running call took its one-shot mock. The same commit's first run passed the file (job 50081). First sighting.
@@ -19,15 +44,6 @@ test's own name, which does not move with the shard.
 
 - 2026-11-09 · fix/1535-repair-start e227e22b · local `scripts/test-backend.sh` (395s), shared host under load · "starts the tests/oidc sidecar with the stand-in issuer before step 4" timed out at the 5s default; the file alone passed on the rerun. First sighting.
 - 2026-11-09 · feat/1419-held-view d37a4df7 · local `scripts/test-backend.sh` (408s), shared host under load · "stops the sidecar in clean-up after a failure in the old install (step 4)" timed out at the 5s default; the file alone passed on the rerun (59/59). Second sighting.
-
-## tests/unit/administration-failed-card-screens.test.mjs (beforeAll, :145)
-
-- 2026-11-10 · fix/1803-repair-restore-guard 749f7a65 (repair.sh and docs only, nowhere near the administration screens) · local `scripts/test-backend.sh`, shared host under load · the file's `beforeAll` timed out at 10s; the file alone passed on the rerun (with the file below, 59/59). First sighting.
-- 2026-11-11 · fix/1794-index-js-writer 263eced6 (test-harness edits nowhere near the administration screens) · local `scripts/test-backend.sh`, shared host under load · the same `beforeAll` timed out at 10s; the file alone passed on the rerun (21/21). Second sighting.
-
-## tests/unit/administration-mail-settings-screens.test.mjs (file-level)
-
-- 2026-11-10 · fix/1803-repair-restore-guard 749f7a65, same run as above · local `scripts/test-backend.sh`, shared host under load · failed at file level alongside the sighting above; passed on the rerun. First sighting.
 
 ## scripts/repair-compose-from-image.test.mjs "repair.sh --check drift report ... shows exactly 20 differing lines and says more were not shown when there are more than 20"
 
@@ -493,3 +509,7 @@ timeout on this one case rather than a global raise.
 ## src/server/documents/pdf-structure-sandbox-poppler.test.ts "line 14: with check 1 / view 1, a render holding the view slot does not delay a structure check" (after-test check, :108)
 
 - 2026-11-12 · chore/v039-batch-b-ci d92e92b6 (Dockerfile pin and JSON policy only, nowhere near the PDF sandbox) · pipeline 4032 / fast (job 49856) · "§1.5 line 16: a child still in flight after the test: expected 1 to be +0"; the retried job 49859 passed. First sighting.
+
+## github-await-handoff.sh, a flaky GitHub › counts a successful read as a reset (scripts/ci/github-await-handoff.test.mjs)
+
+- 2026-11-15 · local, chore/next-4 on the dev merge plus the #1846 change (docs and the guarantees test only) · full `npx vitest run`, load average about 30 · `Test timed out in 30000ms`; the file re-run twice passed 53/53. First sighting.

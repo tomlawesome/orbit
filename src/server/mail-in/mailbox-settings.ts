@@ -59,9 +59,9 @@ import { outgoingMailConfig } from "./sending-settings";
 
 type Transaction = Parameters<Parameters<ReturnType<typeof getDb>["transaction"]>[0]>[0];
 
-/** The four provider profiles ADR-0017 decision 1 names; `other` is the default. */
-/* Outlook/Hotmail is no longer offered (#1780): Outlook.com and Hotmail refuse
-   password sign-in (owner, 2026-11-08). A stored `outlook` row reads as `other` (providerProfileOf). */
+/** The three provider profiles offered; `other` is the default. ADR-0017 decision 1 named four:
+    Outlook/Hotmail is no longer offered (#1780), as Outlook.com and Hotmail refuse password
+    sign-in (owner, 2026-11-08). A stored `outlook` row reads as `other` (providerProfileOf). */
 export const mailboxProviderProfiles = ["mailcow", "gmail", "other"] as const;
 export type MailboxProviderProfile = typeof mailboxProviderProfiles[number];
 

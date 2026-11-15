@@ -12,8 +12,9 @@
  * and empties the plain column, guarded on the plain value it read. So a
  * crash mid-batch loses nothing, a second pass is a no-op, and a hash changed
  * under it is never replaced by a seal of the old one. Until a row is reached
- * its readers fall back to the plain value. Dropping the plain column is a
- * later release (#1835).
+ * its readers fall back to the plain value, among them the per-mail dedupe in
+ * `commitStagedAttachment`. Dropping the plain column is a later release
+ * (#1835).
  *
  * The seal must be under the household the receipt has when it is written,
  * and attributing a receipt re-keys only seals already there. So each row is

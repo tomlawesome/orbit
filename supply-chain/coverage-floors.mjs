@@ -41,7 +41,9 @@ export const floors = {
   // measured on `dev` 230e6396, pipeline 3049, job `fast` 39963, 2026-10-27
   "src/lib": { statements: 87, branches: 82, functions: 89, lines: 89 },
   // measured on `dev` 230e6396, pipeline 3049, job `fast` 39963, 2026-10-27
-  "src/server": { statements: 61, branches: 56, functions: 63, lines: 62 },
+  // lines raised to 67 from MR pipeline 4182, job `fast`, 2026-11-15 (#1850:
+  // the new unit tests; measured 67.09 on batch-a 873db3be)
+  "src/server": { statements: 61, branches: 56, functions: 63, lines: 67 },
   // measured on `dev` 230e6396, pipeline 3049, job `fast` 39963, 2026-10-27
   // kept as a sub-floor because it already had its own 75% statements
   // floor; floors only go up

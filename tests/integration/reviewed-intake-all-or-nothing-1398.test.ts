@@ -365,10 +365,12 @@ describe("mail approval is all or nothing (#1398)", () => {
     await withRequiredScanMode(async () => {
       const { receiptId, attachments } = await seedMail(fixture, [`a-r3-${lifecycle}`]);
       const attachment = attachments[0]!;
+      const staleSealedItemId = randomUUID();
+      const staleContentSha256 = randomUUID().replaceAll("-", "") + randomUUID().replaceAll("-", "");
       await getDb().insert(documents).values({
-        id: attachment.id, householdId: fixture.household.id, itemId: null, sealedItemId: randomUUID(),
+        id: attachment.id, householdId: fixture.household.id, itemId: null, sealedItemId: staleSealedItemId,
         uploadedByUserId: fixture.users.member.id, displayName: "left-by-a-restart.pdf", mediaType: "application/pdf",
-        sizeBytes: attachment.bytes.length, contentSha256: randomUUID().replaceAll("-", "") + randomUUID().replaceAll("-", ""),
+        sizeBytes: attachment.bytes.length, contentSha256: staleContentSha256,
         lifecycle, scanStatus: "pending",
       });
       const before = await itemIds(fixture);
@@ -379,8 +381,18 @@ describe("mail approval is all or nothing (#1398)", () => {
       expect(outcome.result).toMatchObject({ outcome: "approved", attachmentState: "attached" });
       expect(await itemIds(fixture)).toHaveLength(before.length + 1);
       expect([...outcome.result!.attachedAttachmentIds]).toEqual([attachment.id]);
-      const doc = (await getDb().select({ itemId: documents.itemId, sealedItemId: documents.sealedItemId }).from(documents).where(eq(documents.id, attachment.id)))[0];
+      const doc = (await getDb().select({ itemId: documents.itemId, sealedItemId: documents.sealedItemId, contentSha256: documents.contentSha256 }).from(documents).where(eq(documents.id, attachment.id)))[0];
       expect(doc?.itemId, "bound to the new item").toBe(outcome.result!.itemId);
+      // The test's name says the dead copy is removed: a row that kept its
+      // stale key and only gained an item id would be bound but unreadable,
+      // because reads open a document under sealedItemId before itemId.
+      expect(doc?.sealedItemId, "the dead copy's stale key is gone").not.toBe(staleSealedItemId);
+      expect(doc?.contentSha256, "the dead copy's stale hash is gone").not.toBe(staleContentSha256);
+      expect(doc?.sealedItemId ?? doc?.itemId, "sealed under the new item").toBe(outcome.result!.itemId);
+      const [held] = await heldRows(receiptId);
+      expect(held?.assignedDocumentId, "the held attachment points at the document").toBe(attachment.id);
+      const download = await readDocumentDownload(fixture.users.member.id, attachment.id);
+      expect(Buffer.from(download.bytes).equals(Buffer.from(attachment.bytes)), "the attached document opens and holds the mail's bytes").toBe(true);
     });
   }, 60_000);
 

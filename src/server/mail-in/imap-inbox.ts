@@ -11,7 +11,7 @@ import { clearedReviewDraftMetadata, reclaimAbandonedMailboxApproval, sanitizeRe
 import { openMetadataReader, openMetadataReaders, openReceiptMetadataReaders, requireReceiptMetadataWriter, type MetadataCipher, type MetadataExecutor, type MetadataFieldState } from "@/server/metadata/fields";
 import { validUuid } from "@/lib/uuid";
 import { ATTACHMENT_CONTENT_HASH_COLUMN, openContentHash, sealContentHash } from "@/server/documents/content-hash";
-import { SENDER_ADDRESS_WORDS, senderDaysLeft, sweepUncheckedSenderAddresses } from "./sender-addresses";
+import { SENDER_ADDRESS_WORDS, senderClockAt, senderClockStoppedAt, senderDaysLeft, sweepUncheckedSenderAddresses } from "./sender-addresses";
 import { endApprovalNotices } from "./approval-notice";
 import {
   reviewInboxState,
@@ -343,6 +343,7 @@ export async function listImapInbox(userId: string) {
   const metadataReaders = await openReceiptMetadataReaders(receipts.map((receipt) => receipt.householdId));
   const filedReaders = await openMetadataReaders(filedRows.map((row) => row.householdId));
   const now = new Date();
+  const senderClockStopped = receipts.some((receipt) => receipt.heldSenderAddressId !== null) ? await senderClockStoppedAt() : null;
   const visibleReceipts = receipts.filter((receipt) => !receipt.householdId || visibleHouseholdIds.has(receipt.householdId)).map((receipt) => ({
     receipt,
     state: heldForSenderCheck(reviewInboxState(inboxStatusOf(receipt), receipt.failureCode, {
@@ -354,7 +355,7 @@ export async function listImapInbox(userId: string) {
     /* #1650: days before the unchecked address, and the mail held under it,
        goes; null for the sign-in row, which time never removes. */
     senderDaysLeft: receipt.heldSenderAddressId !== null && receipt.heldSenderSource && receipt.heldSenderCreatedAt
-      ? senderDaysLeft({ source: receipt.heldSenderSource, verifiedAt: receipt.heldSenderVerifiedAt, createdAt: receipt.heldSenderCreatedAt, verificationExpiresAt: receipt.heldSenderExpiresAt }, now)
+      ? senderDaysLeft({ source: receipt.heldSenderSource, verifiedAt: receipt.heldSenderVerifiedAt, createdAt: receipt.heldSenderCreatedAt, verificationExpiresAt: receipt.heldSenderExpiresAt }, senderClockAt(receipt.heldSenderCreatedAt, now, senderClockStopped))
       : null,
   }));
   /* #1437: the inbox draws the review card from this read, so the mark rides
