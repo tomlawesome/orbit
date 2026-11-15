@@ -478,3 +478,195 @@ describe("this repository", () => {
     assert.match(job, /node scripts\/ci\/check-cosign-calls\.mjs/);
   });
 });
+
+describe("a cosign variable behind a command wrapper (#1843)", () => {
+  // The literal form is already caught behind any word; a variable named
+  // *cosign* must count behind these wrappers too, including their own
+  // flags and arguments.
+  const wrappers = [
+    "timeout 5",
+    "timeout -k 2 5",
+    "timeout --signal=KILL 5",
+    "nice -n 5",
+    "nice",
+    "ionice -c3",
+    "ionice -c 2 -n 7",
+    "setsid",
+    "setsid -w",
+    "stdbuf -oL",
+    "stdbuf -o0 -e0",
+    "flock /tmp/l",
+    "flock -w 5 /tmp/l",
+  ];
+  for (const [i, w] of wrappers.entries()) {
+    it(`flags "\${cosign}" sign behind ${w}, like the literal word`, () => {
+      fails({ [`scripts/lit${i}.sh`]: `#!/usr/bin/env bash\n${w} cosign sign img\n` }, `scripts/lit${i}.sh`, 2);
+      fails({ [`scripts/w${i}.sh`]: `#!/usr/bin/env bash\n${w} "\${cosign}" sign img\n` }, `scripts/w${i}.sh`, 2);
+      fails({ [`scripts/x${i}.sh`]: `#!/usr/bin/env bash\n${w} $COSIGN_BIN attest-blob f\n` }, `scripts/x${i}.sh`, 2);
+    });
+
+    it(`accepts the variable behind ${w} with the flag, and verify without it`, () => {
+      passes({ [`scripts/s${i}.sh`]: `${w} "\${cosign}" sign --tlog-upload=false img\n${w} "\${cosign}" verify img\n` });
+    });
+  }
+
+  it("flags the variable behind a wrapper after && and inside $( )", () => {
+    fails({ "scripts/a.sh": 'true && timeout 5 "${cosign}" sign img\n' }, "scripts/a.sh", 1);
+    fails({ "scripts/b.sh": 'out=$(flock /tmp/l "$COSIGN" sign img)\n' }, "scripts/b.sh", 1);
+  });
+
+  it("flags the variable behind stacked wrappers", () => {
+    fails({ "scripts/s.sh": 'timeout 5 nice -n 5 "${cosign}" sign img\n' }, "scripts/s.sh", 1);
+    fails({ "scripts/t.sh": 'sudo timeout 5 "${cosign}" sign img\n' }, "scripts/t.sh", 1);
+  });
+
+  it("a marker still excuses the wrapped variable call", () => {
+    passes({ "scripts/s.sh": '# cosign-public-upload: keyless release signature\ntimeout 5 "${cosign}" sign --yes img\n' });
+  });
+
+  it("does not treat a cosign variable as the command when it is only an argument of a wrapper's own flag", () => {
+    passes({ "scripts/s.sh": 'timeout 5 echo "$COSIGN_SHA256" sign\nflock /tmp/l printf "%s" "$cosign_path"\n' });
+  });
+});
+
+describe("one marker excuses one call (#1843)", () => {
+  const reasoned = "# cosign-public-upload: keyless release signature belongs in Rekor\n";
+
+  it("a marked call alone still passes", () => {
+    passes({ "scripts/s.sh": `${reasoned}cosign sign --yes i\n` });
+  });
+
+  for (const [name, joiner] of [["&&", " && "], [";", "; "], ["||", " || "], ["|", " | "]]) {
+    it(`flags the second call of two joined by ${name} on the marked line`, () => {
+      fails({ "scripts/s.sh": `${reasoned}cosign sign --yes i${joiner}cosign sign --yes j\n` }, "scripts/s.sh", 2);
+    });
+  }
+
+  it("flags the second call whichever form it takes", () => {
+    fails({ "scripts/a.sh": `${reasoned}cosign sign --yes i && "\${cosign}" sign-blob --yes f\n` }, "scripts/a.sh", 2);
+    fails({ "scripts/b.sh": `${reasoned}cosign sign --yes i && out=$(cosign attest --yes j)\n` }, "scripts/b.sh", 2);
+  });
+
+  it("flags the second call of a continued command", () => {
+    fails({ "scripts/s.sh": `${reasoned}cosign sign --yes i \\\n  && cosign sign --yes j\n` }, "scripts/s.sh", 3);
+  });
+
+  it("excuses the first call only: a flagless second call fails even if the first has the flag", () => {
+    fails({ "scripts/s.sh": `${reasoned}cosign sign --tlog-upload=false i && cosign sign j\n` }, "scripts/s.sh", 2);
+  });
+
+  it("a second call with the flag needs no marker", () => {
+    passes({ "scripts/s.sh": `${reasoned}cosign sign --yes i && cosign sign --tlog-upload=false j\n` });
+  });
+
+  it("a marker inside a block scalar excuses one call of two on its line", () => {
+    fails({
+      [wf]: `jobs:\n  a:\n    steps:\n      - run: |\n          ${reasoned}          cosign sign --yes i && cosign sign --yes j\n`,
+    }, wf, 6);
+  });
+});
+
+describe("cosign called from .mjs and .ts files (#1843)", () => {
+  // How the checker finds these files is not fixed by the spec; the fixtures
+  // use scripts/ (where the .mjs files are) and src/ (the .ts files).
+  const places = ["scripts/tool.mjs", "scripts/ci/deep/tool.mjs", "src/lib/tool.ts"];
+
+  for (const [i, p] of places.entries()) {
+    const f = (body) => ({ [p]: `import { execFileSync } from "node:child_process";\n${body}\n` });
+
+    it(`flags execFileSync("cosign", ["sign", ...]) in ${p}`, () => {
+      fails(f('execFileSync("cosign", ["sign", image]);'), p, 2);
+      fails(f("execFileSync('cosign', ['attest-blob', '--key', k, file]);"), p, 2);
+    });
+
+    it(`flags spawn, spawnSync, execFile and execFileSync forms in ${p}`, () => {
+      for (const fn of ["spawn", "spawnSync", "execFile", "execFileSync"]) {
+        fails(f(`${fn}("cosign", ["sign-blob", file], { stdio: "inherit" });`), p, 2);
+      }
+    });
+
+    it(`flags a cosign command string run by exec in ${p}`, () => {
+      fails(f("exec(`cosign sign ${image}`);"), p, 2);
+      fails(f('execSync("cosign sign " + image);'), p, 2);
+      fails(f('execSync(`/usr/local/bin/cosign attest ${image}`, { stdio: "inherit" });'), p, 2);
+    });
+
+    it(`accepts the same calls with --tlog-upload=false in ${p}`, () => {
+      passes(f('execFileSync("cosign", ["sign", "--tlog-upload=false", image]);'));
+      passes(f('spawn("cosign", ["sign-blob", "--tlog-upload", "false", file]);'));
+      passes(f("exec(`cosign sign --tlog-upload=false ${image}`);"));
+    });
+
+    it(`ignores verify, version and other non-signing cosign calls in ${p}`, () => {
+      passes(f('execFileSync("cosign", ["verify", image]);\nspawnSync("cosign", ["version"]);\nexec(`cosign verify-blob ${f}`);'));
+    });
+
+    it(`ignores cosign in comments, prose strings and identifiers in ${p}`, () => {
+      passes(
+        f(
+          [
+            "// Signing tools are downloaded release binaries (cosign, #661).",
+            "/* run cosign sign later, with the flag */",
+            'console.log("run cosign sign later");',
+            'const message = "cosign attest comes after";',
+            "const cosignUsable = true;",
+            "const row = { cosignUsable: facts.cosignUsable };",
+          ].join("\n"),
+        ),
+      );
+    });
+
+    it(`flags OTEL_ set in a cosign call's environment in ${p}`, () => {
+      fails(f('execFileSync("cosign", ["verify", image], { env: { OTEL_TRACES_EXPORTER: "otlp" } });'), p, 2);
+    });
+    void i;
+  }
+
+  it("does not flag the checker-neutral file types: .md, .json and .txt mentioning a call", () => {
+    passes({ "scripts/n.md": 'execFileSync("cosign", ["sign", i])\n', "src/n.json": '{"run":"cosign sign i"}\n' });
+  });
+});
+
+describe("cosign called from a Dockerfile (#1843)", () => {
+  const places = ["Dockerfile", "tests/sub/Dockerfile", "Dockerfile.release"];
+  for (const p of places) {
+    it(`flags a RUN cosign sign line in ${p}`, () => {
+      fails({ [p]: "FROM alpine\nRUN cosign sign img\n" }, p, 2);
+      fails({ [p]: "FROM alpine\nRUN cosign attest-blob --key k f\n" }, p, 2);
+    });
+
+    it(`flags a cosign call after && and in a continued RUN in ${p}`, () => {
+      fails({ [p]: "FROM alpine\nRUN apk add cosign && cosign sign img\n" }, p, 2);
+      fails({ [p]: "FROM alpine\nRUN set -eu \\\n  && cosign sign-blob \\\n     --key k f\n" }, p, 3);
+    });
+
+    it(`accepts a RUN cosign sign with --tlog-upload=false in ${p}`, () => {
+      passes({ [p]: "FROM alpine\nRUN cosign sign --tlog-upload=false img\n" });
+    });
+
+    it(`ignores verify, comments and ENV text mentioning cosign in ${p}`, () => {
+      passes({ [p]: "FROM alpine\n# RUN cosign sign img\nRUN cosign verify img\nENV NOTE=\"cosign sign later\"\nCOPY cosign.pub /etc/\n" });
+    });
+
+    it(`flags an OTEL_ variable set by ENV in ${p}`, () => {
+      fails({ [p]: "FROM alpine\nENV OTEL_SDK_DISABLED=false\n" }, p, 2);
+    });
+  }
+});
+
+describe("the new code-file scan on this repository (#1843)", () => {
+  // scripts/supply-chain-policy.mjs only mentions cosign in a comment, and
+  // src/lib/host-facts.ts only has a cosignUsable field: neither is a call.
+  it("passes when the two real files that merely mention cosign are scanned", () => {
+    const rel = ["scripts/supply-chain-policy.mjs", "src/lib/host-facts.ts"];
+    const files = Object.fromEntries(rel.map((r) => [r, readFileSync(join(worktree, r), "utf8")]));
+    assert.match(files[rel[0]], /cosign/);
+    assert.match(files[rel[1]], /cosignUsable/);
+    passes(files);
+  });
+
+  it("passes on the whole repository tree, whatever other .mjs, .ts and Dockerfile files mention cosign", () => {
+    const result = spawnSync("node", [checker, "--root", worktree], { encoding: "utf8" });
+    assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
+  });
+});
