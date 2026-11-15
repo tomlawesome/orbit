@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   citationContentProblems,
+  citedFileLines,
   mainScriptCitationProblems,
   staleInstallShCitations,
 } from "./installer-guarantee-citations.mjs";
@@ -391,6 +392,14 @@ describe("install.sh main-script citations in the guarantee catalogue (#1846)", 
 
   it("every main-script citation in the real catalogue lies outside functions and on code lines", () => {
     expect(mainScriptCitationProblems(catalogue, installShReal)).toEqual([]);
+  });
+
+  it("install.sh #39 cites the docker-compose.yml lines of the model-pull service and its loopback OLLAMA_HOST (#1852)", () => {
+    const compose = readFileSync(new URL("../docker-compose.yml", import.meta.url), "utf8").replaceAll("\r\n", "\n");
+    const cited = citedFileLines(catalogue, compose, "install.sh #39", "docker-compose.yml");
+    expect(cited, "install.sh #39 has no docker-compose.yml citation").not.toBeNull();
+    expect(cited).toContain("orbit-ollama-model-pull:");
+    expect(cited).toContain("OLLAMA_HOST: 127.0.0.1");
   });
 
   // Fixed list from the #1846 spec; substrings are literal text of install.sh.

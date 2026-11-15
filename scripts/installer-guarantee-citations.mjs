@@ -200,3 +200,19 @@ export function citationContentProblems(docText, installShText, expectations) {
   }
   return problems;
 }
+
+/**
+ * #1852: the lines of `fileName` (e.g. "docker-compose.yml") that a guarantee
+ * cites as `<fileName>:<first>[-<last>]`, joined by newlines; null when the
+ * guarantee has no such citation. `guarantee` is "install.sh #39".
+ */
+export function citedFileLines(docText, fileText, guarantee, fileName) {
+  const escaped = fileName.replaceAll(".", "\\.");
+  const pattern = new RegExp(`(?<![\\w./-])${escaped}:(\\d+)(?:-(\\d+))?`, "u");
+  const entry = numberedGuarantees(docText).find((item) => item.guarantee === guarantee);
+  const match = entry && pattern.exec(entry.text);
+  if (!match) return null;
+  const first = Number(match[1]);
+  const last = match[2] === undefined ? first : Number(match[2]);
+  return fileText.split("\n").slice(first - 1, last).join("\n");
+}
