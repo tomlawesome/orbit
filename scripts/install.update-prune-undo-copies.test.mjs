@@ -331,6 +331,33 @@ describe("install.sh --plain --update: a terminal that does not make the run int
   });
 });
 
+describe("install.sh --plain --update: what typing at the prune prompt does (#1834 slice 5 follow-up review)", () => {
+  it("in --plain mode the typed answer is visible: the characters appear after the prompt", async () => {
+    const targetDir = withOldCopies(installedFolder());
+    const result = await updateOnTerminal(targetDir, "nope\r");
+    expect(result.status).toBe(0);
+    const output = result.stdout.replace(/\r/gu, "");
+    const markerAt = output.search(NO_DEFAULT_MARKER);
+    expect(markerAt).toBeGreaterThan(-1);
+    expect(output.slice(0, markerAt)).not.toContain("nope");
+    expect(output.slice(markerAt), "the typed answer is echoed after the prompt").toContain("nope");
+    expect(qualifyingLeft(targetDir)).toEqual(Object.keys(QUALIFYING));
+  });
+
+  it("typing past the 16-character cap leaves nothing in the terminal's input once install.sh exits, and still means no", async () => {
+    const targetDir = withOldCopies(installedFolder());
+    const result = await updateOnTerminal(targetDir, "yes please remove them\r", {}, [
+      '; read -r -t 1 leftover; printf "LEFTOVER=[%s]\\n" "$leftover"',
+    ]);
+    const output = result.stdout.replace(/\r/gu, "");
+    expect(result.promptedInteractions).toBe(1);
+    expect(resultBlock(output)).toContain("Orbit is ready.");
+    expect(output).toMatch(/^LEFTOVER=\[.*\]$/mu);
+    expect(output.match(/^LEFTOVER=\[(.*)\]$/mu)?.[1]).toBe("");
+    expect(qualifyingLeft(targetDir)).toEqual(Object.keys(QUALIFYING));
+  });
+});
+
 describe(`install.sh --plain --update with ${ENV_FORM} (#1834 slice 5 review)`, () => {
   it(`${ENV_FORM}=yes acts exactly as ${FLAG}: lists, states CANNOT, removes exactly the qualifying folders`, () => {
     const targetDir = withOldCopies(installedFolder());
