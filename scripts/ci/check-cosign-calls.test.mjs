@@ -837,3 +837,115 @@ describe("component: and template: includes (#1843, owner decision on note 37b f
     fails({ [ci]: "include:\n  - local: sub/a.yml\n", "sub/a.yml": "include:\n  - template: Jobs/SAST.gitlab-ci.yml\n" }, "sub/a.yml", 2);
   });
 });
+
+describe("strict include subset (#1843 review fix round, note 59935)", () => {
+  const sha = "0123456789abcdef0123456789abcdef01234567";
+  const ci = ".gitlab-ci.yml";
+  const bad = (name, body, line, extra = {}) =>
+    it(`fails on ${name}`, () => {
+      fails({ [ci]: body, ...extra }, ci, line);
+    });
+
+  bad("a list dash at column 0", "include:\n- remote: https://x/y\n", 2);
+  bad("a flow list of flow mappings", 'include: [{remote: "https://x"}]\n', 1);
+  bad("a flow list of strings", 'include: [ "https://x" ]\n', 1);
+  bad("a flow mapping value", 'include: {remote: "https://x"}\n', 1);
+  bad("a flow-style template item", "include:\n  - {template: Jobs/x.yml}\n", 2);
+  bad("a flow-style project item", "include: [{project: a/b, ref: main, file: x.yml}]\n", 1);
+  bad("a quoted include key", '"include":\n  - remote: https://x\n', 2);
+  bad("a quoted item key", 'include:\n  - "remote": "https://x"\n', 2);
+  bad("an alias item through an anchor", "x: &a\n  remote: https://x\ninclude:\n  - *a\n", 4);
+  bad("a !reference item", "include:\n  - !reference [x, y]\n", 2);
+  bad("an unknown item key", "include:\n  - foo: bar\n", 2);
+  bad("a ref only nested under rules", `include:\n  - project: a/b\n    file: x.yml\n    rules:\n      - if: $X\n        ref: ${sha}\n`, 2);
+  bad("a ref only inside inputs", `include:\n  - project: a/b\n    file: x.yml\n    inputs: {ref: ${sha}}\n`, 2);
+  bad("a local glob", "include:\n  - local: ci/*.yml\n", 2, { "ci/a.yml": "x: 1\n" });
+  bad("a local with a $VAR", "include:\n  - local: $CI_DIR/a.yml\n", 2);
+  bad("a local list", "include:\n  - local: [ci/a.yml]\n", 2, { "ci/a.yml": "x: 1\n" });
+  bad("a flow-mapping local item", "include:\n  - {local: ci/a.yml}\n", 2, { "ci/a.yml": "x: 1\n" });
+  bad("a local naming a missing file", "include:\n  - local: ci/missing.yml\n", 2);
+
+  it("still follows a plain existing local include: cosign upload inside is caught", () => {
+    fails({ [ci]: "include:\n  - local: ci/a.yml\n", "ci/a.yml": "job:\n  script:\n    - cosign sign img\n" }, "ci/a.yml", 3);
+  });
+
+  it("still follows a plain existing local include: a remote inside is caught", () => {
+    fails({ [ci]: "include:\n  - local: ci/a.yml\n", "ci/a.yml": "include:\n  - remote: https://x/y\n" }, "ci/a.yml", 2);
+  });
+
+  it("passes a pinned project with file: as a block list", () => {
+    passes({ [ci]: `include:\n  - project: a/b\n    ref: ${sha}\n    file:\n      - x.yml\n      - y.yml\n` });
+  });
+
+  it("passes a pinned project with rules:", () => {
+    passes({ [ci]: `include:\n  - project: a/b\n    ref: ${sha}\n    file: x.yml\n    rules:\n      - if: $X\n` });
+  });
+
+  it("passes a plain existing local include", () => {
+    passes({ [ci]: "include:\n  - local: ci/a.yml\n", "ci/a.yml": "job:\n  script:\n    - true\n" });
+  });
+
+  it("this repository still passes", () => {
+    const result = spawnSync("node", [checker, "--root", worktree], { encoding: "utf8" });
+    assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
+  });
+});
+
+describe("backticks, flock -c and env -C in shell (#1843 review fix round)", () => {
+  const sh = (body) => ({ "scripts/s.sh": `#!/usr/bin/env bash\n${body}\n` });
+
+  it("flags cosign sign in an assignment's backticks", () => {
+    fails(sh("x=`cosign sign a`"), "scripts/s.sh", 2);
+  });
+
+  it("flags a bare backtick line", () => {
+    fails(sh("`cosign sign a`"), "scripts/s.sh", 2);
+  });
+
+  it("flags flock -c with a double-quoted script", () => {
+    fails(sh('flock /l -c "cosign sign x"'), "scripts/s.sh", 2);
+  });
+
+  it("flags flock -c with a single-quoted script", () => {
+    fails(sh("flock /l -c 'cosign sign x'"), "scripts/s.sh", 2);
+  });
+
+  it("flags env -C dir with a variable cosign", () => {
+    fails(sh('env -C /tmp "$cosign" sign x'), "scripts/s.sh", 2);
+  });
+
+  it("passes each with --tlog-upload=false", () => {
+    passes(sh("x=`cosign sign --tlog-upload=false a`"));
+    passes(sh("`cosign sign --tlog-upload=false a`"));
+    passes(sh('flock /l -c "cosign sign --tlog-upload=false x"'));
+    passes(sh("flock /l -c 'cosign sign --tlog-upload=false x'"));
+    passes(sh('env -C /tmp "$cosign" sign --tlog-upload=false x'));
+  });
+});
+
+describe("code-file aliases, absolute paths and sh -c (#1843 review fix round)", () => {
+  const f = (body, imp = 'import { execFile, spawn } from "node:child_process";') => ({ "scripts/tool.mjs": `${imp}\n${body}\n` });
+
+  it("flags execFile of an absolute /usr/bin/cosign", () => {
+    fails(f('execFile("/usr/bin/cosign", ["sign","x"]);'), "scripts/tool.mjs", 2);
+  });
+
+  it("flags execFile of sh -c with a cosign script", () => {
+    fails(f('execFile("sh", ["-c", "cosign sign x"]);'), "scripts/tool.mjs", 2);
+  });
+
+  it("flags spawn of bash -c with a cosign script", () => {
+    fails(f('spawn("bash", ["-c", "cosign sign x"]);'), "scripts/tool.mjs", 2);
+  });
+
+  it("flags an aliased import of execFile", () => {
+    fails({ "scripts/tool.mjs": 'import { execFile as ef } from "node:child_process";\nef("cosign", ["sign","x"]);\n' }, "scripts/tool.mjs", 2);
+  });
+
+  it("passes each with --tlog-upload=false", () => {
+    passes(f('execFile("/usr/bin/cosign", ["sign","--tlog-upload=false","x"]);'));
+    passes(f('execFile("sh", ["-c", "cosign sign --tlog-upload=false x"]);'));
+    passes(f('spawn("bash", ["-c", "cosign sign --tlog-upload=false x"]);'));
+    passes({ "scripts/tool.mjs": 'import { execFile as ef } from "node:child_process";\nef("cosign", ["sign","--tlog-upload=false","x"]);\n' });
+  });
+});
