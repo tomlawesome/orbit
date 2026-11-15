@@ -432,19 +432,25 @@ const bashRegex = (regex) => regex.source.replace(/\\d/gu, "[0-9]");
 /**
  * chown: "pass" (log, then the real chown), "fail" (log, exit 1), "fail-backups-root" (exit 1 only when the last
  * argument is the orbit-install-backups folder itself), "fail-dated" (exit 1 only when the last argument is a dated
- * backup folder, DATED). root: whether the `id` shim makes `id -u` print 0.
+ * backup folder, DATED), "fail-match" (exit 1 only when the last argument, ./ and a trailing / stripped, matches the
+ * failWhen regex). root: whether the `id` shim makes `id -u` print 0.
  * plant: { when: <regex on the last argument, ./ and a trailing / stripped>, links: [[name, target], ...] }: when a
  * chown names a matching path, `ln -s <target> "<last>/<name>"` is run for each pair (a failure ignored) before the
  * real chown, the first instant the folder's owner could create an entry there.
  * Each chown log line also goes, with the number of `compose up` calls the docker shim had logged by then, to
  * an order log, so a test can tell whether a chown came before the stack was started.
+ * When a chown names a directory (not a link), its entries down to two levels at that moment (`find -printf '%P:%y'`)
+ * go to a contents log, so a test can tell what was already in a folder when it changed owner.
  */
-function rootShims({ chown = "pass", root = true, plant = null } = {}) {
+function rootShims({ chown = "pass", root = true, plant = null, failWhen = null } = {}) {
   const dir = scratchDir("orbit-repair-os5-shims-");
   const log = join(dir, "chown.log");
   const order = join(dir, "chown-order.log");
   const datedRegex = join(dir, "dated.re");
   writeFileSync(datedRegex, bashRegex(DATED));
+  const contents = join(dir, "chown-contents.log");
+  const failRegex = join(dir, "fail.re");
+  if (failWhen) writeFileSync(failRegex, bashRegex(failWhen));
   const plantRegex = join(dir, "plant.re");
   let planting = "";
   if (plant) {
@@ -461,6 +467,7 @@ function rootShims({ chown = "pass", root = true, plant = null } = {}) {
     fail: "exit 1",
     "fail-backups-root": `case "\${last%/}" in orbit-install-backups|./orbit-install-backups|*/orbit-install-backups) exit 1;; esac\nexec '${realTool("chown")}' "$@"`,
     "fail-dated": `re="$(cat '${datedRegex}')"\nif [[ "$rel" =~ $re ]]; then exit 1; fi\nexec '${realTool("chown")}' "$@"`,
+    "fail-match": `re="$(cat '${failRegex}')"\nif [[ "$rel" =~ $re ]]; then exit 1; fi\nexec '${realTool("chown")}' "$@"`,
   }[chown];
   writeFileSync(
     join(dir, "chown"),
@@ -475,6 +482,7 @@ state="$(sed -n "2s/^S='\\(.*\\)'\$/\\1/p" "$(command -v docker)" 2>/dev/null)"
 ups=unknown
 if [[ -n "$state" ]]; then ups="$(grep -cE '\\bcompose\\b.*\\bup\\b' "$state/argv.log" 2>/dev/null)"; ups="\${ups:-0}"; fi
 printf '%s ups=%s\\n' "$last" "$ups" >> '${order}'
+if [[ -d "$last" && ! -L "$last" ]]; then printf '%s|%s\\n' "$rel" "$(find "$last" -mindepth 1 -maxdepth 2 -printf '%P:%y ' 2>/dev/null)" >> '${contents}'; fi
 ${planting}${outcome}
 `,
   );
@@ -485,6 +493,8 @@ ${planting}${outcome}
     log,
     env: { ORBIT_REPAIR_PROMPTS: "machine", PATH: `${dir}:${process.env.PATH}` },
     calls: () => read(log),
+    /** Each chown of a directory, in order: { path, entries: ["<relative path>:<find %y type>", ...] }. */
+    contents: () => read(contents).map((line) => /^([^|]*)\|(.*)$/u.exec(line)).map((found) => ({ path: found[1], entries: found[2].split(" ").filter(Boolean) })),
     order: () => read(order).map((line) => /^(.*) ups=(\S+)$/u.exec(line)).map((found) => ({ path: found[1].replace(/^\.\//u, ""), ups: found[2] })),
   };
 }
@@ -786,6 +796,97 @@ describe("FIX-S1 (#1844): a root run of retire-smtp-lines does not follow a plan
     expect(findCalls(["-path", join(targetDir, "orbit-install-backups", "*")], targetDir)).toEqual([]);
     expect(readdirSync(targetDir).filter((name) => /^\.env-orbit\.retire-smtp\..{6}$/u.test(name))).toEqual([]);
     expect(existsSync(secretPath(targetDir))).toBe(true);
+  });
+
+  // Audit v0.3.9-c sweep 2: each of the five guarded chowns, failing alone, stops the run. The rewritten copy and
+  // the backups root are covered above; these are the other three.
+  const BACKUP_REFUSAL = "retire-smtp-lines refused, nothing was changed: the backup of .env-orbit could not be made in orbit-install-backups";
+  const DATED_COPY = /^orbit-install-backups\/\d{8}T\d{6}Z-repair(-\d)?\/\.env-orbit$/u;
+
+  /** A failed chown stopped the run before any change to .env-orbit, the secret or the stack. */
+  function expectStoppedUnchanged(targetDir, result, before, message) {
+    expect(result.stdout).not.toContain(DONE);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(message);
+    const envPath = join(targetDir, ".env-orbit");
+    expect(readFileSync(envPath).equals(before), "the live .env-orbit changed").toBe(true);
+    expect(modeOf(envPath)).toBe("600");
+    expect(existsSync(secretPath(targetDir))).toBe(true);
+    expect(existsSync(join(targetDir, RECORD))).toBe(false);
+    expect(tempLeftovers(targetDir)).toEqual([]);
+    expect(composeUpCalls(result)).toEqual([]);
+  }
+
+  it("sweep 2: a chown that fails on the dated backup folder alone stops the run with no change and no backup left", () => {
+    const targetDir = withMail();
+    const before = readFileSync(join(targetDir, ".env-orbit"));
+    const shims = rootShims({ chown: "fail-match", failWhen: DATED });
+    const result = runAsRoot(targetDir, shims);
+    expectStoppedUnchanged(targetDir, result, before, BACKUP_REFUSAL);
+    const calls = chownCalls(shims);
+    expect(calls.filter((call) => call.path !== null && DATED.test(call.path)).length, shims.calls().join("\n")).toBeGreaterThan(0);
+    // The dated folder is removed with its copies; the backups root this run made may remain, empty.
+    expect(envBackups(targetDir)).toEqual([]);
+    expect(findCalls(["-path", join(targetDir, "orbit-install-backups", "*")], targetDir)).toEqual([]);
+  });
+
+  it("sweep 2: a chown that fails on the backed-up .env-orbit alone stops the run with no change and no backup left", () => {
+    const targetDir = withMail();
+    const before = readFileSync(join(targetDir, ".env-orbit"));
+    const shims = rootShims({ chown: "fail-match", failWhen: DATED_COPY });
+    const result = runAsRoot(targetDir, shims);
+    expectStoppedUnchanged(targetDir, result, before, BACKUP_REFUSAL);
+    const calls = chownCalls(shims);
+    expect(calls.filter((call) => call.path !== null && DATED_COPY.test(call.path)).length, shims.calls().join("\n")).toBeGreaterThan(0);
+    // It stops at once: the dated folder and the backups root are never chowned.
+    expect(calls.filter((call) => call.path !== null && (DATED.test(call.path) || call.path === "orbit-install-backups")), shims.calls().join("\n")).toEqual([]);
+    expect(envBackups(targetDir)).toEqual([]);
+    expect(findCalls(["-path", join(targetDir, "orbit-install-backups", "*")], targetDir)).toEqual([]);
+  });
+
+  it("sweep 2: a chown that fails on the step record alone stops the run with .env-orbit unchanged, keeping the backup it announced", () => {
+    const targetDir = withMail();
+    const before = readFileSync(join(targetDir, ".env-orbit"));
+    const shims = rootShims({ chown: "fail-match", failWhen: RECORD_TMP });
+    const result = runAsRoot(targetDir, shims);
+    expectStoppedUnchanged(targetDir, result, before, "retire-smtp-lines left .env-orbit as it was: its step record could not be written");
+    const calls = chownCalls(shims);
+    expect(calls.filter((call) => call.path !== null && RECORD_TMP.test(call.path)).length, shims.calls().join("\n")).toBeGreaterThan(0);
+    // Unlike the other four, this guard runs after the lasting backup is complete and named on stderr, and it
+    // leaves that backup in place: one dated folder, mode 700, its .env-orbit without the password line.
+    expect(result.stderr).toContain("retire-smtp-lines backed up .env-orbit");
+    const backups = envBackups(targetDir);
+    expect(backups).toHaveLength(1);
+    expect(modeOf(dirname(backups[0]))).toBe("700");
+    expect(readFileSync(backups[0], "utf8")).not.toMatch(/^SMTP_PASSWORD=/mu);
+    // A later run, with the record never written, makes its backup again and finishes.
+    const second = runAsRoot(targetDir, rootShims());
+    expect(second.stdout, second.stderr).toContain(DONE);
+    expect(existsSync(secretPath(targetDir))).toBe(false);
+  });
+
+  // FIX-S1's ordering: the dated folder, and a backups root this run made, change owner only once both copies are
+  // written in the dated folder. Test 5 holds either way; this one does not.
+  it("sweep 2: the dated folder and a new backups root are chowned only after both copies are in the dated folder", () => {
+    const targetDir = withMail();
+    const shims = rootShims();
+    const result = runAsRoot(targetDir, shims);
+    expect(result.stdout, result.stderr).toContain(DONE);
+    const contents = shims.contents();
+    const log = shims.calls().join("\n");
+    const dated = contents.filter((entry) => DATED.test(entry.path));
+    expect(dated, `the dated folder was not chowned once:\n${log}`).toHaveLength(1);
+    expect(dated[0].entries, `the dated folder changed owner before its copies were written:\n${log}`).toEqual(
+      expect.arrayContaining([".env-orbit:f", "docker-compose.mail.yml:f"]),
+    );
+    const root = contents.filter((entry) => entry.path === "orbit-install-backups");
+    expect(root, `the backups root this run made was not chowned once:\n${log}`).toHaveLength(1);
+    const name = dated[0].path.slice("orbit-install-backups/".length);
+    expect(root[0].entries, `the backups root changed owner before the copies were written:\n${log}`).toEqual(
+      expect.arrayContaining([`${name}:d`, `${name}/.env-orbit:f`, `${name}/docker-compose.mail.yml:f`]),
+    );
+    const paths = contents.map((entry) => entry.path);
+    expect(paths.indexOf("orbit-install-backups"), log).toBeGreaterThan(paths.indexOf(dated[0].path));
   });
 });
 
