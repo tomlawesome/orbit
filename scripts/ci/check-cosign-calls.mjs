@@ -83,9 +83,15 @@
  * indented top-level mapping and a quoted top-level key that is escaped or
  * spells include fail too, so an anchor elsewhere cannot bring an include in.
  * Each pinned project or component include prints one `not scanned:` line
- * (project, ref, files) and does not affect the exit code. A local: anywhere
- * else in a followed file (a child pipeline's trigger: include:) is followed
- * when it names an existing file, best effort.
+ * (project, ref, files) and does not affect the exit code.
+ *
+ * A job's `trigger: include:` (a child pipeline; #1843 note 59967) gets the
+ * same reader and pin rules, at its own indentation, plus one more form:
+ * `include: <path>`, a plain scalar naming an existing local file, which is
+ * followed and scanned. Any other value of a trigger's include (flow, alias,
+ * URL, a missing file) fails, and so does a trigger: value that is not a
+ * plain scalar (a flow mapping could hold an include). An include: key
+ * anywhere else is ignored, as GitLab ignores it.
  *
  * Known limits (Low, #1843 note 59935): `cosign sign x -- --tlog-upload=false`
  * passes (the flag after -- is read as a flag); a quoted "OTEL_X=1"
@@ -180,13 +186,6 @@ function filesToScan(root) {
     const found = readIncludes(file, root);
     includes.set(file, found);
     queue.push(...found.locals);
-    // Best effort: a local: anywhere else (a child pipeline's trigger: include:).
-    for (const line of readFileSync(file, "utf8").split("\n")) {
-      const m = /^\s+(?:-\s+)?local:\s*["']?([^"'\s#]+)/.exec(line);
-      if (!m) continue;
-      const inc = resolve(root, m[1].replace(/^\/+/, ""));
-      if (existsSync(inc) && statSync(inc).isFile()) queue.push(inc);
-    }
   }
   const wf = join(root, ".github", "workflows");
   if (existsSync(wf)) {
@@ -837,10 +836,54 @@ function readIncludes(file, root) {
     readIncludeBlock(lines, i + 1, end, root, { fail, notes, locals });
     i = end;
   }
+  readTriggerIncludes(lines, root, { fail, notes, locals });
   return { problems, notes, locals };
 }
 
-function readIncludeBlock(lines, from, end, root, out) {
+/**
+ * A job's trigger: include: (a child pipeline) gets the top-level rules, plus
+ * one extra form: `include: <path>`, a plain scalar naming a local file,
+ * which is followed (#1843 note 59967).
+ */
+function readTriggerIncludes(lines, root, out) {
+  const { fail } = out;
+  const ind = (l) => l.length - l.trimStart().length;
+  for (let i = 0; i < lines.length; i++) {
+    const t = /^( +)(["']?)trigger\2\s*:(.*)$/.exec(lines[i]);
+    if (!t) continue;
+    const T = t[1].length;
+    if (t[2] || !lines[i].slice(T).startsWith("trigger:")) fail(i, `a quoted trigger key, or a space before its colon, ${SUBSET}`);
+    const v = readScalar(t[3]);
+    if (v.error) fail(i, `trigger: ${v.error}`);
+    if (!v.empty) continue; // trigger: group/project, a multi-project pipeline
+    let C = -1;
+    let j = i + 1;
+    for (; j < lines.length && (blankOrComment(lines[j]) || ind(lines[j]) > T); j++) {
+      const l = lines[j];
+      if (blankOrComment(l)) continue;
+      if (C < 0) C = ind(l);
+      if (ind(l) !== C) continue;
+      const k = /^ *(["']?)([^\s:#"']+)\1\s*:(.*)$/.exec(l);
+      if (!k) continue;
+      if (k[2] === "<<") {
+        fail(j, `a merge key (<<) under trigger: can bring in an include key and ${SUBSET}`);
+        continue;
+      }
+      if (k[2] !== "include") continue;
+      if (k[1] || !l.slice(C).startsWith("include:")) fail(j, `a quoted include key, or a space before its colon, ${SUBSET}`);
+      const s = readScalar(k[3]);
+      let end = j + 1;
+      while (end < lines.length && (blankOrComment(lines[end]) || ind(lines[end]) > C || (ind(lines[end]) === C && /^ *-(?:\s|$)/.test(lines[end])))) end++;
+      if (s.error) fail(j, `trigger include: ${s.error}`);
+      else if (!s.empty) followLocal("a trigger's include:", { line: j, ...s }, root, fail, out.locals);
+      readIncludeBlock(lines, j + 1, end, root, out, C);
+      j = end - 1;
+    }
+    i = j - 1;
+  }
+}
+
+function readIncludeBlock(lines, from, end, root, out, keyIndent = 0) {
   const { fail } = out;
   const items = [];
   let dash = -1;
@@ -896,8 +939,8 @@ function readIncludeBlock(lines, from, end, root, out) {
       continue;
     }
     const ind = l.length - l.trimStart().length;
-    if (ind === 0) {
-      fail(j, `a list dash at column 0 under include: ${SUBSET}; indent the items`);
+    if (ind <= keyIndent) {
+      fail(j, `a list dash at the include key's own column ${SUBSET}; indent the items`);
       item = null;
       continue;
     }
@@ -954,22 +997,24 @@ function checkIncludeItem(item, root, { fail, notes, locals }) {
     }
   }
   const loc = K.get("local");
-  if (loc && loc.value !== null) {
-    const p = loc.value;
-    if (loc.quoted) return fail(loc.line, `a quoted local: path ${SUBSET}; write the path plain`);
-    if (/[*?[{$]/.test(p)) return fail(loc.line, "local: with a glob or a variable cannot be followed, so its file would go unscanned (#1843)");
-    const full = resolve(root, p.replace(/^\/+/, ""));
-    let real;
-    try {
-      real = realpathSync(full);
-    } catch {
-      return fail(loc.line, "local: names a file that does not exist, so nothing would be scanned (#1843)");
-    }
-    const realRoot = realpathSync(root);
-    if (!real.startsWith(realRoot + sep)) return fail(loc.line, "local: names a file outside the repository (#1843)");
-    if (!statSync(real).isFile()) return fail(loc.line, "local: names something that is not a regular file (#1843)");
-    locals.push(full);
+  if (loc && loc.value !== null) followLocal("local:", loc, root, fail, locals);
+}
+
+/** A local path to follow: plain, no glob or $, an existing regular file inside the repository. */
+function followLocal(what, { line, value: p, quoted }, root, fail, locals) {
+  if (quoted) return fail(line, `a quoted ${what} path ${SUBSET}; write the path plain`);
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(p)) return fail(line, `${what} naming a URL (remote) is refused; the check never fetches (#1843)`);
+  if (/[*?[{$]/.test(p)) return fail(line, `${what} with a glob or a variable cannot be followed, so its file would go unscanned (#1843)`);
+  const full = resolve(root, p.replace(/^\/+/, ""));
+  let real;
+  try {
+    real = realpathSync(full);
+  } catch {
+    return fail(line, `${what} names a file that does not exist, so nothing would be scanned (#1843)`);
   }
+  if (!real.startsWith(realpathSync(root) + sep)) return fail(line, `${what} names a file outside the repository (#1843)`);
+  if (!statSync(real).isFile()) return fail(line, `${what} names something that is not a regular file (#1843)`);
+  locals.push(full);
 }
 
 function check(file) {
