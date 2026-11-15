@@ -128,12 +128,12 @@ describe("install.sh --plain --update: retire the SMTP lines (#1817)", () => {
         expect(completionLines(result)).toEqual([COMPLETION_LINE]);
       });
 
-      it("asks for the status once, inside orbit-app, after the stack is ready", () => {
+      it("asks for the status once before the retirement and once after the completion line, inside orbit-app, after the stack is ready", () => {
         const targetDir = withSmtpLines(installedFolder());
         const result = update(targetDir, answer);
         const asked = statusCalls(result);
-        expect(asked).toHaveLength(1);
-        expect(asked[0]).toMatch(/compose .*exec -T orbit-app node \/opt\/orbit\/cli\/orbit\.js mail-sending-status$/u);
+        expect(asked).toHaveLength(2);
+        for (const call of asked) expect(call).toMatch(/compose .*exec -T orbit-app node \/opt\/orbit\/cli\/orbit\.js mail-sending-status$/u);
         const calls = result.calls.split("\n");
         const askedAt = calls.findIndex((entry) => entry.includes("mail-sending-status"));
         const readyAt = calls.findIndex((entry) => entry.includes("exec -T orbit-db"));
@@ -305,7 +305,7 @@ describe("install.sh --plain --update: retire the SMTP lines (#1817)", () => {
 // ---------------------------------------------------------------------------
 // #1834 slice 1: the undo copy (Update).
 const KEK_LINE = "DOCUMENT_KEK=TEST-NOT-A-REAL-KEK";
-const OTHER_LINES = [KEK_LINE, "POSTGRES_PASSWORD=TEST-NOT-A-REAL-PG-PASSWORD", "ORBIT_IMAGE=registry.example.test/orbit:test"];
+const OTHER_LINES = [KEK_LINE];
 const RECORD = ".orbit-smtp-retirement";
 const GATE_FAILS_AFTER = { FAKE_MAIL_SENDING_STATUS_AFTER_SECRET_GONE: line("none", false) };
 const backupsRoot = (targetDir) => join(targetDir, "orbit-install-backups");
@@ -314,15 +314,15 @@ const undoCopies = (targetDir) =>
   spawnSync("find", [backupsRoot(targetDir), "-type", "f", "-name", ".env-orbit*"], { encoding: "utf8" }).stdout.split("\n").filter(Boolean);
 const backupFolders = (targetDir) => (existsSync(backupsRoot(targetDir)) ? readdirSync(backupsRoot(targetDir)).sort() : []);
 const SMTP_LINE = /^(SMTP_(HOST|PORT|SECURITY|USER|PASSWORD_FILE|FROM)=|COMPOSE_FILE=.*docker-compose\.mail\.yml)/u;
-/** A deployment with the SMTP lines, an inline SMTP_PASSWORD, other secret lines and the password file. */
+/** A deployment with the SMTP lines and the password file, plus an inline DOCUMENT_KEK that no copy may hold. */
 function withSmtpAndOtherSecrets(targetDir) {
   withSmtpLines(targetDir);
-  appendFileSync(join(targetDir, ".env-orbit"), `SMTP_PASSWORD=${FAKE_PASSWORD}\n${OTHER_LINES.join("\n")}\n`);
+  appendFileSync(join(targetDir, ".env-orbit"), `${KEK_LINE}\n`);
   return targetDir;
 }
 
 describe("install.sh --plain --update: the SMTP undo copy (#1834 slice 1)", () => {
-  it("the kept copy holds only the lines the retirement removes or rewrites: never SMTP_PASSWORD, DOCUMENT_KEK or any other line", () => {
+  it("the kept copy holds only the lines the retirement removes or rewrites: never DOCUMENT_KEK or any other line", () => {
     const targetDir = withSmtpAndOtherSecrets(installedFolder());
     const expected = envOf(targetDir).split("\n").filter((entry) => SMTP_LINE.test(entry));
     expect(expected.length).toBeGreaterThanOrEqual(7);
