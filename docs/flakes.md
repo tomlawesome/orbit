@@ -53,6 +53,7 @@ test's own name, which does not move with the shard.
 ## scripts/ci/write-test-manifest.test.mjs "install.sh's update-path check ... accepts an update from v0.3.5 when that version is passed"
 
 - 2026-11-05 · fix/v037-audit 4da6642d · local `pnpm exec vitest run` (643s), shared host running a full e2e stack alongside · timed out at the 5s default; the file alone passed on the rerun (10/10, that test 2.2s). First sighting.
+- 2026-11-15 · !1327 64726747 · pipeline 4204 / fast (job 51271) · timed out at the 5s default; the retry (job 51318) passed. Second sighting.
 
 ## tests/unit/auth-pending-login-session-callback.test.mjs "passes session creation as collectSignInApproval's own mint callback, not a separate call"
 
