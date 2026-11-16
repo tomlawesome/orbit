@@ -31,7 +31,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PROCESS_TEST_TIMEOUT_MS } from "./process-budget.mjs";
@@ -123,33 +123,61 @@ function update(targetDir, statusLine = imported, { env = {}, pathFor } = {}) {
 const backupsDir = (targetDir) => join(targetDir, "backups");
 const lockOf = (targetDir) => join(backupsDir(targetDir), ".orbit-backup-restore.lock");
 const envOf = (targetDir) => readFileSync(join(targetDir, ".env-orbit"), "utf8");
+// Every update writes ORBIT_PREVIOUS_IMAGE= in the engine step, retirement or not.
+const stableEnvOf = (targetDir) =>
+  envOf(targetDir)
+    .split("\n")
+    .filter((entry) => !entry.startsWith("ORBIT_PREVIOUS_IMAGE="))
+    .join("\n");
 const secretPath = (targetDir) => join(targetDir, ".orbit-secrets", "smtp-password");
 const stdoutLines = (result) => result.stdout.split("\n");
 const upCalls = (result) => result.calls.split("\n").filter((entry) => /--env-file \.env-orbit up -d/u.test(entry));
 const sleepMs = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
-/** Holds `flock -x` on the lock file from another process until the test ends. */
-function holdLock(targetDir) {
-  mkdirSync(backupsDir(targetDir), { recursive: true });
-  const holder = spawn("flock", ["-x", lockOf(targetDir), "sleep", "120"], { stdio: "ignore" });
-  cleanups.push(() => holder.kill("SIGKILL"));
+/** The process group of a holder is killed, so the `sleep` under `flock` goes too and the lock is released. */
+function killHolder(holder) {
+  try {
+    process.kill(-holder.pid, "SIGKILL");
+  } catch {
+    // already gone
+  }
+}
+
+/** Starts `flock -x lock sleep 120` in its own process group and waits until the lock is really held. */
+function startHolder(lock) {
+  mkdirSync(dirname(lock), { recursive: true });
+  const holder = spawn("flock", ["-x", lock, "sleep", "120"], { stdio: "ignore", detached: true });
+  cleanups.push(() => killHolder(holder));
   const deadline = Date.now() + 10_000;
-  while (spawnSync("flock", ["-n", lockOf(targetDir), "true"]).status === 0) {
+  while (spawnSync("flock", ["-n", lock, "true"]).status === 0) {
     if (Date.now() > deadline) throw new Error("the background flock never took the lock");
     sleepMs(25);
   }
+  return holder;
 }
+
+/** Releases a holder and waits until the lock is free. */
+function stopHolder(holder, lock) {
+  killHolder(holder);
+  const deadline = Date.now() + 10_000;
+  while (spawnSync("flock", ["-n", lock, "true"]).status !== 0) {
+    if (Date.now() > deadline) throw new Error("the lock was never released");
+    sleepMs(25);
+  }
+}
+
+const holdLock = (targetDir) => startHolder(lockOf(targetDir));
 
 const lockIsFree = (targetDir) => spawnSync("flock", ["-n", lockOf(targetDir), "true"]).status === 0;
 
 /** Everything a skipped retirement must leave exactly as it was. */
 function expectUntouched(targetDir, before) {
-  expect(envOf(targetDir)).toBe(before.env);
+  expect(stableEnvOf(targetDir)).toBe(before.env);
   expect(readFileSync(secretPath(targetDir), "utf8")).toBe(FAKE_PASSWORD);
   expect(existsSync(join(targetDir, "orbit-install-backups"))).toBe(false);
   expect(existsSync(join(targetDir, RECORD))).toBe(false);
 }
-const before = (targetDir) => ({ env: envOf(targetDir) });
+const before = (targetDir) => ({ env: stableEnvOf(targetDir) });
 
 // A PATH directory of links to every tool the test process can see, minus flock.
 function dirWithoutFlock() {
@@ -256,24 +284,21 @@ describe("install.sh --plain --update: the SMTP retirement takes the backup/rest
     expect(update(targetDir, imported, { env: GATE_FAILS_AFTER }).status).toBe(0);
     const recordBefore = readFileSync(join(targetDir, RECORD), "utf8");
     const copies = readdirSync(join(targetDir, "orbit-install-backups")).sort();
-    const envBefore = envOf(targetDir);
+    const envBefore = stableEnvOf(targetDir);
     holdLock(targetDir);
     const result = update(targetDir);
     expect(result.status).toBe(0);
     expect(stdoutLines(result)).toContain(HELD_LINE);
     expect(readFileSync(join(targetDir, RECORD), "utf8")).toBe(recordBefore);
     expect(readdirSync(join(targetDir, "orbit-install-backups")).sort()).toEqual(copies);
-    expect(envOf(targetDir)).toBe(envBefore);
+    expect(stableEnvOf(targetDir)).toBe(envBefore);
   });
 
   it("2: once the holder is gone the next update retires the lines", () => {
     const targetDir = withSmtpLines(installedFolder());
-    const holder = spawn("flock", ["-x", (mkdirSync(backupsDir(targetDir), { recursive: true }), lockOf(targetDir)), "sleep", "120"], { stdio: "ignore" });
-    const deadline = Date.now() + 10_000;
-    while (spawnSync("flock", ["-n", lockOf(targetDir), "true"]).status === 0 && Date.now() < deadline) sleepMs(25);
+    const holder = holdLock(targetDir);
     expect(update(targetDir).stdout).toContain(HELD_LINE);
-    holder.kill("SIGKILL");
-    sleepMs(200);
+    stopHolder(holder, lockOf(targetDir));
     const result = update(targetDir);
     expect(result.status).toBe(0);
     expect(stdoutLines(result)).toContain(COMPLETION_LINE);
@@ -335,12 +360,7 @@ describe("install.sh --plain --update: the SMTP retirement takes the backup/rest
   it("the backups folder follows ORBIT_BACKUP_DIR, relative to the target: a lock held there stops the retirement", () => {
     const targetDir = withSmtpLines(installedFolder());
     const snap = before(targetDir);
-    mkdirSync(join(targetDir, "elsewhere"), { recursive: true });
-    const lock = join(targetDir, "elsewhere", ".orbit-backup-restore.lock");
-    const holder = spawn("flock", ["-x", lock, "sleep", "120"], { stdio: "ignore" });
-    cleanups.push(() => holder.kill("SIGKILL"));
-    const deadline = Date.now() + 10_000;
-    while (spawnSync("flock", ["-n", lock, "true"]).status === 0 && Date.now() < deadline) sleepMs(25);
+    startHolder(join(targetDir, "elsewhere", ".orbit-backup-restore.lock"));
     const result = update(targetDir, imported, { env: { ORBIT_BACKUP_DIR: "elsewhere" } });
     expect(result.status).toBe(0);
     expect(stdoutLines(result)).toContain(HELD_LINE);
