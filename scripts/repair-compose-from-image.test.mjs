@@ -310,6 +310,33 @@ function snapshot(path) {
 
 const MANUAL_STEP = /recreate the missing managed file from your install source/i;
 
+describe("repair.sh's compose restore is durable and leaves no scratch file (audit Lows b1 O-R4, b1 O-S2)", () => {
+  it("O-R4: flushes the restored file and its folder to disk before the restore counts as done", () => {
+    const targetDir = makeDeployment({});
+    const shimDir = scratchDir("orbit-repair-sync-shim-");
+    const syncLog = join(shimDir, "sync.log");
+    writeFileSync(join(shimDir, "sync"), `#!/bin/sh\nprintf '%s\\n' "$*" >> '${syncLog}'\nexec /usr/bin/sync "$@"\n`);
+    chmodSync(join(shimDir, "sync"), 0o755);
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], { pathPrefix: shimDir });
+    expect(existsSync(join(targetDir, "docker-compose.yml")), result.combined).toBe(true);
+    const calls = existsSync(syncLog) ? lines(readFileSync(syncLog, "utf8")) : [];
+    const wholeFilesystem = calls.some((line) => /(^|\s)(-f|--file-system)(\s|$)/u.test(line));
+    const file = calls.some((line) => line.includes("docker-compose.yml"));
+    const folder = calls.some((line) => /(^|\s)(\.|\.\/|'?\.'?)(\s|$)/u.test(line) || line.includes(targetDir));
+    expect(wholeFilesystem || (file && folder), `sync calls: ${JSON.stringify(calls)}`).toBe(true);
+  });
+
+  it("O-S2: a run killed mid-restore leaves no scratch file once a later run has finished", () => {
+    const targetDir = makeDeployment({});
+    runRepair(targetDir, ["--execute", "--safe-only"], {
+      raceHook: 'if compgen -G "$PWD/.docker-compose.yml.repair*" >/dev/null; then pkill -9 -f "$PWD/scripts/repair.sh"; sleep 2; fi',
+    });
+    const second = runRepair(targetDir, ["--execute", "--safe-only"]);
+    expect(existsSync(join(targetDir, "docker-compose.yml")), second.combined).toBe(true);
+    expect(readdirSync(targetDir).filter((name) => name.startsWith(".docker-compose.yml.repair"))).toEqual([]);
+  });
+});
+
 describe("repair.sh restores a missing docker-compose.yml from the image (#1484)", () => {
   it("writes the image's copy back byte for byte, with the installer's mode and the folder's owner", () => {
     const targetDir = makeDeployment({});

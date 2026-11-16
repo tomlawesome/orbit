@@ -549,6 +549,18 @@ describe("install.sh: the engine's outcome", () => {
   });
 });
 
+describe("install.sh: the completion screen's claim line (audit Low 10-22)", () => {
+  it("says how to pick the claim link out of the logs, not only which logs to read", () => {
+    const targetDir = makeTarget();
+    makePreprovisionedDeployment(targetDir);
+    const result = runInstall(targetDir, {}, ["--plain"]);
+    expect(result.status).toBe(0);
+    const line = result.stdout.split("\n").find((entry) => entry.startsWith("Claim this instance"));
+    expect(line).toBeDefined();
+    expect(line).toMatch(/grep/u);
+  });
+});
+
 describe("install.sh: the launcher's configure tree (#1225)", () => {
   function launcherTree() {
     const tree = join(mkdtempSync(join(tmpdir(), "orbit-install-launcher-")), "tree");

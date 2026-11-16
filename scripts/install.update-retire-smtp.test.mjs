@@ -576,3 +576,11 @@ describe("install.sh --plain --update: adopting a killed run's SMTP copy never w
     });
   }
 });
+
+describe("the retired docker-compose.mail.yml overlay (audit Low D-S3)", () => {
+  it("does not require .orbit-secrets/smtp-password to exist, so the stack still starts after the file is removed", () => {
+    const overlay = readFileSync(new URL("../docker-compose.mail.yml", import.meta.url), "utf8");
+    const active = overlay.split("\n").filter((line) => !line.trim().startsWith("#")).join("\n");
+    expect(active).not.toMatch(/\.orbit-secrets\/smtp-password/u);
+  });
+});

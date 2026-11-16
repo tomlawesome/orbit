@@ -74,6 +74,17 @@ describe("ensureVapidKeys", () => {
     expect(readFileSync(envPath(), "utf8")).toBe(before);
   });
 
+  // Audit Low Config P-15: a non-empty private key returned early, so a
+  // missing VAPID_PUBLIC_KEY was never repaired.
+  it("P-15: repairs a missing VAPID_PUBLIC_KEY when a valid private key is already on disk", () => {
+    const pair = generateVapidKeyPair();
+    mkdirSync(join(deployDir, ".orbit-secrets"), { mode: 0o700 });
+    writeFileSync(keyPath(), `${pair.privateKey}\n`, { mode: 0o600 });
+    ensureVapidKeys(deployDir);
+    expect(readFileSync(keyPath(), "utf8")).toBe(`${pair.privateKey}\n`);
+    expect(readFileSync(envPath(), "utf8")).toContain(`VAPID_PUBLIC_KEY=${pair.publicKey}\n`);
+  });
+
   it("replaces an empty key file", () => {
     mkdirSync(join(deployDir, ".orbit-secrets"), { mode: 0o700 });
     writeFileSync(keyPath(), "", { mode: 0o600 });

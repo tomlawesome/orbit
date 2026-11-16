@@ -622,3 +622,10 @@ describe("prepareConfiguration (install.sh:947-1008)", () => {
     });
   });
 });
+
+describe("noninteractive guidance (audit Low: local-accounts refusal naming)", () => {
+  it("names ORBIT_AUTH_OIDC=false as the way out of the OIDC secret requirement", () => {
+    const text = noninteractiveConfigurationGuidance(["oidc-client-secret"]).join("\n");
+    expect(text).toContain("ORBIT_AUTH_OIDC=false");
+  });
+});
