@@ -569,7 +569,9 @@ describe("one marker excuses one call (#1843)", () => {
 describe("cosign called from .mjs and .ts files (#1843)", () => {
   // How the checker finds these files is not fixed by the spec; the fixtures
   // use scripts/ (where the .mjs files are) and src/ (the .ts files).
-  const places = ["scripts/tool.mjs", "scripts/ci/deep/tool.mjs", "src/lib/tool.ts"];
+  // The nested path is built, not written out: job-inputs' follower reads
+  // scripts/ci/ paths in this file as real inputs of `fast` (#1863).
+  const places = ["scripts/tool.mjs", ["scripts", "ci", "deep", "tool.mjs"].join("/"), "src/lib/tool.ts"];
 
   for (const [i, p] of places.entries()) {
     const f = (body) => ({ [p]: `import { execFileSync } from "node:child_process";\n${body}\n` });
