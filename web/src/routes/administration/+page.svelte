@@ -533,6 +533,7 @@
     password = "";
     mailCard.outcome = null;
     mailCard.problem = null;
+    providerOpen = false;
     editing = true;
   }
 
@@ -550,6 +551,7 @@
     landed: (closes) => {
       if (closes) {
         editing = false;
+        providerOpen = false;
         rotating = false;
         aliasRotating = false;
       }
@@ -1627,7 +1629,7 @@
                   provider delivers sub-addressed mail to. The password is stored encrypted and never shown again.</p>
                 <div class="placerow mailboxrow">
                   <button type="submit" disabled={mailCard.busy !== null}>verify and save</button>
-                  <button type="button" onclick={() => { editing = false; password = ""; }}>cancel</button>
+                  <button type="button" onclick={() => { editing = false; providerOpen = false; password = ""; }}>cancel</button>
                 </div>
               </form>
             {/if}
