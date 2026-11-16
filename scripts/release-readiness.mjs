@@ -25,7 +25,8 @@
 // only (the private-details hook refuses an email), that must equal the author
 // name and a Signed-off-by trailer of the last commit touching the record. Template: docs/releases/TEMPLATE.md.
 //
-// No variable's value is ever printed: variables are checked by name only.
+// No credential's value is ever printed. Every network call and child process
+// has a time limit; running out of time fails that check.
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -44,7 +45,6 @@ export const PREVIEW_CHECKS = Object.freeze([
   "base-image",
   "sidecar-pins",
   "upgrade-matrix",
-  "publish-variables",
   "slow-gates-green",
   "release-record",
 ]);
@@ -60,7 +60,13 @@ export const MAIN_CHECKS = Object.freeze([
 
 /** The jobs that must be green on a dev pipeline with the source branch's tree. */
 export const SLOW_GATES = Object.freeze(["screens_chromium", "smoke", "fast"]);
-export const PUBLISH_VARIABLES = Object.freeze(["GITHUB_HANDOFF_TOKEN", "GITHUB_HANDOFF_REPO"]);
+// Time limits (#1860 review): a hung registry, API or script fails its check.
+export const SCRIPT_TIMEOUT_MS = 10 * 60 * 1000;
+export const GIT_TIMEOUT_MS = 2 * 60 * 1000;
+export const FETCH_TIMEOUT_MS = 30 * 1000;
+export const MAX_JSON_BYTES = 8 * 1024 * 1024;
+// The GitHub mirror whose owner holds GHCR's image and the handoff repository.
+export const GITHUB_REPOSITORY = "tomlawesome/orbit";
 export const EVIDENCE_WINDOW_DAYS = 7;
 export const GUIDE_PATH = "docs/releasing.md";
 export const RECORD_DIR = "docs/releases";
@@ -84,7 +90,9 @@ function checkChangelog(repoDir, version) {
   const problems = [];
   const notes = spawnSync(process.execPath, [join(SCRIPTS_DIR, "release-notes.mjs"), version, "--changelog", path], {
     encoding: "utf8",
+    timeout: GIT_TIMEOUT_MS,
   });
+  if (notes.error) throw new Error(`scripts/release-notes.mjs did not finish: ${notes.error.message}`);
   if (notes.status !== 0) {
     const said = (notes.stderr || "").trim().replace(/^release-notes: /u, "");
     problems.push(`${said || "scripts/release-notes.mjs refused"}: rename "## Unreleased" to "## [${bare}] - YYYY-MM-DD" on dev and fill it`);
@@ -195,6 +203,8 @@ function checkReleaseRecord(version, record, guideBlob, guideSteps) {
   if (record.guideCommit !== guideBlob) problems.push(GUIDE_CHANGED);
   const steps = Array.isArray(record.steps) ? record.steps.map(String) : [];
   const missing = guideSteps.filter((step) => !steps.includes(step));
+  const extra = [...new Set(steps.filter((step) => !guideSteps.includes(step)))];
+  if (extra.length > 0) problems.push(`it lists step(s) ${extra.join(", ")}, which the guide does not have: one line per guide step, no more`);
   if (missing.length > 0) problems.push(`it leaves out guide step(s) ${missing.join(", ")}`);
   const doubled = guideSteps.filter((step) => steps.filter((other) => other === step).length > 1);
   if (doubled.length > 0) problems.push(`it lists guide step(s) ${doubled.join(", ")} more than once`);
@@ -282,18 +292,6 @@ export async function runReadiness({ target, repoDir, lookups }) {
             message: "the sidecar pins are not current (node scripts/sidecar-pins.mjs check --packages): run node scripts/sidecar-pins.mjs sync on dev and merge the re-pin",
           },
     "upgrade-matrix": async () => checkUpgradeMatrix((await lookups.upgradeMatrix()) ?? {}),
-    "publish-variables": async () => {
-      const unset = [];
-      for (const name of PUBLISH_VARIABLES) {
-        if (!(await lookups.variableSet(name))) unset.push(name);
-      }
-      return unset.length === 0
-        ? { ok: true, message: `${PUBLISH_VARIABLES.join(" and ")} are set` }
-        : {
-            ok: false,
-            message: `${unset.join(" and ")} ${unset.length === 1 ? "is" : "are"} not set for this pipeline: the owner adds ${unset.length === 1 ? "it" : "them"} under Settings > CI/CD > Variables (docs/releasing.md, "Required CI/CD variables")`,
-          };
-    },
     "slow-gates-green": async () => checkSlowGates(await lookups.slowGates()),
     "release-record": async () => {
       const tag = needVersion();
@@ -396,12 +394,18 @@ export function parseReleaseRecord(text) {
 
 // --- real lookups --------------------------------------------------------------
 
+/** spawnSync with a time limit; a process that runs out of time throws, naming the limit. */
 function run(command, args, options = {}) {
-  return spawnSync(command, args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, ...options });
+  const timeout = options.timeout ?? SCRIPT_TIMEOUT_MS;
+  const result = spawnSync(command, args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, ...options, timeout });
+  if (result.error?.code === "ETIMEDOUT" || (result.signal === "SIGTERM" && result.status === null)) {
+    throw new Error(`${command === process.execPath ? "node" : command} ${args.map(String).find((a) => !a.startsWith("-")) ?? ""} did not finish within ${Math.round(timeout / 1000)}s`);
+  }
+  return result;
 }
 
 function git(repoDir, args) {
-  const result = run("git", args, { cwd: repoDir });
+  const result = run("git", args, { cwd: repoDir, timeout: GIT_TIMEOUT_MS });
   if (result.status !== 0) {
     const said = (result.stderr || "").split("\n").map((line) => line.trim()).filter(Boolean);
     throw new Error(`git ${args[0]} failed: ${said.find((line) => /^(?:fatal|error):/u.test(line)) ?? said.at(-1) ?? `exit ${result.status}`}`);
@@ -409,7 +413,7 @@ function git(repoDir, args) {
   return result.stdout.trim();
 }
 
-const gitSucceeds = (repoDir, args) => run("git", args, { cwd: repoDir }).status === 0;
+const gitSucceeds = (repoDir, args) => run("git", args, { cwd: repoDir, timeout: GIT_TIMEOUT_MS }).status === 0;
 
 function pickRemote(repoDir, requested) {
   if (requested) return requested;
@@ -424,6 +428,41 @@ function scriptTail(result) {
   return `${result.stdout ?? ""}\n${result.stderr ?? ""}`.trim().split("\n").filter(Boolean).slice(-3).join(" | ");
 }
 
+/**
+ * GET a JSON body with a time limit and a size cap. `what` names the call in
+ * errors; the URL's query and the headers are never in them.
+ */
+export async function fetchJson(url, headers, what) {
+  let response;
+  try {
+    response = await fetch(url, { headers, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+  } catch (error) {
+    if (error?.name === "TimeoutError" || error?.name === "AbortError") {
+      throw new Error(`${what} did not answer within ${FETCH_TIMEOUT_MS / 1000}s`);
+    }
+    throw new Error(`${what} could not be reached: ${errorText(error)}`);
+  }
+  if (!response.ok) throw new Error(`${what} answered ${response.status}`);
+  const declared = Number(response.headers?.get?.("content-length"));
+  if (declared > MAX_JSON_BYTES) throw new Error(`${what} sent ${declared} bytes, over the ${MAX_JSON_BYTES}-byte cap`);
+  if (typeof response.text === "function") {
+    const text = await response.text();
+    if (Buffer.byteLength(text) > MAX_JSON_BYTES) throw new Error(`${what} sent more than the ${MAX_JSON_BYTES}-byte cap`);
+    return JSON.parse(text);
+  }
+  const body = await response.json();
+  if (Buffer.byteLength(JSON.stringify(body) ?? "") > MAX_JSON_BYTES) throw new Error(`${what} sent more than the ${MAX_JSON_BYTES}-byte cap`);
+  return body;
+}
+
+/** The handoff repository's name, from the publish workflow (a non-secret source; #1824). */
+export function handoffRepository(repoDir) {
+  const workflow = readFileSync(join(repoDir, ".github", "workflows", "publish-from-gitlab.yml"), "utf8");
+  const match = /GITHUB_HANDOFF_REPO:\s*\$\{\{\s*github\.repository_owner\s*\}\}\/([A-Za-z0-9._-]+)/u.exec(workflow);
+  if (!match) throw new Error(".github/workflows/publish-from-gitlab.yml no longer names the handoff repository");
+  return `${GITHUB_REPOSITORY.split("/")[0]}/${match[1]}`;
+}
+
 /** The GitLab API base, project and credential header, from CI or the environment. Never printed. */
 function gitlabApi(repoDir, remote) {
   let base = process.env.CI_API_V4_URL;
@@ -435,18 +474,13 @@ function gitlabApi(repoDir, remote) {
     base ||= `https://${match[1] ?? match[2]}/api/v4`;
     project ||= encodeURIComponent(match[3]);
   }
-  let headers;
-  // The job token first, as the job runs; a read-only token where the job
-  // token is not allowed to read pipelines, or for a local run.
-  if (process.env.ORBIT_REUSE_TOKEN) headers = { "PRIVATE-TOKEN": process.env.ORBIT_REUSE_TOKEN };
-  else if (process.env.CI_JOB_TOKEN) headers = { "JOB-TOKEN": process.env.CI_JOB_TOKEN };
-  else if (process.env.GITLAB_TOKEN) headers = { "PRIVATE-TOKEN": process.env.GITLAB_TOKEN };
-  else throw new Error("no GitLab credential to read pipelines with (CI_JOB_TOKEN in CI; GITLAB_TOKEN with read_api locally)");
-  const get = async (path) => {
-    const response = await fetch(`${base.replace(/\/+$/u, "")}/projects/${project}${path}`, { headers });
-    if (!response.ok) throw new Error(`GitLab API answered ${response.status} for ${path.split("?")[0]}`);
-    return response.json();
-  };
+  // ORBIT_REUSE_TOKEN alone in CI, as the reuse lookup reads it (#898; owner
+  // 50a on #1860: the job declares `ci-read-tokens`); a read_api GITLAB_TOKEN
+  // for a local run. Never the job token, never printed.
+  const token = process.env.ORBIT_REUSE_TOKEN || process.env.GITLAB_TOKEN;
+  if (!token) throw new Error("no GitLab credential to read pipelines with (ORBIT_REUSE_TOKEN in CI; GITLAB_TOKEN with read_api locally)");
+  const get = async (path) =>
+    fetchJson(`${base.replace(/\/+$/u, "")}/projects/${project}${path}`, { "PRIVATE-TOKEN": token }, `GitLab API ${path.split("?")[0]}`);
   return { get };
 }
 
@@ -485,7 +519,7 @@ async function newestSameTreeDevPipelineJobs({ repoDir, remote, sourceSha }) {
 }
 
 function resolveDigest(reference) {
-  const result = run("docker", ["buildx", "imagetools", "inspect", reference]);
+  const result = run("docker", ["buildx", "imagetools", "inspect", reference], { timeout: 2 * 60 * 1000 });
   if (result.error) throw new Error("docker buildx is not available to read GHCR");
   const match = /^Digest:\s+(sha256:[0-9a-f]{64})\s*$/mu.exec(result.stdout ?? "");
   return match ? match[1] : null;
@@ -505,7 +539,7 @@ export function realLookups({ repoDir, target, remote: requestedRemote }) {
     }
   };
   const show = (path) => {
-    const result = run("git", ["show", `HEAD:${path}`], { cwd: repoDir });
+    const result = run("git", ["show", `HEAD:${path}`], { cwd: repoDir, timeout: GIT_TIMEOUT_MS });
     return result.status === 0 ? result.stdout : null;
   };
   const stableTags = (tags) => {
@@ -563,7 +597,6 @@ export function realLookups({ repoDir, target, remote: requestedRemote }) {
         newestStable: stableTags(remoteTags).slice(0, 3),
       };
     },
-    variableSet: async (name) => typeof process.env[name] === "string" && process.env[name] !== "",
     slowGates: async () => newestSameTreeDevPipelineJobs({ repoDir, remote, sourceSha }),
     releaseRecord: async (version) => {
       const path = `${RECORD_DIR}/${version}.md`;
@@ -602,25 +635,30 @@ export function realLookups({ repoDir, target, remote: requestedRemote }) {
       return merged === git(repoDir, ["rev-parse", `${sourceSha}^{tree}`]);
     },
     ghcrImage: async () => {
-      const image = "ghcr.io/tomlawesome/orbit";
+      const image = `ghcr.io/${GITHUB_REPOSITORY}`;
       const sha = resolveDigest(`${image}:sha-${sourceSha}`);
       const preview = resolveDigest(`${image}:preview`);
+      const repo = handoffRepository(repoDir);
       let handoff = false;
-      const repo = process.env.GITHUB_HANDOFF_REPO;
-      if (repo && /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/u.test(repo)) {
-        const response = await fetch(`https://api.github.com/repos/${repo}/releases/tags/handoff-${sourceSha}`, {
-          headers: { Accept: "application/vnd.github+json" },
-        });
-        handoff = response.ok && (await response.json()).draft === false;
+      try {
+        const release = await fetchJson(
+          `https://api.github.com/repos/${repo}/releases/tags/handoff-${sourceSha}`,
+          { Accept: "application/vnd.github+json" },
+          `the handoff-${sourceSha} release in ${repo}`,
+        );
+        handoff = release?.draft === false;
+      } catch (error) {
+        // A missing release is a 404, which is the answer "no"; anything else is not an answer.
+        if (!/answered 404$/u.test(errorText(error))) throw error;
       }
       return { shaTag: Boolean(sha), previewTag: Boolean(sha) && preview === sha, handoff };
     },
     evidenceAgeDays: async () => {
-      const digest = resolveDigest(`ghcr.io/tomlawesome/orbit:sha-${sourceSha}`);
+      const digest = resolveDigest(`ghcr.io/${GITHUB_REPOSITORY}:sha-${sourceSha}`);
       if (!digest) throw new Error(`GHCR has no :sha-${sourceSha} image to read evidence for`);
       const result = run("bash", [join(repoDir, "scripts", "ci", "verify-validation-evidence.sh")], {
         cwd: repoDir,
-        env: { ...process.env, ORBIT_IMAGE: "ghcr.io/tomlawesome/orbit", ORBIT_DIGEST: digest, ORBIT_COMMIT: sourceSha, ORBIT_REF: "preview" },
+        env: { ...process.env, ORBIT_IMAGE: `ghcr.io/${GITHUB_REPOSITORY}`, ORBIT_DIGEST: digest, ORBIT_COMMIT: sourceSha, ORBIT_REF: "preview" },
       });
       const recorded = /recorded(?: at)? (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)/u.exec(`${result.stdout}\n${result.stderr}`);
       if ((result.status === 0 || result.status === 13) && recorded) return daysSince(recorded[1]);

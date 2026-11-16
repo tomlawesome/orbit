@@ -1177,9 +1177,11 @@ variables:
 # (docs/releasing.md). On no other pipeline: its rule list ends in `never`,
 # and the `needs:` on it are optional, so those pipelines are unchanged.
 #
-# It reads the pipelines API for the slow-gates check with the job token (or
-# ORBIT_REUSE_TOKEN where a job has it), checks GITHUB_HANDOFF_* by name only,
-# and reads GHCR and the handoff repository anonymously: both are public.
+# It reads earlier pipelines for the slow-gates check with the read-only
+# ORBIT_REUSE_TOKEN alone, as the reuse lookup does (#898), so it declares the
+# `ci-read-tokens` environment (owner 50a on #1860). It reads GHCR and the
+# handoff repository anonymously: both are public, and the handoff
+# repository's name comes from .github/workflows/publish-from-gitlab.yml.
 release_readiness:
   stage: test
   extends: .dind_service
@@ -1187,6 +1189,11 @@ release_readiness:
     name: $NODE_IMAGE
     pull_policy: if-not-present
   timeout: 20m
+  # ORBIT_REUSE_TOKEN is scoped to this environment (owner, 2026-10-28; 50a on
+  # #1860). `prepare` records no deployment.
+  environment:
+    name: ci-read-tokens
+    action: prepare
   rules:
     - !reference [.dev-landing, job_rule]
     - !reference [.backmerge-skip, job_rule]
@@ -5557,7 +5564,8 @@ install_bootstrap_latest:
 #                       evidence. Environment scope `ci-read-tokens` (owner,
 #                       2026-10-28), as are ORBIT_BASE_IMAGE_PULL_USER/_TOKEN:
 #                       only the jobs declaring that environment -- classify,
-#                       build_image, launch_timing -- receive them; scripts/gitlab-ci-lanes.test.mjs keeps that list
+#                       build_image, launch_timing, release_readiness (owner
+#                       50a, #1860) -- receive them; scripts/gitlab-ci-lanes.test.mjs keeps that list
 #                       and the readers equal.
 #                       Unset, every reuse verdict on a merge request
 #                       is "runs", the safe direction. The unset paths are covered by

@@ -1228,8 +1228,9 @@ const TOKEN_MODES = { "nightly-browsers.mjs": ["moved"] };
   }
 
   // Top-level scripts that read a token on a job's behalf (#1830: the signing
-  // image lives in the private base-image registry).
-  const TOKEN_READING_TOP_SCRIPTS = ["check-signing-image-age.sh"];
+  // image lives in the private base-image registry; #1860 owner 50a: release
+  // readiness reads earlier pipelines with ORBIT_REUSE_TOKEN).
+  const TOKEN_READING_TOP_SCRIPTS = ["check-signing-image-age.sh", "release-readiness.mjs"];
 
   function readsToken(block) {
     const text = code(block);

@@ -129,14 +129,14 @@ For a promotion into `preview` (`--target preview`):
   `ORBIT_UPGRADE_LAUNCHER` is `false` (the CI/CD variable or
   `scripts/ci/upgrade-versions.mjs`'s answer), and `updateFrom` is the newest
   three stable tags on GitLab.
-- `publish-variables`: `GITHUB_HANDOFF_TOKEN` and `GITHUB_HANDOFF_REPO` are
-  set, checked by name only and never printed.
 - `slow-gates-green`: on the newest `dev` pipeline (nightly or merge request)
   whose commit has the same tree as the source branch and that ran them,
   `screens_chromium`, `smoke` and `fast` (coverage floors and headroom) are
   green and no `rig_*` job failed. With none, it says which pipeline to run
-  first. It reads the pipelines API with the job token in CI; locally, set
-  `GITLAB_TOKEN` to a `read_api` token first.
+  first. It reads the pipelines API with the read-only `ORBIT_REUSE_TOKEN` in CI
+  (the job declares the `ci-read-tokens` environment, as `classify` does;
+  owner 50a on #1860); locally, set `GITLAB_TOKEN` to a `read_api` token
+  first.
 - `release-record`: the signed record below.
 
 For a promotion into `main` (`--target main`): `tag-free`, `changelog`,
@@ -147,7 +147,9 @@ For a promotion into `main` (`--target main`): `tag-free`, `changelog`,
   `scripts/stable-promotion-policy.mjs` requires after the merge).
 - `ghcr-image`: GHCR holds `:sha-<preview tip>`, `:preview` points at it, and
   the `handoff-<preview tip>` release exists in the handoff repository
-  (`GITHUB_HANDOFF_REPO`; #1821, #1824).
+  (#1821, #1824). The repository's name comes from
+  `.github/workflows/publish-from-gitlab.yml`, never from the protected
+  variable.
 - `evidence-window`: the `preview` tip's validation evidence is no more than
   7 days old (`scripts/ci/verify-validation-evidence.sh`).
 
@@ -199,7 +201,11 @@ record names each one's evidence:
 - Running `promote_stable` on `main` (step 5): the owner, or whoever the owner
   names, on protected `main`.
 - The countersign workflow on GitHub (step 6): the owner.
-- Owner-side setup the repository cannot see: the handoff token's expiry, the
+- The `preview` -> `dev` back-merge after step 1, and the `main` -> `preview`
+  back-merge after step 4: the release agent.
+- The handoff token (`GITHUB_HANDOFF_TOKEN`) is set and not expired: the
+  owner, before step 4. The job cannot read a protected variable.
+- Other owner-side setup the repository cannot see: the
   `orbit-signing` runner and its key files, protected branches, and the
   GitHub mirror: the owner.
 
