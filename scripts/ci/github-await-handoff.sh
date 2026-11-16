@@ -23,8 +23,10 @@
 #     is not listed in it, is not on the release, or differs from its listed
 #     sha256 or size;
 #   - the evidence names another commit, ref or pipeline, is malformed,
-#     points outside GitLab's registry, or is older than seven days;
-#   - the SBOM is not an SPDX document.
+#     points outside GitLab's registry, or is older than seven days.
+#
+# The SBOM is not handed off: it travels inside the image as GitLab's signed
+# spdxjson attestation, and the verifier extracts it (D-S6 43a, #1848).
 #
 # Inputs (environment):
 #   GH_TOKEN            the run's own read-only token: the handoff repository
@@ -49,7 +51,7 @@
 #                       (ADR-0031 #8/#9)
 #
 # Outputs (appended to $GITHUB_OUTPUT when set, and only once every check has
-# passed): digest, source_reference, pipeline_url, evidence, sbom; with
+# passed): digest, source_reference, pipeline_url, evidence; with
 # ORBIT_FETCH_IMAGE=1, image_archive; with ORBIT_FETCH_LAUNCHER_ASSETS=1,
 # release_manifest, release_manifest_sig, launcher_amd64_archive,
 # launcher_arm64_archive.
@@ -64,7 +66,6 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/lib-github-handoff.sh"
 
 readonly COMPLETE=handoff-complete.json
 readonly EVIDENCE=gitlab-tested-image.json
-readonly SBOM=image.spdx.json
 readonly IMAGE=orbit-image.oci.tar
 
 : "${GH_TOKEN:?a GitHub token that can read the handoff repository is required}"
@@ -86,7 +87,7 @@ evidence_dir="${ORBIT_EVIDENCE_DIR:-.orbit-supply-chain}"
 fetch_image="${ORBIT_FETCH_IMAGE:-}"
 fetch_launcher="${ORBIT_FETCH_LAUNCHER_ASSETS:-}"
 
-wanted=("$EVIDENCE" "$SBOM")
+wanted=("$EVIDENCE")
 if [[ "$fetch_image" == 1 ]]; then wanted+=("$IMAGE"); fi
 launcher=(orbit-release-manifest.json orbit-release-manifest.json.sig
   orbit-launcher_linux_amd64.tar.gz orbit-launcher_linux_arm64.tar.gz)
@@ -190,7 +191,6 @@ done
 # Every field the publisher will act on, checked against what this run knows
 # independently.
 evidence="${evidence_dir}/${EVIDENCE}"
-sbom="${evidence_dir}/${SBOM}"
 [[ "$(json 'typeof input === "object" && input !== null && !Array.isArray(input)' < "$evidence" || :)" == true ]] ||
   fail "${EVIDENCE} is not a JSON object"
 field() { json 'input[arg]' "$1" < "$evidence"; }
@@ -215,15 +215,12 @@ now_epoch="$(date -u +%s)"
 ((now_epoch - recorded_epoch <= 7 * 24 * 3600)) || fail "evidence recorded at ${recorded_at} is older than seven days"
 ((recorded_epoch <= now_epoch + 300)) || fail "evidence recorded at ${recorded_at} is in the future"
 
-[[ -n "$(json 'input.spdxVersion ?? input.SPDXID' < "$sbom" || :)" ]] || fail "${SBOM} is not an SPDX document"
-
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
   {
     printf 'digest=%s\n' "$digest"
     printf 'source_reference=%s\n' "$source_reference"
     printf 'pipeline_url=%s\n' "$pipeline_url"
     printf 'evidence=%s\n' "$evidence"
-    printf 'sbom=%s\n' "$sbom"
     if [[ "$fetch_image" == 1 ]]; then
       printf 'image_archive=%s\n' "${evidence_dir}/${IMAGE}"
     fi

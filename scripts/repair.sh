@@ -623,9 +623,13 @@ set -Eeuo pipefail
 #   retire-smtp-lines            <- smtp-lines-retirable (#1817)
 #     mutation=secret-deletion backup=required
 #     rollback=backup-folder-except-secret expect=smtp-lines-retired.
-#     A warn finding (owner decision 7a: --check says attention, exit 3),
-#     only offered in the safe batch (owner decision 1): a run without
-#     --safe-only never lists it. Raised when `orbit mail-sending-status`
+#     A warn finding (owner decision 7a: --check says attention, exit 3)
+#     that runs only in the safe batch (owner decision 1): only --execute
+#     --safe-only (alone or with --dangerous) runs it. --plan and
+#     --export-diagnostics list it, with the no-rollback stderr line, as
+#     what --execute --safe-only would do; --execute --dangerous without
+#     --safe-only does not run it and says so on stderr (#1848 O-F10).
+#     Raised when `orbit mail-sending-status`
 #     (one bounded `compose exec -T orbit-app`, a read of the database) says
 #     source=imported or ui and the SMTP_* lines, the mail overlay's
 #     COMPOSE_FILE entry or .orbit-secrets/smtp-password remain (the shipped
@@ -642,7 +646,10 @@ set -Eeuo pipefail
 #     decision 2, 2026-11-13); the plan line is followed by a stderr line
 #     saying so. A crash between steps leaves the step record
 #     .orbit-smtp-retirement and the next run resumes; the secret stays
-#     until the stack has restarted without it.
+#     until the stack has restarted without it. At execution it checks the
+#     restore journal and the backup/restore lock first, as do_start_services
+#     does, refuses with nothing changed if either says no, and holds the
+#     lock from the rewrite until the undo copy is dealt with (#1848 O-F1).
 #
 #   rerun-configuration           <- configuration-incomplete,
 #                                    configuration-invalid
@@ -1601,6 +1608,10 @@ cleanup() {
   local exit_status=$?
 
   [[ -z "${compose_image_tmp:-}" ]] || rm -f -- "$compose_image_tmp" 2>/dev/null || true
+  # #1848 FR-S1b: retire-smtp-lines's mktemp names, held while they exist,
+  # removed as the folder's owner (#1848 FIX-S1).
+  [[ -z "${smtp_rewrite_tmp:-}" ]] || as_folder_owner rm -f -- "$smtp_rewrite_tmp" 2>/dev/null || true
+  [[ -z "${smtp_step_tmp:-}" ]] || as_folder_owner rm -f -- "$smtp_step_tmp" 2>/dev/null || true
 
   if [[ -n "${recovery_dir:-}" ]]; then
     printf 'Orbit repair: interrupted before completion; this run left a private recovery copy in place, now removed. Re-run "repair.sh --plan" to see current state, then "--execute" again if repairs are still needed.\n' >&2
@@ -1967,7 +1978,7 @@ readonly -A manual_guidance=(
   [container-foreign-owner]="inspect the flagged container's labels and confirm its Orbit ownership before anything touches this project"
   [docker-unavailable]="ensure the docker CLI is installed and the daemon is reachable, then re-run diagnosis"
   [unrelated-resource-present]="confirm whether the reported resource under a different Compose project is still needed; it is out of scope for this deployment's repair"
-  [restore-unfinished]="a restore has not been finished and keeps Orbit stopped; run bash scripts/restore.sh --finish once Orbit is healthy, or bash scripts/restore.sh --recover to roll it back, then re-run repair"
+  [restore-unfinished]="a restore has not been finished and keeps Orbit stopped; run bash scripts/restore.sh --finish and follow what it says (it says when Orbit may be started), or bash scripts/restore.sh --recover to roll it back, then re-run repair"
   [database-volume-missing]="this deployment's database data is missing: there is no database container and no database volume, so starting Orbit would make a new, empty database; restore from a backup with bash scripts/restore.sh, or run the installer to set up a new deployment, then re-run repair"
   [database-unreachable]="the database container is running but not accepting connections; read the orbit-db container's logs and resolve what they report, then re-run diagnosis; repair never restarts the database to investigate"
   # #1026: the application container exists but never held still long enough
@@ -2048,6 +2059,7 @@ app_identity_pinned_image=""
 declare -a plan_entries=()
 plan_actions_count=0
 plan_manual_count=0
+retire_smtp_withheld=0
 recovery_dir=""
 declare -A service_restart_result=()
 
@@ -2437,7 +2449,15 @@ print_recreate_notice() {
 
 # stderr line for retire-smtp-lines (#1817): the one part of it with no undo.
 print_retire_smtp_notice() {
-  printf 'Orbit repair: retire-smtp-lines deletes the SMTP password file from the secrets folder without keeping a copy; that secret cannot be rolled back. Orbit keeps the password in its own Mail settings.\n' >&2
+  # shellcheck disable=SC2016  # literal backticks: a command name, not an expansion
+  printf 'Orbit repair: retire-smtp-lines deletes the SMTP password file from the secrets folder without keeping a copy; that secret cannot be rolled back; it runs only with `--execute --safe-only`. Orbit keeps the password in its own Mail settings.\n' >&2
+}
+
+# #1848 O-F10: an --execute without --safe-only says on stderr, once, that it
+# did not run the retire-smtp-lines that --plan listed. Stdout is unchanged.
+print_retire_smtp_withheld() {
+  [[ "${retire_smtp_withheld:-0}" == 1 ]] || return 0
+  printf 'Orbit repair: retire-smtp-lines was planned but runs only in the safe batch; this run did not run it. Run repair.sh --execute --safe-only to retire the SMTP lines.\n' >&2
 }
 
 
@@ -2699,6 +2719,7 @@ compute_plan_entries() {
   plan_entries=()
   plan_actions_count=0
   plan_manual_count=0
+  retire_smtp_withheld=0
 
   for entry in "${findings[@]:-}"; do
     [[ -n "$entry" ]] || continue
@@ -2715,8 +2736,12 @@ compute_plan_entries() {
       [[ "$fclass" == "$class" ]] || continue
       [[ "$fseverity" == info ]] && continue
       # #1817 owner decision 1: retire-smtp-lines runs only in the safe batch
-      # the person chooses; a run without --safe-only neither runs nor lists it.
-      [[ "$fclass" == smtp-lines-retirable && "$safe_only" != 1 ]] && continue
+      # the person chooses; a run without --safe-only does not run it and
+      # says so on stderr (#1848 O-F10).
+      if [[ "$fclass" == smtp-lines-retirable && "$safe_only" != 1 ]]; then
+        retire_smtp_withheld=1
+        continue
+      fi
 
       if [[ "$fclass" == secret-missing ]]; then
         action="$(resolve_secret_missing_action "$ftarget")"
@@ -3524,8 +3549,10 @@ restore_journal_named() {
 
 # #1804 point 1, execution only: the backup/restore lock, held by backup.sh,
 # restore.sh and a recovery-bundle export (their engine). Prints `held`,
-# `unreadable`, `untestable <flock's words>` or nothing. A lock that is
-# anything but a regular, non-symlink, readable file is `unreadable` and never
+# `unreadable`, `untestable <flock's words>` or nothing (an acquire can also
+# leave `uncreatable`: the backups folder or lock file could not be made). A
+# lock that is anything but a regular, non-symlink, readable file is
+# `unreadable` and never
 # opened (a FIFO would block; review 5). A regular file is opened read-only,
 # so a lock file that vanishes is never created; one that then cannot be
 # opened is `unreadable` too. A non-blocking lock has three outcomes (audit
@@ -3544,8 +3571,15 @@ backup_restore_lock_state() {
 # $held_lock_fd (no subshell, so the descriptor survives) until
 # release_backup_restore_lock; the caller holds it across its compose call.
 # The outcome is left in $lock_probe_state (empty when taken or not checked).
+# With $lock_made_as_owner set to 1 (retire-smtp-lines only, #1848 FIX-S1
+# addendum), root makes a missing backups folder or lock file as the
+# deployment folder's owner (as_folder_owner), never itself; root then only
+# opens the lock read-only, as before.
 held_lock_fd=""
 lock_probe_state=""
+lock_made_as_owner=0
+# shellcheck disable=SC2016 # expanded by the child bash
+readonly lock_make_script='umask 077 && mkdir -p -- "$1" && : >>"$2"'
 probe_backup_restore_lock() {
   local fd status=0 words
   lock_probe_state=""
@@ -3556,8 +3590,14 @@ probe_backup_restore_lock() {
     # truncated), or a backup started during the compose call would create
     # its own and run alongside (#1823 O-R2).
     [[ "${1:-}" == keep ]] || return 0
-    if ! ( umask 077 && mkdir -p "$backup_directory" && : >>"$backup_restore_lock_path" ) 2>/dev/null; then
-      lock_probe_state=unreadable
+    if [[ "$lock_made_as_owner" == 1 && "$(id -u)" == 0 ]]; then
+      as_folder_owner bash -c "$lock_make_script" make-lock "$backup_directory" "$backup_restore_lock_path" 2>/dev/null || status=1
+    else
+      ( umask 077 && mkdir -p "$backup_directory" && : >>"$backup_restore_lock_path" ) 2>/dev/null || status=1
+    fi
+    if [[ "$status" != 0 ]]; then
+      # #1848 O-F5: the folder or its lock file can't be made; say so.
+      lock_probe_state=uncreatable
       return 0
     fi
   fi
@@ -3598,9 +3638,25 @@ lock_state_refusal() {
   if [[ "$lock_state" == unreadable ]]; then
     printf "repair can't check whether a backup, restore or export is running: the lock at %s can't be read" \
       "$backup_restore_lock_path"
+  elif [[ "$lock_state" == uncreatable ]]; then
+    if [[ "$lock_made_as_owner" == 1 && "$(id -u)" == 0 && "${smtp_folder_uid:-0}" != 0 ]]; then
+      # #1848 FIX-S1 addendum 2 item 4: as root the lock is made as the
+      # folder's owner, so that user, not root, must be able to create it.
+      local owner="${smtp_owner_name:-uid ${smtp_folder_uid}}" pointed=""
+      [[ -z "${ORBIT_BACKUP_DIR:-}" ]] || pointed=" (ORBIT_BACKUP_DIR points at it)"
+      printf "the deployment folder's owner %s can't create the backups folder %s%s or write its lock file there: run as root, repair makes the lock as the deployment folder's owner %s, so that user must be able to create it; run backup.sh once, or make the folder writable by %s, then re-run repair" \
+        "$owner" "$backup_directory" "$pointed" "$owner" "$owner"
+    elif [[ -n "${ORBIT_BACKUP_DIR:-}" ]]; then
+      printf "the user running repair can't create the backups folder %s or write its lock file there; ORBIT_BACKUP_DIR points at it, so mount or create that folder and make it writable for the user running repair, or point ORBIT_BACKUP_DIR at the backups folder backup.sh uses, then re-run repair" \
+        "$backup_directory"
+    else
+      printf "the user running repair can't create the backups folder %s or write its lock file there; create that folder (the default ./backups) and make it writable for the user running repair, or set ORBIT_BACKUP_DIR to the backups folder backup.sh uses, then re-run repair" \
+        "$backup_directory"
+    fi
   elif [[ "$lock_state" == untestable* ]]; then
     # The Compose words are an argument so the source names no compose
-    # start outside do_start_services / do_recreate_services (repair.test.mjs).
+    # start outside do_start_services, do_recreate_services or
+    # do_retire_smtp_lines (repair.test.mjs).
     printf "repair can't check whether a backup, restore or export is running: the lock at %s can't be tested on that filesystem (flock said: %s); make sure no backup, restore or export is running, then start Orbit by hand with %s up -d from this folder, or keep the backups folder (ORBIT_BACKUP_DIR) on a filesystem that supports flock" \
       "$backup_restore_lock_path" "${lock_state#untestable }" 'docker compose'
   elif [[ "$lock_state" == held ]]; then
@@ -3638,7 +3694,7 @@ restore_guard_refusal() {
     printf "repair can't check whether a backup, restore or export is running: %s can't be searched" \
       "$backup_directory"
   elif restore_journal_present; then
-    printf 'a restore has not been finished (journal at %s); run bash scripts/restore.sh --finish once Orbit is healthy, or --recover to roll it back' \
+    printf 'a restore has not been finished (journal at %s); run bash scripts/restore.sh --finish and follow what it says (it says when Orbit may be started), or --recover to roll it back' \
       "$(restore_journal_named)"
   else
     lock_state="$(backup_restore_lock_state)"
@@ -3657,13 +3713,15 @@ restore_unfinished_guidance() {
   fi
 }
 
-# #1823 O-S2: the exact command that starts Orbit, so restore.sh --finish has
-# something healthy to finish; a second manual-step line after the guidance.
-# The Compose words are an argument so the source names no compose start
-# outside do_start_services / do_recreate_services (repair.test.mjs).
+# #1823 O-S2, #1848 O-F2: a second manual-step line after the guidance. It
+# defers to restore.sh --finish, which reads the journal (repair never does)
+# and says whether Orbit may be started; the start command is given only on
+# that condition. The Compose words are an argument so the source names no compose start
+# outside do_start_services, do_recreate_services or
+# do_retire_smtp_lines (repair.test.mjs).
 print_restore_start_hint() {
   backup_directory_unsearchable && return 0
-  printf 'manual step: to start Orbit for restore.sh --finish, run %s up -d from this folder (the restore journal is at %s) (resolves=%s)\n' \
+  printf 'manual step: run bash scripts/restore.sh --finish first and follow what it says; start Orbit with %s up -d from this folder only if --finish asks for it (the restore journal is at %s) (resolves=%s)\n' \
     'docker compose' "$(restore_journal_named)" "$1" >&2
 }
 
@@ -4570,15 +4628,29 @@ restart_compose_service() {
 # decision, 2026-11-13): it cannot be rolled back, and the plan says so.
 # Then the done-marker is asked again (#1834, owner decision 10a): usable,
 # the undo copy, its folder when empty, and the record go; otherwise they
-# stay and one line names the copy, and the next run asks again. Run as root,
-# every file it leaves behind takes the deployment folder's owner, as
-# restore-compose-file does (#1844). Each file is written and chowned
-# directly, never through a symlink (FIX-S1): the step record and every file
-# written into a folder someone else may own (an adopted undo folder
-# included) go to a name mktemp chooses and are renamed into place, the chown
-# is --no-dereference, and a new undo folder gets its marker and copies while
-# it is still root's and is given to the folder's owner only once they are in
-# it.
+# stay and one line names the copy, and the next run asks again. Run as root
+# in a folder another user owns, every file it leaves behind belongs to the
+# deployment folder's owner (#1844): every create, write, chmod, rename and
+# removal under the folder runs as that owner through setpriv
+# (as_folder_owner, #1848 FIX-S1), so a symlink they plant reaches only what
+# they could already write. The child runs with that owner's own primary
+# group from the user database and their own supplementary groups
+# (--init-groups, as su does), never the folder's group, in a new session
+# with no controlling terminal (setsid), stdin and stdout from and to
+# /dev/null (the owner-write script's are the pipes repair feeds and checks),
+# stderr to a 4 KiB pipe root prints on failure, a cleared environment, and
+# every other descriptor closed, the held lock's included. That includes the backup/restore lock: a missing
+# backups folder or lock file is made as the owner (wherever ORBIT_BACKUP_DIR
+# points), and root only opens the lock read-only and takes flock on it. Root
+# reads, decides and runs docker; it creates, writes, chmods, renames and
+# removes nothing under the folder, so never through a symlink. In a
+# root-owned folder root writes directly. Either way a .orbit-secrets or its
+# secret file, an orbit-install-backups, an undo folder to adopt or the one
+# the step record names that belongs to anyone but the user whose files the
+# run makes is refused, named, before anything is written. Every file goes to
+# a name mktemp chooses and is renamed into place. Root in a folder it does
+# not own refuses, nothing changed, without setpriv or setsid, or when the
+# owner has no user-database entry.
 readonly smtp_retirement_record=".orbit-smtp-retirement"
 # Written into the undo copy's folder before the copy, naming that folder, so
 # a run killed before the step record leaves a copy the next run can adopt
@@ -4669,9 +4741,167 @@ smtp_record_step=""
 # As root, give a path the deployment folder's owner (restore-compose-file's
 # rule): the folder's user must still be able to read what this run leaves
 # behind. As any other user, a no-op. Never through a symlink: a link swapped
-# in at the name is re-owned itself, its target untouched (FIX-S1).
+# in at the name is re-owned itself, its target untouched (FIX-S1). Used by
+# restore-compose-file and the .env-orbit restore; retire-smtp-lines writes
+# as the owner instead (#1848 FIX-S1).
 own_as_folder() {
   [[ "$(id -u)" != 0 ]] || chown --no-dereference --reference=. -- "$@"
+}
+
+# #1848 FIX-S1: the deployment folder's owner, read once per run by
+# smtp_owner_init; $smtp_writer_uid is the uid whose files this run makes
+# (the folder's owner as root, else the running user). As root in a folder
+# another user owns, that user's name and primary gid come from the user
+# database (getent passwd, addendum 2 item 3), never from the folder's group:
+# a folder in the docker group must not hand that group to the child. A
+# lookup that fails leaves them empty, and the action refuses. Their home
+# (field 6, "/" when empty) is the child's HOME (addendum 3 item 2).
+smtp_folder_uid=""
+smtp_writer_uid=""
+smtp_owner_name=""
+smtp_owner_gid=""
+smtp_owner_home=""
+smtp_owner_init() {
+  local ids entry
+  ids="$(stat -c %u .)" && [[ "$ids" =~ ^[0-9]+$ ]] || return 1
+  smtp_folder_uid="$ids"
+  smtp_writer_uid="$(id -u)" || return 1
+  [[ "$smtp_writer_uid" == 0 && "$smtp_folder_uid" != 0 ]] || return 0
+  smtp_writer_uid="$smtp_folder_uid"
+  entry="$(getent passwd "$smtp_folder_uid" 2>/dev/null)" || return 0
+  # name:password:uid:gid:gecos:home:shell; only an entry for this very uid is used.
+  [[ "$entry" =~ ^([^:]+):[^:]*:([0-9]+):([0-9]+):[^:]*:([^:]*): && "${BASH_REMATCH[2]}" == "$smtp_folder_uid" ]] || return 0
+  smtp_owner_name="${BASH_REMATCH[1]}"
+  smtp_owner_gid="${BASH_REMATCH[3]}"
+  smtp_owner_home="${BASH_REMATCH[4]:-/}"
+}
+
+# clean_terminal_text: stdin to stdout, made safe for root's terminal the way
+# docker_output_excerpt cleans Compose's output: escape sequences, invalid
+# UTF-8, C1 controls, bidi overrides and C0 controls other than tab and
+# newline are removed (#1848 FIX-S1 addendum 4 item 1).
+clean_terminal_text() {
+  local esc=$'\033'
+  LC_ALL=C sed -E "s|${esc}\\[[0-9;?]*[ -/]*[@-~]||g" |
+    { if command -v iconv >/dev/null 2>&1; then iconv -c -f UTF-8 -t UTF-8 2>/dev/null || true; else LC_ALL=C tr -d '\200-\377'; fi; } |
+    LC_ALL=C sed $'s/\xc2[\x80-\x9f]//g; s/\xe2\x80[\xaa-\xae]//g; s/\xe2\x81[\xa6-\xa9]//g' |
+    LC_ALL=C tr -d '\000-\010\013-\037\177'
+}
+
+# as_folder_owner [--pipe] <cmd...> (#1848 FIX-S1): logrotate's `su`,
+# OpenSSH's temporarily_use_uid. As root in a folder another user owns, runs
+# <cmd> as that user, so a link they plant reaches only what they could
+# already write: setpriv with their uid, their primary group and their own
+# supplementary groups (--init-groups, as su does), no new privileges. The
+# child is hardened the way su/runuser are against a less trusted user
+# (addendum 2 item 2, the CVE-2016-2779 class): a new session with no
+# controlling terminal (setsid), stdin and stdout from and to /dev/null,
+# and every other descriptor closed, the held lock's included (root's process
+# keeps it, so the lock stays held), in a cleared environment keeping only
+# PATH, LC_ALL=C, HOME, USER, LOGNAME (sudo's env_reset, `su -`; addendum 3
+# item 2): PATH is root's own, which root already trusts (under sudo it is
+# secure_path). Its stderr goes to a pipe root reads, at most 4096 bytes
+# (addendum 3 item 1): when the child fails, what it said is printed as one
+# "Orbit repair:" line, tabs and newlines as spaces and every other control
+# (C0, C1, bidi overrides, escape sequences, invalid UTF-8) removed by
+# clean_terminal_text (addendum 4 item 1); the caller prints the
+# line naming the step and path. With --pipe, stdin and stdout stay the
+# caller's pipes (smtp_owner_write reads and checks what comes back).
+# Otherwise runs <cmd> as it is. Root without setpriv or setsid, or with no
+# user-database entry for the owner: returns 1.
+as_folder_owner() {
+  local pipe=0 said="" status=0
+  if [[ "${1:-}" == --pipe ]]; then
+    pipe=1
+    shift
+  fi
+  if [[ "$(id -u)" != 0 || "$smtp_folder_uid" == 0 ]]; then
+    "$@"
+    return
+  fi
+  [[ -n "$smtp_folder_uid" && -n "$smtp_owner_gid" ]] &&
+    command -v setpriv >/dev/null 2>&1 && command -v setsid >/dev/null 2>&1 || return 1
+  # fd 3 carries the caller's stdout past the capture; the child closes it.
+  # Past 4096 bytes head exits and the child's next write fails (EPIPE), so
+  # a flood never keeps root reading.
+  {
+    said="$(set -o pipefail
+      (
+        if [[ "$pipe" == 1 ]]; then exec 2>&1 1>&3; else exec 2>&1 1>/dev/null </dev/null; fi
+        fds=()
+        for fd in /proc/"$BASHPID"/fd/*; do
+          fd="${fd##*/}"
+          [[ "$fd" =~ ^[0-9]+$ ]] && ((fd > 2)) && fds+=("$fd")
+        done
+        for fd in "${fds[@]}"; do
+          [[ ! -e /proc/"$BASHPID"/fd/"$fd" ]] || eval "exec $fd<&-"
+        done
+        exec env -i PATH="$PATH" LC_ALL=C HOME="$smtp_owner_home" USER="$smtp_owner_name" LOGNAME="$smtp_owner_name" \
+          setsid --wait setpriv --reuid="$smtp_folder_uid" --regid="$smtp_owner_gid" --init-groups --no-new-privs -- "$@"
+      ) | LC_ALL=C head -c 4096 3>&- | clean_terminal_text 3>&-)" || status=$?
+  } 3>&1
+  if [[ "$status" != 0 ]]; then
+    said="${said//[$'\t\n']/ }"
+    [[ -z "${said// /}" ]] ||
+      printf "Orbit repair: as the deployment folder's owner (%s), %s said: %s\n" "$smtp_owner_name" "${1##*/}" "$said" >&2 || true
+  fi
+  return "$status"
+}
+
+# The owner-side script of smtp_owner_write: $1 folder, $2 mktemp template,
+# $3 mode. Stdin goes to a new mktemp file, chmod $3, and its name is
+# printed. One line, so logs of the setpriv call stay one line each. Its own EXIT trap removes the file until the name is handed over,
+# so a parent killed meanwhile (the printf then fails on the closed pipe)
+# leaves none (#1848 FR-S1b).
+# shellcheck disable=SC2016 # expanded by the child bash
+readonly smtp_owner_write_script='tmp=""; trap "[[ -z \$tmp ]] || rm -f -- \"\$tmp\"" EXIT; trap "exit 1" HUP INT PIPE TERM; '\
+'tmp="$(mktemp "$1/$2")" || exit 1; cat > "$tmp" && chmod "$3" -- "$tmp" && printf "%s\n" "$tmp" || exit 1; tmp=""'
+
+# smtp_owner_write <folder> <template> <mode> <target> <producer...>: the one
+# write primitive of retire-smtp-lines (#1848 FIX-S1). Root makes the bytes
+# (<producer>'s stdout); the folder's owner writes them to a mktemp name in
+# <folder> with <mode> and, once the producer succeeded, renames it over
+# <target> (mv -fT, same folder). An empty <target> leaves the name in
+# $smtp_step_tmp for the caller. On failure nothing is left. The pipeline's
+# status is left in $smtp_write_status: with pipefail it is the rightmost
+# failure, so it is <producer>'s own (smtp_env_rewrite's 3) only when the
+# owner's side succeeded; the owner's side exits 0 or 1 (setpriv 1 or 127).
+smtp_write_status=0
+smtp_owner_write() {
+  local folder="$1" template="$2" mode="$3" target="$4" name="" status=0 prefix
+  shift 4
+  prefix="$folder/${template%XXXXXX}"
+  name="$("$@" | as_folder_owner --pipe bash -c "$smtp_owner_write_script" smtp-owner-write "$folder" "$template" "$mode")" || status=$?
+  smtp_write_status="$status"
+  # The name comes from a process the owner could steer: only one of the
+  # template's shape is used, and only by commands run as the owner.
+  if [[ -n "$name" ]] && ! [[ "${name:0:${#prefix}}" == "$prefix" && "${name:${#prefix}}" =~ ^[A-Za-z0-9]{6}$ ]]; then
+    return 1
+  fi
+  smtp_step_tmp="$name"
+  if [[ "$status" == 0 && -n "$name" ]] && { [[ -z "$target" ]] || as_folder_owner mv -fT -- "$name" "$target"; }; then
+    [[ -z "$target" ]] || smtp_step_tmp=""
+    return 0
+  fi
+  [[ -z "$name" ]] || as_folder_owner rm -f -- "$name" || true
+  smtp_step_tmp=""
+  return 1
+}
+
+# smtp_read_file <path>: its bytes, never through a symlink (O_NOFOLLOW).
+smtp_read_file() {
+  dd if="$1" iflag=nofollow status=none
+}
+
+# The step record's lines for step $1.
+smtp_record_lines() {
+  printf 'step=%s\n' "$1"
+  if [[ -n "$smtp_copy_dir" ]]; then printf 'copy=%s\n' "$smtp_copy_dir"; fi
+}
+
+# .env-orbit through smtp_env_rewrite <retire|backup>.
+smtp_env_lines() {
+  smtp_read_file "$environment_file" | smtp_env_rewrite "$1"
 }
 
 # smtp_write_record <step>: the step record (step=, and copy= naming the undo
@@ -4679,20 +4909,21 @@ own_as_folder() {
 # O_EXCL, mode 600) and renamed over the record, so no fixed name a planted
 # symlink could sit at is ever opened for writing (FIX-S1).
 smtp_write_record() {
-  local tmp
-  tmp="$(mktemp "./${smtp_retirement_record}.XXXXXX")" || return 1
-  if ! { printf 'step=%s\n' "$1" && if [[ -n "$smtp_copy_dir" ]]; then printf 'copy=%s\n' "$smtp_copy_dir"; fi; } > "$tmp" ||
-    ! own_as_folder "$tmp" || ! mv -f -- "$tmp" "$smtp_retirement_record"; then
-    rm -f -- "$tmp"
-    return 1
-  fi
+  smtp_owner_write . "${smtp_retirement_record}.XXXXXX" 600 "$smtp_retirement_record" smtp_record_lines "$1"
 }
+
+# #1848 FR-S1b: the mktemp name that exists right now, for the EXIT trap
+# (cleanup): the rewrite of .env-orbit, and one of the record or undo-copy
+# temporary files, which never exist at the same time.
+smtp_rewrite_tmp=""
+smtp_step_tmp=""
 
 # Removes do_retire_smtp_lines's rewritten copy, if one was made. It reads and
 # clears the caller's `local tmp`, which bash's dynamic scoping allows.
 smtp_discard_rewrite() {
-  [[ -z "$tmp" ]] || rm -f -- "$tmp"
+  [[ -z "$tmp" ]] || as_folder_owner rm -f -- "$tmp" || true
   tmp=""
+  smtp_rewrite_tmp=""
 }
 
 # smtp_read_record: sets $smtp_record_step and $smtp_copy_dir from the step
@@ -4721,12 +4952,12 @@ smtp_read_record() {
 # the folder stays.
 smtp_discard_copy() {
   if [[ -n "$smtp_copy_dir" && ! -L orbit-install-backups && -d "$smtp_copy_dir" && ! -L "$smtp_copy_dir" ]]; then
-    rm -f -- "$smtp_copy_dir/.env-orbit" "$smtp_copy_dir/$smtp_overlay_file" "$smtp_copy_dir/$smtp_copy_marker" \
+    as_folder_owner rm -f -- "$smtp_copy_dir/.env-orbit" "$smtp_copy_dir/$smtp_overlay_file" "$smtp_copy_dir/$smtp_copy_marker" \
       "$smtp_copy_dir/.env-orbit.smtp-copy.tmp" "$smtp_copy_dir"/.env-orbit.smtp-copy.?????? \
-      "$smtp_copy_dir/$smtp_overlay_file".smtp-copy.?????? || return 1
-    rmdir -- "$smtp_copy_dir" 2>/dev/null || true
+      "$smtp_copy_dir/$smtp_overlay_file".smtp-copy.?????? "$smtp_copy_dir/$smtp_copy_marker".?????? || return 1
+    as_folder_owner rmdir -- "$smtp_copy_dir" 2>/dev/null || true
   fi
-  rm -f -- "$smtp_retirement_record"
+  as_folder_owner rm -f -- "$smtp_retirement_record"
 }
 
 # smtp_find_orphan_copy: with no step record, the newest dated folder in
@@ -4757,34 +4988,21 @@ smtp_find_orphan_copy() {
 }
 
 # smtp_write_copy <folder>: the undo copy of the lines the retirement removes
-# from .env-orbit, written to a temporary file in <folder> whose name mktemp
-# chooses (mode 600) and renamed over <folder>/.env-orbit, so an existing
-# copy (a hard link or a symlink included) is replaced, never written through
-# (#1834, FIX-S1); then given the folder's owner, --no-dereference, so a link
-# swapped in after the rename is re-owned itself, its target untouched.
+# from .env-orbit, written as the owner to a mktemp name in <folder> (mode
+# 600) and renamed over <folder>/.env-orbit, so an existing copy (a hard
+# link or a symlink included) is replaced, never written through (#1834,
+# #1848 FIX-S1).
 smtp_write_copy() {
-  local tmp
-  tmp="$(mktemp "$1/.env-orbit.smtp-copy.XXXXXX")" || return 1
-  if ! smtp_env_rewrite backup < "$environment_file" > "$tmp" || ! mv -fT -- "$tmp" "$1/.env-orbit"; then
-    rm -f -- "$tmp"
-    return 1
-  fi
-  own_as_folder "$1/.env-orbit"
+  smtp_owner_write "$1" .env-orbit.smtp-copy.XXXXXX 600 "$1/.env-orbit" smtp_env_lines backup
 }
 
 # smtp_copy_overlay <folder>: the mail overlay, when it is a regular file,
-# copied with its mode into <folder> the same way: to a mktemp name (cp
-# removes that name and creates it afresh), renamed over
-# <folder>/docker-compose.mail.yml, then given the folder's owner (FIX-S1).
+# copied with its mode into <folder> the same way (#1848 FIX-S1).
 smtp_copy_overlay() {
-  local tmp
+  local mode
   [[ -f "$smtp_overlay_file" && ! -L "$smtp_overlay_file" ]] || return 0
-  tmp="$(mktemp "$1/${smtp_overlay_file}.smtp-copy.XXXXXX")" || return 1
-  if ! cp -a --remove-destination -- "$smtp_overlay_file" "$tmp" || ! mv -fT -- "$tmp" "$1/$smtp_overlay_file"; then
-    rm -f -- "$tmp"
-    return 1
-  fi
-  own_as_folder "$1/$smtp_overlay_file"
+  mode="$(stat -c %a -- "$smtp_overlay_file")" && [[ "$mode" =~ ^[0-7]{3,4}$ ]] || return 1
+  smtp_owner_write "$1" "${smtp_overlay_file}.smtp-copy.XXXXXX" "$mode" "$1/$smtp_overlay_file" smtp_read_file "$smtp_overlay_file"
 }
 
 # smtp_confirm_or_keep: after the secret is gone, asks the gate again.
@@ -4806,10 +5024,9 @@ smtp_confirm_or_keep() {
 # orbit-install-backups/<UTC stamp>-repair (-2..-9 when the name exists),
 # every level mode 700, in the installer's own backups folder; it goes once
 # the retirement is confirmed (smtp_discard_copy). Sets $smtp_backup_dir, and
-# $smtp_backup_root_made to 1 when this run made orbit-install-backups. Gives
-# neither folder away: the caller does that once the marker and the copies
-# are in the dated folder, so nobody but this run can create an entry in it
-# while it writes there (FIX-S1).
+# $smtp_backup_root_made to 1 when this run made orbit-install-backups. Both
+# are made as the folder's owner; an existing orbit-install-backups is used
+# only when it is theirs (#1848 FIX-S1, FR-O5c).
 readonly smtp_backup_root="orbit-install-backups"
 smtp_backup_dir=""
 smtp_backup_root_made=0
@@ -4819,18 +5036,65 @@ smtp_backup_dir() {
   if [[ -L "$smtp_backup_root" ]]; then
     return 1
   elif [[ -d "$smtp_backup_root" ]]; then
-    [[ -O "$smtp_backup_root" ]] && chmod 700 -- "$smtp_backup_root" || return 1
+    [[ "$(stat -c %u -- "$smtp_backup_root")" == "$smtp_writer_uid" ]] &&
+      as_folder_owner chmod 700 -- "$smtp_backup_root" || return 1
   else
-    mkdir -m 700 -- "$smtp_backup_root" || return 1
+    as_folder_owner mkdir -m 700 -- "$smtp_backup_root" || return 1
     smtp_backup_root_made=1
   fi
   for suffix in "" -2 -3 -4 -5 -6 -7 -8 -9; do
-    if mkdir -m 700 -- "$smtp_backup_root/${stamp}-repair${suffix}" 2>/dev/null; then
+    if as_folder_owner mkdir -m 700 -- "$smtp_backup_root/${stamp}-repair${suffix}" 2>/dev/null; then
       smtp_backup_dir="$smtp_backup_root/${stamp}-repair${suffix}"
       return 0
     fi
   done
   return 1
+}
+
+# #1848 FIX-S1 addendum: as root, the run writes in orbit-install-backups and
+# its undo folders by path, as the user whose files it makes (the folder's
+# owner, or root in a root-owned folder). One owned by anyone else (a
+# root-owned orbit-install-backups an earlier root run left, or another
+# user's in a root-owned folder) is refused, named, before anything is
+# written: .orbit-secrets and its secret file (addendum 2 item 1: an install
+# or configure run as root can leave them root's), orbit-install-backups, an
+# undo folder this run would adopt, and the one the step record names. Prints the refusal, or nothing (run in a
+# subshell, so the globals it reads into stay unset). Not root,
+# nothing is checked here (smtp_backup_dir still refuses a foreign
+# orbit-install-backups).
+smtp_foreign_folder_refusal() {
+  local path owner_uid owner_name folder_name
+  local -a paths=()
+  [[ "$(id -u)" == 0 ]] || return 0
+  # Addendum 2 item 1: step 3 removes the secret as that user, which a
+  # .orbit-secrets or secret file owned by anyone else would fail silently,
+  # every run.
+  [[ ! -d .orbit-secrets || -L .orbit-secrets ]] || paths+=(.orbit-secrets)
+  [[ ! -f "$smtp_secret_file" || -L "$smtp_secret_file" || -L .orbit-secrets ]] || paths+=("$smtp_secret_file")
+  [[ ! -d "$smtp_backup_root" || -L "$smtp_backup_root" ]] || paths+=("$smtp_backup_root")
+  smtp_read_record
+  if [[ -e "$smtp_retirement_record" || -L "$smtp_retirement_record" ]]; then
+    [[ -z "$smtp_copy_dir" ]] || paths+=("$smtp_copy_dir")
+  elif smtp_find_orphan_copy; then
+    paths+=("$smtp_copy_dir")
+  fi
+  for path in "${paths[@]}"; do
+    if [[ -L "$path" ]] || { [[ ! -d "$path" ]] && ! [[ "$path" == "$smtp_secret_file" && -f "$path" ]]; }; then continue; fi
+    owner_uid="$(stat -c %u -- "$path")" || owner_uid=""
+    [[ "$owner_uid" != "$smtp_writer_uid" ]] || continue
+    owner_name="$(stat -c %U -- "$path" 2>/dev/null)" || owner_name="uid $owner_uid"
+    folder_name="$(stat -c %U -- . 2>/dev/null)" || folder_name="uid $smtp_folder_uid"
+    if [[ "$path" == .orbit-secrets || "$path" == "$smtp_secret_file" ]]; then
+      # The secret is still in use until the retirement deletes it: never
+      # "remove it".
+      printf "%s belongs to another user (%s); give it to the deployment folder's owner (%s), then re-run repair" \
+        "$path" "$owner_name" "$folder_name"
+    else
+      printf "%s belongs to another user (%s); remove it if it is empty, or give it to the deployment folder's owner (%s), then re-run repair" \
+        "$path" "$owner_name" "$folder_name"
+    fi
+    return 0
+  done
 }
 
 # A checksum of .env-orbit's bytes, to see that nothing edited it between the
@@ -4839,54 +5103,34 @@ smtp_env_sum() {
   cksum < "$environment_file"
 }
 
-do_retire_smtp_lines() {
-  local refusal="" detail="" status=0 deadline confirmed=0
-
-  if [[ -z "$project" || "$docker_available" != 1 ]]; then
-    refusal="docker is not available"
-  elif [[ -L "$environment_file" || ! -f "$environment_file" ]]; then
-    refusal="$environment_file is missing"
-  elif ! environment_file_ok_now; then
-    refusal="$environment_file has changed or is not valid (owner-only KEY=value lines naming this project)"
-  fi
-  if [[ -n "$refusal" ]]; then
-    printf 'Orbit repair: retire-smtp-lines refused, nothing was changed: %s.\n' "$refusal" >&2
-    return 1
-  fi
-  smtp_read_record
-
-  # A retirement that finished but was not confirmed (#1834): only the
-  # confirmation is left, so its undo copy goes once the gate holds; nothing
-  # new is copied.
-  if [[ "$smtp_record_step" == retired ]] && ! smtp_lines_present && ! smtp_overlay_listed &&
-    [[ ! -e "$smtp_secret_file" && ! -L "$smtp_secret_file" ]]; then
-    smtp_confirm_or_keep
-    return 0
-  fi
-
-  # 1. The rewrite, the undo copy (only the lines the rewrite removes, never
-  # SMTP_PASSWORD=) and the record. The rewrite is made from .env-orbit as first read and checked
-  # against that read's checksum; the backup reads the file again, and the
-  # checksum is compared once more just before the rename, so the backup and
-  # the rewrite come from the same bytes and an edit made meanwhile is never
-  # lost.
+# Step 1 of retire-smtp-lines, run under the lock do_retire_smtp_lines holds:
+# 1. The rewrite, the undo copy (only the lines the rewrite removes, never
+# SMTP_PASSWORD=) and the record. The rewrite is made from .env-orbit as first read and checked
+# against that read's checksum; the backup reads the file again, and the
+# checksum is compared once more just before the rename, so the backup and
+# the rewrite come from the same bytes and an edit made meanwhile is never
+# lost.
+retire_smtp_prepare() {
   local rewrite=0 tmp="" sum_read
   if smtp_lines_present || smtp_overlay_listed; then
     rewrite=1
     sum_read="$(smtp_env_sum)" || sum_read=""
+    # Written early as the owner, renamed late (#1848 FIX-S1); smtp_env_rewrite's
+    # exit 3 fails the write.
     if [[ -z "$sum_read" ]] ||
-      ! tmp="$(mktemp "${environment_file}.retire-smtp.XXXXXX")" ||
-      ! smtp_env_rewrite retire < "$environment_file" > "$tmp" ||
-      ! chmod 600 -- "$tmp"; then
-      smtp_discard_rewrite
-      printf 'Orbit repair: retire-smtp-lines left %s as it was: its COMPOSE_FILE line could not be rewritten safely; remove docker-compose.mail.yml from it by hand.\n' "$environment_file" >&2
+      ! smtp_owner_write . "${environment_file}.retire-smtp.XXXXXX" 600 "" smtp_env_lines retire; then
+      if [[ -n "$sum_read" && "$smtp_write_status" == 3 ]]; then
+        printf 'Orbit repair: retire-smtp-lines left %s as it was: its COMPOSE_FILE line could not be rewritten safely; remove docker-compose.mail.yml from it by hand.\n' "$environment_file" >&2
+      else
+        # #1848 FIX-S1 addendum: the owner's write failed (setpriv refused,
+        # disk full), not the rewrite tool; no advice to edit by hand.
+        printf 'Orbit repair: retire-smtp-lines refused, nothing was changed: %s could not be rewritten.\n' "$environment_file" >&2
+      fi
       return 1
     fi
-    if ! own_as_folder "$tmp"; then
-      smtp_discard_rewrite
-      printf 'Orbit repair: retire-smtp-lines left %s as it was: the rewritten copy could not be given the folder'"'"'s owner.\n' "$environment_file" >&2
-      return 1
-    fi
+    tmp="$smtp_step_tmp"
+    smtp_rewrite_tmp="$tmp"
+    smtp_step_tmp=""
     if [[ "$(smtp_env_sum)" != "$sum_read" ]]; then
       smtp_discard_rewrite
       printf 'Orbit repair: retire-smtp-lines refused, nothing was changed: %s changed while it was being read; run repair again.\n' "$environment_file" >&2
@@ -4898,25 +5142,26 @@ do_retire_smtp_lines() {
     # left a marked folder; it is adopted (its copy rewritten while
     # .env-orbit still holds the SMTP lines), never copied a second time.
     # Otherwise the marker naming the new folder goes first, then the copy.
-    # Every file is given the folder's owner, and the dated folder (and
-    # orbit-install-backups, when this run made it) only once the marker and
-    # the copies are in it (FIX-S1). An adopted folder may already be the
-    # owner's, so smtp_write_copy and smtp_copy_overlay write through mktemp
-    # names and rename; own_as_folder never follows a link.
+    # Folders and files are made as the folder's owner (#1848 FIX-S1).
     local adopted=0
     if smtp_find_orphan_copy; then
       adopted=1
       smtp_backup_dir="$smtp_copy_dir"
     fi
-    if ! { { [[ "$adopted" == 1 ]] || { smtp_backup_dir &&
-      ( umask 077 && printf 'copy=%s\n' "$smtp_backup_dir" > "$smtp_backup_dir/$smtp_copy_marker" ); }; } &&
-      own_as_folder "$smtp_backup_dir/$smtp_copy_marker" &&
-      { [[ "$adopted" == 1 && "$rewrite" != 1 ]] || smtp_write_copy "$smtp_backup_dir"; } &&
-      smtp_copy_overlay "$smtp_backup_dir" &&
-      own_as_folder "$smtp_backup_dir" &&
-      { [[ "$smtp_backup_root_made" != 1 ]] || own_as_folder "$smtp_backup_root"; }; }; then
+    if ! { [[ "$adopted" == 1 ]] || { smtp_backup_dir &&
+      smtp_owner_write "$smtp_backup_dir" "${smtp_copy_marker}.XXXXXX" 600 "$smtp_backup_dir/$smtp_copy_marker" \
+        printf 'copy=%s\n' "$smtp_backup_dir"; }; } ||
+      ! { [[ "$adopted" == 1 && "$rewrite" != 1 ]] || smtp_write_copy "$smtp_backup_dir"; } ||
+      ! smtp_copy_overlay "$smtp_backup_dir"; then
       smtp_discard_rewrite
-      [[ -z "$smtp_backup_dir" || "$adopted" == 1 ]] || rm -rf -- "$smtp_backup_dir"
+      [[ -z "$smtp_backup_dir" || "$adopted" == 1 ]] || as_folder_owner rm -rf -- "$smtp_backup_dir" || true
+      # #1848 FR-O5a: as install.sh does, an orbit-install-backups this run
+      # made goes too, by rmdir only. A SIGKILL inside the chain still leaves
+      # it.
+      if [[ "$smtp_backup_root_made" == 1 ]]; then
+        as_folder_owner rmdir -- "$smtp_backup_root" 2>/dev/null || true
+        smtp_backup_root_made=0
+      fi
       printf 'Orbit repair: retire-smtp-lines refused, nothing was changed: the backup of %s could not be made in orbit-install-backups.\n' "$environment_file" >&2
       return 1
     fi
@@ -4935,12 +5180,94 @@ do_retire_smtp_lines() {
       printf 'Orbit repair: retire-smtp-lines left %s as it was: it changed while it was being rewritten; run repair again.\n' "$environment_file" >&2
       return 1
     fi
-    if ! mv -f -- "$tmp" "$environment_file"; then
+    if ! as_folder_owner mv -f -- "$tmp" "$environment_file"; then
       smtp_discard_rewrite
       printf 'Orbit repair: retire-smtp-lines left %s as it was: the rewritten copy could not be renamed over it.\n' "$environment_file" >&2
       return 1
     fi
+    smtp_rewrite_tmp=""
   fi
+}
+
+# #1848 FR-S1b: under the lock, before anything is written, unlinks the
+# temporary names a killed retirement left in this folder (rm -f never
+# follows a link), as the folder's owner (#1848 FIX-S1): exactly the fixed
+# part and 6 of [A-Za-z0-9]. Silent.
+smtp_sweep_stale_tmps() {
+  local LC_ALL=C saved_options name
+  local -a stale=()
+  saved_options="$(shopt -p nullglob dotglob)" || true
+  shopt -s nullglob
+  for name in "./${smtp_retirement_record}".?????? "./${environment_file}".retire-smtp.??????; do
+    if [[ "${name##*.}" =~ ^[A-Za-z0-9]{6}$ ]]; then stale+=("$name"); fi
+  done
+  eval "$saved_options"
+  ((${#stale[@]} == 0)) || as_folder_owner rm -f -- "${stale[@]}" 2>/dev/null || true
+  return 0
+}
+
+# #1848 O-F1/O-F3: check-then-act under the lock backup.sh, restore.sh and
+# the other starts (do_start_services, do_recreate_services) hold. The
+# journal and the lock are checked before anything is written, since
+# .env-orbit is itself in the backup set, and the lock is held from the
+# rewrite through the restart to the undo copy's removal; a backup or
+# restore that starts meanwhile sees it held and refuses. A refusal changes
+# nothing.
+do_retire_smtp_lines() {
+  local refusal="" detail="" status=0 deadline confirmed=0
+
+  refusal="$(restore_guard_refusal)"
+  if [[ -n "$refusal" ]]; then
+    :
+  elif [[ -z "$project" || "$docker_available" != 1 ]]; then
+    refusal="docker is not available"
+  elif [[ -L "$environment_file" || ! -f "$environment_file" ]]; then
+    refusal="$environment_file is missing"
+  elif ! environment_file_ok_now; then
+    refusal="$environment_file has changed or is not valid (owner-only KEY=value lines naming this project)"
+  elif ! smtp_owner_init; then
+    refusal="the deployment folder's owner could not be read"
+  elif [[ "$(id -u)" == 0 && "$smtp_folder_uid" != 0 ]] && ! command -v setpriv >/dev/null 2>&1; then
+    # #1848 FIX-S1: as root it writes only as the folder's owner.
+    refusal="run as root, it writes as the deployment folder's owner through setpriv (util-linux), which is not on PATH"
+  elif [[ "$(id -u)" == 0 && "$smtp_folder_uid" != 0 ]] && ! setsid --wait true </dev/null >/dev/null 2>&1; then
+    # #1848 FIX-S1 addendum 2 item 2: that child runs in a new session, and
+    # root waits for it (addendum 3 item 4: --wait is util-linux 2.31+).
+    refusal="run as root, it runs the deployment folder's owner's commands in a new session through setsid --wait (util-linux 2.31 or later), which is not on PATH or does not support --wait"
+  elif [[ "$(id -u)" == 0 && "$smtp_folder_uid" != 0 && -z "$smtp_owner_gid" ]]; then
+    # #1848 FIX-S1 addendum 2 item 3: the owner's own group, from the user
+    # database; addendum 3 item 3: no entry, no getent or a failed lookup.
+    refusal="run as root, it could not look up the deployment folder's owner (uid $smtp_folder_uid) in the user database (getent passwd)"
+  else
+    refusal="$(smtp_foreign_folder_refusal)"
+  fi
+  if [[ -z "$refusal" ]]; then
+    # #1848 FIX-S1 addendum: a missing backups folder or lock file is made
+    # as the folder's owner.
+    lock_made_as_owner=1
+    acquire_backup_restore_lock
+    lock_made_as_owner=0
+    refusal="$lock_refusal"
+  fi
+  if [[ -n "$refusal" ]]; then
+    printf 'Orbit repair: retire-smtp-lines refused, nothing was changed: %s.\n' "$refusal" >&2
+    return 1
+  fi
+  # Every return from here on releases the lock.
+  smtp_sweep_stale_tmps
+  smtp_read_record
+
+  # A retirement that finished but was not confirmed (#1834): only the
+  # confirmation is left, so its undo copy goes once the gate holds; nothing
+  # new is copied.
+  if [[ "$smtp_record_step" == retired ]] && ! smtp_lines_present && ! smtp_overlay_listed &&
+    [[ ! -e "$smtp_secret_file" && ! -L "$smtp_secret_file" ]]; then
+    smtp_confirm_or_keep
+    release_backup_restore_lock
+    return 0
+  fi
+
+  retire_smtp_prepare || { release_backup_restore_lock; return 1; }
 
   # 2. Start the stack on the rewritten file. Until it is up, the running
   # containers may still mount the secret, so it stays.
@@ -4951,6 +5278,7 @@ do_retire_smtp_lines() {
       </dev/null 2>&1 | docker_output_excerpt)" || status=$?
   if [[ "$status" != 0 ]]; then
     [[ -z "$detail" ]] || printf 'Orbit repair: Docker said: %s\n' "$detail" >&2 || true
+    release_backup_restore_lock
     printf 'Orbit repair: retire-smtp-lines kept the SMTP password file: Orbit could not be started on the rewritten %s; running repair again is safe.\n' "$environment_file" >&2
     return 1
   fi
@@ -4962,18 +5290,30 @@ do_retire_smtp_lines() {
     sleep 2
   done
   if [[ "$confirmed" != 1 ]]; then
+    release_backup_restore_lock
     printf 'Orbit repair: retire-smtp-lines kept the SMTP password file: Orbit did not confirm its Mail settings after the restart; running repair again is safe.\n' >&2
     return 1
   fi
-  smtp_write_record restarted || return 1
+  # #1848 FIX-S1 addendum 3 item 1: each failure here names its step and path.
+  if ! smtp_write_record restarted; then
+    release_backup_restore_lock
+    printf 'Orbit repair: retire-smtp-lines kept the SMTP password file: its step record %s could not be written after the restart (step 2); running repair again is safe.\n' "$smtp_retirement_record" >&2
+    return 1
+  fi
 
   # 3. Nothing mounts them now. The secret is deleted, never copied.
-  rm -f -- "$smtp_overlay_file" "$smtp_secret_file" || return 1
+  if ! as_folder_owner rm -f -- "$smtp_overlay_file" "$smtp_secret_file"; then
+    release_backup_restore_lock
+    printf 'Orbit repair: retire-smtp-lines step 3 could not remove %s and %s as the deployment folder'"'"'s owner; running repair again is safe.\n' "$smtp_overlay_file" "$smtp_secret_file" >&2
+    return 1
+  fi
 
   # 4. The undo copy goes once Orbit confirms mail sending without the
   # secret (#1834); otherwise it is kept and named.
-  smtp_write_record retired || true
+  smtp_write_record retired ||
+    printf 'Orbit repair: retire-smtp-lines could not write its step record %s after step 3; the next run finishes it.\n' "$smtp_retirement_record" >&2 || true
   smtp_confirm_or_keep
+  release_backup_restore_lock
 }
 
 # --- folder-moved / recreate-services (#1576) ---------------------------------
@@ -6242,6 +6582,7 @@ execute_repair() {
     if [[ "$dangerous" == 1 ]]; then
       printf 'dangerous result=empty done=0 failed=0 reason=none\n'
     fi
+    print_retire_smtp_withheld
     run_diagnosis
     print_check_lines
     settle_credential_checkpoints 0
@@ -6265,6 +6606,7 @@ execute_repair() {
     if [[ "$dangerous" == 1 ]]; then
       printf 'dangerous result=refused done=0 failed=0 reason=deployment-version-unsupported\n'
     fi
+    # #1848 O-F10: no withheld line; --safe-only is refused here too.
     print_check_lines
     settle_credential_checkpoints 0 version-unsupported
     exit 6
@@ -6276,6 +6618,7 @@ execute_repair() {
     execute_dangerous_batch
   fi
 
+  print_retire_smtp_withheld
   cleanup_recovery_dir
   run_diagnosis
   print_check_lines

@@ -958,6 +958,9 @@ export const auditLog = pgTable("audit_log", {
   // Supports readWorkspace's item-activity feed query (entityType filter +
   // createdAt-descending scan), the only remaining unbounded audit_log read.
   index("audit_household_activity_idx").on(table.householdId, table.entityType, table.createdAt),
+  // The relay rotation limits' count (#1848 W-R1): one member's rotations in a window.
+  index("audit_relay_rotation_idx").on(table.actorUserId, table.action, table.createdAt)
+    .where(sql`${table.entityType} = 'mail_in_relay'`),
 ]);
 
 /** A private, passphrase-encrypted household portability export. */

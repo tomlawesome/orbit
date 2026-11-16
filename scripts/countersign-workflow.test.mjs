@@ -311,22 +311,30 @@ describe("countersign workflow: evidence window from the tag date", () => {
 
   it("changes nothing else: the verify step still runs the shared verifier, whose code is unchanged", () => {
     expect(step(VERIFY)).toContain("run: bash scripts/ci/verify-validation-evidence.sh");
-    // Comment lines may change; code may not. Pinned by content, not by a
-    // commit a shallow clone may lack, to the reviewed version that also
-    // checks sbomSha256 when given ORBIT_SBOM_FILE (#1824).
-    const verifier = readFileSync(new URL("./ci/verify-validation-evidence.sh", import.meta.url), "utf8");
-    const code = verifier.split("\n").filter((line) => !/^\s*#/.test(line)).join("\n");
-    expect(createHash("sha256").update(code).digest("hex")).toBe(
-      "75e19faa10360a0bb3682635ea831bed7da532b43b3682886f1e423cbd0e5df8",
-    );
-    // Countersign passes no SBOM file, so the verifier behaves for it exactly as before.
+    // D-S6 43a (#1848) changed the verifier's code (it can now extract a verified
+    // SBOM), so the byte pin of #1824 is gone; what stays pinned is that
+    // countersign asks for no SBOM and so gets the verifier as it always was.
     expect(step(VERIFY)).not.toContain("ORBIT_SBOM_FILE");
+    expect(step(VERIFY)).not.toContain("ORBIT_SBOM_OUT");
     expect(workflow).not.toContain("ORBIT_SBOM_FILE");
+    expect(workflow).not.toContain("ORBIT_SBOM_OUT");
     // Order of the existing steps is kept.
     expect(stepStart("Validate the release input")).toBeLessThan(stepStart("Check out the release"));
     expect(stepStart(RESOLVE)).toBeLessThan(stepStart(VERIFY));
     expect(stepStart(VERIFY)).toBeLessThan(stepStart("Countersign keyless"));
     // The new step is the only one added there.
     expect(windowStep().match(/- name:/g)).toHaveLength(1);
+  });
+});
+
+// D-S6 43a addendum 1, item 2: the verifier's bytes are pinned again, so an
+// unreviewed edit to it fails a test. The hash is of the final verifier and is
+// filled in as the last step of the build; until then this fails by design.
+const VERIFIER_SHA256 = "66b1a3951fef333174ed332e26633a0ae9fbf8a14fefb15b7c8b746039810046";
+
+describe("the shared verifier's byte pin (D-S6 43a addendum 1)", () => {
+  it("pins scripts/ci/verify-validation-evidence.sh by sha256", () => {
+    const bytes = readFileSync(new URL("./ci/verify-validation-evidence.sh", import.meta.url));
+    expect(createHash("sha256").update(bytes).digest("hex")).toBe(VERIFIER_SHA256);
   });
 });

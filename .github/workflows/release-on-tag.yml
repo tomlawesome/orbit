@@ -5,8 +5,8 @@ name: Release the mirrored stable tag
 # preview digest and creates the annotated `vX.Y.Z` tag. GitLab's push
 # mirror carries that tag here within minutes, and this workflow's only job
 # is to turn it into a GitHub Release so the public Releases page keeps
-# working. GitHub does no judging of its own -- it never refuses a tag or
-# recomputes anything for the image.
+# working. GitHub does no judging of its own -- it recomputes nothing for
+# the image, and its only refusal is of a tag that is not a stable vX.Y.Z.
 #
 # ADR-0031 #9: the same signed launcher and release manifest are attached
 # here, to the permanent stable release -- the exact bytes GitLab already
@@ -18,10 +18,16 @@ name: Release the mirrored stable tag
 # the tagged commit is the one `promote_stable` found tested (#1640), so this
 # commit's own GitLab pipeline is the one that tested it.
 #
-# A pre-release-shaped tag (`vX.Y.Z-<prerelease>`, e.g. a throwaway
-# `vX.Y.Z-e2e.N` tag used to prove the launcher/signature path end to end,
-# #1121) is published as a GitHub pre-release and never marked Latest --
-# scripts/ci/classify-release-tag.sh decides which shape a given tag is.
+# Only a stable `vX.Y.Z` tag is released. A pre-release-shaped tag
+# (`vX.Y.Z-<prerelease>`) is refused before anything is published: the
+# signed manifest only ever names `vX.Y.Z`, so such a tag could never get
+# its files (#1848 D-F4; the throwaway e2e rehearsal of #1121 is dropped).
+# scripts/ci/classify-release-tag.sh decides which shape a tag is.
+#
+# Verify, then publish: the release is created as a draft only after every
+# check below has passed, the files are attached to the draft, and only then
+# is it published. A refusal at any step leaves no half-made public release,
+# and a re-run finishes the same draft.
 #
 # That pipeline is a *push* pipeline for either `preview` or a `hotfix/*`
 # branch (only those hand off to GitHub, and the handoff's evidence must name
@@ -65,40 +71,16 @@ jobs:
           fetch-tags: true
           persist-credentials: false
 
-      # A stable vX.Y.Z tag becomes the release exactly as it always has (gh
-      # release create defaults to marking it Latest). A pre-release-shaped
-      # tag -- a throwaway vX.Y.Z-e2e.N proving the launcher/signature path,
-      # #1121 -- is published as a GitHub pre-release and explicitly kept off
-      # Latest, so scripts/get-orbit.sh's default ORBIT_CHANNEL=latest can
-      # never resolve to it.
-      - name: Create the release if it does not already exist
+      - name: Refuse a tag that is not a stable vX.Y.Z
         env:
-          GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
-          if gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" > /dev/null 2>&1; then
-            printf 'Release %s already exists; nothing to do.\n' "${TAG}"
-          else
-            kind="$(bash scripts/ci/classify-release-tag.sh "${TAG}")"
-            if [[ "${kind}" == "prerelease" ]]; then
-              gh release create "${TAG}" --repo "${GITHUB_REPOSITORY}" --verify-tag --generate-notes \
-                --prerelease --latest=false
-            else
-              # The body is the version's CHANGELOG.md section (#1704). If the
-              # script fails the step fails: no release without notes.
-              previous="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname |
-                grep -xE 'v[0-9]+\.[0-9]+\.[0-9]+' |
-                awk -v tag="${TAG}" '$0 == tag { found = 1; next } found { print; exit }' || true)"
-              if [[ -n "${previous}" ]]; then
-                node scripts/release-notes.mjs "${TAG}" --previous "${previous}" \
-                  --repo "${GITHUB_REPOSITORY}" > "${RUNNER_TEMP}/release-notes.md"
-              else
-                node scripts/release-notes.mjs "${TAG}" > "${RUNNER_TEMP}/release-notes.md"
-              fi
-              gh release create "${TAG}" --repo "${GITHUB_REPOSITORY}" --verify-tag \
-                --notes-file "${RUNNER_TEMP}/release-notes.md"
-            fi
-          fi
+          set -Eeuo pipefail
+          kind="$(bash scripts/ci/classify-release-tag.sh "${TAG}" || true)"
+          [[ "${kind}" == "stable" ]] || {
+            printf '::error::%s is not a stable vX.Y.Z tag; only stable tags are released (#1848).\n' "${TAG}" >&2
+            exit 1
+          }
 
       # The tagged commit is the one `promote_stable` found tested: `main`'s
       # head, or the commit behind its merge commit (#1640). The tag's own
@@ -202,6 +184,36 @@ jobs:
             "install.sh=scripts/install.sh" \
             "get-orbit.sh=scripts/get-orbit.sh"
 
+      # Created as a draft, after every check above, so nothing is public
+      # until the files are attached. Publishing it below marks it Latest by
+      # GitHub's default, as the old non-draft create did. The existence
+      # check lists every release, drafts included, so a re-run after a
+      # failed upload finishes the same draft rather than making a second.
+      - name: Create the release as a draft if it does not already exist
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -Eeuo pipefail
+          tags="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases" --jq ".[].tag_name")"
+          if grep -qxF "${TAG}" <<< "${tags}"; then
+            printf 'Release %s already exists; not creating it again.\n' "${TAG}"
+          else
+            # The body is the version's CHANGELOG.md section (#1704). If the
+            # script fails the step fails: no release without notes.
+            previous="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname |
+              grep -xE 'v[0-9]+\.[0-9]+\.[0-9]+' |
+              awk -v tag="${TAG}" '$0 == tag { found = 1; next } found { print; exit }' || true)"
+            if [[ -n "${previous}" ]]; then
+              node scripts/release-notes.mjs "${TAG}" --previous "${previous}" \
+                --repo "${GITHUB_REPOSITORY}" > "${RUNNER_TEMP}/release-notes.md"
+            else
+              node scripts/release-notes.mjs "${TAG}" > "${RUNNER_TEMP}/release-notes.md"
+            fi
+            gh release create "${TAG}" --repo "${GITHUB_REPOSITORY}" --verify-tag --draft \
+              --notes-file "${RUNNER_TEMP}/release-notes.md"
+          fi
+
       - name: Attach the launcher and manifest to the release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -214,3 +226,9 @@ jobs:
           gh release upload "${TAG}" --repo "${GITHUB_REPOSITORY}" --clobber \
             "${MANIFEST}" "${MANIFEST_SIG}" "${AMD64_ARCHIVE}" "${ARM64_ARCHIVE}" \
             scripts/install.sh scripts/get-orbit.sh
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: gh release edit "${TAG}" --repo "${GITHUB_REPOSITORY}" --draft=false
