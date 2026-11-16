@@ -623,9 +623,13 @@ set -Eeuo pipefail
 #   retire-smtp-lines            <- smtp-lines-retirable (#1817)
 #     mutation=secret-deletion backup=required
 #     rollback=backup-folder-except-secret expect=smtp-lines-retired.
-#     A warn finding (owner decision 7a: --check says attention, exit 3),
-#     only offered in the safe batch (owner decision 1): a run without
-#     --safe-only never lists it. Raised when `orbit mail-sending-status`
+#     A warn finding (owner decision 7a: --check says attention, exit 3)
+#     that runs only in the safe batch (owner decision 1): only --execute
+#     --safe-only (alone or with --dangerous) runs it. --plan and
+#     --export-diagnostics list it, with the no-rollback stderr line, as
+#     what --execute --safe-only would do; --execute --dangerous without
+#     --safe-only does not run it and says so on stderr (#1848 O-F10).
+#     Raised when `orbit mail-sending-status`
 #     (one bounded `compose exec -T orbit-app`, a read of the database) says
 #     source=imported or ui and the SMTP_* lines, the mail overlay's
 #     COMPOSE_FILE entry or .orbit-secrets/smtp-password remain (the shipped
@@ -1600,6 +1604,9 @@ cleanup() {
   local exit_status=$?
 
   [[ -z "${compose_image_tmp:-}" ]] || rm -f -- "$compose_image_tmp" 2>/dev/null || true
+  # #1848 FR-S1b: retire-smtp-lines's mktemp names, held while they exist.
+  [[ -z "${smtp_rewrite_tmp:-}" ]] || rm -f -- "$smtp_rewrite_tmp" 2>/dev/null || true
+  [[ -z "${smtp_step_tmp:-}" ]] || rm -f -- "$smtp_step_tmp" 2>/dev/null || true
 
   if [[ -n "${recovery_dir:-}" ]]; then
     printf 'Orbit repair: interrupted before completion; this run left a private recovery copy in place, now removed. Re-run "repair.sh --plan" to see current state, then "--execute" again if repairs are still needed.\n' >&2
@@ -1966,7 +1973,7 @@ readonly -A manual_guidance=(
   [container-foreign-owner]="inspect the flagged container's labels and confirm its Orbit ownership before anything touches this project"
   [docker-unavailable]="ensure the docker CLI is installed and the daemon is reachable, then re-run diagnosis"
   [unrelated-resource-present]="confirm whether the reported resource under a different Compose project is still needed; it is out of scope for this deployment's repair"
-  [restore-unfinished]="a restore has not been finished and keeps Orbit stopped; run bash scripts/restore.sh --finish once Orbit is healthy, or bash scripts/restore.sh --recover to roll it back, then re-run repair"
+  [restore-unfinished]="a restore has not been finished and keeps Orbit stopped; run bash scripts/restore.sh --finish and follow what it says (it says when Orbit may be started), or bash scripts/restore.sh --recover to roll it back, then re-run repair"
   [database-volume-missing]="this deployment's database data is missing: there is no database container and no database volume, so starting Orbit would make a new, empty database; restore from a backup with bash scripts/restore.sh, or run the installer to set up a new deployment, then re-run repair"
   [database-unreachable]="the database container is running but not accepting connections; read the orbit-db container's logs and resolve what they report, then re-run diagnosis; repair never restarts the database to investigate"
   # #1026: the application container exists but never held still long enough
@@ -2047,6 +2054,7 @@ app_identity_pinned_image=""
 declare -a plan_entries=()
 plan_actions_count=0
 plan_manual_count=0
+retire_smtp_withheld=0
 recovery_dir=""
 declare -A service_restart_result=()
 
@@ -2436,7 +2444,15 @@ print_recreate_notice() {
 
 # stderr line for retire-smtp-lines (#1817): the one part of it with no undo.
 print_retire_smtp_notice() {
-  printf 'Orbit repair: retire-smtp-lines deletes the SMTP password file from the secrets folder without keeping a copy; that secret cannot be rolled back. Orbit keeps the password in its own Mail settings.\n' >&2
+  # shellcheck disable=SC2016  # literal backticks: a command name, not an expansion
+  printf 'Orbit repair: retire-smtp-lines deletes the SMTP password file from the secrets folder without keeping a copy; that secret cannot be rolled back; it runs only with `--execute --safe-only`. Orbit keeps the password in its own Mail settings.\n' >&2
+}
+
+# #1848 O-F10: an --execute without --safe-only says on stderr, once, that it
+# did not run the retire-smtp-lines that --plan listed. Stdout is unchanged.
+print_retire_smtp_withheld() {
+  [[ "${retire_smtp_withheld:-0}" == 1 ]] || return 0
+  printf 'Orbit repair: retire-smtp-lines was planned but runs only in the safe batch; this run did not run it. Run repair.sh --execute --safe-only to retire the SMTP lines.\n' >&2
 }
 
 
@@ -2698,6 +2714,7 @@ compute_plan_entries() {
   plan_entries=()
   plan_actions_count=0
   plan_manual_count=0
+  retire_smtp_withheld=0
 
   for entry in "${findings[@]:-}"; do
     [[ -n "$entry" ]] || continue
@@ -2714,8 +2731,12 @@ compute_plan_entries() {
       [[ "$fclass" == "$class" ]] || continue
       [[ "$fseverity" == info ]] && continue
       # #1817 owner decision 1: retire-smtp-lines runs only in the safe batch
-      # the person chooses; a run without --safe-only neither runs nor lists it.
-      [[ "$fclass" == smtp-lines-retirable && "$safe_only" != 1 ]] && continue
+      # the person chooses; a run without --safe-only does not run it and
+      # says so on stderr (#1848 O-F10).
+      if [[ "$fclass" == smtp-lines-retirable && "$safe_only" != 1 ]]; then
+        retire_smtp_withheld=1
+        continue
+      fi
 
       if [[ "$fclass" == secret-missing ]]; then
         action="$(resolve_secret_missing_action "$ftarget")"
@@ -3649,7 +3670,7 @@ restore_guard_refusal() {
     printf "repair can't check whether a backup, restore or export is running: %s can't be searched" \
       "$backup_directory"
   elif restore_journal_present; then
-    printf 'a restore has not been finished (journal at %s); run bash scripts/restore.sh --finish once Orbit is healthy, or --recover to roll it back' \
+    printf 'a restore has not been finished (journal at %s); run bash scripts/restore.sh --finish and follow what it says (it says when Orbit may be started), or --recover to roll it back' \
       "$(restore_journal_named)"
   else
     lock_state="$(backup_restore_lock_state)"
@@ -3668,14 +3689,15 @@ restore_unfinished_guidance() {
   fi
 }
 
-# #1823 O-S2: the exact command that starts Orbit, so restore.sh --finish has
-# something healthy to finish; a second manual-step line after the guidance.
-# The Compose words are an argument so the source names no compose start
+# #1823 O-S2, #1848 O-F2: a second manual-step line after the guidance. It
+# defers to restore.sh --finish, which reads the journal (repair never does)
+# and says whether Orbit may be started; the start command is given only on
+# that condition. The Compose words are an argument so the source names no compose start
 # outside do_start_services, do_recreate_services or
 # do_retire_smtp_lines (repair.test.mjs).
 print_restore_start_hint() {
   backup_directory_unsearchable && return 0
-  printf 'manual step: to start Orbit for restore.sh --finish, run %s up -d from this folder (the restore journal is at %s) (resolves=%s)\n' \
+  printf 'manual step: run bash scripts/restore.sh --finish first and follow what it says; start Orbit with %s up -d from this folder only if --finish asks for it (the restore journal is at %s) (resolves=%s)\n' \
     'docker compose' "$(restore_journal_named)" "$1" >&2
 }
 
@@ -4693,18 +4715,28 @@ own_as_folder() {
 smtp_write_record() {
   local tmp
   tmp="$(mktemp "./${smtp_retirement_record}.XXXXXX")" || return 1
+  smtp_step_tmp="$tmp"
   if ! { printf 'step=%s\n' "$1" && if [[ -n "$smtp_copy_dir" ]]; then printf 'copy=%s\n' "$smtp_copy_dir"; fi; } > "$tmp" ||
     ! own_as_folder "$tmp" || ! mv -f -- "$tmp" "$smtp_retirement_record"; then
     rm -f -- "$tmp"
+    smtp_step_tmp=""
     return 1
   fi
+  smtp_step_tmp=""
 }
+
+# #1848 FR-S1b: the mktemp name that exists right now, for the EXIT trap
+# (cleanup): the rewrite of .env-orbit, and one of the record or undo-copy
+# temporary files, which never exist at the same time.
+smtp_rewrite_tmp=""
+smtp_step_tmp=""
 
 # Removes do_retire_smtp_lines's rewritten copy, if one was made. It reads and
 # clears the caller's `local tmp`, which bash's dynamic scoping allows.
 smtp_discard_rewrite() {
   [[ -z "$tmp" ]] || rm -f -- "$tmp"
   tmp=""
+  smtp_rewrite_tmp=""
 }
 
 # smtp_read_record: sets $smtp_record_step and $smtp_copy_dir from the step
@@ -4777,10 +4809,13 @@ smtp_find_orphan_copy() {
 smtp_write_copy() {
   local tmp
   tmp="$(mktemp "$1/.env-orbit.smtp-copy.XXXXXX")" || return 1
+  smtp_step_tmp="$tmp"
   if ! smtp_env_rewrite backup < "$environment_file" > "$tmp" || ! mv -fT -- "$tmp" "$1/.env-orbit"; then
     rm -f -- "$tmp"
+    smtp_step_tmp=""
     return 1
   fi
+  smtp_step_tmp=""
   own_as_folder "$1/.env-orbit"
 }
 
@@ -4792,10 +4827,13 @@ smtp_copy_overlay() {
   local tmp
   [[ -f "$smtp_overlay_file" && ! -L "$smtp_overlay_file" ]] || return 0
   tmp="$(mktemp "$1/${smtp_overlay_file}.smtp-copy.XXXXXX")" || return 1
+  smtp_step_tmp="$tmp"
   if ! cp -a --remove-destination -- "$smtp_overlay_file" "$tmp" || ! mv -fT -- "$tmp" "$1/$smtp_overlay_file"; then
     rm -f -- "$tmp"
+    smtp_step_tmp=""
     return 1
   fi
+  smtp_step_tmp=""
   own_as_folder "$1/$smtp_overlay_file"
 }
 
@@ -4865,6 +4903,7 @@ retire_smtp_prepare() {
     sum_read="$(smtp_env_sum)" || sum_read=""
     if [[ -z "$sum_read" ]] ||
       ! tmp="$(mktemp "${environment_file}.retire-smtp.XXXXXX")" ||
+      ! smtp_rewrite_tmp="$tmp" ||
       ! smtp_env_rewrite retire < "$environment_file" > "$tmp" ||
       ! chmod 600 -- "$tmp"; then
       smtp_discard_rewrite
@@ -4906,6 +4945,13 @@ retire_smtp_prepare() {
       { [[ "$smtp_backup_root_made" != 1 ]] || own_as_folder "$smtp_backup_root"; }; }; then
       smtp_discard_rewrite
       [[ -z "$smtp_backup_dir" || "$adopted" == 1 ]] || rm -rf -- "$smtp_backup_dir"
+      # #1848 FR-O5a: as install.sh does, an orbit-install-backups this run
+      # made goes too, by rmdir only, so a root-owned one never blocks the
+      # folder's user. A SIGKILL inside the chain still leaves it.
+      if [[ "$smtp_backup_root_made" == 1 ]]; then
+        rmdir -- "$smtp_backup_root" 2>/dev/null || true
+        smtp_backup_root_made=0
+      fi
       printf 'Orbit repair: retire-smtp-lines refused, nothing was changed: the backup of %s could not be made in orbit-install-backups.\n' "$environment_file" >&2
       return 1
     fi
@@ -4929,7 +4975,22 @@ retire_smtp_prepare() {
       printf 'Orbit repair: retire-smtp-lines left %s as it was: the rewritten copy could not be renamed over it.\n' "$environment_file" >&2
       return 1
     fi
+    smtp_rewrite_tmp=""
   fi
+}
+
+# #1848 FR-S1b: under the lock, before anything is written, unlinks the
+# temporary names a killed retirement left in this folder (rm -f never
+# follows a link): exactly the fixed part and 6 of [A-Za-z0-9]. Silent.
+smtp_sweep_stale_tmps() {
+  local LC_ALL=C saved_options name
+  saved_options="$(shopt -p nullglob dotglob)" || true
+  shopt -s nullglob
+  for name in "./${smtp_retirement_record}".?????? "./${environment_file}".retire-smtp.??????; do
+    if [[ "${name##*.}" =~ ^[A-Za-z0-9]{6}$ ]]; then rm -f -- "$name" 2>/dev/null || true; fi
+  done
+  eval "$saved_options"
+  return 0
 }
 
 # #1848 O-F1/O-F3: check-then-act under the lock backup.sh, restore.sh and
@@ -4958,6 +5019,7 @@ do_retire_smtp_lines() {
     return 1
   fi
   # Every return from here on releases the lock.
+  smtp_sweep_stale_tmps
   smtp_read_record
 
   # A retirement that finished but was not confirmed (#1834): only the
@@ -6240,6 +6302,7 @@ execute_repair() {
     if [[ "$dangerous" == 1 ]]; then
       printf 'dangerous result=empty done=0 failed=0 reason=none\n'
     fi
+    print_retire_smtp_withheld
     run_diagnosis
     print_check_lines
     settle_credential_checkpoints 0
@@ -6263,6 +6326,7 @@ execute_repair() {
     if [[ "$dangerous" == 1 ]]; then
       printf 'dangerous result=refused done=0 failed=0 reason=deployment-version-unsupported\n'
     fi
+    # #1848 O-F10: no withheld line; --safe-only is refused here too.
     print_check_lines
     settle_credential_checkpoints 0 version-unsupported
     exit 6
@@ -6274,6 +6338,7 @@ execute_repair() {
     execute_dangerous_batch
   fi
 
+  print_retire_smtp_withheld
   cleanup_recovery_dir
   run_diagnosis
   print_check_lines

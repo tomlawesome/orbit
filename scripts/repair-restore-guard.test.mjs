@@ -29,7 +29,7 @@ vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 const FINDING = "finding class=restore-unfinished target=restore severity=warn";
 // Prefix only: #1823 O-S2 appends the compose start command to the guidance.
-const MANUAL_GUIDANCE = "manual step: a restore has not been finished and keeps Orbit stopped; run bash scripts/restore.sh --finish once Orbit is healthy, or bash scripts/restore.sh --recover to roll it back";
+const MANUAL_GUIDANCE = "manual step: a restore has not been finished and keeps Orbit stopped; run bash scripts/restore.sh --finish and follow what it says (it says when Orbit may be started), or bash scripts/restore.sh --recover to roll it back";
 const LOCK_REASON = "a backup, restore or export is running right now; wait for it to end, then re-run repair.";
 
 const backupsOf = (targetDir, backupDir) => backupDir ?? join(targetDir, "backups");
@@ -219,7 +219,7 @@ describe("#1804 restore-unfinished: refused again at execution time", () => {
     expect(result.stateOf("orbit-db")).toBe("stopped");
     expect(result.stateOf("orbit-app")).toBe("stopped");
     expect(result.stderr).toContain("Orbit repair: start-services refused, nothing was changed: a restore has not been finished (journal at ");
-    expect(result.stderr).toContain(`${join(".orbit-restore", "restore.journal")}); run bash scripts/restore.sh --finish once Orbit is healthy, or --recover to roll it back.`);
+    expect(result.stderr).toContain(`${join(".orbit-restore", "restore.journal")}); run bash scripts/restore.sh --finish and follow what it says (it says when Orbit may be started), or --recover to roll it back.`);
     expect(existsSync(journalOf(targetDir))).toBe(true);
     expect(readFileSync(journalOf(targetDir), "utf8")).toBe('{"step":"half-done"}\n');
   });
@@ -239,7 +239,7 @@ describe("#1804 restore-unfinished: refused again at execution time", () => {
     expect(composeUpCalls(result)).toEqual([]);
     expect(result.stateOf("orbit-db")).toBe("running");
     expect(result.stderr).toContain("Orbit repair: recreate-services refused, nothing was changed: a restore has not been finished (journal at ");
-    expect(result.stderr).toContain("run bash scripts/restore.sh --finish once Orbit is healthy, or --recover to roll it back.");
+    expect(result.stderr).toContain("run bash scripts/restore.sh --finish and follow what it says (it says when Orbit may be started), or --recover to roll it back.");
   });
 
   it("a dangling symlink appearing at the journal path refuses too", async () => {

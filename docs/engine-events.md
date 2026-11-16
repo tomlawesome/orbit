@@ -1282,8 +1282,10 @@ repair can't tell whether a restore is unfinished). So does anything at
 `<deployment folder>/.orbit-restore-pending` (#1823), the marker `restore.sh`
 writes, holding the journal's absolute path, before it stops Orbit and removes
 only once that journal is gone; it is found whatever `ORBIT_BACKUP_DIR` says,
-and a marker that is a symlink, unreadable or the wrong type counts too. It is `manual` (finish with `restore.sh --finish` once Orbit is
-healthy, or roll back with `restore.sh --recover`) and a `start-services`
+and a marker that is a symlink, unreadable or the wrong type counts too. It is `manual` (run `restore.sh --finish` and follow what it
+says, which includes when Orbit may be started, or roll back with
+`restore.sh --recover`; repair never reads the journal, so its start command
+is given only for when `--finish` asks for it, #1848 O-F2) and a `start-services`
 precondition, so `services-not-running` and `folder-moved` are planned
 `manual` with that guidance. Repair's other actions are planned as usual.
 
@@ -1343,8 +1345,12 @@ planned (a `folder-moved` finding), neither `restart-services` nor
 
 `retire-smtp-lines` (#1817) resolves `smtp-lines-retirable` with
 `rollback=backup-folder-except-secret expect=smtp-lines-retired`, and runs
-only in the safe batch the operator chooses (`--execute --safe-only`); a run
-without `--safe-only` neither runs nor lists it. It copies only the lines it
+only in the safe batch the operator chooses (owner decision 1): only
+`--execute --safe-only` (alone or with `--dangerous`) runs it. `--check`
+reports `smtp-lines-retirable`; `--plan` and `--export-diagnostics` list
+`retire-smtp-lines`, followed by the no-rollback stderr line, because they
+show what `--execute --safe-only` would do. `--execute --dangerous` without
+`--safe-only` does not run it and says so in one stderr line (#1848 O-F10). It copies only the lines it
 removes from `.env-orbit` (never `SMTP_PASSWORD=` or any other line) and the
 overlay into an undo copy, `orbit-install-backups/<stamp>-repair/` (mode 700,
 its path named on stderr), rewrites `.env-orbit` without the `SMTP_*` keys and the overlay's

@@ -1214,7 +1214,7 @@ describe("#1848 retire-smtp-lines is refused while a restore is unfinished", () 
     });
     expect(result.stdout).toContain("plan action=retire-smtp-lines resolves=smtp-lines-retirable");
     expectRefused(result, targetDir, before, JOURNAL_REFUSAL);
-    expect(result.stderr).toContain(`${join(".orbit-restore", "restore.journal")}); run bash scripts/restore.sh --finish once Orbit is healthy, or --recover to roll it back.`);
+    expect(result.stderr).toContain(`${join(".orbit-restore", "restore.journal")}); run bash scripts/restore.sh --finish and follow what it says (it says when Orbit may be started), or --recover to roll it back.`);
     expect(readFileSync(journalOf(targetDir), "utf8")).toBe('{"step":"half-done"}\n');
   });
 
