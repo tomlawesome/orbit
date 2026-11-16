@@ -27,6 +27,12 @@ describe("warningHint", () => {
     expect(warningHint(30)).toBe("Your first warning is 30 days before, so each planet sits a month nearer the sun.");
   });
 
+  it("#1738 W-F1/W-F2/W-F3: says an item with its own reminders sits by its largest own day, not the first warning", () => {
+    const hint = warningHint(14);
+    expect(hint, "names items with their own reminders").toMatch(/own reminders?/i);
+    expect(hint, "says which of their days is used").toMatch(/largest|furthest|longest/i);
+  });
+
   it.each([null, undefined, 0, 2.5])("is empty for %s", (value) => {
     expect(warningHint(value)).toBe("");
   });

@@ -72,3 +72,17 @@ describe("readSettingsScreen", () => {
     await expect(readSettingsScreen()).resolves.toMatchObject({ user: { id: "u1" } });
   });
 });
+
+describe("#1789 W-R1: the duplicate alert's workspace read is bounded", () => {
+  beforeEach(() => vi.resetModules());
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("readDueReckoning asks /api/workspace with an abort signal, so a stalled read cannot hold the lane forever", async () => {
+    stubFetch({ sessionOk: true });
+    const { readDueReckoning } = await import("../../web/src/lib/data/workspace.js");
+    await readDueReckoning();
+    const asked = vi.mocked(fetch).mock.calls.find(([url]) => String(url).includes("/api/workspace"));
+    expect(asked, "the workspace was read").toBeDefined();
+    expect(asked?.[1]?.signal, "the read carries an abort signal").toBeInstanceOf(AbortSignal);
+  });
+});

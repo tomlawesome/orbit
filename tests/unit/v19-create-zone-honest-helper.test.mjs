@@ -74,4 +74,10 @@ describe("#1316 / 17a: the create card's time zone helper tells the truth about 
     expect(card.helper).not.toMatch(/read off your browser/i);
   });
 
+  it("#1738 W-F18: a zone off the list no longer sends the reader to settings for what the card now does itself", async () => {
+    const card = await mountCard("America/Chicago");
+    expect(card.helper, "the helper still says detection fell back").not.toBe("");
+    expect(card.helper).not.toMatch(/short list/i);
+    expect(card.helper).not.toMatch(/in settings/i);
+  });
 });
