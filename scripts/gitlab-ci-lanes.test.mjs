@@ -943,11 +943,13 @@ describe("browser jobs by event (#1412)", () => {
   it("starts the same jobs on the dev -> preview merge request as on a merge request into dev (#1546)", () => {
     /* Except the upgrade cells: owner answer 59a (#1665) runs them on this
        merge request alone, overriding #1546 for these two jobs only. Their own
-       rules are checked under "upgrade matrix wiring (#1665)". */
+       rules are checked under "upgrade matrix wiring (#1665)". And
+       release_readiness, which #1860 runs on promotion merge requests only;
+       scripts/ci/release-readiness-ci.test.mjs checks its rules. */
     const everyJob = jobs
       .filter(([, block]) => /^ {2}stage: /mu.test(block))
       .map(([name]) => name)
-      .filter((name) => name !== "upgrade_cell" && name !== "upgrade_cell_launcher");
+      .filter((name) => name !== "upgrade_cell" && name !== "upgrade_cell_launcher" && name !== "release_readiness");
     for (const name of everyJob) {
       expect(jobVerdict(name, events.promotionMergeRequest), name).toBe(jobVerdict(name, events.devMergeRequest));
     }
@@ -1226,8 +1228,9 @@ const TOKEN_MODES = { "nightly-browsers.mjs": ["moved"] };
   }
 
   // Top-level scripts that read a token on a job's behalf (#1830: the signing
-  // image lives in the private base-image registry).
-  const TOKEN_READING_TOP_SCRIPTS = ["check-signing-image-age.sh"];
+  // image lives in the private base-image registry; #1860 owner 50a: release
+  // readiness reads earlier pipelines with ORBIT_REUSE_TOKEN).
+  const TOKEN_READING_TOP_SCRIPTS = ["check-signing-image-age.sh", "release-readiness.mjs"];
 
   function readsToken(block) {
     const text = code(block);

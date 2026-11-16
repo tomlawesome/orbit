@@ -1156,6 +1156,63 @@ variables:
     su node -s /bin/bash -c "cd '$CI_PROJECT_DIR' && $1"
   }
 
+# --- release readiness ---------------------------------------------------------
+
+# A promotion merge request: `dev` into `preview`, or `preview` into `main`
+# (#1860). The same shape as the back-merge template's test, the other way
+# round; a hotfix into `main` and the back-merges are not promotions.
+.promotion_mr: &promotion_mr
+  if: $CI_PIPELINE_SOURCE == "merge_request_event" && (($CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == "dev" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "preview") || ($CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == "preview" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"))
+
+# Release readiness (#1860, owner 2026-11-16): first on every promotion merge
+# request, and everything else waits for it: `classify`, which has no `needs:`,
+# waits for it by stage, every job rooted at `classify` waits through it, and
+# the other jobs with no `needs:` wait by stage too. The three cheap static
+# checks (gitleaks, private-details, flake_check) keep `needs: []` and start
+# beside it (decided on #1860: under a minute each). Anything else that would
+# start beside it fails scripts/ci/release-readiness-ci.test.mjs. It runs every check scripts/release-readiness.mjs knows in one go and
+# ends with the list of every failure, so nothing long runs on a promotion that
+# was never ready (v0.3.9 lost two days to checks that only ran at the end).
+# The same script runs locally before the promotion is opened
+# (docs/releasing.md). On no other pipeline: its rule list ends in `never`,
+# and the `needs:` on it are optional, so those pipelines are unchanged.
+#
+# It reads earlier pipelines for the slow-gates check with the read-only
+# ORBIT_REUSE_TOKEN alone, as the reuse lookup does (#898), so it declares the
+# `ci-read-tokens` environment (owner 50a on #1860). It reads GHCR and the
+# handoff repository anonymously: both are public, and the handoff
+# repository's name comes from .github/workflows/publish-from-gitlab.yml.
+release_readiness:
+  stage: test
+  extends: .dind_service
+  image:
+    name: $NODE_IMAGE
+    pull_policy: if-not-present
+  timeout: 20m
+  # ORBIT_REUSE_TOKEN is scoped to this environment (owner, 2026-10-28; 50a on
+  # #1860). `prepare` records no deployment.
+  environment:
+    name: ci-read-tokens
+    action: prepare
+  rules:
+    - !reference [.dev-landing, job_rule]
+    - !reference [.backmerge-skip, job_rule]
+    - *batch_intake_skip
+    - *promotion_mr
+    - when: never
+  needs: []
+  variables:
+    # Full history: the record's signature is read from the last commit that
+    # touched it, and the containment check walks the target branch.
+    GIT_DEPTH: 0
+  script:
+    - *docker_cli
+    - |
+      set -eu
+      git fetch --quiet --tags origin \
+        "+refs/heads/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}:refs/remotes/origin/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}"
+      node scripts/release-readiness.mjs --target "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" --remote origin
+
 # --- classify ----------------------------------------------------------------
 
 # Selects the cheapest lane that still exercises every changed boundary, using
@@ -1196,6 +1253,9 @@ classify:
     - *nightly_browsers
     - *not_scheduled
     - when: on_success
+  # No `needs:`, on purpose: by stage order this waits for `release_readiness`
+  # (stage `test`) on a promotion merge request (#1860), and everything rooted
+  # here waits through it.
   variables:
     # Full history: the comparison below needs the base commit, and the
     # classifier reads two lockfile snapshots out of Git.
@@ -5506,7 +5566,8 @@ install_bootstrap_latest:
 #                       evidence. Environment scope `ci-read-tokens` (owner,
 #                       2026-10-28), as are ORBIT_BASE_IMAGE_PULL_USER/_TOKEN:
 #                       only the jobs declaring that environment -- classify,
-#                       build_image, launch_timing -- receive them; scripts/gitlab-ci-lanes.test.mjs keeps that list
+#                       build_image, launch_timing, release_readiness (owner
+#                       50a, #1860) -- receive them; scripts/gitlab-ci-lanes.test.mjs keeps that list
 #                       and the readers equal.
 #                       Unset, every reuse verdict on a merge request
 #                       is "runs", the safe direction. The unset paths are covered by
