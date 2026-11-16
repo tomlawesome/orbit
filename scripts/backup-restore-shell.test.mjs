@@ -86,6 +86,14 @@ while (argv[verbIndex] === "--project-name" || argv[verbIndex] === "--env-file")
 const verb = argv[verbIndex];
 if (verb === "stop") process.exit(Number(process.env.FAKE_STOP_STATUS || 0));
 if (verb === "start") process.exit(Number(process.env.FAKE_START_STATUS || 0));
+if (verb === "exec") {
+  // The mail-sending-status question (#1848 O-S1): FAKE_MAIL_STATUS_HANG blocks it, FAKE_MAIL_STATUS_EXIT
+  // is its exit status, FAKE_MAIL_STATUS_ANSWER its output (default: a "set up" answer, so a test that
+  // does not care about mail never sees the not-set-up line).
+  if (process.env.FAKE_MAIL_STATUS_HANG) { setInterval(() => {}, 1000); return; }
+  process.stdout.write(process.env.FAKE_MAIL_STATUS_ANSWER ?? "mail-sending source=ui imported-from-environment=false\\n");
+  process.exit(Number(process.env.FAKE_MAIL_STATUS_EXIT || 0));
+}
 if (verb === "run") {
   if (process.env.FAKE_ENGINE_STDIN_KIND_LOG) {
     const { fstatSync, statSync } = require("node:fs");
@@ -261,9 +269,9 @@ function composeCalls(calls) {
   return calls.filter((call) => call[0] === "compose" && call.includes("--env-file")).map(composeCall);
 }
 
-/** The compose verbs in call order: "stop", "run", "start". */
+/** The compose verbs in call order: "stop", "run", "start" (the mail-status "exec" is asked about in mailStatusCalls). */
 function verbs(calls) {
-  return composeCalls(calls).map((call) => call.verb);
+  return composeCalls(calls).map((call) => call.verb).filter((verb) => verb !== "exec");
 }
 
 /** Every `compose run` in call order, parsed by parseRun. */
@@ -1132,5 +1140,122 @@ describe("shared shapes", () => {
     );
     const engine = engineRun(run(deployment, "backup.sh", []).calls);
     expect(engine.env).toMatchObject({ ORBIT_HOST_UID: "0", ORBIT_HOST_GID: "0" });
+  });
+});
+
+// #1848 O-S1: after a successful restore, restore.sh asks the running app whether outgoing
+// mail is set up and says so on stderr when it is not. Written from the specification alone.
+const MAIL_STATUS_COMMAND = ["orbit-app", "node", "/opt/orbit/cli/orbit.js", "mail-sending-status"];
+const mailStatusCalls = (calls) => composeCalls(calls).filter((call) => call.verb === "exec");
+const NOT_SET_UP = /not set up|could not confirm/i;
+const mailLine = (stderr) => stderr.split("\n").filter((line) => /Administration > Mail/.test(line));
+
+describe("#1848 O-S1 restore.sh asks whether outgoing mail is set up", () => {
+  const restore = (env = {}, flags = ["--yes"]) => {
+    const deployment = makeDeployment();
+    const bundle = join(deployment.deployDir, "b.tar");
+    writeFileSync(bundle, "bundle");
+    return run(deployment, "restore.sh", [...flags, bundle], { env: { ...UNATTENDED, ORBIT_RESTORE_HEALTH_SECONDS: "1", ...env } });
+  };
+
+  it("#1848 O-S1 a successful restore asks `exec -T orbit-app node ... mail-sending-status` with the same project and env file", () => {
+    const result = restore();
+    expect(result.status, result.stderr).toBe(0);
+    const asked = mailStatusCalls(result.calls);
+    expect(asked).toHaveLength(1);
+    expect(asked[0].rest).toEqual(["-T", ...MAIL_STATUS_COMMAND]);
+    const stop = composeCalls(result.calls).find((call) => call.verb === "stop");
+    expect(asked[0].project).toBeTruthy();
+    expect(asked[0].project).toBe(stop.project);
+    expect(asked[0].envFile).toBe(stop.envFile);
+  });
+
+  it("#1848 O-S1 source=none prints the one stderr line and still exits 0", () => {
+    const result = restore({ FAKE_MAIL_STATUS_ANSWER: "mail-sending source=none imported-from-environment=false\n" });
+    expect(result.status).toBe(0);
+    const lines = mailLine(result.stderr);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(NOT_SET_UP);
+    expect(lines[0]).toMatch(/password/i);
+  });
+
+  it.each([
+    ["source=imported", "mail-sending source=imported imported-from-environment=true\n"],
+    ["source=imported, not from the environment", "mail-sending source=imported imported-from-environment=false\n"],
+    ["source=ui", "mail-sending source=ui imported-from-environment=false\n"],
+    ["source=ui, from the environment", "mail-sending source=ui imported-from-environment=true\n"],
+  ])("#1848 O-S1 %s: nothing is printed and the exit is 0", (_n, answer) => {
+    const result = restore({ FAKE_MAIL_STATUS_ANSWER: answer });
+    expect(result.status).toBe(0);
+    expect(mailStatusCalls(result.calls)).toHaveLength(1);
+    expect(result.stderr).toBe("");
+  });
+
+  it.each([
+    ["no output", ""],
+    ["a different line", "something else\n"],
+    ["an unknown source", "mail-sending source=maybe imported-from-environment=true\n"],
+    ["a missing field", "mail-sending source=ui\n"],
+    ["two lines, the first one fine", "mail-sending source=ui imported-from-environment=false\nextra line\n"],
+    ["two set-up lines", "mail-sending source=ui imported-from-environment=false\nmail-sending source=imported imported-from-environment=true\n"],
+  ])("#1848 O-S1 a malformed or multi-line answer (%s) prints the line, exit 0", (_n, answer) => {
+    const result = restore({ FAKE_MAIL_STATUS_ANSWER: answer });
+    expect(result.status).toBe(0);
+    expect(mailLine(result.stderr)).toHaveLength(1);
+  });
+
+  it("#1848 O-S1 a failed exec (an older image without the command) prints the line, exit 0, even with a set-up answer", () => {
+    const result = restore({ FAKE_MAIL_STATUS_EXIT: "1" });
+    expect(result.status).toBe(0);
+    const lines = mailLine(result.stderr);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(NOT_SET_UP);
+    expect(lines[0]).toMatch(/password/i);
+  });
+
+  it("#1848 O-S1 a hanging exec is cut off by ORBIT_RESTORE_MAIL_STATUS_SECONDS: line printed, exit 0, within a few seconds", () => {
+    const started = Date.now();
+    const result = restore({ FAKE_MAIL_STATUS_HANG: "1", ORBIT_RESTORE_MAIL_STATUS_SECONDS: "1" });
+    expect(Date.now() - started).toBeLessThan(15000);
+    expect(result.status).toBe(0);
+    expect(mailLine(result.stderr)).toHaveLength(1);
+  });
+
+  it.each([
+    ["the engine fails", { FAKE_ENGINE_STATUS: "1" }],
+    ["Orbit does not start", { FAKE_START_STATUS: "1" }],
+    ["Orbit is not healthy", { FAKE_CURL_STATUS: "7" }],
+    ["the engine is locked", { FAKE_ENGINE_STATUS: String(ENGINE_LOCKED_EXIT) }],
+    ["the engine leaves a journal and fails", { FAKE_ENGINE_STATUS: "1", FAKE_ENGINE_JOURNAL: "__JOURNAL__" }],
+  ])("#1848 O-S1 when %s: no mail-status exec and no mail line", (_n, env) => {
+    const deployment = makeDeployment();
+    const bundle = join(deployment.deployDir, "b.tar");
+    writeFileSync(bundle, "bundle");
+    const settled = Object.fromEntries(Object.entries(env).map(([k, v]) => [k, v === "__JOURNAL__" ? deployment.journal : v]));
+    const result = run(deployment, "restore.sh", ["--yes", bundle], { env: { ...UNATTENDED, ORBIT_RESTORE_HEALTH_SECONDS: "1", FAKE_MAIL_STATUS_ANSWER: "mail-sending source=none imported-from-environment=false\n", ...settled } });
+    expect(result.status).not.toBe(0);
+    expect(mailStatusCalls(result.calls)).toEqual([]);
+    expect(mailLine(result.stderr)).toEqual([]);
+  });
+
+  it("#1848 O-S1 restore.sh --recover asks nothing and prints no mail line", () => {
+    const deployment = makeDeployment();
+    const result = run(deployment, "restore.sh", ["--recover"], { env: { ORBIT_RESTORE_HEALTH_SECONDS: "1", FAKE_MAIL_STATUS_ANSWER: "mail-sending source=none imported-from-environment=false\n" } });
+    expect(result.status).toBe(0);
+    expect(mailStatusCalls(result.calls)).toEqual([]);
+    expect(mailLine(result.stderr)).toEqual([]);
+  });
+});
+
+describe("#1848 O-S1 docs/upgrades-and-backups.md tells how to re-enter the SMTP password", () => {
+  it("#1848 O-S1 the 'Go back after a failed update' section says to re-enter it in Administration > Mail", () => {
+    const doc = readFileSync(join(scriptsDir, "..", "docs", "upgrades-and-backups.md"), "utf8");
+    const start = doc.indexOf("## Go back after a failed update");
+    expect(start).toBeGreaterThanOrEqual(0);
+    const next = doc.indexOf("\n## ", start + 1);
+    const section = doc.slice(start, next === -1 ? undefined : next);
+    expect(section).toContain("Administration > Mail");
+    expect(section).toMatch(/SMTP password/i);
+    expect(section).toContain("restore.sh");
   });
 });

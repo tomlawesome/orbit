@@ -7,16 +7,23 @@ fixing the cause deletes the heading in the same commit. Name a sharded browser
 job as GitLab does (`pipeline 3600 / rig_webkit 2/3`); the heading carries the
 test's own name, which does not move with the shard.
 
-## Full `npx vitest run`: mass timeouts at host load about 50 (host) (#1864)
+## Full `npx vitest run`: mass timeouts at host load about 50 (host)
 
 - 2026-11-15 · local, chore/next-4 on 5b3cdc20 plus the #1848 D-F8 change (sidecar-freshness-issue.sh only) · load average 47-52 · 54 tests in 15 files hit their deadlines (`runRepair`/`runInstall` child killed, `Test timed out`, one 54 ms > 50 ms timer check): scripts/install.{readiness,renamed-folder,rollback,update-profile,update-retire-smtp,interrupts-journal}, scripts/repair-{preconditions-1804,restore-guard,retire-smtp-1817,start-services}, scripts/ci/{import-door,upgrade-versions}, scripts/gitlab-ci-lanes, scripts/web-build-stamp, src/server/portable-archive-container. The 15 files re-run with 4 workers passed 740/740. First sighting.
 - 2026-11-15 · local, chore/next-4 on 26da27ce plus the #1848 SEC-D-S4 change (github-await-handoff.sh only) · full `npx vitest run`, load average about 40 · 9 tests in 6 files timed out (check-svelte-server-parse child deadline, `Hook timed out`, `Test timed out`): scripts/check-svelte-server-parse, scripts/web-build-stamp, tests/unit/administration-{failed-card,mail-settings}-screens, tests/unit/v19-mail-sender-check, tests/unit/v19-tour-chapter-the-item. Re-run with 4 workers: 178/178. Second sighting.
-- 2026-11-16 · local, chore/next-5 on 87d1935d merged with batch-a fc471cc6 · full `npx vitest run`, run alongside a second full run, load average about 45 · 40 tests in 24 files timed out (`Hook timed out in 10000ms`, `Test timed out`, install and repair child deadlines). The 24 files re-run with 4 workers passed except one real failure (#1863). Third sighting.
-- 2026-11-16 · local, fix/1848-d-s6-sbom-attest on 8af744d4 plus the D-S6 43a change · full `pnpm exec vitest run`, alongside the run above · 37 tests in 22 files timed out. Re-run with 4 workers: 606/606. Fourth sighting.
+
+## tests/integration/portable-archive-review-lease.test.ts "ruling 1: the heartbeat runs while one long document is being staged ... lease_renewed_at moves forward ..." (and the two ruling 9 tests after it, as a knock-on)
+
+- 2026-11-15 · !1325 dev 13eec37c · pipeline 4218 / integration 3/4 (job 51434) · timed out at 300 s on a loaded runner (job 888 s against ~500 s usual); the ruling 9 tests then failed with document_not_found. The same tree passed in pipeline 4211. First sighting.
+
+## src/server/documents/preview.test.ts "renderDocumentPagePreview (real pdftoppm/pdfinfo) > passes an already-raster PNG through, downscaling ..."
+
+- 2026-11-15 · !1325 dev 13eec37c · pipeline 4228 / fast (job 51590) · timed out at the 5s default on a loaded runner; retried as job 51647. First sighting.
 
 ## src/cli/orbit.mail-sending-status.test.ts "source=imported, imported from the environment: one line, exit 0" and "source=ui after an import ...: imported-from-environment stays true"
 
 - 2026-11-15 · local, chore/next-4 on 9c7361cf plus the #1848 W-F1 change (About page apk links only) · full `npx vitest run` on the loaded shared host · the first took 5.4 s; the second got its one expected line printed twice. A re-run of the file passed. First sighting.
+- 2026-11-15 · local, chore/next-5 on 0397b513 plus the #1848 O-F1 change (repair.sh only) · full `npx vitest run` on the loaded shared host · both timed out at 5 s. The file alone passed 3 runs of 3. Second sighting.
 
 ## tests/integration/imap-attachment-processing.test.ts "records discard purge intent before an injected storage failure and retries safely"
 
@@ -50,11 +57,6 @@ test's own name, which does not move with the shard.
 ## scripts/repair-compose-from-image.test.mjs "repair.sh --check drift report ... shows exactly 20 differing lines and says more were not shown when there are more than 20"
 
 - 2026-11-05 · fix/v038-batch-a-intake 8c2d0d58 (+ CI-rule edits nowhere near repair.sh) · local `pnpm exec vitest run scripts/ci/ scripts/*.test.mjs`, shared host under load · failed once; the file alone passed on the rerun (92/92). First sighting.
-
-## scripts/ci/write-test-manifest.test.mjs "install.sh's update-path check ... accepts an update from v0.3.5 when that version is passed"
-
-- 2026-11-05 · fix/v037-audit 4da6642d · local `pnpm exec vitest run` (643s), shared host running a full e2e stack alongside · timed out at the 5s default; the file alone passed on the rerun (10/10, that test 2.2s). First sighting.
-- 2026-11-16 · fix/1848-d-s6-sbom-attest 8af744d4 plus the D-S6 43a change (not this file) · local `pnpm exec vitest run` of scripts/ci/*.test.mjs with three other files · failed; the file alone passed on the rerun (18/18). Second sighting.
 
 ## tests/unit/auth-pending-login-session-callback.test.mjs "passes session creation as collectSignInApproval's own mint callback, not a separate call"
 

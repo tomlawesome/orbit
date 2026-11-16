@@ -749,9 +749,13 @@ GitLab's push mirror carries the new tag to GitHub within minutes.
 `gh release create --verify-tag`, so the GitHub Releases page keeps working
 for the public. A stable release's body is the version's `CHANGELOG.md`
 section plus a compare link to the previous stable tag, made by
-`scripts/release-notes.mjs`; there is no hand step (a pre-release still uses
-generated notes). GitHub makes no decision of its own: if a
-release for that tag already exists, it does nothing. The workflow reads the
+`scripts/release-notes.mjs`; there is no hand step. GitHub makes no decision of
+its own, except that it refuses a tag that is not a plain `vX.Y.Z` before
+publishing anything (#1848). It verifies first, then publishes: the release is
+created as a draft only after the manifest and launcher checks pass, the files
+are attached, and only then is it published, so a failed check leaves no
+half-made public release. If a release for that tag already exists it is not
+created again. The workflow reads the
 `Tested on:` line to find the pipeline whose launcher, manifest and signature
 it attaches, so a hotfix release gets its files without anyone fetching them
 by hand (#1640). A tag made before that line existed falls back to searching

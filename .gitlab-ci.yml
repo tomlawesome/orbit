@@ -1464,12 +1464,12 @@ classify:
 fast:
   stage: fast
   extends: .node
-  # A hang detector, not a speed budget (#880, #1620). Set at 1.5x the 13m05s
-  # slowest green run of 2026-11-01, when this job also ran typecheck, lint and
-  # the web build (~4m); those moved to `fast_checks` (#1831), so 20m is now
-  # about 2x its Vitest share (~9m) and is kept until its runs are measured.
-  # This job runs test-backend.sh's `tests` phase.
-  timeout: 20m
+  # Still a hang detector, not a speed budget (#880, #1620). Measured: pipeline
+  # 4308 (2026-11-16) ran about 20m of wall time across 160 files on a
+  # changed-files run that touched repair.sh and install.sh, and hit the old
+  # 20m; 30m is about 1.5x that. Speeding up the slow repair and install tests
+  # is #1861. This job runs test-backend.sh's `tests` phase.
+  timeout: 30m
   rules:
     - !reference [.dev-landing, job_rule]
     - !reference [.backmerge-skip, job_rule]
