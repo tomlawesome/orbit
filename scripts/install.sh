@@ -3142,7 +3142,7 @@ smtp_backup_restore_lock_path() {
 # wait: the lock is held, or its file is unusable (never opened, followed or
 # replaced: a missing one is created only with O_EXCL, noclobber).
 smtp_take_backup_restore_lock() {
-  local lock fd status=0
+  local lock fd status=0 words esc=$'\033'
   lock="$(smtp_backup_restore_lock_path)"
   if ! command -v flock >/dev/null 2>&1; then
     printf 'Orbit installer: flock is not installed, so the old mail settings are being retired without the backup/restore lock; make sure no backup, restore or Repair run is going on.\n' || true
@@ -3162,16 +3162,23 @@ smtp_take_backup_restore_lock() {
     printf '%s\n' "$unusable" || true
     return 1
   fi
-  flock -n -x "$fd" >/dev/null 2>&1 || status=$?
+  # flock's words kept: exit 1 with none is a holder; with words (an
+  # unsupported filesystem) it is untestable, as repair.sh reads it.
+  words="$(flock -n -x "$fd" 2>&1 >/dev/null)" || status=$?
   if [[ "$status" == 0 ]]; then
     smtp_lock_fd="$fd"
     return 0
   fi
   exec {fd}<&-
-  if [[ "$status" == 1 ]]; then
+  if [[ "$status" == 1 && -z "$words" ]]; then
     printf 'Orbit installer: a backup, restore or Repair run is using the backups folder, so the old mail settings were left in place; the next update or Repair run will retire them.\n' || true
   else
-    printf 'Orbit installer: the backup/restore lock at %s could not be tested (flock exit status %s), so the old mail settings were left in place; the next update or Repair run will retire them.\n' "$lock" "$status" || true
+    # One bounded, control-free line, as repair.sh's lock_words_excerpt makes it.
+    words="$(printf '%s' "$words" | LC_ALL=C sed -E "s|${esc}\\[[0-9;?]*[ -/]*[@-~]||g" |
+      LC_ALL=C tr '\r\n\t' '   ' | LC_ALL=C tr -d '\000-\037\177' | LC_ALL=C tr -s ' ' |
+      LC_ALL=C sed -E 's/^ +| +$//g' | { head -c 200; cat >/dev/null; })"
+    [[ -n "$words" ]] || words="exit status $status"
+    printf 'Orbit installer: the backup/restore lock at %s could not be tested (flock said: %s), so the old mail settings were left in place; the next update or Repair run will retire them.\n' "$lock" "$words" || true
   fi
   return 1
 }
