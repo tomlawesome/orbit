@@ -13,7 +13,7 @@ import { PROCESS_DEADLINE_MS } from "../process-budget.mjs";
  *  - a release's created_at is the date of the commit it tags (GitHub's
  *    documented behaviour), NOT when the release was made; published_at is
  *    when it was published (null for a draft). A new release made over the
- *    API takes `commitDate` (default: now) as created_at, and publishing it
+ *    API takes `commitDate` (default: 100 days ago) as created_at, and publishing it
  *    sets published_at to now;
  *  - the list is paginated (30 per page unless per_page says otherwise);
  *  - GET /releases/tags/<tag> never shows a draft;
@@ -83,9 +83,9 @@ export class FakeGithub {
     return release;
   }
 
-  addAsset(release, name, content) {
+  addAsset(release, name, content, updated_at = new Date().toISOString()) {
     const buffer = Buffer.isBuffer(content) ? content : Buffer.from(content);
-    const asset = { id: this.nextId++, name, content: buffer };
+    const asset = { id: this.nextId++, name, content: buffer, updated_at };
     release.assets.push(asset);
     return asset;
   }
@@ -100,6 +100,7 @@ export class FakeGithub {
       name: asset.name,
       size: asset.content.length,
       state: "uploaded",
+      updated_at: asset.updated_at,
       url: `${this.apiUrl}${this.prefix}/releases/assets/${asset.id}`,
       browser_download_url: `${this.base}/dl/${asset.id}/${encodeURIComponent(asset.name)}`,
     };

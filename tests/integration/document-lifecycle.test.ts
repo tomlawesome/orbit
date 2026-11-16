@@ -1398,7 +1398,7 @@ describe("authenticated encrypted document lifecycle", () => {
         vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "clean" });
         const retry = await approveReviewedIntake(start.fixture.users.member.id, start.input).catch((error: unknown) => error);
         expect(retry).toBeInstanceOf(AppError);
-        expect((retry as AppError).code).toBe("reviewed_intake_not_approvable");
+        expect((retry as AppError).code).toBe("reviewed_intake_not_approvable"); // 409 since #1823 A-F10
 
         await discardImapReviewItem(start.fixture.users.member.id, start.receiptId);
         expect((await start.receipt()).status).toBe("discarded");
@@ -1427,7 +1427,7 @@ describe("authenticated encrypted document lifecycle", () => {
 
         const retry = await approveReviewedIntake(start.fixture.users.member.id, start.input).catch((error: unknown) => error);
         expect(retry).toBeInstanceOf(AppError);
-        expect((retry as AppError).code).toBe("reviewed_intake_not_approvable");
+        expect((retry as AppError).code).toBe("reviewed_intake_not_approvable"); // 409 since #1823 A-F10
         await discardImapReviewItem(start.fixture.users.member.id, start.receiptId);
         expect((await start.receipt()).status).toBe("discarded");
       });

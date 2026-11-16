@@ -765,12 +765,15 @@ started from the owner's GitHub login, so a bad release needs two separate
 break-ins on two hosts. Previews don't get one: a preview is for testing, not
 for trusting.
 
-Two limits:
+Three limits:
 
 - **Within seven days.** The verifier refuses evidence older than seven days,
   so countersign right after promoting.
 - **Needs `main`.** GitHub only offers the workflow once the file is on
   `main`, so it's available from the first stable release that contains it.
+- **Not a release published before #1824.** Its attestation was never copied
+  to GHCR, so the workflow refuses it as missing. Re-publish it first, then
+  countersign (see "The release handoff (#1824)" above).
 
 ### Check both signatures on a release
 

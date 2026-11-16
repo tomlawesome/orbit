@@ -36,7 +36,7 @@ report_file="${1:-}"
 api="${CI_API_V4_URL%/}/projects/${CI_PROJECT_ID}"
 title='Sidecar pins are behind'
 labels='security,dependencies'
-milestone_title='M5 — Supply chain and CI baseline'
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 # The token travels in a header file, never in argv or a process listing.
 header_file="$(mktemp)"
@@ -79,15 +79,16 @@ if [[ -n "$existing_iid" ]]; then
   exit 0
 fi
 
-# Exact title match: GitLab's milestones `title` filter is exact, unlike issue
-# search above. Missing is not fatal -- the issue is still worth filing without
-# it -- so this warns rather than failing the run.
+# The nearest open version milestone, chosen by nearestMilestone in
+# nightly-browsers.mjs so both filings land where planning looks (#1848 D-F8).
+# Missing or unreadable is not fatal -- the issue is still worth filing
+# without it -- so this warns rather than failing the run.
 milestone_id="$(
-  api_call -G --data-urlencode "title=${milestone_title}" "${api}/milestones" |
-    json_field '' 'const [first] = JSON.parse(input); return first ? first.id : "";'
+  { api_call -G --data-urlencode "state=active" --data-urlencode "per_page=100" "${api}/milestones" || printf '[]'; } |
+    NEAREST_MILESTONE="${script_dir}/nightly-browsers.mjs" node --input-type=module -e 'const { nearestMilestone } = await import(new URL(process.env.NEAREST_MILESTONE, "file://").href); let input = ""; for await (const chunk of process.stdin) input += chunk; let list = []; try { list = JSON.parse(input); } catch {} process.stdout.write(String(nearestMilestone(list)?.id ?? ""));'
 )"
 if [[ -z "$milestone_id" ]]; then
-  printf 'sidecar-freshness-issue: no milestone titled "%s"; creating without one.\n' "$milestone_title" >&2
+  printf 'sidecar-freshness-issue: no open version milestone found; creating without one.\n' >&2
 fi
 
 create_args=(-X POST

@@ -23,7 +23,7 @@ const script = new URL("./ci/sidecar-freshness-issue.sh", import.meta.url).pathn
  * multi-line file, so a newline cannot be the record separator without
  * splitting one call into several.
  */
-function makeCurlStub({ searchResponse, milestoneResponse, putResponse, postResponse }) {
+function makeCurlStub({ searchResponse, milestoneResponse, milestoneFails, putResponse, postResponse }) {
   const dir = mkdtempSync(join(tmpdir(), "sidecar-freshness-curl-"));
   const logFile = join(dir, "calls.log");
   writeFileSync(logFile, "");
@@ -66,7 +66,9 @@ function makeCurlStub({ searchResponse, milestoneResponse, putResponse, postResp
       `    printf '%s' ${JSON.stringify(JSON.stringify(postResponse ?? {}))}`,
       "    ;;",
       "  */milestones*)",
-      `    printf '%s' ${JSON.stringify(JSON.stringify(milestoneResponse ?? []))}`,
+      ...(milestoneFails
+        ? ["    echo 'curl: (22) The requested URL returned error: 500' >&2", "    exit 22"]
+        : [`    printf '%s' ${JSON.stringify(JSON.stringify(milestoneResponse ?? []))}`]),
       "    ;;",
       "  *)",
       `    printf '%s' ${JSON.stringify(JSON.stringify(searchResponse ?? []))}`,
@@ -119,10 +121,13 @@ describe("scripts/ci/sidecar-freshness-issue.sh", () => {
     expect(calls().length).toBe(0);
   });
 
-  it("creates a new issue with the milestone when none exists yet", () => {
+  it("creates a new issue in the nearest open version milestone", () => {
     const { dir, calls } = makeCurlStub({
       searchResponse: [],
-      milestoneResponse: [{ id: 17, title: "M5 — Supply chain and CI baseline" }],
+      milestoneResponse: [
+        { id: 17, title: "v0.4.0" },
+        { id: 18, title: "M5 — Supply chain and CI baseline" },
+      ],
       postResponse: { iid: 42 },
     });
     const result = run({ stubDir: dir });
@@ -134,7 +139,9 @@ describe("scripts/ci/sidecar-freshness-issue.sh", () => {
     expect(recordedCalls.length).toBe(3);
     const [search, milestone, create] = recordedCalls;
     expect(search.join(" ")).toContain("search=Sidecar pins are behind");
-    expect(milestone.join(" ")).toContain("title=M5");
+    expect(milestone.join(" ")).toContain("state=active");
+    expect(milestone.join(" ")).toContain("per_page=100");
+    expect(milestone.join(" ")).not.toContain("title=");
     const createArgs = create.join(" ");
     expect(createArgs).toContain("-X POST");
     expect(createArgs).toContain("title=Sidecar pins are behind");
@@ -155,6 +162,77 @@ describe("scripts/ci/sidecar-freshness-issue.sh", () => {
     }
   });
 
+  const created = (recordedCalls) => recordedCalls[recordedCalls.length - 1].join(" ");
+
+  it("picks the numerically lowest version milestone, v0.3.10 over v0.4.0", () => {
+    const { dir, calls } = makeCurlStub({
+      milestoneResponse: [
+        { id: 1, title: "v0.4.0" },
+        { id: 2, title: "v0.3.10" },
+      ],
+      postResponse: { iid: 42 },
+    });
+    const result = run({ stubDir: dir });
+    expect(result.status, result.stderr).toBe(0);
+    expect(created(calls())).toContain("milestone_id=2");
+  });
+
+  it("compares numerically, v0.3.9 over v0.3.10", () => {
+    const { dir, calls } = makeCurlStub({
+      milestoneResponse: [
+        { id: 1, title: "v0.3.10" },
+        { id: 2, title: "v0.3.9" },
+      ],
+      postResponse: { iid: 42 },
+    });
+    const result = run({ stubDir: dir });
+    expect(result.status, result.stderr).toBe(0);
+    expect(created(calls())).toContain("milestone_id=2");
+  });
+
+  it("ignores M5, Parked, v0.3.x and v0.4 titles", () => {
+    const { dir, calls } = makeCurlStub({
+      milestoneResponse: [
+        { id: 1, title: "M5 — Supply chain and CI baseline" },
+        { id: 2, title: "Parked" },
+        { id: 3, title: "v0.3.x" },
+        { id: 4, title: "v0.4" },
+        { id: 5, title: "v1.0.0" },
+      ],
+      postResponse: { iid: 42 },
+    });
+    const result = run({ stubDir: dir });
+    expect(result.status, result.stderr).toBe(0);
+    expect(created(calls())).toContain("milestone_id=5");
+  });
+
+  it("creates without milestone_id and notes it on stderr when no version milestone is open", () => {
+    const { dir, calls } = makeCurlStub({
+      milestoneResponse: [
+        { id: 1, title: "M5 — Supply chain and CI baseline" },
+        { id: 2, title: "Parked" },
+      ],
+      postResponse: { iid: 42 },
+    });
+    const result = run({ stubDir: dir });
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("created issue #42");
+    expect(result.stderr.trim().length).toBeGreaterThan(0);
+    const createArgs = created(calls());
+    expect(createArgs).toContain("-X POST");
+    expect(createArgs).not.toContain("milestone_id");
+  });
+
+  it("still creates the issue, exit 0, when the milestones read fails", () => {
+    const { dir, calls } = makeCurlStub({ milestoneFails: true, postResponse: { iid: 42 } });
+    const result = run({ stubDir: dir });
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("created issue #42");
+    const createArgs = created(calls());
+    expect(createArgs).toContain("-X POST");
+    expect(createArgs).not.toContain("milestone_id");
+  });
+
   it("updates the existing issue's description instead of creating a second one", () => {
     const { dir, calls } = makeCurlStub({
       searchResponse: [{ iid: 7, title: "Sidecar pins are behind" }],
@@ -166,6 +244,7 @@ describe("scripts/ci/sidecar-freshness-issue.sh", () => {
     const recordedCalls = calls();
     // search, then update -- no milestone lookup, no create.
     expect(recordedCalls.length).toBe(2);
+    expect(recordedCalls.some((c) => c.join(" ").includes("/milestones"))).toBe(false);
     const [, update] = recordedCalls;
     const updateArgs = update.join(" ");
     expect(updateArgs).toContain("-X PUT");

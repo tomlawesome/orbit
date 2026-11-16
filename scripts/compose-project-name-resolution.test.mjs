@@ -55,7 +55,8 @@ import { failOnProcessDeadline, processGuard } from "./process-budget.mjs";
 // on the issue). They derive the name exactly as repair.sh does, with the same
 // text, and join the pinned set.
 const OPERATOR_SCRIPTS = ["backup.sh", "restore.sh", "export-recovery-bundle.sh", "import-recovery-bundle.sh"];
-const SCRIPTS = ["end-maintenance.sh", "repair.sh", ...OPERATOR_SCRIPTS];
+// #1842: install.sh's update readiness check names the project with the same text.
+const SCRIPTS = ["end-maintenance.sh", "repair.sh", "install.sh", ...OPERATOR_SCRIPTS];
 
 function extractFunction(source, name) {
   const match = source.match(new RegExp(`^${name}\\(\\) \\{\\n[\\s\\S]*?\\n\\}\\n`, "mu"));
@@ -84,12 +85,12 @@ function sourceOf(name) {
   return readFileSync(join(import.meta.dirname, name), "utf8");
 }
 
-describe("read_compose_project_name is the same function in all six scripts", () => {
+describe("read_compose_project_name is the same function in all seven scripts", () => {
   // Extracted inside each test, so a script that lacks the function fails its
   // own test by name instead of the whole file at collection.
   const bodiesOf = () => SCRIPTS.map((name) => extractFunction(sourceOf(name), "read_compose_project_name"));
 
-  it("is present, identical, in end-maintenance.sh, repair.sh and the four operator scripts", () => {
+  it("is present, identical, in end-maintenance.sh, repair.sh, install.sh and the four operator scripts", () => {
     const bodies = bodiesOf();
     for (const [index, body] of bodies.entries()) {
       assert.equal(body, bodies[0], `${SCRIPTS[index]} carries a different read_compose_project_name`);

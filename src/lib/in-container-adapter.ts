@@ -383,3 +383,40 @@ export function preflightPostgresClient(options: PreflightPostgresClientOptions 
     );
   }
 }
+
+/** psql's own bound on reaching the server, and the whole query's (`orbit update --preflight`, #1779). */
+const READ_ONLY_CONNECT_TIMEOUT_SECONDS = "10";
+const READ_ONLY_QUERY_TIMEOUT_MS = 60_000;
+const FIELD_SEPARATOR = "\u001f";
+
+/**
+ * A query port for `orbit update --preflight` (#1779, note 58520 A): one
+ * `psql -At` per statement, in a read-only session (default_transaction_
+ * read_only), rows ended by NUL and cells split by the unit separator, so a
+ * value holding a newline cannot split a row.
+ * The connection and password are read as the restore engine reads them.
+ * psql's stderr is dropped, not shown: it can quote the statement. A failure
+ * rejects with a bounded message that names neither the SQL nor the server.
+ */
+export function createReadOnlyQuery(options: PreflightPostgresClientOptions = {}): (sql: string) => Promise<string[][]> {
+  const base = options.env ?? process.env;
+  const env: NodeJS.ProcessEnv = {
+    ...base,
+    PGOPTIONS: "-c default_transaction_read_only=on",
+    PGCONNECT_TIMEOUT: READ_ONLY_CONNECT_TIMEOUT_SECONDS,
+  };
+  const tools = new PostgresTools(env, options.passwordFile ?? DEFAULT_PASSWORD_FILE);
+  return async (sql: string) => {
+    const result = tools.psql(
+      tools.connection.database,
+      ["--no-psqlrc", "--no-align", "--tuples-only", `--field-separator=${FIELD_SEPARATOR}`, "--record-separator-zero", "--set=ON_ERROR_STOP=1", `--command=${sql}`],
+      { stdio: ["ignore", "pipe", "pipe"], timeout: READ_ONLY_QUERY_TIMEOUT_MS, killSignal: "SIGKILL" },
+    );
+    if (result.status !== 0 || typeof result.stdout !== "string") refuseDatabase("the database could not be reached or did not answer.");
+    const records = result.stdout.split("\0");
+    // psql may end the last record with a newline rather than a NUL.
+    const last = records.pop() ?? "";
+    if (last.replace(/\n$/u, "") !== "") records.push(last.replace(/\n$/u, ""));
+    return records.map((record) => record.split(FIELD_SEPARATOR));
+  };
+}

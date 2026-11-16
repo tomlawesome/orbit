@@ -149,6 +149,8 @@ const test: TestUserConfig = {
           "scripts/test-backend-poppler-precheck.test.mjs",
           // Same reason (#1099): uses node:test. Run by scripts/test-backend.sh.
           "scripts/ci/coverage-floor-check.test.mjs",
+          // Same reason (#1841): uses node:test. Run by scripts/test-backend.sh.
+          "scripts/ci/check-cosign-calls.test.mjs",
           // Same reason (#1681): uses node:test, against the e2e stack's DKIM
           // key stand-in started as a child process. Run by scripts/test-backend.sh.
           "tests/dkim-dns/server.test.mjs",
