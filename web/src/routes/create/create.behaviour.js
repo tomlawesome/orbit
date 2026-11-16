@@ -879,7 +879,8 @@ export function mountCreate({
       }
       if (file && held.attachmentId !== stagedId) {
         staging = true;
-        await stageDocument(active.id, file, held.attachmentId, draftId).catch(async (error) => {
+        let remade = false;
+        const answer = await stageDocument(active.id, file, held.attachmentId, draftId).catch(async (error) => {
           /* The sweep retired the file once staged under this id, and the
              server will not take it under that id again: stage the same
              file once more under a fresh id, within this Add. A second
@@ -887,9 +888,26 @@ export function mountCreate({
           if (!bindRefused(error) || attachmentId !== held.attachmentId) throw error;
           reissueAttachmentId();
           held.attachmentId = attachmentId;
-          await stageDocument(active.id, file, held.attachmentId, draftId);
+          remade = true;
+          return stageDocument(active.id, file, held.attachmentId, draftId);
         });
         staging = false;
+        /* The press's own stage is the file's copy now, let go like the pick's
+           when the file is replaced or the form left (#1789 W-S1, W-S2). */
+        stagedId = held.attachmentId;
+        /* The pick's stage got no answer, so nobody has been asked about a
+           file the household already holds: the alert is the answer, and
+           nothing is bound until the person chooses (#1789 W-F3). */
+        if (!remade && answer?.alreadyHeld && attachment === file && !alerting) {
+          const reckoning = await readDueReckoning().catch(() => null);
+          if (attachment === file) {
+            showHeld(file, answer.alreadyHeld, reckoning, readGate());
+            save.textContent = label;
+            saving = false;
+            updateRefusal();
+            return;
+          }
+        }
       }
       await applyCommand(held.attachment ? { ...command, documentIds: [held.attachmentId] } : command).catch((error) => {
         /* This draft id is new to the server, so "this item changed on another

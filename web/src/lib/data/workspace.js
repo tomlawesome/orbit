@@ -704,7 +704,7 @@ function workspaceOf(body) {
 export async function readWorkspace(fetchImpl = globalThis.fetch) {
   /** @type {WorkspaceAnswer} */
   const body = await json(
-    await fetchImpl("/api/workspace", { credentials: "same-origin" }),
+    await fetchImpl("/api/workspace", { credentials: "same-origin", signal: AbortSignal.timeout(STAGED_PAGE_TIMEOUT_MS) }),
   );
   return workspaceOf(body);
 }
