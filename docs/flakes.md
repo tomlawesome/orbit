@@ -7,10 +7,12 @@ fixing the cause deletes the heading in the same commit. Name a sharded browser
 job as GitLab does (`pipeline 3600 / rig_webkit 2/3`); the heading carries the
 test's own name, which does not move with the shard.
 
-## Full `npx vitest run`: mass timeouts at host load about 50 (host)
+## Full `npx vitest run`: mass timeouts at host load about 50 (host) (#1864)
 
 - 2026-11-15 · local, chore/next-4 on 5b3cdc20 plus the #1848 D-F8 change (sidecar-freshness-issue.sh only) · load average 47-52 · 54 tests in 15 files hit their deadlines (`runRepair`/`runInstall` child killed, `Test timed out`, one 54 ms > 50 ms timer check): scripts/install.{readiness,renamed-folder,rollback,update-profile,update-retire-smtp,interrupts-journal}, scripts/repair-{preconditions-1804,restore-guard,retire-smtp-1817,start-services}, scripts/ci/{import-door,upgrade-versions}, scripts/gitlab-ci-lanes, scripts/web-build-stamp, src/server/portable-archive-container. The 15 files re-run with 4 workers passed 740/740. First sighting.
 - 2026-11-15 · local, chore/next-4 on 26da27ce plus the #1848 SEC-D-S4 change (github-await-handoff.sh only) · full `npx vitest run`, load average about 40 · 9 tests in 6 files timed out (check-svelte-server-parse child deadline, `Hook timed out`, `Test timed out`): scripts/check-svelte-server-parse, scripts/web-build-stamp, tests/unit/administration-{failed-card,mail-settings}-screens, tests/unit/v19-mail-sender-check, tests/unit/v19-tour-chapter-the-item. Re-run with 4 workers: 178/178. Second sighting.
+- 2026-11-16 · local, chore/next-5 on 87d1935d merged with batch-a fc471cc6 · full `npx vitest run`, run alongside a second full run, load average about 45 · 40 tests in 24 files timed out (`Hook timed out in 10000ms`, `Test timed out`, install and repair child deadlines). The 24 files re-run with 4 workers passed except one real failure (#1863). Third sighting.
+- 2026-11-16 · local, fix/1848-d-s6-sbom-attest on 8af744d4 plus the D-S6 43a change · full `pnpm exec vitest run`, alongside the run above · 37 tests in 22 files timed out. Re-run with 4 workers: 606/606. Fourth sighting.
 
 ## src/cli/orbit.mail-sending-status.test.ts "source=imported, imported from the environment: one line, exit 0" and "source=ui after an import ...: imported-from-environment stays true"
 
@@ -52,6 +54,7 @@ test's own name, which does not move with the shard.
 ## scripts/ci/write-test-manifest.test.mjs "install.sh's update-path check ... accepts an update from v0.3.5 when that version is passed"
 
 - 2026-11-05 · fix/v037-audit 4da6642d · local `pnpm exec vitest run` (643s), shared host running a full e2e stack alongside · timed out at the 5s default; the file alone passed on the rerun (10/10, that test 2.2s). First sighting.
+- 2026-11-16 · fix/1848-d-s6-sbom-attest 8af744d4 plus the D-S6 43a change (not this file) · local `pnpm exec vitest run` of scripts/ci/*.test.mjs with three other files · failed; the file alone passed on the rerun (18/18). Second sighting.
 
 ## tests/unit/auth-pending-login-session-callback.test.mjs "passes session creation as collectSignInApproval's own mint callback, not a separate call"
 

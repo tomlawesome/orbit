@@ -32,9 +32,9 @@ describe("handoff_to_github job (#1824)", () => {
     expect(jobNamesOf(ci)).toContain("handoff_to_github");
   });
 
-  it("needs the jobs that make the evidence, the signature, the SBOM and the launcher", () => {
+  it("needs the jobs that make the evidence, the signature and the launcher", () => {
     const needs = needsOf("handoff_to_github");
-    for (const job of ["record_image", "sign_evidence", "supply_chain_image", "build_launcher"]) {
+    for (const job of ["record_image", "sign_evidence", "build_launcher"]) {
       expect(needs, job).toContain(job);
     }
   });
@@ -107,11 +107,21 @@ describe("handoff_to_github job (#1824)", () => {
     for (const line of lists) expect(line).toMatch(/ -u GITHUB_HANDOFF_TOKEN\b/u);
   });
 
-  it("sign_evidence signs the SBOM's sha256 into the predicate: it needs supply_chain_image and names the SBOM file", () => {
+  it("sign_evidence attests the SBOM (D-S6 43a): it needs supply_chain_image and names the SBOM file", () => {
     const block = jobBlock("sign_evidence", ci);
     expect(needsOf("sign_evidence")).toContain("supply_chain_image");
     expect(block).toMatch(/ORBIT_SBOM_FILE=\S*\.orbit-supply-chain\/image\.spdx\.json/u);
     expect(block).toContain("scripts/ci/attest-tested-image.sh");
+    expect(block).not.toContain("sbomSha256");
+  });
+
+  it("handoff_to_github no longer hands the SBOM over as a file, and no longer needs the job that makes it (D-S6 43a)", () => {
+    const block = jobBlock("handoff_to_github", ci);
+    expect(block).not.toContain("image.spdx.json");
+    // The SBOM travels inside the saved image layout, as a signed attestation,
+    // so the carry check covers it: the saved layout must verify an spdxjson
+    // attestation under cosign.pub as well.
+    expect(block).toMatch(/verify-attestation[^\n]*--local-image[^\n]*--type spdxjson|verify-attestation[^\n]*--type spdxjson[^\n]*--local-image/u);
   });
 
   it("is created on push pipelines for preview and hotfix/* and on no other event", () => {
