@@ -23,7 +23,6 @@ const PREVIEW_IDS = [
   "base-image",
   "sidecar-pins",
   "upgrade-matrix",
-  "publish-variables",
   "slow-gates-green",
   "release-record",
 ];
@@ -296,41 +295,22 @@ describe("check: upgrade-matrix", () => {
   });
 });
 
-describe("check: publish-variables", () => {
+describe("no secret value in any message", () => {
   afterEach(() => {
-    delete process.env.GITHUB_HANDOFF_TOKEN;
+    delete process.env.ORBIT_REUSE_TOKEN;
+    delete process.env.GITLAB_TOKEN;
   });
-  it("fails when GITHUB_HANDOFF_TOKEN is not set", async () => {
-    await expectFails("publish-variables", "preview", { variableSet: async (name) => name !== "GITHUB_HANDOFF_TOKEN" });
-  });
-  it("fails when GITHUB_HANDOFF_REPO is not set", async () => {
-    await expectFails("publish-variables", "preview", { variableSet: async (name) => name !== "GITHUB_HANDOFF_REPO" });
-  });
-  it("names the variables it asks about", async () => {
-    const asked = [];
-    await run("preview", {
-      variableSet: async (name) => {
-        asked.push(name);
-        return true;
+  it("never prints an environment value in any message", async () => {
+    const secret = "fake-placeholder-value";
+    process.env.ORBIT_REUSE_TOKEN = secret;
+    process.env.GITLAB_TOKEN = secret;
+    const report = await run("preview", {
+      baseImageCurrent: async () => false,
+      slowGates: async () => {
+        throw new Error("GitLab API answered 401");
       },
     });
-    expect(asked).toEqual(expect.arrayContaining(["GITHUB_HANDOFF_TOKEN", "GITHUB_HANDOFF_REPO"]));
-  });
-  it("never prints a variable's value in any message", async () => {
-    const secret = "fake-placeholder-value";
-    process.env.GITHUB_HANDOFF_TOKEN = secret;
-    const report = await run("preview", {
-      variableSet: async () => false,
-      baseImageCurrent: async () => false,
-    });
-    expect(byId(report, "publish-variables").ok).toBe(false);
-    expect(JSON.stringify(report)).not.toContain(secret);
-    for (const r of report.results) expect(r.message).not.toContain(secret);
-  });
-  it("never prints the value when the variables are set either", async () => {
-    const secret = "fake-placeholder-value";
-    process.env.GITHUB_HANDOFF_TOKEN = secret;
-    const report = await run("preview", { variableSet: async () => true });
+    expect(report.ok).toBe(false);
     expect(JSON.stringify(report)).not.toContain(secret);
   });
 });
@@ -391,11 +371,15 @@ describe("check: release-record", () => {
     });
     expect(byId(report, "release-record").message).toContain(GUIDE_STEPS[0]);
   });
-  it("passes when the record has extra steps beyond the guide's", async () => {
-    const report = await run("preview", {
+  it("fails when the record has a step the guide does not list", async () => {
+    await expectFails("release-record", "preview", {
       releaseRecord: async () => ({ exists: true, signed: true, guideCommit: "abc123", steps: [...GUIDE_STEPS, "extra"] }),
     });
-    expect(byId(report, "release-record").ok).toBe(true);
+  });
+  it("fails when the record repeats a step", async () => {
+    await expectFails("release-record", "preview", {
+      releaseRecord: async () => ({ exists: true, signed: true, guideCommit: "abc123", steps: [...GUIDE_STEPS, GUIDE_STEPS[0]] }),
+    });
   });
   it("is checked for main too", async () => {
     await expectFails("release-record", "main", {
