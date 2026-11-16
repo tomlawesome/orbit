@@ -4,7 +4,7 @@
   import { dayMonth, plural } from "$lib/format.js";
   import { createArm } from "$lib/arm.js";
   import { ADMIN_PAUSED_WORDS, copyRelayAddress, relayAddressLabel } from "$lib/relay-address.js";
-  import { ROTATE_UNCHANGED, ROTATE_UNKNOWN, addSender, readRelay, removeSender, rotateRelay, rotateRelayReconciled, sendSenderCheck } from "$lib/data/workspace.js";
+  import { ROTATE_LIMITED, ROTATE_NOT_CONFIRMED, ROTATE_UNCHANGED, ROTATE_UNKNOWN, WorkspaceError, addSender, readRelay, removeSender, rotateRelay, rotateRelayReconciled, sendSenderCheck } from "$lib/data/workspace.js";
   import { failureWords } from "$lib/pocket/words.js";
   import {
     checkRow, LINK_CHECKED, LINK_FAILED, alreadyCheckedWords, refusalWords, SENDING, sentWords,
@@ -105,6 +105,10 @@
     problemLine?.focus();
   };
 
+  /** #1848 W-R1: over the limits says so; any other refusal is the plain one. @param {unknown} error */
+  const rotateRefusalOf = (error) =>
+    error instanceof WorkspaceError && error.code === "relay_rotation_limited" ? ROTATE_LIMITED : ROTATE_UNCHANGED;
+
   /** @param {"rotate" | "pause" | "resume"} action */
   const act = async (action) => {
     if (shared.working) return;
@@ -117,14 +121,14 @@
         const outcome = await rotateRelayReconciled(relay.address);
         if (outcome.relay) shared.rotated = outcome.relay;
         if (outcome.rotated === null) await refuse(ROTATE_UNKNOWN);
-        else if (!outcome.rotated) await refuse(ROTATE_UNCHANGED);
+        else if (!outcome.rotated) await refuse(ROTATE_NOT_CONFIRMED);
       } else {
         shared.rotated = await rotateRelay(action);
       }
-    } catch {
+    } catch (error) {
       /* #1151 W2-R6: the same words as the phone's own copy of this act. */
       await refuse(action === "rotate"
-        ? ROTATE_UNCHANGED
+        ? rotateRefusalOf(error)
         : `not ${action === "pause" ? "paused" : "resumed"} — Orbit could not reach your relay`);
     } finally {
       shared.working = false;

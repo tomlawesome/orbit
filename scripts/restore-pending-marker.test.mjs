@@ -49,6 +49,15 @@ if (verb === "stop") {
   process.exit(Number(process.env.FAKE_STOP_STATUS || 0));
 }
 if (verb === "start") { fs.appendFileSync(process.env.FAKE_LOG, "start\\n"); process.exit(0); }
+if (verb === "exec") {
+  // The mail-sending-status question (#1848 O-S1): FAKE_MAIL_STATUS_HANG blocks it, FAKE_MAIL_STATUS_EXIT
+  // is its exit status, FAKE_MAIL_STATUS_ANSWER its output (default: a "set up" answer, so a test that
+  // does not care about mail never sees the not-set-up line).
+  fs.appendFileSync(process.env.FAKE_LOG, "mail-exec=" + JSON.stringify(argv) + "\\n");
+  if (process.env.FAKE_MAIL_STATUS_HANG) { setInterval(() => {}, 1000); return; }
+  process.stdout.write(process.env.FAKE_MAIL_STATUS_ANSWER ?? "mail-sending source=ui imported-from-environment=false\\n");
+  process.exit(Number(process.env.FAKE_MAIL_STATUS_EXIT || 0));
+}
 if (verb === "run") {
   if (argv.includes("--preflight")) process.exit(0);
   const journal = process.env.FAKE_JOURNAL;
@@ -451,5 +460,143 @@ describe("#1848 O-F8 the refusal names the ORBIT_BACKUP_DIR value to recover wit
     expect(result.stderr).toContain(odd);
     expect(result.stderr).not.toContain("ORBIT_BACKUP_DIR=");
     expect(readFileSync(d.marker, "utf8")).toBe(`${odd}\n`);
+  });
+});
+
+// #1848 O-S1: `restore.sh --finish` (and a restore that finishes) asks whether outgoing mail is
+// set up and says so when it is not. Written from the specification alone.
+const NONE = "mail-sending source=none imported-from-environment=false\n";
+const mailExecs = (result) => result.log.split("\n").filter((l) => l.startsWith("mail-exec=")).map((l) => JSON.parse(l.slice("mail-exec=".length)));
+const mailLines = (stderr) => stderr.split("\n").filter((l) => /Administration > Mail/.test(l));
+const pendingFinish = (d) => {
+  mkdirSync(dirname(d.journal), { recursive: true });
+  writeFileSync(d.journal, "format_version=1\nstate=database-restored\n");
+  writeFileSync(d.marker, `${d.journal}\n`);
+};
+
+describe("#1848 O-S1 restore.sh --finish asks about outgoing mail", () => {
+  it("#1848 O-S1 --finish success runs the status exec with the project and env file the other compose calls use", () => {
+    const d = makeDeployment();
+    pendingFinish(d);
+    const result = run(d, ["--finish"], { FAKE_CURL_STATUS: "0" });
+    expect(result.status, result.stderr).toBe(0);
+    const execs = mailExecs(result);
+    expect(execs).toHaveLength(1);
+    const argv = execs[0];
+    expect(argv[0]).toBe("compose");
+    expect(argv[argv.indexOf("--project-name") + 1]).toBeTruthy();
+    expect(argv[argv.indexOf("--env-file") + 1]).toMatch(/\.env-orbit$/);
+    expect(argv.slice(argv.indexOf("exec"))).toEqual(["exec", "-T", "orbit-app", "node", "/opt/orbit/cli/orbit.js", "mail-sending-status"]);
+  });
+
+  it("#1848 O-S1 --finish success with source=none prints one line and exits 0", () => {
+    const d = makeDeployment();
+    pendingFinish(d);
+    const result = run(d, ["--finish"], { FAKE_CURL_STATUS: "0", FAKE_MAIL_STATUS_ANSWER: NONE });
+    expect(result.status).toBe(0);
+    const lines = mailLines(result.stderr);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(/not set up|could not confirm/i);
+    expect(lines[0]).toMatch(/password/i);
+  });
+
+  it.each([["imported", "mail-sending source=imported imported-from-environment=true\n"], ["ui", "mail-sending source=ui imported-from-environment=false\n"]])(
+    "#1848 O-S1 --finish success with source=%s prints nothing",
+    (_n, answer) => {
+      const d = makeDeployment();
+      pendingFinish(d);
+      const result = run(d, ["--finish"], { FAKE_CURL_STATUS: "0", FAKE_MAIL_STATUS_ANSWER: answer });
+      expect(result.status).toBe(0);
+      expect(mailExecs(result)).toHaveLength(1);
+      expect(result.stderr).toBe("");
+    },
+  );
+
+  it("#1848 O-S1 --finish with a failing exec or a multi-line answer prints the line, exit 0", () => {
+    for (const env of [{ FAKE_MAIL_STATUS_EXIT: "1" }, { FAKE_MAIL_STATUS_ANSWER: "mail-sending source=ui imported-from-environment=false\nmore\n" }]) {
+      const d = makeDeployment();
+      pendingFinish(d);
+      const result = run(d, ["--finish"], { FAKE_CURL_STATUS: "0", ...env });
+      expect(result.status).toBe(0);
+      expect(mailLines(result.stderr)).toHaveLength(1);
+    }
+  });
+
+  it("#1848 O-S1 --finish with a hanging exec is bounded by ORBIT_RESTORE_MAIL_STATUS_SECONDS", () => {
+    const d = makeDeployment();
+    pendingFinish(d);
+    const started = Date.now();
+    const result = run(d, ["--finish"], { FAKE_CURL_STATUS: "0", FAKE_MAIL_STATUS_HANG: "1", ORBIT_RESTORE_MAIL_STATUS_SECONDS: "1" });
+    expect(Date.now() - started).toBeLessThan(15000);
+    expect(result.status).toBe(0);
+    expect(mailLines(result.stderr)).toHaveLength(1);
+  });
+
+  it("#1848 O-S1 --finish that fails (not healthy, or the journal is not a completed restore) asks nothing", () => {
+    const unhealthy = makeDeployment();
+    pendingFinish(unhealthy);
+    const a = run(unhealthy, ["--finish"], { FAKE_CURL_STATUS: "7", FAKE_MAIL_STATUS_ANSWER: NONE });
+    expect(a.status).not.toBe(0);
+    expect(mailExecs(a)).toEqual([]);
+    expect(mailLines(a.stderr)).toEqual([]);
+
+    const notDone = makeDeployment();
+    mkdirSync(dirname(notDone.journal), { recursive: true });
+    writeFileSync(notDone.journal, "format_version=1\nstate=checkpointed\n");
+    const b = run(notDone, ["--finish"], { FAKE_CURL_STATUS: "0", FAKE_MAIL_STATUS_ANSWER: NONE });
+    expect(b.status).not.toBe(0);
+    expect(mailExecs(b)).toEqual([]);
+
+    const engineFails = makeDeployment();
+    pendingFinish(engineFails);
+    const c = run(engineFails, ["--finish"], { FAKE_CURL_STATUS: "0", FAKE_ENGINE_STATUS: "1", FAKE_MAIL_STATUS_ANSWER: NONE });
+    expect(c.status).not.toBe(0);
+    expect(mailExecs(c)).toEqual([]);
+    expect(mailLines(c.stderr)).toEqual([]);
+  });
+});
+
+describe("#1848 O-S1 a full restore that finishes asks; kept-stopped and --recover do not", () => {
+  it("#1848 O-S1 a restore healthy on the restored data (finish step done) asks once and prints the line on source=none", () => {
+    const d = makeDeployment();
+    const result = run(d, ["--yes", bundleIn(d)], { ...UNATTENDED, FAKE_JOURNAL_STATE: "database-restored", FAKE_CURL_STATUS: "0", FAKE_MAIL_STATUS_ANSWER: NONE });
+    expect(result.status, result.stderr).toBe(0);
+    expect(mailExecs(result)).toHaveLength(1);
+    expect(mailLines(result.stderr)).toHaveLength(1);
+  });
+
+  it("#1848 O-S1 a restore healthy with mail set up prints nothing", () => {
+    const d = makeDeployment();
+    const result = run(d, ["--yes", bundleIn(d)], { ...UNATTENDED, FAKE_JOURNAL_STATE: "database-restored", FAKE_CURL_STATUS: "0" });
+    expect(result.status).toBe(0);
+    expect(mailExecs(result)).toHaveLength(1);
+    expect(result.stderr).toBe("");
+  });
+
+  it("#1848 O-S1 a restore kept stopped (not healthy) asks nothing and prints no mail line", () => {
+    const d = makeDeployment();
+    const result = run(d, ["--yes", bundleIn(d)], { ...UNATTENDED, FAKE_JOURNAL_STATE: "database-restored", FAKE_CURL_STATUS: "7", FAKE_MAIL_STATUS_ANSWER: NONE });
+    expect(result.status).not.toBe(0);
+    expect(mailExecs(result)).toEqual([]);
+    expect(mailLines(result.stderr)).toEqual([]);
+  });
+
+  it("#1848 O-S1 a restore failing with a journal left asks nothing", () => {
+    const d = makeDeployment();
+    const result = run(d, ["--yes", bundleIn(d)], { ...UNATTENDED, ...RESTORED, FAKE_MAIL_STATUS_ANSWER: NONE });
+    expect(result.status).not.toBe(0);
+    expect(mailExecs(result)).toEqual([]);
+    expect(mailLines(result.stderr)).toEqual([]);
+  });
+
+  it("#1848 O-S1 --recover asks nothing and prints no mail line", () => {
+    const d = makeDeployment();
+    mkdirSync(dirname(d.journal), { recursive: true });
+    writeFileSync(d.journal, "format_version=1\nstate=checkpointed\n");
+    writeFileSync(d.marker, `${d.journal}\n`);
+    const result = run(d, ["--recover"], { FAKE_CURL_STATUS: "0", FAKE_MAIL_STATUS_ANSWER: NONE });
+    expect(result.status, result.stderr).toBe(0);
+    expect(mailExecs(result)).toEqual([]);
+    expect(mailLines(result.stderr)).toEqual([]);
   });
 });

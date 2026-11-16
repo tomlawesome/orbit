@@ -1793,8 +1793,16 @@ describe("merge requests run changed-reachable tests, the dev push runs everythi
 describe("job timeouts (#1620)", () => {
   const timeoutOf = (name) => allBlocks.get(name).match(/^ {2}timeout: (\S+)\s*$/mu)?.[1];
 
-  it("gives fast a 20m timeout", () => {
-    expect(timeoutOf("fast")).toBe("20m");
+  it("gives fast a 30m timeout (#1861)", () => {
+    expect(timeoutOf("fast")).toBe("30m");
+  });
+
+  it("documents fast's 30m timeout with its measured basis and hang-detector role (#1861)", () => {
+    const lines = allBlocks.get("fast").split("\n");
+    const at = lines.findIndex((line) => /^ {2}timeout: /u.test(line));
+    const above = lines.slice(Math.max(0, at - 10), at).join("\n");
+    expect(above).toContain("4308");
+    expect(above).toContain("hang detector");
   });
 
   it("gives fast_checks a 10m timeout (#1831)", () => {
@@ -3008,8 +3016,8 @@ describe("the fast job is split by phase (#1831)", () => {
     expect(needsText("fast_checks")).toBe(needsText("fast"));
   });
 
-  it("keeps fast at 20m and gives fast_checks 10m", () => {
-    expect(code("fast")).toMatch(/^ {2}timeout: 20m\s*$/mu);
+  it("gives fast a 30m timeout and keeps fast_checks at 10m (#1861)", () => {
+    expect(code("fast")).toMatch(/^ {2}timeout: 30m\s*$/mu);
     expect(code("fast_checks")).toMatch(/^ {2}timeout: 10m\s*$/mu);
   });
 
