@@ -367,6 +367,22 @@ describe("install.sh --plain --update: the SMTP retirement takes the backup/rest
     expectUntouched(targetDir, snap);
   });
 
+  it("flock exiting 1 with an error on stderr is untestable, not held: the could-not-be-tested line names the lock file and flock's words", () => {
+    const targetDir = withSmtpLines(installedFolder());
+    const snap = before(targetDir);
+    const shimDir = scratch("flock-shim");
+    writeFileSync(join(shimDir, "flock"), "#!/bin/bash\necho 'flock: 3: Operation not supported' >&2\nexit 1\n");
+    chmodSync(join(shimDir, "flock"), 0o755);
+    const result = update(targetDir, imported, { pathFor: (binDir) => `${shimDir}:${binDir}:${process.env.PATH}` });
+    expect(result.status).toBe(0);
+    const lines = stdoutLines(result);
+    expect(lines).not.toContain(HELD_LINE);
+    expect(lines.some((entry) => entry.includes("could not be tested") && entry.includes(lockOf(targetDir)) && entry.includes("Operation not supported"))).toBe(true);
+    expect(result.stdout).not.toContain(COMPLETION_LINE);
+    expectUntouched(targetDir, snap);
+    expect(upCalls(result)).toHaveLength(1);
+  });
+
   it("4: with no flock on PATH the retirement goes ahead without the lock, with one line saying so", () => {
     const targetDir = withSmtpLines(installedFolder());
     const noFlock = dirWithoutFlock();
