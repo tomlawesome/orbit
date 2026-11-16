@@ -10,7 +10,11 @@ import { keepImportanceOfferDismissed, keepLabelDays, keepPlanetSize, keepSkyDri
 
 /** Theme, text size, planet-name days, sky driver, planet size, the importance offer and notification-channel preferences (#735 port). */
 export const PUT = write(async (event, session) => {
-  const preference = themePreferenceSchema.parse(await event.request.json());
+  const raw = await event.request.json();
+  const preference = themePreferenceSchema.parse(raw);
+  /* Notification channels are written only when the body carries them, so a
+     theme pick never reverts a flip made in between. */
+  const carried = (/** @type {string} */ key) => raw !== null && typeof raw === "object" && Object.hasOwn(raw, key);
   await getDb().transaction(async (transaction) => {
     await transaction.insert(userPreferences).values({
       userId: session.user.id,
@@ -28,8 +32,8 @@ export const PUT = write(async (event, session) => {
       set: {
         themeId: preference.theme,
         textSize: preference.textSize,
-        emailNotifications: preference.emailNotifications,
-        pushNotifications: preference.pushNotifications,
+        ...(carried("emailNotifications") ? { emailNotifications: preference.emailNotifications } : {}),
+        ...(carried("pushNotifications") ? { pushNotifications: preference.pushNotifications } : {}),
         labelDays: preference.labelDays,
         skyDriver: preference.skyDriver,
         planetSize: preference.planetSize,
@@ -40,8 +44,8 @@ export const PUT = write(async (event, session) => {
 
     /** @type {Array<"email" | "web_push">} */
     const disabledChannels = [];
-    if (!preference.emailNotifications) disabledChannels.push("email");
-    if (!preference.pushNotifications) disabledChannels.push("web_push");
+    if (carried("emailNotifications") && !preference.emailNotifications) disabledChannels.push("email");
+    if (carried("pushNotifications") && !preference.pushNotifications) disabledChannels.push("web_push");
     if (disabledChannels.length) {
       await transaction.update(notificationDeliveries).set({
         status: "cancelled",

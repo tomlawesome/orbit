@@ -70,7 +70,7 @@
     <!-- The one line the card says by itself: the exact command, because
          "check the logs" is not an instruction anyone can follow at 2am on a
          machine they installed an hour ago. -->
-    <p class="note">Run <b>docker compose logs orbit-app</b> and open the claim link it prints.</p>
+    <p class="note">Run <b>docker compose logs orbit-app</b> and use the claim code it prints.</p>
 
     <button class="act" id="claimbtn" type="submit" disabled={!typed || busy}>Continue</button>
   </form>
