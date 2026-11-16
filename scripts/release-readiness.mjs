@@ -28,6 +28,7 @@
 // No credential's value is ever printed. Every network call and child process
 // has a time limit; running out of time fails that check.
 import { spawnSync } from "node:child_process";
+import { ORBIT_DIGEST_TOKEN_PATTERN } from "./release-metadata-patterns.mjs";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -521,7 +522,7 @@ async function newestSameTreeDevPipelineJobs({ repoDir, remote, sourceSha }) {
 function resolveDigest(reference) {
   const result = run("docker", ["buildx", "imagetools", "inspect", reference], { timeout: 2 * 60 * 1000 });
   if (result.error) throw new Error("docker buildx is not available to read GHCR");
-  const match = /^Digest:\s+(sha256:[0-9a-f]{64})\s*$/mu.exec(result.stdout ?? "");
+  const match = new RegExp(`^Digest:\\s+(${ORBIT_DIGEST_TOKEN_PATTERN.source})\\s*$`, "mu").exec(result.stdout ?? "");
   return match ? match[1] : null;
 }
 
