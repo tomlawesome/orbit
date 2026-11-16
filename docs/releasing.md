@@ -297,13 +297,15 @@ refuses jobs from unprotected refs) and locked to this project.
 
 GitHub's workflows never connect to GitLab. GitLab pushes what they need, as
 offline image transfer: on a `preview` or `hotfix/*` push, after
-`record_image`, `sign_evidence`, `supply_chain_image` and `build_launcher`,
+`record_image`, `sign_evidence` and `build_launcher`,
 the `handoff_to_github` job:
 
-1. saves the tested image by digest, with GitLab's attestation, as one
-   OCI-layout archive, `orbit-image.oci.tar` (`cosign save`), and checks
-   offline, with the committed `cosign.pub`, that the attestation is in it;
-2. uploads that archive with `gitlab-tested-image.json`, `image.spdx.json`,
+1. saves the tested image by digest, with GitLab's attestations (the
+   validation record and the SBOM, which `sign_evidence` attests as
+   `spdxjson`, #1848), as one OCI-layout archive, `orbit-image.oci.tar`
+   (`cosign save`), and checks offline, with the committed `cosign.pub`, that
+   both are in it;
+2. uploads that archive with `gitlab-tested-image.json`,
    `orbit-release-manifest.json`, its `.sig` and the two launcher archives to
    a release named `handoff-<commit>` in the separate public handoff
    repository, `<owner>/orbit-handoff`, named by the `GITHUB_HANDOFF_REPO`
@@ -333,7 +335,18 @@ it, and each file must be under 2 GiB. Trust stays in the key:
   the archive into a throwaway `crane registry serve` on localhost, runs
   `scripts/ci/verify-validation-evidence.sh` there, and only then copies the
   image and the attestation to GHCR, checking the pushed digest equals the
-  evidence digest. Nothing unverified reaches GHCR.
+  evidence digest. Nothing unverified reaches GHCR. The verifier, given
+  `ORBIT_SBOM_OUT`, also writes out the SBOM from GitLab's verified spdxjson
+  attestation, and that is the SBOM GitHub attests: the newest by its signed
+  SPDX `creationInfo.created` (an RFC 3339 date-time, compared as an
+  instant), refusing two different SBOMs at the same instant, or one without
+  a valid `created` (ADR-0020, 43a amendment). An SBOM attestation whose
+  subject is another digest is refused with exit 10. The logged SBOM sha256
+  is of the written file, the re-serialised SPDX document, so it matches
+  `sha256sum` of `ORBIT_SBOM_OUT`, not GitLab's `image.spdx.json`. The SBOM
+  attestations are copied to GHCR with the validation ones, and the GHCR
+  check demands them. Digests attested before 43a have no SBOM attestation,
+  so GitHub refuses to publish them: re-validate them on GitLab.
 - `release-on-tag.yml` takes the launcher archives, manifest and `.sig` from
   the same handoff release, read-only, and runs every check it ran before.
 - `countersign.yml` verifies GitLab's attestation on GHCR, where the publish
@@ -853,9 +866,13 @@ GitLab's push mirror carries the new tag to GitHub within minutes.
 `gh release create --verify-tag`, so the GitHub Releases page keeps working
 for the public. A stable release's body is the version's `CHANGELOG.md`
 section plus a compare link to the previous stable tag, made by
-`scripts/release-notes.mjs`; there is no hand step (a pre-release still uses
-generated notes). GitHub makes no decision of its own: if a
-release for that tag already exists, it does nothing. The workflow reads the
+`scripts/release-notes.mjs`; there is no hand step. GitHub makes no decision of
+its own, except that it refuses a tag that is not a plain `vX.Y.Z` before
+publishing anything (#1848). It verifies first, then publishes: the release is
+created as a draft only after the manifest and launcher checks pass, the files
+are attached, and only then is it published, so a failed check leaves no
+half-made public release. If a release for that tag already exists it is not
+created again. The workflow reads the
 `Tested on:` line to find the pipeline whose launcher, manifest and signature
 it attaches, so a hotfix release gets its files without anyone fetching them
 by hand (#1640). A tag made before that line existed falls back to searching

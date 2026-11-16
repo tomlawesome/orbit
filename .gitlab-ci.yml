@@ -1524,12 +1524,12 @@ classify:
 fast:
   stage: fast
   extends: .node
-  # A hang detector, not a speed budget (#880, #1620). Set at 1.5x the 13m05s
-  # slowest green run of 2026-11-01, when this job also ran typecheck, lint and
-  # the web build (~4m); those moved to `fast_checks` (#1831), so 20m is now
-  # about 2x its Vitest share (~9m) and is kept until its runs are measured.
-  # This job runs test-backend.sh's `tests` phase.
-  timeout: 20m
+  # Still a hang detector, not a speed budget (#880, #1620). Measured: pipeline
+  # 4308 (2026-11-16) ran about 20m of wall time across 160 files on a
+  # changed-files run that touched repair.sh and install.sh, and hit the old
+  # 20m; 30m is about 1.5x that. Speeding up the slow repair and install tests
+  # is #1861. This job runs test-backend.sh's `tests` phase.
+  timeout: 30m
   rules:
     - !reference [.dev-landing, job_rule]
     - !reference [.backmerge-skip, job_rule]
@@ -4874,10 +4874,10 @@ sign_evidence:
     # this job's own checkout rather than read from the artifact.
     - job: record_image
       artifacts: true
-    # The SBOM, whose sha256 the attestation signs as sbomSha256 (#1824): the
-    # SBOM itself is not signed, so this is what makes a swapped one on the
-    # way to GitHub fail verification. handoff_to_github hands over the same
-    # artifact.
+    # The SBOM, attested itself as a second, spdxjson attestation over the
+    # same digest with the same key (D-S6 43a, #1848). It then travels inside
+    # the saved image layout, so a swapped one on the way to GitHub fails
+    # verification; nothing hands the file over separately.
     - job: supply_chain_image
       artifacts: true
   script:
@@ -5025,9 +5025,8 @@ handoff_to_github:
     # .sig is this job's artifact.
     - job: sign_evidence
       artifacts: true
-    # The SBOM.
-    - job: supply_chain_image
-      artifacts: true
+    # No supply_chain_image: the SBOM is an attestation sign_evidence made,
+    # carried in the saved layout (D-S6 43a).
     # The two launcher archives.
     - job: build_launcher
       artifacts: true
@@ -5068,10 +5067,13 @@ handoff_to_github:
       "$cosign" verify-attestation --local-image --key cosign.pub --type "$predicate_type" \
         --insecure-ignore-tlog=true "$ORBIT_HANDOFF_IMAGE_DIR" > /dev/null ||
         { echo "handoff_to_github: the saved image carries no attestation under cosign.pub; GitHub would refuse it" >&2; exit 1; }
+      # The SBOM travels the same way, as sign_evidence's spdxjson attestation.
+      "$cosign" verify-attestation --local-image --key cosign.pub --type spdxjson \
+        --insecure-ignore-tlog=true "$ORBIT_HANDOFF_IMAGE_DIR" > /dev/null ||
+        { echo "handoff_to_github: the saved image carries no SBOM (spdxjson) attestation under cosign.pub; GitHub would refuse it" >&2; exit 1; }
       tar -C "$ORBIT_HANDOFF_IMAGE_DIR" -cf "$ORBIT_HANDOFF_DIR/orbit-image.oci.tar" .
       for file in \
         .orbit-supply-chain/gitlab-tested-image.json \
-        .orbit-supply-chain/image.spdx.json \
         .orbit-supply-chain/orbit-release-manifest.json \
         .orbit-supply-chain/orbit-release-manifest.json.sig \
         .orbit-launcher-artifacts/orbit-launcher_linux_amd64.tar.gz \

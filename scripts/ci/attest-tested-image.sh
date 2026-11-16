@@ -42,9 +42,11 @@
 #   CI_PIPELINE_ID         }  predefined GitLab job environment
 #   CI_PIPELINE_URL        }
 #   ORBIT_SBOM_FILE        Optional; the image's SBOM (image.spdx.json). When
-#                          set, its sha256 is signed as sbomSha256, so an SBOM
-#                          swapped on the way to GitHub no longer matches
-#                          (#1824). sign_evidence always sets it.
+#                          set, it is attested itself over the same digest, as
+#                          a second cosign attestation (--type spdxjson) with
+#                          the same key and flags (D-S6 43a, #1848), so a
+#                          swapped SBOM no longer verifies. sign_evidence
+#                          always sets it.
 #   ORBIT_POLICY_VERSION   Optional; the policy version to bind. Computed by
 #                          scripts/ci/policy-version.sh when unset.
 #   ORBIT_COSIGN           Optional; the cosign command to run, overridable
@@ -95,13 +97,10 @@ policy_version="${ORBIT_POLICY_VERSION:-$(bash scripts/ci/policy-version.sh)}"
 [[ "$policy_version" =~ $ORBIT_DIGEST_PATTERN ]] ||
   fail "policy version is not a sha256 value: ${policy_version}"
 
-sbom_line=""
-if [[ -n "${ORBIT_SBOM_FILE:-}" ]]; then
-  [[ -f "$ORBIT_SBOM_FILE" && -r "$ORBIT_SBOM_FILE" ]] ||
-    fail "ORBIT_SBOM_FILE is not a readable file: ${ORBIT_SBOM_FILE}"
-  sbom_sha256="$(sha256sum < "$ORBIT_SBOM_FILE" | cut -d' ' -f1)"
-  [[ "$sbom_sha256" =~ ^[0-9a-f]{64}$ ]] || fail "could not hash ORBIT_SBOM_FILE: ${ORBIT_SBOM_FILE}"
-  sbom_line=$',\n  "sbomSha256": "'"${sbom_sha256}"'"'
+sbom_file="${ORBIT_SBOM_FILE:-}"
+if [[ -n "$sbom_file" ]]; then
+  [[ -f "$sbom_file" && -r "$sbom_file" ]] ||
+    fail "ORBIT_SBOM_FILE is not a readable file: ${sbom_file}"
 fi
 
 recorded_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -119,7 +118,7 @@ cat > "$predicate_file" <<JSON
   "pipelineUrl": "${pipeline_url}",
   "imageDigest": "${image_digest}",
   "policyVersion": "${policy_version}",
-  "recordedAt": "${recorded_at}"${sbom_line}
+  "recordedAt": "${recorded_at}"
 }
 JSON
 
@@ -134,15 +133,25 @@ fi
 # --tlog-upload=false alongside it ("not supported with --signing-config or
 # --use-signing-config"). Verified against the pinned binary, 2026-09-08.
 # --yes answers cosign's interactive prompts, which a job cannot.
-"$cosign_cmd" attest \
-  --predicate "$predicate_file" \
-  --type "$PREDICATE_TYPE" \
-  --key "$COSIGN_PRIVATE_KEY" \
-  --use-signing-config=false \
-  --tlog-upload=false \
-  --yes \
-  "$image_reference" ||
+attest() { # $1 predicate file, $2 predicate type
+  "$cosign_cmd" attest \
+    --predicate "$1" \
+    --type "$2" \
+    --key "$COSIGN_PRIVATE_KEY" \
+    --use-signing-config=false \
+    --tlog-upload=false \
+    --yes \
+    "$image_reference"
+}
+attest "$predicate_file" "$PREDICATE_TYPE" ||
   fail "cosign could not attest ${image_reference}"
+
+# The SBOM, attested itself (D-S6 43a): verifiers pick the newest by its signed
+# SPDX creationInfo.created (scripts/ci/verify-validation-evidence.sh).
+if [[ -n "$sbom_file" ]]; then
+  attest "$sbom_file" spdxjson ||
+    fail "cosign could not attest the SBOM (spdxjson) for ${image_reference}"
+fi
 
 printf 'attest-tested-image: attested %s (policy %s) as %s\n' \
   "$image_digest" "$policy_version" "$PREDICATE_TYPE"

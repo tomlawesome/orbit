@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 #
 # Classifies a `vX.Y.Z` release tag as "stable" or "prerelease" (#1121).
-# release-on-tag.yml uses this to decide whether `gh release create` gets
-# `--prerelease --latest=false`: a plain `vX.Y.Z` tag behaves as it always
-# has, but a semver pre-release shape (`vX.Y.Z-e2e.N`, `vX.Y.Z-rc.N`, ...)
-# must never become GitHub's Latest release, since scripts/get-orbit.sh's
-# default `ORBIT_CHANNEL=latest` fetches whatever holds that title.
+# release-on-tag.yml releases only a "stable" tag and refuses anything else
+# before publishing (#1848 D-F4): the signed manifest only ever names
+# `vX.Y.Z`, so a pre-release shape (`vX.Y.Z-rc.N`, ...) could never get its
+# files, and must never become GitHub's Latest release either.
 #
 # Bash only, no node/jq: the GitHub-hosted `ubuntu-latest` runner this job
 # uses has both, but this script also runs in a plain shell as part of the
