@@ -3,12 +3,14 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 /*
- * #1427, #1316, #1572: the PDF reader (pdfjs-dist) and the image decoder
- * (@napi-rs/canvas, which pdf.js draws on and which decodes JPEG and PNG) run
- * only inside the sandbox child (src/server/documents/pdf-structure-sandbox.ts).
- * Nothing else under src/server may load either in the server process, for the
- * structure check or for drawing a page. Type-only imports are fine: they
- * vanish at build time. Source tripwire; failures list file:line.
+ * #1427, #1316, #1572: the image decoder (@napi-rs/canvas, which decodes JPEG
+ * and PNG) runs only inside the sandbox child
+ * (src/server/documents/pdf-structure-sandbox.ts). Nothing else under
+ * src/server may load it in the server process. Type-only imports are fine:
+ * they vanish at build time. PDFs are read by poppler in a child process, and
+ * the rule that no PDF parser is named at all is in
+ * pdf-no-parser-in-server.test.mjs (#1436). Source tripwire; failures list
+ * file:line.
  */
 
 const root = path.resolve(import.meta.dirname, "../..");
@@ -57,11 +59,6 @@ describe("no in-process PDF reader or image decoder", () => {
     const relative = scanned.map((file) => path.relative(root, file));
     expect(relative).toContain("src/server/documents/preview.ts");
     expect(relative).toContain("src/server/documents/validation.ts");
-  });
-
-  it("nothing under src/server but the sandbox worker file names pdfjs-dist, except in a type-only import", () => {
-    const violations = namingsOf("pdfjs-dist");
-    expect(violations, `loads or names the PDF reader outside the sandbox:\n${violations.join("\n")}`).toEqual([]);
   });
 
   it("nothing under src/server but the sandbox worker file names @napi-rs/canvas, except in a type-only import", () => {

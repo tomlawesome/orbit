@@ -1,18 +1,44 @@
 import { randomUUID } from "node:crypto";
-import { sql, type SQL } from "drizzle-orm";
+import { and, eq, sql, type SQL } from "drizzle-orm";
 import type { getDb } from "@/db";
 import { imapIngestionAttachments } from "@/db/schema";
 import { getDocumentConfig, keyEncryptionKeyFor, wrappingKey } from "@/server/documents/config";
-import { readEffectiveUploadLimit } from "@/server/upload-limit";
 import { createDocumentSealer, createDocumentUnsealer, type CryptoEnvelope } from "@/server/documents/crypto";
 import { openDocumentStorage, releaseBuffer, type ReceivedDocument } from "@/server/documents/storage";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
 import { classifyScan, documentScanCodes } from "@/server/documents/scan-outcome";
-import { identifyImapAttachmentBytes, normalizeImapAttachmentName } from "./core/imap-attachment-validation";
+import { IMAP_ATTACHMENT_LIMITS, identifyImapAttachmentBytes, MAIL_MESSAGE_CEILING_BYTES, normalizeImapAttachmentName } from "./core/imap-attachment-validation";
 import { classifyDocumentStructure, type SupportedDocumentMediaType } from "@/server/documents/validation";
 
 /** A database or a transaction: anything that can run an UPDATE. */
 type DbWriter = Pick<ReturnType<typeof getDb>, "update">;
+
+/**
+ * #1398: the scanner flagged this held attachment while its member added the
+ * mail. The row is `rejected` (it has left the held set, so storage
+ * reconciliation treats any copy left behind as an orphan) and records the
+ * scan's own failure code, `malware_detected`, in its failure-code column, so
+ * the review card can say which file it was. No add path takes a rejected row.
+ */
+export const FLAGGED_ATTACHMENT_CODE = "malware_detected";
+export const flaggedAttachment = sql`(${imapIngestionAttachments.status} = 'rejected' and ${imapIngestionAttachments.purgeFailureCode} = ${FLAGGED_ATTACHMENT_CODE})`;
+export const isFlaggedAttachment = (row: { status: string; purgeFailureCode?: string | null }) =>
+  row.status === "rejected" && row.purgeFailureCode === FLAGGED_ATTACHMENT_CODE;
+
+/**
+ * Deletes the held copies of a receipt's flagged attachments, best effort, as
+ * the mail leaves review (added, discarded, expired). The row left the held
+ * set in a committed transaction before this runs (the delete-after-commit
+ * order ADR-0010 uses), so a copy this misses is an unreferenced object the
+ * storage reconciliation sweep deletes. The delete is idempotent.
+ */
+export async function purgeFlaggedCopies(executor: Pick<ReturnType<typeof getDb>, "select">, receiptId: string): Promise<void> {
+  const rows = await executor.select({ storageKey: imapIngestionAttachments.storageKey }).from(imapIngestionAttachments)
+    .where(and(eq(imapIngestionAttachments.messageId, receiptId), flaggedAttachment))
+    // One mail holds at most this many attachments, so the bound never leaves one out.
+    .limit(IMAP_ATTACHMENT_LIMITS.attachmentCount);
+  for (const { storageKey } of rows) await purgeHeldImapAttachment(storageKey).catch(() => undefined);
+}
 
 /**
  * Records that deleting a held attachment's private copy failed, and counts
@@ -119,7 +145,7 @@ async function checkReceivedAttachment(
       if (outcome.status !== "clean") throw new Error(outcome.code);
     }
     // ADR-0033: the renderer opens it only once the scan has passed.
-    const structure = await classifyDocumentStructure(bytes, mediaType, { path: received.quarantinePath, sizeBytes: received.sizeBytes });
+    const { reason: structure } = await classifyDocumentStructure(bytes, mediaType, { path: received.quarantinePath, sizeBytes: received.sizeBytes });
     // No verdict is not a refusal: a retryable attachment failure, not a permanent one.
     if (structure === "structure_check_unavailable") throw new Error("structure_check_unavailable");
     if (structure !== "supported_structure") throw new Error("mime_structure_invalid");
@@ -137,11 +163,16 @@ export async function scanAndHoldImapAttachment(input: {
   recipientUserId: string;
   receiptId: string;
   mailboxIngestion?: boolean;
+  /**
+   * The mail limit the ingestion cycle read (#1388); ingestion always passes
+   * it. The upload limit never applies to mail, and approval files it under
+   * the size it was held at (reviewed-intake.ts). Without one, the mail limit's
+   * ceiling bounds the hold.
+   */
+  maxBytes?: number;
   onCiphertextAllocated?: (object: { id: string; storageKey: string }) => Promise<void>;
 }): Promise<HeldImapAttachment> {
-  const config = getDocumentConfig();
-  // The administrator's limit, read now so a change needs no restart (#1285).
-  const maxBytes = await readEffectiveUploadLimit(config);
+  const maxBytes = input.maxBytes ?? MAIL_MESSAGE_CEILING_BYTES;
   const id = randomUUID();
   const body = new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(input.bytes); controller.close(); } });
   const received = await openDocumentStorage().receive(body, id, maxBytes, input.bytes.length);

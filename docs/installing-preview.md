@@ -175,13 +175,14 @@ has the detail. Then export a recovery bundle
 
 ## 7. Email (optional)
 
-Outgoing mail (reminders) is set in `.env-orbit`, with the password kept in
-a private file; incoming mail is set later in Administration. Follow
-[Configuration](administrator-operations.md#configuration) (the SMTP
-settings) and [Mailbox provider operation](administrator-operations.md#mailbox-provider-operation):
-put the password in `.orbit-secrets/smtp-password` (readable only by you)
-with an editor, not on a command line, set the `SMTP_*` lines, and start
-Orbit with the mail overlay so it can read the password file.
+Both halves of mail are set on Orbit's own screen, under **Administration →
+Mail**, and nothing goes in `.env-orbit`: the **Mailbox** half for incoming
+mail ([Mailbox provider operation](administrator-operations.md#mailbox-provider-operation))
+and the **Sending** half for reminders, invitations and address checks
+([Outgoing mail](administrator-operations.md#outgoing-mail)). Orbit signs in
+to each server before it saves, and stores the passwords encrypted. The
+`SMTP_*` lines and the mail overlay are deprecated: an older install's lines
+are copied into the Mail card once and then ignored.
 
 ## Tested
 

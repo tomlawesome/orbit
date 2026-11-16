@@ -52,4 +52,33 @@ export const POST = write(async (event, session) => {
     documentId: documentIdResult.data.toLowerCase(),
   });
   return json({ document }, { status: document.recoverable ? 202 : 201, headers: { "cache-control": "no-store" } });
+}, {
+  /* #1437: the Add form stages its file at the pick, to learn whether the
+     household already holds it, so the fixture app answers the stage too
+     rather than bouncing a 401 into the login flow. Nothing is kept, and the
+     fixture household holds no file. */
+  fixture: (event) => {
+    const filename = event.request.headers.get("x-orbit-filename") ?? "";
+    let displayName = filename;
+    try { displayName = decodeURIComponent(filename); } catch { /* the header as sent */ }
+    return json({
+      document: {
+        id: event.request.headers.get("x-orbit-document-id") ?? "",
+        itemId: event.request.headers.get("x-orbit-item-id"),
+        displayName,
+        mediaType: event.request.headers.get("content-type") ?? "application/octet-stream",
+        sizeBytes: Number(event.request.headers.get("content-length") ?? 0),
+        lifecycle: "available",
+        scanStatus: "clean",
+        availableAt: new Date().toISOString(),
+        deleteAfter: null,
+        ready: true,
+        failureCode: null,
+        recoverable: false,
+        recoveryExpiresAt: null,
+        recoveryStatus: null,
+        alreadyHeld: null,
+      },
+    }, { status: 201, headers: { "cache-control": "no-store" } });
+  },
 });

@@ -30,6 +30,7 @@ const ROUTES = /** @type {const} */ ([
   ["/api/admin/mailbox", "admin/mailbox"],
   ["/api/admin/contact", "admin/contact"],
   ["/api/admin/upload-limit", "admin/upload-limit"],
+  ["/api/admin/mail-limit", "admin/mail-limit"],
 ]);
 
 const HOUSEHOLD_ROUTES = /** @type {const} */ ([

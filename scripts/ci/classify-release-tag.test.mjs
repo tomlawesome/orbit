@@ -4,9 +4,9 @@ import { describe, expect, it } from "vitest";
 
 /*
  * scripts/ci/classify-release-tag.sh is the single place that decides
- * whether a `vX.Y.Z[-prerelease]` tag is a stable release or a throwaway
- * pre-release (#1121): release-on-tag.yml uses its answer to decide
- * whether `gh release create` gets `--prerelease --latest=false`.
+ * whether a `vX.Y.Z[-prerelease]` tag is a stable release or a pre-release
+ * (#1121): release-on-tag.yml releases a stable tag and refuses any
+ * other (#1848).
  */
 const script = new URL("./classify-release-tag.sh", import.meta.url).pathname;
 

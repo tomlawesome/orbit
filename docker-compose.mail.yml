@@ -1,8 +1,9 @@
-# Optional mail-provider secret. Keep this overlay out of ordinary deployments
-# until SMTP has been configured in .env-orbit and the host file exists with
-# private permissions. The mailbox (inbound mail) credential is configured
-# from the administration screen and stored encrypted in the database
-# (ADR-0017); it is not an environment secret and has no entry here.
+# Retired (#1629). Outgoing mail is now set on Administration -> Mail and its
+# password is stored encrypted in the database (ADR-0017). Kept only so an
+# older install that still lists this overlay in COMPOSE_FILE keeps starting:
+# on its first start Orbit copies the SMTP_* settings into the Mail card once
+# and ignores them afterwards. Remove the overlay from COMPOSE_FILE and delete
+# .orbit-secrets/smtp-password (docs/administrator-operations.md#outgoing-mail).
 services:
   orbit-app:
     environment:

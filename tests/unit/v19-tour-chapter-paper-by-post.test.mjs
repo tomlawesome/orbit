@@ -16,24 +16,25 @@ import { box, namesIn, playOut, setReducedMotion, settle, tokensOf, web } from "
  * the beat order, the same way as the other built chapters.
  */
 
-const RELAY_SOURCE = readFileSync(web("src/routes/settings/mail/+page.svelte"), "utf8");
-/* #1174: the pocket relay is its own dialect (pocket.svelte), and chapter 6's
-   pocket selector is pinned against THAT file, not the desk's. */
-const RELAY_POCKET_SOURCE = readFileSync(web("src/routes/settings/mail/pocket.svelte"), "utf8");
+const RELAY_SOURCE = readFileSync(web("src/routes/settings/+page.svelte"), "utf8");
+/* #1509: the relay is the Mail card of Settings. The pocket's is Settings'
+   pocket.svelte, and chapter 6's pocket selector is pinned against THAT file,
+   not the desk's. */
+const RELAY_POCKET_SOURCE = readFileSync(web("src/routes/settings/pocket.svelte"), "utf8");
 
-/** The relay screen, near enough for the film: just the card this chapter
- *  names. */
+/** The Settings screen, near enough for the film: just the Mail card this
+ *  chapter names. */
 function drawRelay() {
   document.body.innerHTML = `
     <div class="stage" id="stage">
-      <div class="glass relay-card">
+      <div class="card wide" id="mail">
         <div class="dish" id="relaydish"><span></span><span></span><span></span><i></i></div>
         <h1>Your relay</h1>
         <div class="alias">relay-household@post.orbit.test</div>
         <div class="btns"><button class="pri">rotate address</button><button>pause ingest</button></div>
       </div>
     </div>`;
-  box(document.querySelector(".relay-card"), { x: 458, y: 264, w: 364, h: 260 });
+  box(document.querySelector("#mail"), { x: 458, y: 264, w: 364, h: 260 });
 }
 
 beforeEach(() => {
@@ -44,13 +45,13 @@ beforeEach(() => {
 });
 
 describe("the selectors chapter 6 names", () => {
-  it("every desk one of them exists in /settings/mail's own markup", () => {
+  it("every desk one of them exists in Settings' own markup (the Mail card)", () => {
     const rendered = namesIn(RELAY_SOURCE);
     for (const [beat, selector] of Object.entries(SELECTORS.DESK)) {
       for (const token of tokensOf(selector)) {
         expect(
           rendered.has(token),
-          `chapter 6's desk "${beat}" names "${selector}", but /settings/mail renders no "${token}"`,
+          `chapter 6's desk "${beat}" names "${selector}", but Settings renders no "${token}"`,
         ).toBe(true);
       }
     }
@@ -59,29 +60,29 @@ describe("the selectors chapter 6 names", () => {
   /* #1174: the pocket relay is pocket.svelte's, where the desk's
      `.relay-card` is a 0x0 box — the pocket set is pinned against the pocket
      file, and must not be the desk's selector. */
-  it("every pocket one of them exists in the pocket relay's own markup (pocket.svelte)", () => {
+  it("every pocket one of them exists in Settings' own pocket markup (the Mail card)", () => {
     const rendered = namesIn(RELAY_POCKET_SOURCE);
     for (const [beat, selector] of Object.entries(SELECTORS.POCKET)) {
       for (const token of tokensOf(selector)) {
         expect(
           rendered.has(token),
-          `chapter 6's pocket "${beat}" names "${selector}", but the pocket relay renders no "${token}"`,
+          `chapter 6's pocket "${beat}" names "${selector}", but Settings' pocket renders no "${token}"`,
         ).toBe(true);
       }
     }
-    expect(RELAY_POCKET_SOURCE).toContain('aria-label="Your address"');
-    expect(SELECTORS.POCKET.card).not.toBe(".relay-card");
+    expect(RELAY_POCKET_SOURCE).toContain('id="p-mail"');
+    expect(SELECTORS.POCKET.card).not.toBe(SELECTORS.DESK.card);
   });
 
   it("names the same card the ratified walk already points at", () => {
     /* The walk ratified this stop (route and target held here as literals,
        #1403 D2); the film must not drift off onto its own idea of where the
        relay lives. */
-    const stop = { route: "/settings/mail", target: ".relay-card" };
-    expect(stop.route).toBe("/settings/mail");
-    expect(stop.target).toContain(".relay-card");
-    expect(SELECTORS.DESK.card).toBe(".relay-card");
-    expect(SELECTORS.POCKET.card).toContain(".rl-pocket");
+    const stop = { route: "/settings", target: "#mail" };
+    expect(stop.route).toBe("/settings");
+    expect(stop.target).toContain("#mail");
+    expect(SELECTORS.DESK.card).toBe("#mail");
+    expect(SELECTORS.POCKET.card).toBe("#p-mail");
   });
 
   it("says the same line the ratified walk already says (its second cut, #1174)", () => {
@@ -128,11 +129,11 @@ describe("the beats, against a recorder", () => {
     expect(log[1]).toEqual(["veil", false]);
   });
 
-  it("dims before the cut, then moves to the relay", async () => {
+  it("dims before the cut, then moves to Settings", async () => {
     const { log, ctx } = recorder();
     await relay.play(ctx);
     const veilOn = log.findIndex(([w, on]) => w === "veil" && on === true);
-    const moved = log.findIndex(([w, route]) => w === "setScreen" && route === "/settings/mail");
+    const moved = log.findIndex(([w, route]) => w === "setScreen" && route === "/settings");
     expect(veilOn).toBeGreaterThan(-1);
     expect(moved).toBeGreaterThan(veilOn);
   });
@@ -142,7 +143,7 @@ describe("the beats, against a recorder", () => {
     await relay.play(ctx);
     const said = log.filter(([word]) => word === "callout").map(([, text, sel]) => [text, sel]);
     expect(said).toEqual([
-      ["Forward a bill to your relay address and Orbit reads a copy to import it.", ".relay-card"],
+      ["Forward a bill to your relay address and Orbit reads a copy to import it.", "#mail"],
     ]);
   });
 
@@ -162,7 +163,7 @@ describe("the chapter played for real", () => {
     const ctx = createFilmContext({
       clock,
       doc: document,
-      routeOf: () => "/settings/mail",
+      routeOf: () => "/settings",
       navigate: async () => {},
       settle: async () => {},
     });
@@ -203,7 +204,7 @@ describe("the chapter played for real", () => {
     const ctx = createFilmContext({
       clock,
       doc: document,
-      routeOf: () => "/settings/mail",
+      routeOf: () => "/settings",
       navigate: async () => {},
       settle: async () => {},
     });

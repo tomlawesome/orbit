@@ -271,25 +271,29 @@ async function fillPocket() {
 
 const words = (/** @type {string} */ note) => note.replace(/\s+/gu, " ").trim();
 
+/* #1437: the file is staged the moment it is picked, and a save after a good
+   pick stage only binds it. So "the stage answers 503" means the check is
+   down at the pick and still down at Add: two answers, the pick's and the
+   Add's. The pick's is not shown; the Add's is. */
 describe.each([
   ["the desk form", fillDesk],
   ["the pocket form", fillPocket],
 ])("#1593: %s when the stage answers 503 document_check_unavailable", (_name, fill) => {
   it("tells the member to try again in the server's words, never to choose another file", async () => {
+    stageUnavailable = 2;
     const form = await fill();
-    stageUnavailable = 1;
     await form.pressAdd();
 
     expect(words(form.note())).toContain(UNAVAILABLE_WORDS);
     expect(form.note()).not.toMatch(/choose another|could not open|pick it again|refused/iu);
-    expect(ofKind("stage")).toHaveLength(1);
+    expect(ofKind("stage"), "the pick's stage and the Add's").toHaveLength(2);
     expect(ofKind("command"), "nothing is saved without the file").toHaveLength(0);
     expect(goto).not.toHaveBeenCalled();
   });
 
   it("does not mark the file refused or hold Add: the file is fine and stays attached", async () => {
+    stageUnavailable = 2;
     const form = await fill();
-    stageUnavailable = 1;
     await form.pressAdd();
 
     expect(form.fileMarkedRefused(), "a temporary failure is not a refused file").toBe(false);
@@ -299,14 +303,14 @@ describe.each([
   });
 
   it("the next Add saves the item and its file once the check runs again", async () => {
+    stageUnavailable = 2;
     const form = await fill();
-    stageUnavailable = 1;
     await form.pressAdd();
     expect(goto).not.toHaveBeenCalled();
 
     await form.pressAdd();
 
-    expect(ofKind("stage")).toHaveLength(2);
+    expect(ofKind("stage"), "the pick's stage, then one per Add").toHaveLength(3);
     const commands = ofKind("command");
     expect(commands).toHaveLength(1);
     expect(commands[0].body.documentIds).toHaveLength(1);
@@ -316,8 +320,8 @@ describe.each([
 
 describe("#1593: the desk and the pocket say the same words for it", () => {
   it("shows the identical message on both surfaces", async () => {
+    stageUnavailable = 2;
     const desk = await fillDesk();
-    stageUnavailable = 1;
     await desk.pressAdd();
     const deskWords = words(desk.note());
     mounted?.teardown();
@@ -327,8 +331,8 @@ describe("#1593: the desk and the pocket say the same words for it", () => {
     goto.mockClear();
     stubFetch();
 
+    stageUnavailable = 2;
     const pocket = await fillPocket();
-    stageUnavailable = 1;
     await pocket.pressAdd();
     const pocketWords = words(pocket.note());
 

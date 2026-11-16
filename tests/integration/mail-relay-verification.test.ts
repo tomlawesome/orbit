@@ -16,6 +16,7 @@ import { RELAY_LISTENING, RELAY_NOT_USABLE, readRelaySettings } from "@/server/m
 import { hasVerifiedSenderAddress, listSenderAddresses, seedSenderAddress, userForVerifiedSender } from "@/server/mail-in/sender-addresses";
 import { cleanupIntegrationEnvironment, createIntegrationFixture, type IntegrationFixture, type IntegrationSession } from "./support/fixtures";
 import { callRoute, callRouteForSession, loadRoute } from "./support/request-event";
+import { clearSending, setUpSending } from "./support/mail-sending-1629";
 
 /*
  * ADR-0017 decision 3, amended by decision 7c: the member's registered address
@@ -65,31 +66,23 @@ const verificationRoute = async () => (await loadRoute("settings/mail-relay/veri
 const verifyRoute = async () => (await loadRoute("settings/mail-relay/verify")).GET;
 
 let fixture: IntegrationFixture;
-const savedEnvironment: Record<string, string | undefined> = {};
 
 beforeEach(async () => {
   mail.sent.length = 0;
-  for (const name of ["SMTP_PORT", "SMTP_FROM", "SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD"]) savedEnvironment[name] = process.env[name];
-  delete process.env.SMTP_HOST;
-  delete process.env.SMTP_USER;
-  delete process.env.SMTP_PASSWORD;
-  process.env.SMTP_HOST = "smtp.example.test"; process.env.SMTP_PORT = "587"; process.env.SMTP_USER = "orbit-test"; process.env.SMTP_PASSWORD = "fake-smtp-password";
-  process.env.SMTP_FROM = "Orbit <orbit@example.test>";
   fixture = await createIntegrationFixture("sender-check");
+  /* Outgoing mail is the sending row since #1629, not SMTP_* (ADR-0017 amendment). */
+  await setUpSending(fixture.users.admin.id);
 });
 
 afterEach(async () => {
   vi.useRealTimers();
-  for (const [name, value] of Object.entries(savedEnvironment)) {
-    if (value === undefined) delete process.env[name];
-    else process.env[name] = value;
-  }
   const db = getDb();
   await db.delete(imapRecipientAliases);
   await db.delete(mailInSenderAddresses);
   await db.delete(mailInRelays);
   await db.update(mailInMailbox).set({ passwordSecretId: null, aliasKeySecretId: null });
   await db.delete(mailInMailbox);
+  await clearSending();
   await db.delete(mailInSecrets);
   await db.delete(auditLog);
   await fixture.cleanup();
@@ -276,6 +269,16 @@ describe("POST /api/settings/mail-relay/verification (decision 7c)", () => {
     expect(await hasVerifiedSenderAddress(fixture.users.member.id)).toBe(true);
   });
 
+  it("lands the reader on Settings, where the relay now lives (#1509): /settings?sender=verified and ?sender=unverified", async () => {
+    const member = await fixture.session("member");
+    const owner = await fixture.session("owner");
+    expect((await send(member)).status).toBe(202);
+    const token = tokenIn(mail.sent[0].text);
+
+    expect((await openLink(owner, token)).headers.get("location")).toBe("/settings?sender=unverified");
+    expect((await openLink(member, token)).headers.get("location")).toBe("/settings?sender=verified");
+  });
+
   it("verifies through the emailed link, only for the member who is signed in, and then refuses a second send", async () => {
     const member = await fixture.session("member");
     const owner = await fixture.session("owner");
@@ -412,6 +415,8 @@ describe("a registered address that moves to a claimed address and back (#1316)"
 
     await changeRegisteredAddress(other.id, claimed);
     await readRelaySettings(other);
+    /* Since 54553 only a VERIFIED row claims an address: N has proved Y. */
+    await getDb().update(mailInSenderAddresses).set({ verifiedAt: new Date() }).where(eq(mailInSenderAddresses.userId, other.id));
     await changeRegisteredAddress(other.id, parked);
 
     await changeRegisteredAddress(member.id, claimed);

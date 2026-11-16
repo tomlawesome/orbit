@@ -34,7 +34,9 @@ import { isValidClientId, isValidOidcIssuer, normalizePublicOrigin } from "../li
 import { runConfigurationCommand } from "../lib/configuration-migration";
 import { readinessReport } from "../lib/deployment-readiness";
 import { InstallTransaction, type ManagedPath } from "../lib/install-transaction";
-import { createInContainerAdapter, preflightPostgresClient } from "../lib/in-container-adapter";
+import { createInContainerAdapter, createReadOnlyQuery, preflightPostgresClient } from "../lib/in-container-adapter";
+import { runUpdatePreflight } from "../db/contract-preconditions";
+import { MigrationIntegrityError } from "../db/migration-integrity";
 import {
   type BackupDockerAdapter,
   RecoveryBundleRefusal,
@@ -80,6 +82,7 @@ import {
   collectMachineOidcSecret,
   runConfigureApply,
   setDeploymentProfile,
+  setScannerMode,
   type ConfigureMachinePromptDriver,
   type GuidedInitInput,
 } from "../lib/configure-engine";
@@ -407,7 +410,7 @@ function makeRestoreConfirmer(useYesFlag: boolean): () => boolean {
 
 // ---------------------------------------------------------------------------
 // orbit configure / --init / --set-oidc-secret / --set-deployment-profile /
-// --preflight / --migrate: everything scripts/configure.sh does (#294,
+// --set-scanner / --preflight / --migrate: everything scripts/configure.sh does (#294,
 // #1210). File work only, no `docker`. scripts/configure.sh is
 // now only the shell that runs this command as a `docker run --rm` one-off
 // with the deployment directory mounted at /orbit-deploy (docs/
@@ -727,6 +730,24 @@ function commandConfigureSetDeploymentProfile(deployDir: string, preset: string,
   }
 }
 
+const SET_SCANNER_USAGE = "orbit: usage: orbit configure --set-scanner <on|off>";
+
+/** `orbit configure --set-scanner on|off` (#1170): DOCUMENT_SCAN_MODE and the scanner-off overlay in one write. */
+function commandConfigureSetScanner(deployDir: string, mode: string): never {
+  if (mode !== "on" && mode !== "off") usageExit(SET_SCANNER_USAGE);
+  try {
+    const message = setScannerMode(deployDir, mode);
+    process.stdout.write(`${message}\n`);
+    process.exit(0);
+  } catch (error) {
+    if (error instanceof ConfigureEngineRefusal) {
+      if (error.code === "scanner-mode-invalid") usageExit(SET_SCANNER_USAGE);
+      fail(`orbit: ${error.message}`);
+    }
+    throw error;
+  }
+}
+
 /** `orbit configure --preflight|--migrate ...`: the retired scripts/configuration.sh's grammar over the port (#1210 D8). */
 function commandConfigureMigration(deployDir: string, args: string[]): never {
   const result = runConfigurationCommand(args, join(deployDir, ".env-orbit"));
@@ -758,9 +779,13 @@ function commandConfigure(deployDir: string, args: string[]): never {
       commandConfigureSetDeploymentProfile(deployDir, preset, model);
       break;
     }
+    case "--set-scanner":
+      if (rest.length !== 1) usageExit(SET_SCANNER_USAGE);
+      commandConfigureSetScanner(deployDir, rest[0]);
+      break;
     default:
       usageExit(
-        `orbit: unknown option ${first} (usage: orbit configure [--init|--set-oidc-secret|--set-deployment-profile PRESET [MODEL]|--preflight ...|--migrate ...])`,
+        `orbit: unknown option ${first} (usage: orbit configure [--init|--set-oidc-secret|--set-deployment-profile PRESET [MODEL]|--set-scanner on|off|--preflight ...|--migrate ...])`,
       );
   }
 }
@@ -1414,8 +1439,12 @@ function outcomeLines(outcome: InstallOutcome): string[] {
         "status=ok",
         `fresh=${outcome.fresh ? 1 : 0}`,
         `profile=${outcome.selectedProfile}`,
+        `scanner=${outcome.scanner}`,
         `model-pull=${outcome.modelPullRequested ? 1 : 0}`,
         `database-volume=${outcome.databaseVolume ?? ""}`,
+        `recreate=${outcome.recreate ? 1 : 0}`,
+        // #1542: only when a profile change dropped an optional service.
+        ...(outcome.droppedServices?.length ? [`drop-services=${outcome.droppedServices.join(" ")}`] : []),
       ];
     case "failed":
       return [
@@ -1464,6 +1493,40 @@ function writeInstallJournal(outcomePath: string | undefined): void {
   } finally {
     closeSync(descriptor);
   }
+}
+
+const UPDATE_PREFLIGHT_USAGE = "orbit: usage: orbit update --preflight --dir <deployment>";
+
+/**
+ * `orbit update --preflight --dir <deployment>` (#1779, note 58520 A): run by
+ * install.sh as a compose one-off on orbit-app, from the new image, while the
+ * old version still runs. Asks the live database whether this release's
+ * contract migrations would refuse. stdout: `update-preflight: ready` (exit
+ * 0), or a blocked line per precondition and its remedy (exit 1). Anything
+ * else is exit 2 with a bounded reason: no SQL, no connection string. Sends
+ * only reads.
+ */
+function commandUpdatePreflight(deployDirArg: string | undefined, args: string[]): void {
+  if (!isRunningAsEngineContainer()) fail("orbit: update runs only inside the Orbit image, started by scripts/install.sh.");
+  if (args.length !== 0) usageExit(UPDATE_PREFLIGHT_USAGE);
+  if (!deployDirArg) usageExit(`orbit: update --preflight requires --dir <deployment> (${UPDATE_PREFLIGHT_USAGE.slice("orbit: ".length)})`);
+  const targetDir = resolve(deployDirArg);
+  if (!existsSync(targetDir) || !statSync(targetDir).isDirectory()) usageExit("orbit: update --preflight: the deployment directory is not a directory.");
+  const unchecked = (reason: string): never => usageExit(`orbit: the database's readiness for this release could not be checked; ${reason}`);
+  runUpdatePreflight({
+    query: createReadOnlyQuery(),
+    migrationsFolder: resolve(process.env.DRIZZLE_MIGRATIONS_PATH ?? "drizzle"),
+  }).then(
+    (result) => {
+      process.stdout.write(`${result.lines.join("\n")}\n`);
+      process.exit(result.exitCode);
+    },
+    (error: unknown) => {
+      if (error instanceof RestoreEngineRefusal) unchecked(error.message);
+      if (error instanceof MigrationIntegrityError) unchecked("this image's migrations could not be read.");
+      unchecked("a query did not return the expected answer.");
+    },
+  );
 }
 
 function commandInstallOrUpdate(command: "install" | "update", deployDirArg: string | undefined, args: string[]): void {
@@ -1542,6 +1605,9 @@ function commandInstallOrUpdate(command: "install" | "update", deployDirArg: str
       requestedComposeProjectName: process.env.COMPOSE_PROJECT_NAME || undefined,
       // Passed as set, empty included: an empty request is refused, not read as standard (#1504).
       requestedProfile: process.env.ORBIT_INSTALL_PROFILE,
+      // Likewise as set (#1170): an empty or unknown value is refused, not read as on.
+      requestedScanner: process.env.ORBIT_INSTALL_SCANNER,
+      requestedFolderMoved: process.env.ORBIT_INSTALL_FOLDER_MOVED,
       facts,
       assetsRoot,
       launcherConfigTree: process.env[LAUNCHER_CONFIG_TREE_ENV] || undefined,
@@ -1758,6 +1824,63 @@ function commandAuth(args: string[]): void {
   commandAuthRecoveryLink();
 }
 
+/**
+ * `orbit mail-sending-status` (#1817): the done-marker `install.sh --update`
+ * and `repair.sh` read before retiring the `SMTP_*` lines, run in the app
+ * container through `compose exec -T orbit-app node /opt/orbit/cli/orbit.js
+ * mail-sending-status`. Prints exactly one line from a closed vocabulary:
+ *
+ *   mail-sending source=<imported|ui|none> imported-from-environment=<true|false>
+ *
+ * Exit 0 on an answer, 2 on usage, 1 when the database could not be asked.
+ * Like end-maintenance, the failure message is category only: a driver error
+ * can carry the host, user or address, and nothing of the mail setup beyond
+ * the two values above leaves the container.
+ */
+function commandMailSendingStatus(args: string[]): void {
+  if (args.length > 0) {
+    usageExit("orbit: unknown option for mail-sending-status (usage: orbit mail-sending-status)");
+    return;
+  }
+  process.env.ORBIT_LOG_LEVEL = "error";
+  void (async () => {
+    let close: (() => Promise<void>) | undefined;
+    try {
+      const [{ sendingSource, sendingImportedFromEnvironment }, { closeDatabase }] = await Promise.all([
+        import("../server/mail-in/sending-settings"),
+        import("../db"),
+      ]);
+      close = closeDatabase;
+      const [source, imported] = await Promise.all([sendingSource({ usable: true }), sendingImportedFromEnvironment()]);
+      await closeDatabase();
+      process.stdout.write(`mail-sending source=${source ?? "none"} imported-from-environment=${imported ? "true" : "false"}\n`);
+      process.exit(0);
+    } catch {
+      process.stderr.write("orbit: mail-sending-status failed; the database could not be asked\n");
+      if (close) await close().catch(() => {});
+      process.exit(1);
+    }
+  })();
+}
+
+/**
+ * `orbit rewrap-kek --next-key-file <path>` (#1635): step 3 of "Rotating the
+ * document key-encryption key" (docs/administrator-operations.md), run in the
+ * app container through `compose exec orbit-app node /opt/orbit/cli/orbit.js
+ * rewrap-kek --next-key-file /run/orbit-secrets/orbit-document-kek-next`, so
+ * it inherits the container's database settings and current key. It is the
+ * same function `pnpm rewrap-kek` runs (src/db/rewrap-kek-run.ts): same
+ * checks, output lines, audit entries and exit codes (1 on any refusal or
+ * failure, 0 on completion). Loaded only when called, so no other command
+ * pulls in the rewrap worker.
+ */
+function commandRewrapKek(args: string[]): void {
+  void import("../db/rewrap-kek-run").then(({ runRewrapKek }) => runRewrapKek(args)).catch((error: unknown) => {
+    process.stderr.write(`orbit rewrap-kek: ${error instanceof Error ? error.message : String(error)}\n`);
+    process.exitCode = 1;
+  });
+}
+
 function main(): void {
   const [, , command, ...rest] = process.argv;
 
@@ -1812,8 +1935,14 @@ function main(): void {
       case "configure":
         commandConfigure(deployDir, commandArgs);
         break;
-      case "install":
       case "update":
+        if (commandArgs.includes("--preflight")) {
+          commandUpdatePreflight(deployDirArg, commandArgs.filter((arg, index) => index !== commandArgs.indexOf("--preflight")));
+          break;
+        }
+        commandInstallOrUpdate(command, deployDirArg, commandArgs);
+        break;
+      case "install":
         commandInstallOrUpdate(command, deployDirArg, commandArgs);
         break;
       case "backup":
@@ -1833,6 +1962,12 @@ function main(): void {
         break;
       case "auth":
         commandAuth(commandArgs);
+        break;
+      case "mail-sending-status":
+        commandMailSendingStatus(commandArgs);
+        break;
+      case "rewrap-kek":
+        commandRewrapKek(rest);
         break;
       default:
         failUsage();
@@ -1865,7 +2000,7 @@ function main(): void {
 
 function failUsage(): never {
   fail(
-    "orbit: supported commands: check, configure [--init|--set-oidc-secret|--set-deployment-profile PRESET [MODEL]], backup, restore, export-recovery-bundle, import-recovery-bundle, end-maintenance, auth recovery-link [--dir <deployment>] | install --dir <deployment> | update --dir <deployment>",
+    "orbit: supported commands: check, configure [--init|--set-oidc-secret|--set-deployment-profile PRESET [MODEL]|--set-scanner on|off], backup, restore, export-recovery-bundle, import-recovery-bundle, end-maintenance, mail-sending-status, rewrap-kek --next-key-file <path>, auth recovery-link [--dir <deployment>] | install --dir <deployment> | update --dir <deployment> | update --preflight --dir <deployment>",
   );
 }
 

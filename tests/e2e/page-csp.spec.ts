@@ -19,7 +19,7 @@ resetDatabaseBetweenSpecFiles();
  * Two halves:
  *   - THE WALK: a `securitypolicyviolation` listener is installed before the
  *     page's first script (addInitScript), and the reader walks `/`, `/home`,
- *     `/inbox`, `/create`, `/settings`, `/settings/mail`, `/administration`,
+ *     `/inbox`, `/create`, `/settings`, `/administration`,
  *     `/about` and the first household's page signed in, then `/login` signed
  *     out. Not one violation is seen. A walk alone would pass on a site with
  *     no policy at all, so each page is also proven to ENFORCE one, by the
@@ -122,7 +122,7 @@ async function expectInlineScriptRefused(page: Page, where: string) {
   expect(await page.evaluate(() => (window as Watched).__orbitInlineRan === true), `${where}: the injected inline script ran`).toBe(false);
 }
 
-const SIGNED_IN_PAGES = ["/", "/home", "/inbox", "/create", "/settings", "/settings/mail", "/administration", "/about"];
+const SIGNED_IN_PAGES = ["/", "/home", "/inbox", "/create", "/settings", "/administration", "/about"];
 
 test("every page, signed in and signed out, runs without one CSP violation, and enforces a policy", async ({ page, browser }) => {
   test.setTimeout(240_000);

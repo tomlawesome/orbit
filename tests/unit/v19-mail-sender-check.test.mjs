@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url";
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { landOnSettings, settingsAnswer, showOnly } from "./support/settings-relay-mount.mjs";
 import { RELAY_FIXTURE } from "../../web/src/lib/data/fixtures/relay.js";
 import { clockOf, dayMonth, localZone } from "../../web/src/lib/format.js";
 
@@ -52,12 +53,16 @@ vi.mock("../../web/src/lib/pocket/wake.js", () => ({
 }));
 vi.mock("../../web/src/lib/backdrops/satellites.js", () => ({ mountSatellites: () => () => {} }));
 vi.mock("../../web/src/lib/Chrome.svelte", () => ({ default: () => {} }));
+vi.mock("../../web/src/lib/PageSky.svelte", () => ({ default: () => {} }));
+vi.mock("../../web/src/lib/pocket/Sheet.svelte", () => ({ default: () => {} }));
+vi.mock("../../web/src/lib/tour/watch.js", () => ({ watchTour: () => () => {} }));
+vi.mock("../../web/src/lib/push/alerts.js", () => ({ alertsSupported: () => false, syncAlerts: async () => {}, enableAlerts: async () => {}, disableAlerts: async () => {} }));
 vi.mock("../../web/src/lib/pocket/Sky.svelte", () => ({ default: () => {} }));
 vi.mock("../../web/src/lib/pocket/ArmButton.svelte", () => ({ default: () => {} }));
 vi.mock("../../web/src/lib/pocket/FailedRow.svelte", () => ({ default: () => {} }));
 
 /** The svelte files above, by path under web/src: written into compiled code as they are. */
-const STAND_INS = new Set(["lib/Chrome.svelte", "lib/pocket/Sky.svelte", "lib/pocket/ArmButton.svelte", "lib/pocket/FailedRow.svelte"]);
+const STAND_INS = new Set(["lib/Chrome.svelte", "lib/pocket/Sky.svelte", "lib/pocket/ArmButton.svelte", "lib/pocket/FailedRow.svelte", "lib/PageSky.svelte", "lib/pocket/Sheet.svelte"]);
 
 /* ---- compiling the screen -------------------------------------------------- */
 
@@ -120,7 +125,7 @@ beforeAll(async () => {
     join(compiledDir, "state.mjs"),
     "export const page = { get url() { return new URL(window.location.href); }, params: {}, data: {}, status: 200, error: null };",
   );
-  compiledPage = compileSvelte(join(web, "src/routes/settings/mail/+page.svelte"));
+  compiledPage = compileSvelte(join(web, "src/routes/settings/+page.svelte"));
 });
 afterAll(() => { rmSync(compiledDir, { recursive: true, force: true }); });
 
@@ -161,6 +166,8 @@ function stubServer() {
     const href = String(url);
     const method = init?.method ?? "GET";
     if (href.includes("/api/auth/session")) return json({ user: { id: "u1" }, csrfToken: "t1" });
+    const screen = settingsAnswer(href, { receipts: server.receipts ?? [] });
+    if (screen) return screen;
     if (href.endsWith("/api/settings/mail-relay/verification") && method === "POST") {
       server.calls.push({ href, init });
       return server.answer(init);
@@ -200,7 +207,7 @@ beforeEach(() => {
   vi.resetModules();
   media.pocket = false;
   wake.mockClear();
-  window.history.replaceState({}, "", "/settings/mail");
+  landOnSettings();
   stubServer();
 });
 afterEach(() => {
@@ -244,17 +251,16 @@ async function mountScreen(/** @type {{ sender: object | null, pocket: boolean, 
   mediaWatchers.clear();
   window.matchMedia = /** @type {any} */ (() => phoneQuery);
   server.relay = relayBody(sender);
-  window.history.replaceState({}, "", `/settings/mail${search}`);
-  const { readRelay } = await import("../../web/src/lib/data/workspace.js");
-  const relay = await readRelay();
+  landOnSettings(search);
   const { mount, unmount } = await import(pathToFileURL(join(svelteSrc, "index-client.js")).href);
   const { default: Page } = await import(/* @vite-ignore */ compiledPage);
   const component = mount(Page, {
     target: document.body,
-    props: { data: { relay, failures: [], user: { id: "u1" }, household: null } },
+    props: { data: { fixtures: false } },
   });
   unmountScreen = () => unmount(component);
   await settle();
+  showOnly(pocket);
   server.reads = 0;
 }
 
@@ -507,7 +513,7 @@ describe.each(LAYOUTS)("#1410: %s after the link in the check email", (_name, po
     expect(rowSays("sender check")).toBe("checked");
     expect(allText()).toContain("connected · listening");
     expect(window.location.search, "?sender= is gone from the address bar").toBe("");
-    expect(window.location.pathname).toBe("/settings/mail");
+    expect(window.location.pathname).toBe("/settings");
   });
 
   it("?sender=unverified puts a refusal in an alert that takes focus, shows the button, and cleans the address bar", async () => {
@@ -519,7 +525,7 @@ describe.each(LAYOUTS)("#1410: %s after the link in the check email", (_name, po
     expect(document.activeElement, "the alert has focus").toBe(alert);
     expect(buttonSaying("send the check email"), "the way to a new email is on screen").not.toBeNull();
     expect(window.location.search, "?sender= is gone from the address bar").toBe("");
-    expect(window.location.pathname).toBe("/settings/mail");
+    expect(window.location.pathname).toBe("/settings");
   });
 
   it("with no ?sender= nothing is announced and no alert is raised", async () => {

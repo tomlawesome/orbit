@@ -23,7 +23,7 @@ import { verifySenderAddress } from "orbit/server/mail-in/sender-addresses";
  * Written without the shared `api()` wrapper on purpose — that wrapper turns
  * anything thrown into the error envelope, which would swallow a redirect.
  */
-const RELAY_PAGE = "/settings/mail";
+const RELAY_PAGE = "/settings";
 
 /** @param {string} location */
 function seeOther(location) {

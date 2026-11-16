@@ -25,12 +25,13 @@ const view = (libraries = LIBRARIES) =>
   creditsView({ pictures: CREDITS, fonts: FONTS, sidecars: SIDECARS, libraries });
 
 describe("creditsView (#1256)", () => {
-  it("draws the four groups in the record's order, with their counts", () => {
+  it("draws the five groups in the record's order, with their counts (System packages since #1781)", () => {
     const { groups } = view();
     expect(groups.map((group) => [group.title, group.count])).toEqual([
       ["Pictures", CREDITS.length],
       ["Fonts", FONTS.length],
-      ["Libraries", LIBRARIES.length],
+      ["Libraries", LIBRARIES.filter((library) => library.kind !== "apk").length],
+      ["System packages", LIBRARIES.filter((library) => library.kind === "apk").length],
       ["Sidecar images", SIDECARS.length],
     ]);
   });
@@ -185,11 +186,28 @@ describe("licence expressions and the bill of materials (#1256)", () => {
         { name: "broken" },
       ],
     })).toEqual([
-      { name: "jose", version: "6.2.12", licence: "MIT", author: "Filip Skokan", source: "https://github.com/panva/jose" },
-      { name: "left-pad", version: "1.3.0", licence: "NOASSERTION", author: "", source: "https://www.npmjs.com/package/left-pad" },
+      { name: "jose", version: "6.2.12", licence: "MIT", author: "Filip Skokan", source: "https://github.com/panva/jose", kind: "npm" },
+      { name: "left-pad", version: "1.3.0", licence: "NOASSERTION", author: "", source: "https://www.npmjs.com/package/left-pad", kind: "npm" },
     ]);
     expect(librariesOf({})).toBeNull();
     expect(librariesOf(null)).toBeNull();
+  });
+
+  it("tells an apk library from an npm one and links it to pkgs.alpinelinux.org (#1781)", () => {
+    const purl = (locator) => [{ referenceCategory: "PACKAGE-MANAGER", referenceType: "purl", referenceLocator: locator }];
+    const [apk, npm] = librariesOf({
+      packages: [
+        { name: "poppler-utils", versionInfo: "24.10.0-r2", licenseDeclared: "GPL-2.0-or-later", supplier: "NOASSERTION", homepage: "NOASSERTION",
+          externalRefs: purl("pkg:apk/alpine/poppler-utils@24.10.0-r2?arch=x86_64&distro=alpine-3.21.3") },
+        { name: "jose", versionInfo: "6.2.12", licenseDeclared: "MIT", supplier: "NOASSERTION", homepage: "NOASSERTION",
+          externalRefs: purl("pkg:npm/jose@6.2.12") },
+      ],
+    });
+    expect(apk.kind).toBe("apk");
+    expect(apk.source).toContain("pkgs.alpinelinux.org");
+    expect(apk.source).not.toContain("npmjs.com");
+    expect(npm.kind).toBe("npm");
+    expect(npm.source).toBe("https://www.npmjs.com/package/jose");
   });
 
   it("makes ids from plain slugs", () => {
@@ -253,5 +271,125 @@ describe("a sidecar's version on card 1 (#1256)", () => {
   it("keeps 'not running' for a sidecar that is off, whatever is pinned", () => {
     expect(sidecarVersionOf({ id: "ollama", state: "off", version: null }, SIDECARS))
       .toEqual({ kind: "off", text: "not running" });
+  });
+});
+
+describe("#1781 system packages (creditsView)", () => {
+  const npm = (name, extra = {}) => ({ name, version: "1.0.0", licence: "MIT", author: "", source: `https://www.npmjs.com/package/${name}`, kind: "npm", ...extra });
+  const apk = (name, extra = {}) => ({ name, version: "2.1-r0", licence: "GPL-2.0-only", author: "", source: `https://pkgs.alpinelinux.org/package/v3.22/main/x86_64/${name}`, kind: "apk", ...extra });
+  const MIXED = [npm("zod"), apk("busybox"), npm("axios"), apk("zlib"), apk("openssl", { licence: "Apache-2.0" }), apk("ffmpeg")];
+  const mixed = () => creditsView({ pictures: CREDITS, fonts: FONTS, sidecars: SIDECARS, libraries: MIXED });
+  const group = (id, v = mixed()) => v.groups.find((g) => g.id === id);
+
+  it("#1781 system packages: puts the group after Libraries and before Sidecar images", () => {
+    expect(mixed().groups.map((g) => g.id)).toEqual([
+      "credits-pictures", "credits-fonts", "credits-libraries", "credits-system-packages", "credits-sidecars",
+    ]);
+    expect(group("credits-system-packages")?.title).toBe("System packages");
+  });
+
+  it("#1781 system packages: lists the apk entries A-Z by name with the count", () => {
+    const g = group("credits-system-packages");
+    expect(g?.count).toBe(4);
+    expect(g?.entries?.map((e) => e.name)).toEqual(["busybox", "ffmpeg", "openssl", "zlib"]);
+  });
+
+  it("#1781 system packages: Libraries keeps only npm entries", () => {
+    const g = group("credits-libraries");
+    expect(g?.count).toBe(2);
+    expect(g?.entries?.map((e) => e.name)).toEqual(["axios", "zod"]);
+  });
+
+  it("#1781 system packages: the letter index is built from npm entries only", () => {
+    const byLetter = Object.fromEntries(mixed().letters.map((l) => [l.letter, l.id]));
+    expect(byLetter.A).not.toBeNull();
+    expect(byLetter.Z).not.toBeNull();
+    // b, f, o only start apk packages.
+    expect(byLetter.B).toBeNull();
+    expect(byLetter.F).toBeNull();
+    expect(byLetter.O).toBeNull();
+  });
+
+  it("#1781 system packages: with no bill of materials the count and entries are null", () => {
+    const g = group("credits-system-packages", view(null));
+    expect(g).toBeDefined();
+    expect(g?.count).toBeNull();
+    expect(g?.entries).toBeNull();
+  });
+
+  it("#1781 system packages: an apk package's licences count in the Licences list", () => {
+    const users = Object.fromEntries(mixed().licences.map((l) => [l.key, l.users]));
+    const base = Object.fromEntries(view([]).licences.map((l) => [l.key, l.users]));
+    // busybox, zlib and ffmpeg (apk) on top of the hand-kept entries.
+    expect(users["GPL-2.0-only"]).toBe((base["GPL-2.0-only"] ?? 0) + 3);
+    // openssl (apk) on top of the hand-kept entries.
+    expect(users["Apache-2.0"]).toBe((base["Apache-2.0"] ?? 0) + 1);
+  });
+
+  it("#1781 system packages: each apk entry keeps its version and pkgs.alpinelinux.org link", () => {
+    const entry = group("credits-system-packages")?.entries?.find((e) => e.name === "busybox");
+    expect(entry?.version).toBe("2.1-r0");
+    expect(entry?.sourceUrl).toBe("https://pkgs.alpinelinux.org/package/v3.22/main/x86_64/busybox");
+    expect(entry?.sourceHost).toBe("pkgs.alpinelinux.org");
+  });
+});
+
+describe("#1848 W-F1 apk source link", () => {
+  const purlRef = (locator) => [{ referenceCategory: "PACKAGE-MANAGER", referenceType: "purl", referenceLocator: locator }];
+  const apkSource = (name, locator, homepage = "NOASSERTION") => {
+    const [one] = librariesOf({
+      packages: [{ name, versionInfo: "1.0-r0", licenseDeclared: "MIT", supplier: "NOASSERTION", homepage, externalRefs: purlRef(locator) }],
+    });
+    return one;
+  };
+  const search = "https://pkgs.alpinelinux.org/packages";
+
+  it("links a community package (ffmpeg) to the package search, not a /main/ page", () => {
+    const one = apkSource("ffmpeg", "pkg:apk/alpine/ffmpeg@6.1.2-r1?arch=x86_64&distro=alpine-3.22.1");
+    expect(one.source).toBe(`${search}?name=ffmpeg&branch=v3.22&arch=x86_64`);
+    expect(one.source).not.toContain("/main/");
+    expect(one.source).not.toContain("/community/");
+    expect(one.kind).toBe("apk");
+  });
+
+  it("keeps a real arch such as aarch64", () => {
+    const one = apkSource("ffmpeg", "pkg:apk/alpine/ffmpeg@6.1.2-r1?arch=aarch64&distro=alpine-3.21.3");
+    expect(one.source).toBe(`${search}?name=ffmpeg&branch=v3.21&arch=aarch64`);
+  });
+
+  it("maps noarch to x86_64", () => {
+    const one = apkSource("tzdata", "pkg:apk/alpine/tzdata@2025b-r0?arch=noarch&distro=alpine-3.22.1");
+    expect(one.source).toBe(`${search}?name=tzdata&branch=v3.22&arch=x86_64`);
+  });
+
+  it("uses x86_64 when the arch qualifier is missing", () => {
+    const one = apkSource("tzdata", "pkg:apk/alpine/tzdata@2025b-r0?distro=alpine-3.22.1");
+    expect(one.source).toBe(`${search}?name=tzdata&branch=v3.22&arch=x86_64`);
+  });
+
+  it("uses the edge branch when the distro qualifier is missing", () => {
+    const one = apkSource("ffmpeg", "pkg:apk/alpine/ffmpeg@6.1.2-r1?arch=x86_64");
+    expect(one.source).toBe(`${search}?name=ffmpeg&branch=edge&arch=x86_64`);
+  });
+
+  it("URL-encodes a name that needs it", () => {
+    const one = apkSource("c++-lib", "pkg:apk/alpine/c%2B%2B-lib@1.0-r0?arch=x86_64&distro=alpine-3.22.1");
+    expect(one.source).toBe(`${search}?name=${encodeURIComponent("c++-lib")}&branch=v3.22&arch=x86_64`);
+    expect(one.source).toContain("name=c%2B%2B-lib");
+    expect(one.source).not.toContain("/main/");
+  });
+
+  it("lets an http(s) homepage win", () => {
+    const one = apkSource("ffmpeg", "pkg:apk/alpine/ffmpeg@6.1.2-r1?arch=x86_64&distro=alpine-3.22.1", "https://ffmpeg.org/");
+    expect(one.source).toBe("https://ffmpeg.org/");
+    expect(one.kind).toBe("apk");
+  });
+
+  it("leaves an npm package linked to npmjs.com", () => {
+    const [one] = librariesOf({
+      packages: [{ name: "jose", versionInfo: "6.2.12", licenseDeclared: "MIT", supplier: "NOASSERTION", homepage: "NOASSERTION", externalRefs: purlRef("pkg:npm/jose@6.2.12") }],
+    });
+    expect(one.source).toBe("https://www.npmjs.com/package/jose");
+    expect(one.kind).toBe("npm");
   });
 });

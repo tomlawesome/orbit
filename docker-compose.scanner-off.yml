@@ -1,0 +1,10 @@
+# Lists orbit-clamav under a profile nothing ever activates, so `up`, `ps`
+# and `config` leave it out. Named in COMPOSE_FILE only when
+# DOCUMENT_SCAN_MODE=disabled; the installer keeps the two in step (#1170).
+# Caveats: `docker compose --profile '*'` would start it again. Adding this
+# overlay does NOT stop an orbit-clamav that is already running: neither
+# `up -d --remove-orphans` nor `down` removes it (checked on Compose v5.7);
+# `docker compose rm -s -f orbit-clamav` does.
+services:
+  orbit-clamav:
+    profiles: ["scanner-off"]

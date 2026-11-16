@@ -48,7 +48,7 @@ documents retained. Both sources use one editable draft-and-approval flow.
    or `To` headers alone are never sufficient. Messages whose forwarding path
    strips required identity evidence are quarantined for explicit association.
 3. Orbit places accepted messages into that user's private, durable ingestion
-   queue. IMAP UIDVALIDITY and UID plus a content hash make reconnects and
+   queue. IMAP UIDVALIDITY and UID make reconnects and
    retries idempotent.
 4. It examines the subject, message body and attachments, prioritising the
    documents themselves when extracting policy, provider, reference, cost,
@@ -233,7 +233,8 @@ foundation, not a deferred enhancement.
 - Authorization is rechecked when every byte stream is opened; cached URLs or
   prior membership never confer continuing access.
 - Explicit deletion, retention, per-file and per-instance limits, and orphan
-  cleanup.
+  cleanup; a refused upload's record goes 45 days after the refusal, its
+  audit event stays (#1786).
 - Document events in the household audit history.
 - Backup and restore coverage for both metadata and document bytes.
 

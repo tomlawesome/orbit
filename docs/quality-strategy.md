@@ -129,8 +129,9 @@ fail on a global percentage.
 
 Merge requests run only the tests that import a changed file (`vitest run
 --changed` against the merge base, for `fast` and `integration`), with no
-coverage; the push that lands on `dev` runs everything with the coverage
-ratchet (#1414). In `fast`, a merge request that changes any file other than
+coverage, except a merge request from `batch-a` or `batch-b` into `dev`, which
+runs everything with the coverage ratchet (owner, 2026-11-13, #1812); the push
+that lands on `dev` runs everything with the coverage ratchet (#1414). In `fast`, a merge request that changes any file other than
 JavaScript, TypeScript or Svelte source (the CI YAML, a Dockerfile) runs the
 whole suite instead, because `--changed` cannot see who reads such a file.
 Markdown is the exception and keeps the narrow run (owner, 2026-11-03): a docs
@@ -185,7 +186,7 @@ and first fail at the container build on the `preview` push.
 It compiles it **once** (#1061). The build used to happen three times in one
 pipeline — `scripts/test-backend.sh` did it, `fast` did it again on the same
 checkout, and the fidelity gate's Playwright `webServer` did it a third time
-from source. `fast` now publishes `web/build` as an artefact and `fidelity`
+from source. `fast` now publishes `web/build` as an artefact (`fast_checks` since #1831) and `fidelity`
 takes it. What stops a stale build being served instead is
 `scripts/web-build-stamp.mjs`: the build records a hash of everything it was
 made from — `web/` less its tests, `src/`, and the manifests that pin the
@@ -332,14 +333,16 @@ it, start none of the nine browser jobs: `smoke`, `smoke_webkit`,
 `smoke_webkit_mobile`, `smoke_local_only`, `rig_chromium`, `rig_firefox`,
 `rig_webkit`, `film_webkit` and `screens_chromium` (#1615, #1692; `smoke_firefox`, `fidelity` and `fidelity_webkit`
 before it). They still get the fast checks, integration, the image
-build and the non-browser journeys. The nine run in full:
+build and the non-browser journeys. `rig_chromium`, `rig_firefox`, `rig_webkit`
+and `film_webkit` run nightly and nowhere else, and nothing that publishes waits
+on them (owner answer 125, #1763). The other five run in full:
 
 - at promotion: the push to `preview` (and `hotfix/*`). The `dev -> preview`
   merge request runs the quick checks a merge request into `dev` runs, no
   browsers (#1546);
 - every night on `dev`, from a pipeline schedule that sets
   `ORBIT_NIGHTLY_BROWSERS=true`, 02:00 Europe/London every night except
-  Monday. That pipeline holds only `classify`, `fast`, `build_image` and the
+  Monday. That pipeline holds only `classify`, `fast`, `fast_checks`, `build_image` and the
   nine, plus `nightly_report`. It does nothing when `dev` has not moved since the
   last nightly run (`classify` asks `scripts/ci/nightly-browsers.mjs`; the
   jobs stop on the `nightly_idle` lane; a night that yielded or sat idle is
@@ -352,8 +355,9 @@ build and the non-browser journeys. The nine run in full:
 
 A red night must be seen. `nightly_report`, the last job and `on_failure`
 only, files one issue titled "Nightly browser run failed on dev" in the
-nearest open milestone, listing the failed jobs and failing tests, or comments
-on it while it is open. It reads `SIDECAR_ISSUE_TOKEN`, the same project token
+lowest open version milestone (`v0.3.9` before `v0.3.10`; never `v0.3.x`,
+`v0.4`, `Parked` or `Waiting on upstream`; with none open, no milestone),
+listing the failed jobs and failing tests, or comments on it while it is open. It reads `SIDECAR_ISSUE_TOKEN`, the same project token
 `sidecar_pin_freshness` uses, scoped to the `ci-issue-token` environment, and
 fails clearly if it is unset. A night is not
 re-run on a commit it already ran on, even if red: retry the failed job.
@@ -390,7 +394,7 @@ Amended by ADR-0039 (owner answer 1a, 2026-11-01), as the target until
 - The stack browser jobs run only at promotion and nightly, on Chromium
   desktop and phone plus a WebKit sliver of the sign-in journeys (entry,
   local sign-in, first-run door). Firefox and WebKit otherwise run the rig
-  at promotion and nightly (answer 2a).
+  nightly (answer 2a; nightly only since owner answer 125, #1763).
 - The rig jobs (`rig_chromium`, `rig_firefox`, `rig_webkit`, `film_webkit`, `screens_chromium`; #1615, #1692) replace
   the `fidelity` jobs and carry the journeys (`web/tests/rig/`, #1614) as
   well as the screens gate.
@@ -406,7 +410,7 @@ this table is what runs.
 | --- | --- |
 | Merge request into `dev` | `vitest run --changed <merge base>` for the default and integration projects, without coverage; lint and type check; `rig_chromium` (journeys, web changes; two shards) once it measures under 10 minutes on three runs (the rule is written and switched off until then) |
 | Push to `dev` | the full Vitest run with the coverage ratchet; integration in full; the non-browser stack jobs as today |
-| Promotion (push to `preview`) | everything but the tap-floor measurement: the full Vitest run, the rig on all five browser/device projects, as sharded jobs (`rig_chromium`: desktop and phone, 2 shards; `rig_firefox`: desktop, 2; `rig_webkit`: desktop and phone, 3; `film_webkit`: the phone film, 2) and the Chromium pixel screens on their own (`screens_chromium`, one worker, no shards), then `browser_report`, the stack on Chromium desktop and phone (`smoke`, `smoke_local_only`) plus the WebKit sign-in sliver (`smoke_webkit`, `smoke_webkit_mobile`) |
+| Promotion (push to `preview`) | everything but the nightly browser suite and the tap-floor measurement: the full Vitest run and the Chromium pixel screens (`screens_chromium`, one worker, no shards), then `browser_report`, the stack on Chromium desktop and phone (`smoke`, `smoke_local_only`) plus the WebKit sign-in sliver (`smoke_webkit`, `smoke_webkit_mobile`) |
 | Nightly | the same, plus the full tap-floor measurement (`pocket_measure`), which never fails the pipeline for a miss: a miss ends it as a warning, and `pocket_measure_filing`, which installs nothing and alone holds the filing token, files the screens that missed as one issue labelled `priority: low`; a failure that names no screen fails the filing job and is the night's ordinary failure |
 
 The rig runs `fullyParallel` with workers sized to its runner, because it
@@ -414,7 +418,8 @@ shares no state. The stack suite keeps two workers and the reset gate; #949's
 per-spec isolation is not built.
 
 Sharded browser jobs (#1546, design note 52876, owner decision 97a). The
-promotion and the nightly run ten rig-lane jobs where there were four:
+the nightly runs ten rig-lane jobs where there were four (the promotion runs
+only `screens_chromium` of them since #1763):
 `rig_chromium` 2, `rig_firefox` 2, `rig_webkit` 3 and `film_webkit` 2 shards,
 plus `screens_chromium`. The shard rule: GitLab's `parallel:` gives each job
 `CI_NODE_INDEX` and `CI_NODE_TOTAL`, `web/playwright.config.js` turns them
@@ -459,9 +464,9 @@ for each.
 
 | Lane | The change touches only | Jobs it runs |
 | --- | --- | --- |
-| documentation (`risk=fast`) | prose, issue templates, policy files and unit-only tests | `classify`, `fast`, `base_image`, `gitleaks`, `licence_policy` where the file is one it reads |
-| ignore/policy (#889) | `.gitleaksignore`, `supply-chain/licence-policy.yml` | `classify`, `gitleaks`, `licence_policy`, `supply_chain_source` |
-| CI definition (#889) | `.gitlab-ci.yml`, `scripts/ci/`, the classifier and the tests that read the pipeline file | `classify`, `fast`, `fast_docker`, `gitleaks`, `supply_chain_source` |
+| documentation (`risk=fast`) | prose, issue templates, policy files and unit-only tests | `classify`, `fast`, `base_image`, `gitleaks`, `licence_policy` where the file is one it reads; a change to `supply-chain/licence-policy.yml` also runs the image build (`build_image`) and the system jobs, because the Dockerfile fails the build on an apk licence that file does not allow (#1823) |
+| ignore/policy (#889) | `.gitleaksignore` | `classify`, `gitleaks`, `licence_policy`, `supply_chain_source` |
+| CI definition (#889) | `.gitlab-ci.yml`, `scripts/ci/`, the classifier and the tests that read the pipeline file | `classify`, `fast`, `fast_checks`, `fast_docker`, `gitleaks`, `supply_chain_source` |
 
 The documentation lane is the risk classifier's `fast` result and predates the
 other two: it shortens the pipeline by axis, so a job still runs when its own
@@ -492,7 +497,7 @@ for the same thing.
 `scripts/ci/` sits in the CI lane by the owner's decision on #889. Several of
 those scripts are the acceptance stage's own checks, so a change confined to
 the CI-definition lane's own merge request does not exercise them: that lane
-runs `fast`, `fast_docker`, `gitleaks` and `supply_chain_source` only, and
+runs `fast`, `fast_checks`, `fast_docker`, `gitleaks` and `supply_chain_source` only, and
 skips the acceptance stage entirely. `scripts/ci/` matches no path in
 `classifyCiRisk`'s `fastPatterns`, `systemPatterns` or `integrationPatterns`,
 so it falls through to the function's catch-all default, `CI_RISK.SYSTEM`
@@ -555,7 +560,7 @@ the browser checks' own axes; `classify` does both. It forces the lane to
 `preview` or `main` (#1092), so a promotion whose whole diff sits in a narrow
 lane still runs the acceptance stage. On the same events, except a push to
 `dev`, it also switches `ORBIT_WEB` and `ORBIT_E2E` on (#1186), so the
-rig jobs (`rig_chromium`, `rig_firefox`, `rig_webkit`, `film_webkit`, `screens_chromium`) and the stack browser
+`screens_chromium` and the stack browser
 suites run at promotion even when its diff never touched
 `web/`.
 
@@ -590,8 +595,8 @@ instead of being reused.
 finishes, always computes the content ID: a SHA-256 over the runner image's
 ordered layer content hashes, excluding the final per-commit stamp layer
 (`scripts/ci/image-content-id.sh`). `classify` computes and looks up the
-evidence for the four source-keyed jobs (`fast`, `fast_docker`, `integration`,
-`fidelity`) before anything is built; `build_image`
+evidence for the source-keyed jobs (`fast`, `fast_checks`, `fast_docker`,
+`integration`, `fidelity`) before anything is built; `build_image`
 finishes the six image jobs' keys once it has the content ID and looks those
 up too (`scripts/ci/reuse-lookup.mjs`). Where a lookup finds a passing run on
 the same key, the job stands on it and stops; where it does not, it runs.
@@ -620,7 +625,11 @@ every merge-request verdict is "runs" — the safe direction.
 
 `fast` (#950, owner ruling on #923 rec 15a, 2026-09-09) is the docker-free
 part of what used to be one job: type-check, lint, the coverage-bearing
-Vitest run and the web build, on the unprivileged `big` lane. `fast_docker`
+Vitest run and the web build, on the unprivileged `big` lane. Since #1831
+that is itself split by phase (`ORBIT_TEST_PHASE` in `scripts/test-backend.sh`):
+`fast_checks` runs type-check, lint, the web build and the render proof and
+publishes `web/build/`; `fast` runs the guards and the Vitest run and publishes
+`coverage/`. Every check runs in exactly one of them. `fast_docker`
 is the other half, on the privileged `orbit-build` lane, and runs the
 suites, of everything that mentions Docker, actually confirmed (by running
 the candidate set with `docker` entirely absent from PATH, matching `big`'s
@@ -642,8 +651,8 @@ The split frees the
 ~200-300 s `orbit-build` used to hold for `fast`'s docker-free work every
 pipeline.
 
-The acceptance stage waits for `fast` and `fast_docker`, so a red one of
-either costs no image build, no browser suite and no installer run. It no
+The acceptance stage waits for `fast`, `fast_checks` and `fast_docker`, so a
+red one of them costs no image build, no browser suite and no installer run. It no
 longer also waits for
 `gitleaks`, `licence_policy` and `supply_chain_source` (#945, owner ruling on
 #923 rec 16b, 2026-09-09): those three queued 541–1105 s on the shared
@@ -653,7 +662,7 @@ none is `allow_failure: true` — it just no longer blocks a job that never
 reads its result; the acceptance stage keeps running rather than being
 cancelled (ADR-0028 §5 removed the project's `auto_cancel` on job failure).
 The rig jobs and `integration` still wait for all
-five: `fast`, `fast_docker`, `gitleaks`, `licence_policy` and
+six: `fast`, `fast_checks`, `fast_docker`, `gitleaks`, `licence_policy` and
 `supply_chain_source`.
 
 `sidecar_images` and `launcher_install_compat` (#944, owner ruling on #923
@@ -861,8 +870,8 @@ immediately.
   repeat-request idempotency and `409` content/scope mismatch;
 - encrypted staging privacy/AAD separation, no download/draft/parse/action
   authorization, duplicate workers, ten-minute lease expiry and stale-worker
-  fencing, restart recovery, five attempts/manual retry/immutable 24-hour
-  expiry, purge failure backlog, and reviewed pending attachment;
+  fencing, restart recovery, five attempts/manual retry/24-hour expiry that
+  never runs out while the scanner is unreachable (#1419), purge failure backlog, and reviewed pending attachment;
 - backup/restore with missing, extra, corrupt and mixed-state document objects;
 - backup/restore with in-flight encrypted scanner stages, correspondence
   validation, lease reset and requeue, with no plaintext quarantine archive;

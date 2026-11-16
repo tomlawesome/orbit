@@ -201,9 +201,6 @@ importers:
       nodemailer:
         specifier: 10.2.1
         version: 10.2.1
-      pdfjs-dist:
-        specifier: 6.3.289
-        version: 6.3.289
       postgres:
         specifier: ^3.4.7
         version: 3.4.9
@@ -295,9 +292,6 @@ importers:
       nodemailer:
         specifier: 10.2.1
         version: 10.2.1
-      pdfjs-dist:
-        specifier: 6.3.289
-        version: 6.3.289
       postgres:
         specifier: ^3.4.7
         version: 3.4.9
@@ -1968,10 +1962,6 @@ packages:
   path-key@3.1.1:
     resolution: {integrity: sha512-ojmeN0qd+y0jszEtoY48r0Peq5dwMEkIlCOu6Q5f41lfkswXuKtYrhgoTpLnyIcHm24Uhqx+5Tqm2InSwLhE6Q==}
     engines: {node: '>=8'}
-
-  pdfjs-dist@6.3.289:
-    resolution: {integrity: sha512-ZHjSVpDa3D6izMq8/04lvkhkATUmL9px6ChPaXc1k6nU2Mrhlg1/7F0bdUqCwUjw3NsPTfPZsMDUU6ZIcRaeQw==}
-    engines: {node: '>=22.13.0 || >=24'}
 
   picocolors@1.1.1:
     resolution: {integrity: sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==}
@@ -3730,10 +3720,6 @@ snapshots:
   path-expression-matcher@1.6.2: {}
 
   path-key@3.1.1: {}
-
-  pdfjs-dist@6.3.289:
-    optionalDependencies:
-      '@napi-rs/canvas': 1.0.9
 
   picocolors@1.1.1: {}
 

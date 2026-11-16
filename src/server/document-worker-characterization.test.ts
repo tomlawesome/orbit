@@ -62,6 +62,7 @@ const mocks = vi.hoisted(() => ({
   createDocumentUnsealer: vi.fn(),
   createDocumentSealer: vi.fn(),
   scanFile: vi.fn(),
+  ping: vi.fn(),
   classifyStructure: vi.fn(),
   unsealToQuarantine: vi.fn(),
   readQuarantine: vi.fn(),
@@ -74,10 +75,16 @@ const mocks = vi.hoisted(() => ({
   ciphertextExists: vi.fn(),
   listCiphertextObjects: vi.fn(),
   listStagingObjects: vi.fn(),
+  // The kept page previews' namespace (#1433 D20).
+  listPreviewObjects: vi.fn(),
+  listPreviewShards: vi.fn(),
+  previewExists: vi.fn(),
+  deletePreviewCiphertext: vi.fn(),
   listQuarantineFiles: vi.fn(),
   sweepTemporaryFiles: vi.fn(),
   purgeExpiredPortableArchives: vi.fn(),
   reconcilePortableArchiveStorage: vi.fn(),
+  rollBackStaleUnfinishedPortableImports: vi.fn(),
   purgeExpiredHouseholds: vi.fn(),
 }));
 
@@ -109,6 +116,7 @@ function classifyExecute(text: string): string {
   if (/select lifecycle, version as generation/u.test(text)) return "readPurgeDocumentState";
   if (/select lifecycle\s+from documents/u.test(text)) return "readCurrentLifecycle";
   if (/item_id is null and delete_after <= now\(\)/u.test(text)) return "retireUnboundUploads";
+  if (/'preview', coalesce\(max\(generation\), 0\) \+ 1/u.test(text)) return "enqueuePreviewJob";
   if (/select id\s+from document_jobs/u.test(text)) {
     if (/kind = 'scan'/u.test(text)) return "fenceScanJob";
     if (/kind = 'purge'/u.test(text)) return "fenceStalePurgeClaim";
@@ -257,11 +265,14 @@ vi.mock("@/server/documents/crypto", async (importActual) => {
   };
 });
 
-vi.mock("@/server/documents/scanner", () => ({ scanFileWithClamAv: mocks.scanFile }));
+// #1419: the maintenance cycle pings the scanner; here it answers.
+vi.mock("@/server/documents/scanner", () => ({ scanFileWithClamAv: mocks.scanFile, pingClamAv: mocks.ping }));
 
 vi.mock("@/server/documents/validation", async (importActual) => ({
   ...await importActual<typeof import("@/server/documents/validation")>(),
-  classifyDocumentStructure: mocks.classifyStructure,
+  // The check answers { reason, pageCount } since #1436 D3; the spy keeps answering the reason.
+  classifyDocumentStructure: async (...args: unknown[]) =>
+    ({ reason: await (mocks.classifyStructure as (...a: unknown[]) => Promise<string>)(...args) }),
   validateSupportedDocumentStructure: async (...args: unknown[]) =>
     (await (mocks.classifyStructure as (...a: unknown[]) => Promise<string>)(...args)) === "supported_structure",
 }));
@@ -283,6 +294,10 @@ vi.mock("@/server/documents/storage", async (importActual) => {
     ciphertextExists = mocks.ciphertextExists;
     listCiphertextObjects = mocks.listCiphertextObjects;
     listStagingObjects = mocks.listStagingObjects;
+    listPreviewObjects = mocks.listPreviewObjects;
+    listPreviewShards = mocks.listPreviewShards;
+    previewExists = mocks.previewExists;
+    deletePreviewCiphertext = mocks.deletePreviewCiphertext;
     listQuarantineFiles = mocks.listQuarantineFiles;
     sweepTemporaryFiles = mocks.sweepTemporaryFiles;
   }
@@ -296,8 +311,13 @@ vi.mock("@/server/documents/storage", async (importActual) => {
 vi.mock("@/server/portable-archive-repository", () => ({
   purgeExpiredPortableArchives: mocks.purgeExpiredPortableArchives,
   reconcilePortableArchiveStorage: mocks.reconcilePortableArchiveStorage,
+  rollBackStaleUnfinishedPortableImports: mocks.rollBackStaleUnfinishedPortableImports,
 }));
 
+/* #1437: the content-index backfill is its own sweep with its own tests. */
+vi.mock("@/server/document-maintenance/content-index-backfill", () => ({ backfillDocumentContentIndexes: async () => 0 }));
+/* #1786: the rejected-row retention sweep is its own sweep with its own tests. */
+vi.mock("@/server/document-maintenance/rejected-purge", () => ({ purgeExpiredRejectedDocuments: async () => 0 }));
 vi.mock("@/server/household-lifecycle", () => ({ purgeExpiredHouseholds: mocks.purgeExpiredHouseholds }));
 
 import { DOCUMENT_MAX_BYTES_CEILING } from "@/server/documents/config";
@@ -387,6 +407,7 @@ function documentTransitions(): Array<Record<string, unknown> | undefined> {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.ping.mockResolvedValue(true);
   mocks.steps.length = 0;
   mocks.executed.length = 0;
   mocks.writes.length = 0;
@@ -473,6 +494,21 @@ beforeEach(() => {
     mocks.steps.push("storage.listStagingObjects");
     return [];
   });
+  mocks.listPreviewObjects.mockImplementation(async () => {
+    mocks.steps.push("storage.listPreviewObjects");
+    return [];
+  });
+  mocks.listPreviewShards.mockImplementation(async () => {
+    mocks.steps.push("storage.listPreviewShards");
+    return [];
+  });
+  mocks.previewExists.mockImplementation(async () => {
+    mocks.steps.push("storage.previewExists");
+    return true;
+  });
+  mocks.deletePreviewCiphertext.mockImplementation(async () => {
+    mocks.steps.push("storage.deletePreviewCiphertext");
+  });
   mocks.listQuarantineFiles.mockImplementation(async () => {
     mocks.steps.push("storage.listQuarantineFiles");
     return [];
@@ -482,6 +518,9 @@ beforeEach(() => {
   });
   mocks.reconcilePortableArchiveStorage.mockImplementation(async () => {
     mocks.steps.push("portableArchives.reconcile");
+  });
+  mocks.rollBackStaleUnfinishedPortableImports.mockImplementation(async () => {
+    mocks.steps.push("portableArchives.rollBackStaleImports");
   });
   mocks.purgeExpiredHouseholds.mockImplementation(async () => {
     mocks.steps.push("households.purgeExpired");
@@ -501,9 +540,19 @@ describe("runDocumentMaintenanceCycle — phase order", () => {
     expect(mocks.steps).toEqual([
       // 1. Strand the documents interrupted mid-upload.
       "update:documents",
+      // The documents content-index backfill leaves no step here; the next is
+      // 1a. Seal mail-in attachment hashes left plain (#1778), right after it.
+      "select:imap_ingestion_attachments",
       // 2. Expire recovery stages past their retention window.
       "tx:begin",
       "select:document_staging_objects",
+      "tx:commit",
+      // The scanner answers. This process has never ended an outage, so its
+      // first healthy ping ends any the database holds open (#1810 A-F1,
+      // level-triggered reconciliation); later healthy pings write nothing.
+      "tx:begin",
+      "execute:advisoryLock",
+      "update:audit_log",
       "tx:commit",
       // 3. Retry the deletion of already-terminal staged bytes.
       "select:document_staging_objects",
@@ -522,8 +571,14 @@ describe("runDocumentMaintenanceCycle — phase order", () => {
       "storage.listCiphertextObjects",
       "select:document_staging_objects",
       "storage.listStagingObjects",
+      // The kept pages' sweep (#1433 D20): rows first, in pages, then the
+      // volume one shard at a time (none here).
+      "select:document_previews",
+      "storage.listPreviewShards",
       "storage.listQuarantineFiles",
       "portableArchives.reconcile",
+      // An import whose lease ran out is rolled back in the same step (#1390).
+      "portableArchives.rollBackStaleImports",
       // 7. Scan recovery is claimed before purge, in one pass each.
       "execute:claimScanJobs",
       "execute:claimPurgeJobs",
@@ -652,6 +707,8 @@ describe("scanner recovery — the clean path publishes only after a clean scan"
       "update:document_jobs",
       "select:reviewed_intake_operations",
       "insert:audit_log",
+      // Its pages are queued for drawing in the same transaction (#1433 D12).
+      "execute:enqueuePreviewJob",
       "tx:commit",
       // Only after the handoff is durable are the staged bytes removed.
       "storage.deleteStagingCiphertext",
@@ -830,6 +887,22 @@ describe("scanner recovery — fail-closed scanning order", () => {
     expect(jobWrite?.values).toMatchObject({ status: "retry", lastError: "scanner_unavailable", leaseToken: null });
   });
 
+  it("keeps the job in retry, never failed, when the scanner is unavailable at the attempt ceiling", async () => {
+    mocks.ping.mockResolvedValue(false); // #1419: scanner down at the moment of the retry
+    armScanJob();
+    world.jobAttempts = 5;
+    mocks.scanFile.mockImplementation(async () => {
+      mocks.steps.push("scanner.scan");
+      return { status: "error", reason: "unavailable" };
+    });
+
+    await runDocumentMaintenanceCycle();
+
+    const jobWrite = mocks.writes.find((write) => write.table === "document_jobs" && write.operation === "update");
+    expect(jobWrite?.values).toMatchObject({ status: "retry", lastError: "scanner_unavailable", leaseToken: null });
+    expectNoPublish();
+  });
+
   it("fails the job terminally once the automatic attempt ceiling is reached", async () => {
     armScanJob();
     world.jobAttempts = 5;
@@ -862,6 +935,8 @@ describe("scanner recovery — fail-closed scanning order", () => {
       "select:document_staging_objects",
       "update:document_staging_objects",
       "update:documents",
+      // A staged mail-in transfer is settled in the same transaction (#1802).
+      "select:imap_ingestion_attachments",
       "update:reviewed_intake_operations",
       "insert:audit_log",
       "tx:commit",
@@ -1227,6 +1302,8 @@ describe("purge jobs — irreversible ordering", () => {
       "execute:readOwnedPurgeRecord",
       "tx:commit",
       // The bytes go first: a terminal row must never point at ciphertext.
+      // The kept pages' objects before the document's (#1433 D20).
+      "select:document_previews",
       "storage.deleteCiphertext",
       // Only then is the metadata finalized, under the same lease.
       "tx:begin",
@@ -1235,6 +1312,7 @@ describe("purge jobs — irreversible ordering", () => {
       "execute:readOwnedPurgeRecord",
       "update:documents",
       "delete:document_crypto",
+      "delete:document_previews",
       "update:document_jobs",
       "insert:audit_log",
       "tx:commit",

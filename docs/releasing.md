@@ -33,10 +33,25 @@ GitLab merge.
 
 To ship a stable release:
 
-Before step 1, on `dev`: write `src/release-notes/v<version>.ts` (for everyone / for administrators; empty parts show nothing), then register it in `src/release-notes/index.ts`: import its `notes` and add them to `releaseNotes`. It ships in the image, so it must be merged before the preview is built.
+Before step 1, on `dev`: write `src/release-notes/v<version>.ts` (for everyone / for administrators; empty parts show nothing), then register it in `src/release-notes/index.ts`: import its `notes` and add them to `releaseNotes`. It ships in the image, so it must be merged before the preview is built. In the same change, rename `## Unreleased` in `CHANGELOG.md` to `## [X.Y.Z] - YYYY-MM-DD`: `promote_stable` reads that heading on `main` and refuses without it (#1704), and `main`'s files must match the tested preview's.
+
+Then, still before step 1 (#1860):
+
+- Read this whole guide, write the release record `docs/releases/vX.Y.Z.md`
+  from [the template](releases/TEMPLATE.md), and commit it on `dev` signed
+  off by name (`git commit --trailer "Signed-off-by: <your name>"`). See [Release readiness](#release-readiness-and-the-signed-release-record).
+- Fetch (`git fetch --tags <remote> dev preview main`), then run
+  `node scripts/release-readiness.mjs --target preview` on `dev` (and
+  `--target main` on `preview` before step 4). Open the promotion merge
+  request only when it ends "Ready". The `release_readiness` job runs the same
+  checks first on the merge request, and nothing else in its pipeline starts
+  until it is green.
 
 1. Merge `dev` into `preview`. CI tests the build, signs the evidence and
-   publishes the image to GHCR as `:preview`.
+   publishes the image to GHCR as `:preview`. Straight after the merge, open
+   the `preview` -> `dev` back-merge, while `preview`'s pipeline runs: Orbit
+   merges semi-linearly, so without it the next promotion is refused as
+   needing a rebase (v0.3.8 lost a round to this; #1758 automates it).
 2. Deploy that preview by its digest and do release acceptance: the
    charter's list ([v1 charter](v1-charter.md#release-acceptance), item 4),
    checked off on the release's acceptance issue. The update through the
@@ -44,14 +59,17 @@ Before step 1, on `dev`: write `src/release-notes/v<version>.ts` (for everyone /
    launcher cell on the `dev` -> `preview` merge request (#1666; see
    [Upgrade matrix](#upgrade-matrix)). Link that merge request's green
    pipeline on the acceptance issue. Green is not enough: the job also exits
-   green when it skips, with an `upgrade-cell SKIP` line in its log naming
-   why (nothing update-relevant changed, `ORBIT_UPGRADE_LAUNCHER` or
-   `ORBIT_UPGRADE_MATRIX` is `false`, or the latest-1 slot is empty). Open
-   the job log and check there is no SKIP line. If the gate skipped it
-   (#1665), the line names the commit of the earlier passed run on the same
-   merge request that it stands on: link that pipeline's job instead. For any
-   other SKIP, fix the cause (set the variable back to `true`, or fill the
-   slot), re-run the pipeline, and link the run that shows the cell ran. The
+   green when it does not run the cell. Open the job log and find the cell's
+   own `upgrade-cell PASS … shape=launcher` line. That line is the proof. An
+   `upgrade-cell SKIP` line, a lane's `skipped: …` line, or no verdict line at
+   all means the cell did not prove the update. If the gate skipped it
+   (#1665), the SKIP line names the commit of the earlier passed run on the
+   same merge request that it stands on: link that pipeline's job instead,
+   and check that it shows the PASS line. For any other SKIP (nothing
+   update-relevant changed, `ORBIT_UPGRADE_LAUNCHER` or `ORBIT_UPGRADE_MATRIX`
+   is `false`, or the latest-1 slot is empty), fix the cause (set the variable
+   back to `true`, or fill the slot), re-run the pipeline, and link the run
+   that shows the PASS line. The
    matrix does not cover Fedora, so the
    launcher's `live-fedora` update leg is still run by hand (#1601). Start an
    `ai/orbit-launcher` pipeline by hand on `dev` with `RUN_LIVE=true` and four
@@ -72,10 +90,12 @@ Before step 1, on `dev`: write `src/release-notes/v<version>.ts` (for everyone /
    `delivered`, and add a row for any promise found anywhere new. A promise
    that will not be kept is marked `dropped` and removed from where it was
    made.
-4. Merge `preview` into `main` with the merge request's Merge button. That
-   merge request renames `## Unreleased` in `CHANGELOG.md` to
-   `## [X.Y.Z] - YYYY-MM-DD`; its reviewer checks the notes against the issues
-   merged since the last release.
+4. Merge `preview` into `main` with the merge request's Merge button. Its
+   reviewer checks the notes against the issues merged since the last release.
+   The merge request cannot change any file: `promote_stable` needs `main`'s
+   files to equal the tested preview's, so the `CHANGELOG.md` heading is set on
+   `dev` before step 1 (see above). Straight after the merge, open the
+   `main` -> `preview` back-merge, for the same reason as in step 1.
 5. On GitLab, run the manual `promote_stable` job in the pipeline the merge
    started on `main`. It promotes the image built for `main`'s commit, tags
    it `vX.Y.Z` and `latest`, and creates the `vX.Y.Z` tag.
@@ -84,6 +104,111 @@ Before step 1, on `dev`: write `src/release-notes/v<version>.ts` (for everyone /
 
 The rest of this document says what each step checks and why.
 
+## Release readiness and the signed release record
+
+v0.3.9's release lost two days to checks that only ran at the end of the
+release path (#1860). `scripts/release-readiness.mjs` runs every check that
+can be made from the repository, the registry or earlier pipelines before a
+promotion starts, all in one go, and ends with the list of every failure and
+what to do about it. It exits 0 only when every check passes.
+
+For a promotion into `preview` (`--target preview`):
+
+- `version`: `scripts/calculate-version.mjs --channel preview` gives a valid
+  `vX.Y.Z` and `scripts/release-line.json` parses.
+- `tag-free`: the GitLab tag `vX.Y.Z` does not exist yet.
+- `changelog`: `CHANGELOG.md` has a filled `## [X.Y.Z] - YYYY-MM-DD` section
+  (`scripts/release-notes.mjs`) and no `## Unreleased` section holds entries.
+- `in-app-notes`: `src/release-notes/vX.Y.Z.ts` exists and
+  `src/release-notes/index.ts` imports it and lists it in `releaseNotes`.
+- `contains-target`: the source branch contains the target branch, so the
+  semi-linear merge is not refused as needing a rebase.
+- `base-image`: `scripts/check-base-image-current.sh` passes on both axes.
+- `sidecar-pins`: `node scripts/sidecar-pins.mjs check --packages` passes.
+- `upgrade-matrix`: neither `ORBIT_UPGRADE_MATRIX` nor
+  `ORBIT_UPGRADE_LAUNCHER` is `false` (the CI/CD variable or
+  `scripts/ci/upgrade-versions.mjs`'s answer), and `updateFrom` is the newest
+  three stable tags on GitLab.
+- `slow-gates-green`: on the newest `dev` pipeline (nightly or merge request)
+  whose commit has the same tree as the source branch and that ran them,
+  `screens_chromium`, `smoke` and `fast` (coverage floors and headroom) are
+  green and no `rig_*` job failed. With none, it says which pipeline to run
+  first. It reads the pipelines API with the read-only `ORBIT_REUSE_TOKEN` in CI
+  (the job declares the `ci-read-tokens` environment, as `classify` does;
+  owner 50a on #1860); locally, set `GITLAB_TOKEN` to a `read_api` token
+  first.
+- `release-record`: the signed record below.
+
+For a promotion into `main` (`--target main`): `tag-free`, `changelog`,
+`in-app-notes` and `release-record` again for the version on `preview`, and:
+
+- `main-tree-equals-preview`: `main` is contained in `preview`, and the merge
+  result's files equal the `preview` tip's (what
+  `scripts/stable-promotion-policy.mjs` requires after the merge).
+- `ghcr-image`: GHCR holds `:sha-<preview tip>`, `:preview` points at it, and
+  the `handoff-<preview tip>` release exists in the handoff repository
+  (#1821, #1824). The repository's name comes from
+  `.github/workflows/publish-from-gitlab.yml`, never from the protected
+  variable.
+- `evidence-window`: the `preview` tip's validation evidence is no more than
+  7 days old (`scripts/ci/verify-validation-evidence.sh`).
+
+### The signed release record
+
+Running the checks is not proof that the guide was read, so the agent running
+the release signs a record for the version: a pre-flight checklist sign-off
+(DCO-style sign-off bound to this guide's content; owner design ruling on
+#1860). Copy [docs/releases/TEMPLATE.md](releases/TEMPLATE.md) to
+`docs/releases/vX.Y.Z.md` and fill it in:
+
+- `version:` the version, `vX.Y.Z`.
+- `guide-blob:` this guide's git blob id, `git rev-parse HEAD:docs/releasing.md`,
+  and `guide-commit:` the last commit that changed it,
+  `git log -1 --format=%H -- docs/releasing.md` (for people; the check
+  verifies the blob id, which a rebase does not change).
+- One `step N:` line for every numbered step of "What you do, in short", in
+  order: `done: <link or job id>`, `not-needed: <the owner decision that says
+  so>`, or `after-merge` for a step that comes after the promotion.
+- `Signed-off-by: <name>`: a name only, no email (the private-details check
+  refuses an email in a file or a commit message), equal to the commit's
+  author name. Commit it with
+  `git commit --trailer "Signed-off-by: <name>"`, which adds the same trailer
+  (`git commit -s` would add the email).
+
+The `release-record` check fails when the record is missing; when its
+`Signed-off-by` line is not the author name and a `Signed-off-by` trailer of the
+last commit that touched it; when `guide-blob` is not this guide's blob id in
+the tree being promoted ("guide changed; re-read docs/releasing.md and
+regenerate the record": any edit to this guide needs a new record); or when it
+leaves out, repeats or reorders a step, or a step's evidence is empty or a
+placeholder. The record is written once, on `dev`, before step 1: the
+promotion into `main` cannot change a file (step 4), so its check reads the
+same record from `preview`. Steps that come later say `after-merge`, and their
+evidence goes where each step says (the acceptance issue, the merge request).
+
+### What the job cannot check
+
+These steps are not checked by `release_readiness` and stay manual. The
+record names each one's evidence:
+
+- Release acceptance on the deployed preview (step 2): the release agent
+  does it on the acceptance issue, with the `upgrade-cell PASS … shape=launcher`
+  line and the `live-fedora` leg; only the owner waives it.
+- The roadmap update (step 3): the release agent.
+- Checking the notes against the issues merged since the last release
+  (step 4): the promotion merge request's reviewer.
+- Approving the promotion merge request into `preview` or `main`: the owner.
+- Running `promote_stable` on `main` (step 5): the owner, or whoever the owner
+  names, on protected `main`.
+- The countersign workflow on GitHub (step 6): the owner.
+- The `preview` -> `dev` back-merge after step 1, and the `main` -> `preview`
+  back-merge after step 4: the release agent.
+- The handoff token (`GITHUB_HANDOFF_TOKEN`) is set and not expired: the
+  owner, before step 4. The job cannot read a protected variable.
+- Other owner-side setup the repository cannot see: the
+  `orbit-signing` runner and its key files, protected branches, and the
+  GitHub mirror: the owner.
+
 ## Protected branch flow
 
 - Ordinary issue branches start from and target `dev`.
@@ -91,14 +216,15 @@ The rest of this document says what each step checks and why.
 - The `preview` push runs the full CI gate and publishes the tested image to
   GHCR as `:preview` and `:sha-<commit>`. On GitHub's mirror, the
   `publish-from-gitlab` workflow copies the digest GitLab already built and
-  tested; it never rebuilds. It polls the GitLab pipeline for the pushed
-  commit (`scripts/ci/gitlab-await-tested-image.sh`) and copies the digest
-  only once that pipeline succeeds. If a GitLab job fails by chance and is
-  retried, the next poll picks the pipeline up as soon as it turns `success`
-  within the wait window (`ORBIT_WAIT_MINUTES`, default 120 minutes); nobody
-  needs to re-run anything. Only if the window passes with the pipeline still
-  failed do you re-run the GitHub run by hand, with
-  `gh run rerun <run-id> --failed`.
+  tested; it never rebuilds, and it never connects to GitLab (#1824). GitLab
+  hands the build over instead: see "The release handoff" below. The
+  workflow waits for that handoff (`scripts/ci/github-await-handoff.sh`) and
+  copies the digest only once it is complete and GitLab's attestation
+  verifies. If a GitLab job fails by chance and is retried, the workflow picks
+  the handoff up as soon as it lands within the wait window
+  (`ORBIT_WAIT_MINUTES`, default 120 minutes); nobody needs to re-run
+  anything. Only if the window passes with no handoff do you re-run the
+  GitHub run by hand, with `gh run rerun <run-id> --failed`.
 - After digest-based acceptance, merge `preview` into `main`.
 - A `hotfix/*` branch starts from `main`, publishes and accepts a patch, is
   merged into `main` with the merge request's Merge button, promoted, and
@@ -110,8 +236,10 @@ The rest of this document says what each step checks and why.
   `repair_journeys`.
 - After every promotion, back-merge (`preview` into `dev`, `main` into
   `preview`), and an empty back-merge MR runs only `backmerge-check` (#1698).
-- A merge request into `batch-a` or `batch-b` runs only the static checks,
-  `gitleaks`, `private-details` and `flake_check`, in a few minutes (#1720).
+- A merge request into `batch-a` or `batch-b` runs the static checks,
+  `gitleaks`, `private-details` and `flake_check` (#1720), and the unit tests,
+  `fast` with the `classify` job it needs (#1776, owner 14a, 2026-11-07): about
+  11 to 12 minutes, so a batch never takes in a failing unit test unseen.
   The batch's own merge request into `dev`, after its audit, runs the full
   pipeline, so nothing reaches `dev` untested. "Pipelines must succeed" still
   holds: the small pipeline is what lets the batch merge request merge.
@@ -159,10 +287,121 @@ On a `preview`/`hotfix-*` push, three jobs run in turn:
 
 The signing key never enters GitLab at all. It lives on the runner host, and
 only the job tagged `orbit-signing` can reach it. The reason: this GitLab is
-the Community Edition, which has no protected environments and no
-environment-scoped variables, so a CI/CD variable would be readable by every
-job in a protected-branch pipeline. The runner is registered as protected (it
+the Community Edition, which has no protected environments. It does scope a
+variable to an environment, but any branch can declare that environment in
+its own `.gitlab-ci.yml`, so a CI/CD variable would in the end be readable by
+any job in a protected-branch pipeline (ADR-0020). The runner is registered as protected (it
 refuses jobs from unprotected refs) and locked to this project.
+
+### The release handoff (#1824)
+
+GitHub's workflows never connect to GitLab. GitLab pushes what they need, as
+offline image transfer: on a `preview` or `hotfix/*` push, after
+`record_image`, `sign_evidence` and `build_launcher`,
+the `handoff_to_github` job:
+
+1. saves the tested image by digest, with GitLab's attestations (the
+   validation record and the SBOM, which `sign_evidence` attests as
+   `spdxjson`, #1848), as one OCI-layout archive, `orbit-image.oci.tar`
+   (`cosign save`), and checks offline, with the committed `cosign.pub`, that
+   both are in it;
+2. uploads that archive with `gitlab-tested-image.json`,
+   `orbit-release-manifest.json`, its `.sig` and the two launcher archives to
+   a release named `handoff-<commit>` in the separate public handoff
+   repository, `<owner>/orbit-handoff`, named by the `GITHUB_HANDOFF_REPO`
+   CI/CD variable (`scripts/ci/github-upload-handoff.sh`). The release is made
+   as a **draft**, the files go up, `handoff-complete.json` (every file's
+   sha256 and size) goes up last, and only then is the draft published. A
+   failed upload leaves an unpublished draft that GitHub's side cannot see. A
+   re-run turns the same release back into a draft, replaces its files and
+   publishes it again; it never makes a second one;
+3. deletes handoff releases older than 14 days, and their tags
+   (`scripts/ci/github-prune-handoffs.sh`). No GitHub workflow writes to or
+   prunes the handoff repository.
+
+The job is not allowed to fail: a build GitHub cannot publish is not
+releasable, and this is where that shows. It fails at once, naming the
+variable, if `GITHUB_HANDOFF_TOKEN` or `GITHUB_HANDOFF_REPO` is unset.
+
+The handoff release is only the carrier, not a trust anchor: anyone can read
+it, and each file must be under 2 GiB. Trust stays in the key:
+
+- `publish-from-gitlab.yml` waits for the published release with its
+  `handoff-complete.json` (a draft, or a release without it, is not there),
+  reading with the run's own read-only token: the repository is public, so
+  the workflow holds `contents: read` only, in every job (#1107 option 21a).
+  It downloads the files, checks each against its listed sha256 and size,
+  and checks the evidence names this commit, branch and pipeline. It loads
+  the archive into a throwaway `crane registry serve` on localhost, runs
+  `scripts/ci/verify-validation-evidence.sh` there, and only then copies the
+  image and the attestation to GHCR, checking the pushed digest equals the
+  evidence digest. Nothing unverified reaches GHCR. The verifier, given
+  `ORBIT_SBOM_OUT`, also writes out the SBOM from GitLab's verified spdxjson
+  attestation, and that is the SBOM GitHub attests: the newest by its signed
+  SPDX `creationInfo.created` (an RFC 3339 date-time, compared as an
+  instant), refusing two different SBOMs at the same instant, or one without
+  a valid `created` (ADR-0020, 43a amendment). An SBOM attestation whose
+  subject is another digest is refused with exit 10. The logged SBOM sha256
+  is of the written file, the re-serialised SPDX document, so it matches
+  `sha256sum` of `ORBIT_SBOM_OUT`, not GitLab's `image.spdx.json`. The SBOM
+  attestations are copied to GHCR with the validation ones, and the GHCR
+  check demands them. Digests attested before 43a have no SBOM attestation,
+  so GitHub refuses to publish them: re-validate them on GitLab.
+- `release-on-tag.yml` takes the launcher archives, manifest and `.sig` from
+  the same handoff release, read-only, and runs every check it ran before.
+- `countersign.yml` verifies GitLab's attestation on GHCR, where the publish
+  workflow copied it. A release published before #1824 has no attestation on
+  GHCR, so countersign refuses it; countersign such a release before this
+  change lands, or re-publish it.
+
+Why a separate repository (owner, 2026-11-12, answer 11d; ADR-0031): a key
+that can write to Orbit's own GitHub repository could push a commit that
+swaps `cosign.pub`, and the workflows read that file from the pushed commit.
+So the handoff key has no power there. In `orbit-handoff` it can only add,
+change or delete handoff files, and a changed file fails the checks above and
+publishes nothing.
+
+#### The GitHub handoff token
+
+The owner creates and renews this; agents cannot.
+
+1. On GitHub, create a new **public** repository named `orbit-handoff` under
+   the same account as Orbit's mirror, with one first commit (tick "Add a
+   README"), so releases have a commit to tag. It holds no code, only
+   handoff releases.
+2. Create a **fine-grained** personal access token: Settings > Developer
+   settings > Fine-grained tokens. Resource owner: that account; repository
+   access **Only select repositories**: `orbit-handoff` only, never Orbit's
+   own repository. Repository permissions: **Contents: Read and write**
+   (Metadata: Read is added automatically); nothing else. Give it an expiry
+   date, at most a year.
+3. On GitLab, `ai/orbit` > Settings > CI/CD > Variables, add
+   `GITHUB_HANDOFF_TOKEN` with the token as its value, **protected** and
+   **masked**, with **Environment scope** `github-handoff`. Protected keeps
+   it to protected branches, where `handoff_to_github` runs. The environment
+   scope keeps it from every other job in those pipelines: only
+   `handoff_to_github` declares `github-handoff`, and GitLab gives an
+   environment-scoped variable only to jobs that declare its environment.
+   Protected branches here include `dev` and the batch branches, whose jobs
+   run merged code and its dependencies, so without the scope all of them
+   would receive it. What the scope does not do on this CE instance (19.5.3,
+   checked 2026-11-12): CE has no protected environments, so a change to
+   `.gitlab-ci.yml` that declares `github-handoff` in another job would give
+   that job the token. That change has to be reviewed and merged to reach a
+   protected branch; the scope limits reach, it is not a fence (ADR-0020).
+   The live-test job also strips the token from its environment (`env -u`).
+4. Add a second variable, `GITHUB_HANDOFF_REPO`, set to
+   `<owner>/orbit-handoff` with your account as the owner (protected; it is
+   not a secret, so it need not be masked). It is a variable so that no owner
+   name is written in a tracked file.
+5. Put the expiry in your calendar and renew before it, every year: create a
+   new token the same way and replace the variable's value. An expired token
+   turns `handoff_to_github` red, and nothing publishes until it is replaced.
+6. Once a `preview` push has published through the handoff, delete the two
+   old GitHub Actions secrets, `GITLAB_READ_TOKEN` and
+   `GITLAB_READ_TOKEN_NAME` (Orbit's GitHub repository > Settings > Secrets
+   and variables > Actions), and revoke the GitLab token they held. No
+   workflow reads them any more.
 
 **Re-publishing:** if publication fails, or a tag needs recreating, retry
 `publish_channel` alone. It re-checks and re-tags without re-running
@@ -353,9 +592,22 @@ the `previous/` pair of that job, fetched by its job id and verified. On a
 rebuild of the digest being pushed, the predecessor's own `previous/` pair is
 carried instead.
 
+Beside the pair, `previous/` also carries that build's two launcher archives,
+`orbit-launcher_linux_amd64.tar.gz` and `_arm64.tar.gz` (#1556), so
+orbit-launcher's update leg never depends on `build_launcher` artifacts, which
+expire after 90 days. They come from the newest successful `build_launcher`
+job of the predecessor's pipeline; for a rebuild or a never-signed predecessor,
+from the `previous/` of the `record_image` job whose pair is carried. Each is
+kept only if its sha256 equals the carried manifest's `files` entry, and they
+are carried both or neither. Leaving them out never fails the job: one line on
+stderr says why (`not carrying the launcher archives ...`), and orbit-launcher
+checks the sha256 itself and falls back to `build_launcher`. An API error on
+them still fails, as for the pair.
+
 `record_image` and `sign_evidence` keep their artifacts for ever
-(`expire_in: never`, a few KB per release), so the next release can always
-read them. A stuck preview or hotfix release recovers by an ordinary push, a
+(`expire_in: never`: a few KB per release for the pair and the signature, plus
+the two launcher archives, a few MB), so the next release can always read
+them. A stuck preview or hotfix release recovers by an ordinary push, a
 job retry or waiting, never by a hand-started pipeline or a CI variable.
 
 A ref's first release is recognised automatically: when the whole job list
@@ -614,9 +866,13 @@ GitLab's push mirror carries the new tag to GitHub within minutes.
 `gh release create --verify-tag`, so the GitHub Releases page keeps working
 for the public. A stable release's body is the version's `CHANGELOG.md`
 section plus a compare link to the previous stable tag, made by
-`scripts/release-notes.mjs`; there is no hand step (a pre-release still uses
-generated notes). GitHub makes no decision of its own: if a
-release for that tag already exists, it does nothing. The workflow reads the
+`scripts/release-notes.mjs`; there is no hand step. GitHub makes no decision of
+its own, except that it refuses a tag that is not a plain `vX.Y.Z` before
+publishing anything (#1848). It verifies first, then publishes: the release is
+created as a draft only after the manifest and launcher checks pass, the files
+are attached, and only then is it published, so a failed check leaves no
+half-made public release. If a release for that tag already exists it is not
+created again. The workflow reads the
 `Tested on:` line to find the pipeline whose launcher, manifest and signature
 it attaches, so a hotfix release gets its files without anyone fetching them
 by hand (#1640). A tag made before that line existed falls back to searching
@@ -643,12 +899,15 @@ started from the owner's GitHub login, so a bad release needs two separate
 break-ins on two hosts. Previews don't get one: a preview is for testing, not
 for trusting.
 
-Two limits:
+Three limits:
 
 - **Within seven days.** The verifier refuses evidence older than seven days,
   so countersign right after promoting.
 - **Needs `main`.** GitHub only offers the workflow once the file is on
   `main`, so it's available from the first stable release that contains it.
+- **Not a release published before #1824.** Its attestation was never copied
+  to GHCR, so the workflow refuses it as missing. Re-publish it first, then
+  countersign (see "The release handoff (#1824)" above).
 
 ### Check both signatures on a release
 
@@ -665,12 +924,12 @@ cosign verify ghcr.io/tomlawesome/orbit@sha256:... \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 
 # 2. GitLab's key-based validation evidence, with the committed cosign.pub.
-#    It lives beside the image in the GitLab registry, not in GHCR, so this
-#    one needs read access to the GitLab registry's ai/orbit image.
+#    The publish workflow copies it to GHCR with the image (#1824); releases
+#    published before that have it only in the GitLab registry.
 cosign verify-attestation --key cosign.pub \
   --type https://tomlawson.io/attestations/orbit-validation/v1 \
   --insecure-ignore-tlog=true \
-  <gitlab-registry>/ai/orbit@sha256:...
+  ghcr.io/tomlawesome/orbit@sha256:...
 ```
 
 A user's own machine runs the first of these checks automatically: see "The
@@ -701,7 +960,8 @@ consumer checks it two ways, with cosign and with
 
 **Where it travels.** Only `release-on-tag.yml` publishes these files. It
 downloads the manifest, its `.sig` and the two launcher archives from the
-GitLab pipeline that tested the commit a stable tag points at, checks them,
+`handoff-<commit>` release GitLab published in the handoff repository for the
+commit a stable tag points at (see "The release handoff"), checks them,
 checks each file's sha256 against the manifest, and attaches them to the
 release. It never rebuilds anything. It uploads `install.sh` and
 `get-orbit.sh` from its own checkout, which is safe only because that is a
@@ -711,9 +971,10 @@ assuming it.
 
 `publish-from-gitlab.yml`, which runs automatically on every push to
 `preview` or a `hotfix/*` branch, only copies the tested image digest to
-GHCR. It does not hold `contents: write` and never touches the launcher,
-manifest or a release (owner decision, 2026-09-24, #1107 option 21a): an
-automatic workflow must not be able to change the releases page. There is no
+GHCR. It never publishes the launcher, manifest or a release (owner
+decision, 2026-09-24, #1107 option 21a), and holds `contents: read` only, in
+every job: since #1824 it reads the handoff from the separate public handoff
+repository, which needs no write access, and never writes there. There is no
 automatically published preview launcher; a preview install needs a
 verified manifest handed to `install.sh` directly, via
 `ORBIT_RELEASE_MANIFEST`.
@@ -783,8 +1044,14 @@ for the full list of what is and is not checked.
 
 ## Required CI/CD variables
 
-The owner creates both under GitLab Settings > CI/CD > Variables, masked,
-protected (the job only ever runs on a protected ref):
+The owner creates these under GitLab Settings > CI/CD > Variables, masked,
+protected (the jobs only ever run on a protected ref):
+
+- `GITHUB_HANDOFF_TOKEN` -- a fine-grained GitHub token for the
+  `orbit-handoff` repository only, Contents read and write, with an expiry.
+  Read by `handoff_to_github`; see "The GitHub handoff token".
+- `GITHUB_HANDOFF_REPO` -- `<owner>/orbit-handoff`, the handoff repository
+  (not a secret; masking is optional). Read by `handoff_to_github`.
 
 - `GHCR_PUBLISH_TOKEN` -- a GitHub token (fine-grained or classic) scoped to
   `write:packages` only. Nothing else: it can push and tag container images
@@ -803,10 +1070,10 @@ jobs that read it receive it -- see "Who starts a pipeline, and where it runs"
 in `docs/quality-strategy.md`) is still read by the jobs that look up earlier
 pipelines' evidence.
 
-Neither token is ever a command-line argument or printed: the GHCR token is
-piped to `docker login` on stdin, and the GitLab token travels to `curl` as a
-header file. Rotate either by replacing the CI/CD variable; nothing else
-needs to change.
+No token is ever a command-line argument or printed: the GHCR token is
+piped to `docker login` on stdin, and the GitLab and GitHub handoff tokens
+travel to `curl` as a header file. Rotate any of them by replacing the CI/CD
+variable; nothing else needs to change.
 
 The signing key material is stricter still. It is not a CI/CD variable at
 all, but files on the `orbit-signing` runner's host that only the signing

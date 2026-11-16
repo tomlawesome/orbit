@@ -224,10 +224,11 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
     await expect(page.locator(decorativeSky(testInfo)).first()).toHaveAttribute("aria-hidden", "true");
   });
 
-  test("/settings/mail", async ({ page }, testInfo) => {
-    await signedIn("/settings/mail", "rest")(page);
+  /* #1509: the relay is the Mail card's `your relay` tab; the sky is /settings' own. */
+  test("/settings#mail", async ({ page }, testInfo) => {
+    await signedIn("/settings", "mail")(page);
     await walkScreen(page, testInfo, "settings-mail");
-    await expect(page.locator(".satellites")).toHaveAttribute("aria-hidden", "true");
+    await expect(page.locator(decorativeSky(testInfo)).first()).toHaveAttribute("aria-hidden", "true");
   });
 
   test("/inbox", async ({ page }, testInfo) => {

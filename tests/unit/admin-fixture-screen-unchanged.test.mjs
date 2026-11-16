@@ -13,6 +13,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  * The "answering" run feeds readAdminScreen() the real route handlers' own
  * fixture answers (every database collaborator throws); the "failing" run
  * answers 500 for the same four URLs.
+ *
+ * #1792 (L18): the export settings' route (`/api/admin/archive-storage`)
+ * joins the "answering" run with its fixture answer, the defaults never
+ * changed; the photographed rows stay those of the "failing" run.
  */
 const DATABASE_DOWN = new Error("database must not be touched in fixture mode");
 vi.mock("orbit/server/authorization", () => ({ requireInstanceAdministrator: async () => { throw DATABASE_DOWN; } }));
@@ -32,6 +36,7 @@ const ROUTE_FILES = {
   "/api/admin/documents/health": "../../web/src/routes/api/admin/documents/health/+server.js",
   "/api/admin/documents/rotation": "../../web/src/routes/api/admin/documents/rotation/+server.js",
   "/api/admin/recovery-bundle": "../../web/src/routes/api/admin/recovery-bundle/+server.js",
+  "/api/admin/archive-storage": "../../web/src/routes/api/admin/archive-storage/+server.js",
 };
 const HOUSEHOLD = { id: "hh-1", name: "Household", today: "2026-08-13" };
 
@@ -94,6 +99,22 @@ describe("administration screen model in fixture mode (#1697)", () => {
     expect(answering.metadata?.locked ?? false).toBe(false);
     expect(answering.metadata?.damagedValues ?? 0).toBe(0);
     expect(answering.recoveryBundle === null || answering.recoveryBundle.exported).toBe(true);
+  });
+
+  it("reads the export settings' fixture answer, the defaults never changed, and the photographed rows do not move (#1792)", async () => {
+    const failing = await screen("failing");
+    const answering = await screen("answering");
+    for (const field of ["services", "instance", "relay", "users", "owners"]) {
+      expect(answering[field], field).toEqual(failing[field]);
+    }
+    expect(answering.archiveStorage).toMatchObject({
+      retentionHours: 6,
+      keepPerHousehold: 2,
+      overrides: { retentionHours: null, keepPerHousehold: null, maxTotalBytes: null },
+      version: 1,
+      updatedAt: null,
+    });
+    expect(failing.failed.archiveStorage, "fixture mode flags no card as failed").toBe(false);
   });
 
   it("flags no card as failed in either run", async () => {

@@ -4,8 +4,8 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 /*
  * Per-route request body limits (#1285): adapter-node's BODY_SIZE_LIMIT is
  * one number for every route, and its 512 KB default refused every document
- * over 512 KB with a 500. The image now sets it to the largest body any route
- * may take, and the request pipeline (web/src/hooks.server.js, through
+ * over 512 KB with a 500. The image now turns it off (Infinity, #1390), and
+ * the request pipeline (web/src/hooks.server.js, through
  * web/src/lib/server/body-limit.js) holds each route to its own: the document
  * upload routes to the administrator's upload limit, everything else to a
  * small one. An over-limit body is a 413, never a 500.
@@ -22,10 +22,10 @@ vi.mock("orbit/server/upload-limit", () => ({
 }));
 
 import { appErrorResponse } from "orbit/lib/app-error";
-import { MAX_ARCHIVE_CIPHERTEXT_CHARACTERS } from "orbit/server/portable-archive-limits";
+import { V1_MAX_ARCHIVE_CIPHERTEXT_CHARACTERS, maxArchiveFileBytes } from "orbit/server/portable-archive-limits";
 import {
-  SERVER_BODY_LIMIT,
   SMALL_BODY_LIMIT,
+  archiveBodyLimit,
   bodyLimitFor,
   discardBody,
   limitRequestBody,
@@ -78,7 +78,7 @@ describe("which limit a route gets", () => {
     await expect(bodyLimitFor(null, readLimit)).resolves.toMatchObject({ limit: SMALL_BODY_LIMIT });
   });
 
-  it("lets through the largest archive import Orbit's own export can produce, well past 101 MiB (#1290)", async () => {
+  it("lets through the largest v1 archive import the import accepts, well past 101 MiB (#1290)", async () => {
     /* The body the import screen sends for an archive at the format's cap:
        the encrypted archive as the export wrote it, at the longest ciphertext
        the import accepts, plus the largest conflict list the route allows. The
@@ -86,12 +86,21 @@ describe("which limit a route gets", () => {
     const conflictItemIds = Array.from({ length: 10_000 }, () => "00000000-0000-4000-8000-000000000000");
     const archive = { version: 1, algorithm: "aes-256-gcm", kdf: "scrypt", salt: "s".repeat(22), iv: "i".repeat(16), authTag: "t".repeat(22), ciphertext: "" };
     const envelope = JSON.stringify({ householdId: conflictItemIds[0], archive, passphrase: "p".repeat(256), conflictItemIds, currentPassword: "c".repeat(1_024) });
-    const largestBody = Buffer.byteLength(envelope) + MAX_ARCHIVE_CIPHERTEXT_CHARACTERS;
+    const largestBody = Buffer.byteLength(envelope) + V1_MAX_ARCHIVE_CIPHERTEXT_CHARACTERS;
     expect(largestBody).toBeGreaterThan(101 * MIB);
     for (const route of ["/api/portable-archives/import", "/api/portable-archives/preview"]) {
       const rule = await bodyLimitFor(route, readLimit);
       expect(rule.limit).toBeGreaterThanOrEqual(largestBody);
-      expect(rule.limit).toBeLessThanOrEqual(SERVER_BODY_LIMIT);
+    }
+  });
+
+  it("gives the archive routes the largest v2 archive the configuration allows, plus the small limit (#1390)", async () => {
+    /* No document key in the unit lane, so the configuration cannot be read
+       and the default 5 GiB quota's figure applies. */
+    const expected = maxArchiveFileBytes({ householdQuotaBytes: 5 * 1_073_741_824 }) + SMALL_BODY_LIMIT;
+    expect(archiveBodyLimit()).toBe(expected);
+    for (const route of ["/api/portable-archives/import", "/api/portable-archives/preview"]) {
+      await expect(bodyLimitFor(route, readLimit)).resolves.toMatchObject({ limit: expected });
     }
   });
 
@@ -99,10 +108,9 @@ describe("which limit a route gets", () => {
     expect(SMALL_BODY_LIMIT).toBeGreaterThan(512 * 1024);
   });
 
-  it("matches the image's server-wide BODY_SIZE_LIMIT exactly", () => {
+  it("leaves the image's server-wide BODY_SIZE_LIMIT off, so this module is the one gate (#1390)", () => {
     const dockerfile = readFileSync(new URL("../../Dockerfile", import.meta.url), "utf8");
-    const [, value] = /^ENV BODY_SIZE_LIMIT=(\d+)M$/m.exec(dockerfile) ?? [];
-    expect(Number(value) * MIB).toBe(SERVER_BODY_LIMIT);
+    expect(dockerfile).toMatch(/^ENV BODY_SIZE_LIMIT=Infinity$/m);
   });
 });
 

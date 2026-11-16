@@ -113,7 +113,7 @@ closed.
 | RM-041 | Downloads are authenticated, authorisation is rechecked, no public URLs, safe headers | ORB-FUT-003 | v1.0 | delivered | #42; #1571: a download is verified in one pass over the stored object, audited, then decrypted into the response in pieces, so no plaintext is released before the tag verifies and the file is no longer buffered (92106e44; `tests/integration/document-lifecycle.test.ts`, `src/server/documents/storage-unseal.test.ts`) |
 | RM-042 | File type decided by inspecting the bytes; opaque storage keys | ORB-FUT-003 | v1.0 | delivered | #42, ADR-0033; #1397: a PDF may carry up to 256 cross-reference sections (8a07698a; `src/server/documents/validation.test.ts`); #1572: the image decoder runs in the sandbox child (ADR-0038; `src/server/documents/image-sandbox.test.ts`); #1590: the PDF end search is native, not a step per byte (35cc2381) |
 | RM-043 | Documents wait in quarantine until scanned, and a scanner outage recovers without re-upload | ORB-FUT-003 | v1.1 | delivered | #123, #168; #1571: scanner recovery decrypts a staged object to a quarantine file and releases it only after the tag verifies; a staged object failing its check never reaches the scanner (92106e44; `src/server/document-worker-characterization.test.ts`) |
-| RM-044 | Malware scanning is optional: on by default, a recommendation when off, never forced | ORB-FUT-003; site: "The system" | M16 | partial | DOCUMENT_SCAN_MODE=disabled works but the ClamAV container always runs (#1170) |
+| RM-044 | Malware scanning is optional: on by default, a recommendation when off, never forced | ORB-FUT-003; site: "The system" | v0.3.8 | delivered | #1170: `scripts/configure.sh --set-scanner` writes DOCUMENT_SCAN_MODE together with the `docker-compose.scanner-off.yml` overlay; with the scanner off, install and update skip the orbit-clamav pull and wait and remove a still-running orbit-clamav (a86ea704, ad4ea655; `scripts/install.bootstrap.test.mjs`, acceptance scenario 5689554d) |
 | RM-045 | Per-file and per-instance limits, with an upload limit the administrator can set | ORB-FUT-003 | v0.3 | delivered | #1285: administrator-set upload limit in Administration |
 | RM-046 | Orphan cleanup and storage reconciliation | ORB-FUT-003 | v1.0 | delivered | #42 |
 | RM-047 | Document events recorded in the household audit history | ORB-FUT-003 | unscheduled | partial | events reach the instance audit log; only administrators read it; download auditing unconfirmed |
@@ -127,7 +127,7 @@ closed.
 
 | ID | Promise | Promised in | Target | Status | Evidence |
 | --- | --- | --- | --- | --- | --- |
-| RM-053 | An uploaded document may suggest item fields; bounded, best effort, every field editable, nothing saved until the user submits | charter V1-DOC-02; site: "The relay" | v1.0 | delivered | #43; #1459: skipped when reading is off, and the Add page says the file is attached as it is |
+| RM-053 | An uploaded document may suggest item fields; bounded, best effort, every field editable, nothing saved until the user submits | charter V1-DOC-02; site: "The relay" | v1.0 | delivered | #43; #1459: skipped when reading is off, and the Add page says the file is attached as it is; #1437: the file is stored when it is picked, to say whether the household already holds it, while the item still waits for Add, and a file let go is deleted at once |
 | RM-054 | Extraction accuracy measured on real-world documents | decision #977 | M15 | partial | #319, #986, #962 open; corpus built in M8 |
 | RM-055 | An optional local model (Ollama) that proposes and never writes | ORB-FUT-003; charter non-goals | M8 | delivered | #935, #936, fa5f07b6; #1474: the installer downloads the confirmed model in a one-off container with a route out |
 | RM-056 | The model reads mailed-in items on CPU, live uploads only with a GPU, and live goes first | decision #974 | M15 | not started | #974, #1031; no GPU detection or queue |
@@ -142,7 +142,7 @@ closed.
 | RM-060 | Forward a bill or policy to Orbit; it reads the attachment and asks before anything is added | charter V1-DOC-03; ORB-FUT-001; site: "The relay" | v1.0 | partial | #22, #57, #58, #59, #60; proof against a real mailbox open (#1255); #1459: with TIKA_URL unset, mail-in skips reading; #1396, #1568: an approval cut off part-way is retried with the same stored request, says it was interrupted, and a replay after the receipt is discarded is refused (da6c3d36, 36d2477b, 53ad72ea; `tests/integration/reviewed-intake-route-retry.test.ts`) |
 | RM-061 | Every user has their own relay address, which they can rotate and pause | decision #336; owner-decisions §7; site: "The relay" | M4 | delivered | #336, #744, #746 |
 | RM-062 | Mail-in pulls from one mailbox and never opens a port; container mail settings are for sending only | owner-decisions §7 | M4 | delivered | #742, #743, #747 |
-| RM-063 | Support Mailcow, Gmail and Outlook, with OAuth2 for Outlook and Hotmail | owner-decisions §7 | v0.4 | partial | password IMAP works; OAuth2 is a stored setting only, no flow; #1312 (owner 2026-10-07: build it in v0.4) |
+| RM-063 | Support Mailcow and Gmail; Outlook and Hotmail are not supported | owner-decisions §7 | v0.4 | partial | password IMAP works; owner 2026-11-08 (on #1312): no OAuth2, Outlook dropped, #1780 |
 | RM-064 | Mail is tied to a user by envelope recipient and a signed alias, never the From line; unmatched mail is held for association | charter V1-DOC-03; ORB-FUT-001 | v1.0 | partial | #57; unmatched mail is deleted, not held |
 | RM-065 | Receipts are idempotent and bad messages reach a visible failed state after bounded retries | ORB-FUT-001 | v1.0 | delivered | #57, #58 |
 | RM-066 | Mailbox files are PDF only and bounded; unreviewed drafts expire after 45 days | ORB-FUT-001; site: "The relay" | v1.0 | delivered | #58, #964 |
@@ -251,7 +251,6 @@ closed.
 - "Every household has its own relay address" (and the tour film): the relay is per user (RM-061).
 - "PostgreSQL 17": Orbit runs 18 (RM-088).
 - "No invitations": email invitations exist for people without an account (RM-016).
-- ClamAV described as "if you like": its container always starts and only the scan mode can be switched off (RM-044).
 - "The sky's weather = your workload": nothing maps workload to the weather (RM-030).
 - "A history for everything": no screen lists an item's history (RM-022).
 - "Recolour your own sections": colour follows the chosen mark (RM-026).

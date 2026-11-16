@@ -2,6 +2,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { fixtureApi } from "../support/fixture-api.mjs";
+import { INBOX_FIXTURE } from "../../web/src/lib/data/fixtures/inbox.js";
 import { createPageLoader, runtime } from "../support/svelte-page.mjs";
 import { subscribeWake } from "$lib/pocket/wake.js";
 
@@ -59,7 +60,7 @@ describe("the inbox on a phone, mounted", () => {
     const api = fixtureApi({
       "GET /api/imap-inbox/*": ({ path }) => ({
         receipt: { id: path.split("/").pop(), draftVersion: 3, proposal: { title: "Home insurance renewal" } },
-        sections: [{ id: "s-home" }, { id: "s-dates" }],
+        sections: [{ id: "s-home" }, { id: "s-services" }],
         attachments: [{ id: "a-1" }],
       }),
       "PUT /api/imap-inbox/*": () => ({ ok: true }),
@@ -138,7 +139,7 @@ describe("the inbox on a phone, mounted", () => {
       expect(go.getAttribute("aria-disabled")).toBe("true");
       expect(sheet().textContent).toContain("not yet — choose a section");
     });
-    click(chip("Dates & renewals"));
+    click(chip("Services"));
     await settle();
     const provider = field("provider");
     provider.value = "Harbour Mutual plc";
@@ -147,7 +148,7 @@ describe("the inbox on a phone, mounted", () => {
     await vi.waitFor(() => expect(go.getAttribute("aria-disabled")).not.toBe("true"));
     click(go);
     await vi.waitFor(() => expect(seen.approvals).toHaveLength(1));
-    expect(seen.approvals[0].sectionId).toBe("s-dates");
+    expect(seen.approvals[0].sectionId).toBe("s-services");
     /* The sheet sends the cost as typed and the item's kind, for the engine
        to read and map (ADR-0034, #1325). */
     expect(seen.approvals[0].item).toMatchObject({
@@ -160,7 +161,7 @@ describe("the inbox on a phone, mounted", () => {
     const { seen, wakes, settle } = await mountInbox({
       "GET /api/imap-inbox/*": ({ path }) => ({
         receipt: { id: path.split("/").pop(), draftVersion: 3, proposal: { title: "Home insurance renewal" } },
-        sections: [{ id: "s-home" }, { id: "s-dates" }],
+        sections: [{ id: "s-home" }, { id: "s-services" }],
         attachments: [{ id: "a-1" }],
         approval: PAIR,
       }),
@@ -187,7 +188,7 @@ describe("the inbox on a phone, mounted", () => {
         call += 1;
         return {
           receipt: { id: path.split("/").pop(), draftVersion: 3, proposal: { title: "Home insurance renewal" } },
-          sections: [{ id: "s-home" }, { id: "s-dates" }],
+          sections: [{ id: "s-home" }, { id: "s-services" }],
           attachments: [{ id: "a-1" }],
           ...(reports(call) ? { approval: PAIR } : {}),
         };
@@ -226,7 +227,7 @@ describe("the inbox on a phone, mounted", () => {
     await vi.waitFor(() => expect(dialog()?.querySelector("input")).not.toBeNull());
     await settle();
     const sheet = /** @type {HTMLElement} */ (dialog());
-    click([...sheet.querySelectorAll("button")].find((el) => el.textContent?.includes("Dates & renewals")) ?? null);
+    click([...sheet.querySelectorAll("button")].find((el) => el.textContent?.includes("Services")) ?? null);
     await settle();
     const provider = /** @type {HTMLInputElement} */ (document.getElementById(
       [...sheet.querySelectorAll("label")].find((el) => el.textContent?.trim().startsWith("provider"))?.getAttribute("for") ?? ""));
@@ -237,7 +238,7 @@ describe("the inbox on a phone, mounted", () => {
     await vi.waitFor(() => expect(go.getAttribute("aria-disabled")).not.toBe("true"));
     click(go);
     await vi.waitFor(() => expect(seen.approvals).toHaveLength(1));
-    /* the pair verbatim: its section is s-home, not the s-dates chosen here */
+    /* the pair verbatim: its section is s-home, not the s-services chosen here */
     expect(seen.approvals[0]).toEqual(REPLAY_BODY);
     await vi.waitFor(() => expect(wakes.some((words) => words.includes("earlier approval"))).toBe(true));
     expect(wakes.some((words) => words.includes("added to your orbit"))).toBe(false);
@@ -277,5 +278,73 @@ describe("the inbox on a phone, mounted", () => {
     await settle();
     click(button("tap again to remove the message from 09 Aug"));
     await vi.waitFor(() => expect(seen.discards).toEqual(["r-gone"]));
+  });
+
+  /*
+   * #1398 rework (notes 56204, 56230, 56245): the scanner flagged a file while
+   * the member added the mail. The card says so under that file and its two
+   * buttons become Add without it / Discard everything, each asking twice.
+   */
+  const flaggedInbox = (/** @type {string[]} */ ...names) => ({
+    "GET /api/imap-inbox": () => {
+      const inbox = structuredClone(INBOX_FIXTURE);
+      const receipt = inbox.receipts.find((one) => one.id === "r-insurance");
+      receipt.attachments = names.map((displayName, at) => ({
+        id: `a-flagged-${at}`, ordinal: at + 1, displayName, mediaType: "application/pdf", sizeBytes: 831488, scanState: "flagged",
+      }));
+      return inbox;
+    },
+  });
+  /** A button of the pocket's inbox by the word it rests on. */
+  const resting = (/** @type {string} */ label) => /** @type {HTMLElement | null} */ (
+    [...document.querySelectorAll(".pk-inbox button")].find((el) => (el.querySelector(".rest")?.textContent ?? el.textContent ?? "").trim() === label
+      || (el.getAttribute("aria-label") ?? "").startsWith(label)) ?? null);
+  const inboxText = () => document.querySelector(".pk-inbox")?.textContent?.replace(/\s+/g, " ") ?? "";
+
+  it("a flagged file: the card says so under it, with no 'scanned clean' and no way to open it", async () => {
+    await mountInbox(flaggedInbox("policy-schedule.pdf"));
+    expect(inboxText()).toContain('The scanner flagged a virus or malware inside attachment: "policy-schedule.pdf"');
+    expect(inboxText()).not.toContain("scanned clean");
+    const paper = /** @type {HTMLButtonElement | null} */ ([...document.querySelectorAll(".pk-inbox .rv-paper")].find((el) => el.textContent?.includes("policy-schedule.pdf")) ?? null);
+    expect(paper?.disabled, "the flagged paper cannot be opened").toBe(true);
+  });
+
+  it("one flagged file: the buttons are Add without it and Discard everything, and the old pair is gone", async () => {
+    await mountInbox(flaggedInbox("policy-schedule.pdf"));
+    expect(resting("Add without it")).not.toBeNull();
+    expect(resting("Discard everything")).not.toBeNull();
+    expect(resting("Add without them")).toBeNull();
+    expect(resting("Add to orbit")).toBeNull();
+    expect(resting("Dismiss")).toBeNull();
+  });
+
+  it("several flagged files: one line each, and the button is Add without them", async () => {
+    await mountInbox(flaggedInbox("policy-schedule.pdf", "terms.pdf"));
+    expect(inboxText()).toContain('The scanner flagged a virus or malware inside attachment: "policy-schedule.pdf"');
+    expect(inboxText()).toContain('The scanner flagged a virus or malware inside attachment: "terms.pdf"');
+    expect(resting("Add without them")).not.toBeNull();
+    expect(resting("Add without it")).toBeNull();
+    expect(resting("Discard everything")).not.toBeNull();
+  });
+
+  it("Add without it asks twice, then adds the mail", async () => {
+    const { seen, settle } = await mountInbox(flaggedInbox("policy-schedule.pdf"));
+    click(resting("Add without it"));
+    await settle();
+    expect(seen.approvals, "one tap only arms").toHaveLength(0);
+    click(resting("Add without it"));
+    await vi.waitFor(() => expect(seen.approvals).toHaveLength(1));
+    expect(seen.approvals[0]).toMatchObject({ source: { receiptId: "r-insurance" } });
+    expect(seen.discards).toEqual([]);
+  });
+
+  it("Discard everything asks twice, then discards the mail", async () => {
+    const { seen, settle } = await mountInbox(flaggedInbox("policy-schedule.pdf"));
+    click(resting("Discard everything"));
+    await settle();
+    expect(seen.discards, "one tap only arms").toEqual([]);
+    click(resting("Discard everything"));
+    await vi.waitFor(() => expect(seen.discards).toEqual(["r-insurance"]));
+    expect(seen.approvals).toHaveLength(0);
   });
 });

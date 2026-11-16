@@ -18,6 +18,7 @@ import {
 import { purgeHeldImapAttachment, scanAndHoldImapAttachment, type HeldImapAttachment } from "@/server/mail-in/imap-attachment-holding";
 import { syntheticPdf } from "../support/synthetic-documents";
 import { cleanupIntegrationEnvironment } from "./support/fixtures";
+import { preserveInstanceMetadataKey, sealedHash } from "./support/imap-attachment-seed";
 
 /*
  * #1392: a document-key rotation must finish even when a held mail attachment
@@ -33,6 +34,8 @@ import { cleanupIntegrationEnvironment } from "./support/fixtures";
  * `RotationCycleResult` carries no skip report; the ids are loaded once, at
  * completion, by `heldObjectsOnOlderKey`, for the operator's report.
  */
+
+preserveInstanceMetadataKey();
 
 const cleanups: Array<() => Promise<void>> = [];
 
@@ -135,7 +138,7 @@ async function plantHeldAttachment(old?: { kek: Buffer; keyId: string }): Promis
   });
   const [message] = await getDb().insert(imapIngestionMessages).values({
     mailbox: "rotation-old-key", mailboxUidValidity: "rotation", mailboxUid: Math.floor(Math.random() * 1_000_000_000),
-    contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: "rotation-alias", status: "pending_review",
+    recipientAliasSha256: "rotation-alias", status: "pending_review",
     expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "pending",
   }).returning({ id: imapIngestionMessages.id });
   const envelope = old
@@ -143,10 +146,15 @@ async function plantHeldAttachment(old?: { kek: Buffer; keyId: string }): Promis
     : held.envelope;
   await getDb().insert(imapIngestionAttachments).values({
     id: held.id, messageId: message.id, displayName: held.displayName, mediaType: held.mediaType, sizeBytes: held.sizeBytes,
-    contentSha256: held.contentSha256, storageKey: held.storageKey, ciphertextSize: held.ciphertextSize,
+    ...await sealedHash(message.id, held.id, held.contentSha256), storageKey: held.storageKey, ciphertextSize: held.ciphertextSize,
     envelopeVersion: envelope.envelopeVersion, contentIv: envelope.contentIv, contentAuthTag: envelope.contentAuthTag,
     wrappedDek: envelope.wrappedDek, wrapIv: envelope.wrapIv, wrapAuthTag: envelope.wrapAuthTag, keyId: envelope.keyId, status: "stored",
   });
+  // Seeding the sealed hash minted the instance metadata key under the live
+  // key; these tests count the key rows a rotation has left, and that row is
+  // not what they plant. The row is already sealed into the hash, so drop it
+  // (preserveInstanceMetadataKey puts back whatever was there before the test).
+  await getDb().delete(metadataKeys).where(eq(metadataKeys.scope, "instance"));
   cleanups.push(async () => {
     await purgeHeldImapAttachment(held.storageKey);
     await getDb().delete(imapIngestionMessages).where(eq(imapIngestionMessages.id, message.id));

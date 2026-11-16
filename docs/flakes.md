@@ -7,9 +7,56 @@ fixing the cause deletes the heading in the same commit. Name a sharded browser
 job as GitLab does (`pipeline 3600 / rig_webkit 2/3`); the heading carries the
 test's own name, which does not move with the shard.
 
-## scripts/ci/write-test-manifest.test.mjs "install.sh's update-path check ... accepts an update from v0.3.5 when that version is passed"
+## Full `npx vitest run`: mass timeouts at host load about 50 (host)
 
-- 2026-11-05 · fix/v037-audit 4da6642d · local `pnpm exec vitest run` (643s), shared host running a full e2e stack alongside · timed out at the 5s default; the file alone passed on the rerun (10/10, that test 2.2s). First sighting.
+- 2026-11-15 · local, chore/next-4 on 5b3cdc20 plus the #1848 D-F8 change (sidecar-freshness-issue.sh only) · load average 47-52 · 54 tests in 15 files hit their deadlines (`runRepair`/`runInstall` child killed, `Test timed out`, one 54 ms > 50 ms timer check): scripts/install.{readiness,renamed-folder,rollback,update-profile,update-retire-smtp,interrupts-journal}, scripts/repair-{preconditions-1804,restore-guard,retire-smtp-1817,start-services}, scripts/ci/{import-door,upgrade-versions}, scripts/gitlab-ci-lanes, scripts/web-build-stamp, src/server/portable-archive-container. The 15 files re-run with 4 workers passed 740/740. First sighting.
+- 2026-11-15 · local, chore/next-4 on 26da27ce plus the #1848 SEC-D-S4 change (github-await-handoff.sh only) · full `npx vitest run`, load average about 40 · 9 tests in 6 files timed out (check-svelte-server-parse child deadline, `Hook timed out`, `Test timed out`): scripts/check-svelte-server-parse, scripts/web-build-stamp, tests/unit/administration-{failed-card,mail-settings}-screens, tests/unit/v19-mail-sender-check, tests/unit/v19-tour-chapter-the-item. Re-run with 4 workers: 178/178. Second sighting.
+
+## tests/integration/portable-archive-review-lease.test.ts "ruling 1: the heartbeat runs while one long document is being staged ... lease_renewed_at moves forward ..." (and the two ruling 9 tests after it, as a knock-on)
+
+- 2026-11-15 · !1325 dev 13eec37c · pipeline 4218 / integration 3/4 (job 51434) · timed out at 300 s on a loaded runner (job 888 s against ~500 s usual); the ruling 9 tests then failed with document_not_found. The same tree passed in pipeline 4211. First sighting.
+
+## src/server/documents/preview.test.ts "renderDocumentPagePreview (real pdftoppm/pdfinfo) > passes an already-raster PNG through, downscaling ..."
+
+- 2026-11-15 · !1325 dev 13eec37c · pipeline 4228 / fast (job 51590) · timed out at the 5s default on a loaded runner; retried as job 51647. First sighting.
+
+## src/cli/orbit.mail-sending-status.test.ts "source=imported, imported from the environment: one line, exit 0" and "source=ui after an import ...: imported-from-environment stays true"
+
+- 2026-11-15 · local, chore/next-4 on 9c7361cf plus the #1848 W-F1 change (About page apk links only) · full `npx vitest run` on the loaded shared host · the first took 5.4 s; the second got its one expected line printed twice. A re-run of the file passed. First sighting.
+- 2026-11-15 · local, chore/next-5 on 0397b513 plus the #1848 O-F1 change (repair.sh only) · full `npx vitest run` on the loaded shared host · both timed out at 5 s. The file alone passed 3 runs of 3. Second sighting.
+
+## tests/integration/imap-attachment-processing.test.ts "records discard purge intent before an injected storage failure and retries safely"
+
+- 2026-11-15 · local, chore/next-4 at 33e1669d plus the #1848 A-F2 change (sender clock only) · all mail and imap integration files together on a loaded shared host · `Test timed out in 15000ms`. A re-run of the file passed 15/15. First sighting.
+
+## tests/unit/system-status-route.test.mjs "answers the real per-service state for a signed-in reader (positive case)"
+
+- 2026-11-15 · local, chore/next-4 on 635b8481 plus the #1848 O-R1 change · full `npx vitest run`, host load about 31 · timed out at 5 s with `connect ECONNREFUSED 127.0.0.1:3000`. A re-run of the file passed. First sighting.
+
+## tests/unit/v19-home-drawer-attach-id.test.mjs "keeps the id when the attach landed but the read failed, and sends it again on a re-pick"
+
+- 2026-11-15 · local, chore/next-4 on 635b8481 plus the #1848 O-R1 change · full `npx vitest run`, host load about 31 · timed out at 5 s. A re-run of the file passed. First sighting.
+
+## scripts/repair.test.mjs "restores the .orbit-config.rollback copy into .env-orbit, removes the rollback file, and ends healthy" (:3852)
+
+- 2026-11-15 · local, chore/next-4 on 635b8481 plus the #1848 O-R1 change · full `npx vitest run` on the shared host · `runRepair: the child was killed after its 30000ms deadline` after its stdout already showed both actions done and 0 failed. A re-run of the file passed. First sighting.
+
+## tests/unit/admin-sending-route-1629.test.mjs "GET /api/admin/sending answers the sending half as sending, no-store, read for the caller's own id" (and the next test, as a knock-on)
+
+- 2026-11-13 · !1302 6028593c · pipeline 4068 / fast (job 50111, a retry) · the first test timed out at 5 s on its first `await route()`, the cold import of the route, on a loaded runner; the next test then got 200 for 403, as the timed-out test's still-running call took its one-shot mock. The same commit's first run passed the file (job 50081). First sighting.
+
+## web/tests/rig/kept-previews-1433.spec.js "each page turn in the reader of a kept 3-page document completes within 1 s" (:106)
+
+- 2026-11-12 · dev nightly · pipeline 3998 / rig_chromium 1/2 (rig-desktop) · "turning to page 2" (back from page 3) took 1,372 ms against the 1,000 ms limit; rig-phone passed in 2/2. Locally on batch-b fb5afbb3, 6 of 6 passed (`--repeat-each=3`, desk and phone). First sighting.
+
+## scripts/ci/upgrade-cell.test.mjs "upgrade-cell.sh: oidc stand-in provider (#1750)" (two tests of the block, the same 5s timeout)
+
+- 2026-11-09 · fix/1535-repair-start e227e22b · local `scripts/test-backend.sh` (395s), shared host under load · "starts the tests/oidc sidecar with the stand-in issuer before step 4" timed out at the 5s default; the file alone passed on the rerun. First sighting.
+- 2026-11-09 · feat/1419-held-view d37a4df7 · local `scripts/test-backend.sh` (408s), shared host under load · "stops the sidecar in clean-up after a failure in the old install (step 4)" timed out at the 5s default; the file alone passed on the rerun (59/59). Second sighting.
+
+## scripts/repair-compose-from-image.test.mjs "repair.sh --check drift report ... shows exactly 20 differing lines and says more were not shown when there are more than 20"
+
+- 2026-11-05 · fix/v038-batch-a-intake 8c2d0d58 (+ CI-rule edits nowhere near repair.sh) · local `pnpm exec vitest run scripts/ci/ scripts/*.test.mjs`, shared host under load · failed once; the file alone passed on the rerun (92/92). First sighting.
 
 ## tests/unit/auth-pending-login-session-callback.test.mjs "passes session creation as collectSignInApproval's own mint callback, not a separate call"
 
@@ -303,10 +350,6 @@ timeout on this one case rather than a global raise.
 - 2026-10-21 · b331397f (!1074, installer-only change) · pipeline 2834 / smoke_local_only (job 38082) · `the chooser: the frame sampler never saw the newcomer's frame` (0 frames, line 275). 77 others passed in 1.9 m. Job retried as 38096: green. The spec's timing was reworked afterwards under #1447 (33b94d9e). First sighting.
 - 2026-11-05 · dbc2e3ba (chore/batch-a-intake-1, !1174) · pipeline 3615 / `rig_webkit` job 46466 (rig-webkit-phone; the test moved to `web/tests/rig/local-sign-in.spec.js:134` with #1609) · `locator.scrollIntoViewIfNeeded` at :71 "waiting for element to be stable" ran to the 30 s test timeout (called from :148). host load; code unchanged since 3614. Second sighting.
 
-## pdf-structure-sandbox.test.ts "stops on a form feed before the object and a startxref that is not a number and answers structure_check_unavailable, never supported_structure, while this thread keeps running"
-
-- 2026-11-03 · c890fe38 (!1152, supply-chain policy and the node:24-alpine pin only) · pipeline 3475 / `fast` job 44607 · expected the log to match /memory/i, got `detail: "PDF structure sandbox stopped the check: timeout"` (`durationMs: 1500`): the child was stopped on time before memory; retried as job 44639: passed. Same wall-clock-under-load shape as the 3 s bound (since removed) (#1447). First sighting.
-
 ## launcher TestLive_InstallPortConflictFailsCleanly (`launcher_install_compat`)
 
 - 2026-10-31 · c17bfabd (!1122, policy dates and the Trivy pin only) · pipeline 3266 / `launcher_install_compat` job 42511 · the install stopped at "OIDC provider is unavailable" before reaching the port clash, so `live_test.go:1528` never saw the compose-up reason; same minutes as the `integration` job's DNS timeout above. Retried as job 42513: passed. First sighting.
@@ -335,10 +378,6 @@ timeout on this one case rather than a global raise.
 
 - 2026-11-01 · 51aa93dd (`fix/local-test-tools`, nothing uncommitted; the change touches `scripts/test-e2e-local.sh`'s report folders and dependency step, not its port choice) · local `pnpm test`, the full suite on this shared host · the script exited 1 with `port <n> (GreenMail SMTP (TEST_SMTP_PORT)) is already in use -- likely a real Orbit deployment on this host`, so `expect(result.status).toBe(0)` failed. The file alone passed on an immediate rerun (79 of 79 apart from the #1526 hooks test, which fails for its own reason). A port the fixture's run picked was taken by something else running at the same moment. First sighting.
 
-## validation-index-equivalence.test.ts "3 MiB of q, then endobj with no gap (a word byte before it)"
-
-- 2026-11-01 · 2ce41874 (`fix/local-test-tools`, local test scripts only; nothing near document validation) · pipeline 3319 / `fast` retry job 43177 · timed out at the 5 s default while the shared host was busy; the same job's first run (43145) passed it. Wall-clock-under-load shape. First sighting.
-
 ## tests/e2e/v19-mail-review-unread.spec.ts:209 "home phone: a landed approve whose re-read fails is woken as done and the row shows the done line" (mobile-webkit)
 
 - 2026-11-02 · a9527f1d (`deps/1565-sveltekit-3`; nothing near mail review) · local `scripts/test-e2e-local.sh`, all projects, 1.5 h run on a shared host · `mail.approvals` stayed 0 for the 20 s poll: the approval never reached the test's route. The same spec on mobile-webkit with `--repeat-each=3` on the same branch passed 16 of 16. First sighting.
@@ -356,16 +395,9 @@ timeout on this one case rather than a global raise.
 
 - 2026-11-02 · 3748dda7 · local `scripts/test-backend.sh`, worktree `v035-audit-tests`, same parallel runs as above · timed out alongside check-base-image-current.test.mjs; passed alone afterwards. First sighting.
 
-## validation-index-equivalence.test.ts, four 3 MiB-input tests time out together (host)
-
-- 2026-11-02 · 8b150ceb (!1146's merge; nothing near document validation) · pipeline 3443 / `fast` job 44202 · four of the file's long 3 MiB-input tests timed out in the same run; later `fast` runs on dev passed them. The shape is a loaded runner, not this code. First sighting.
 ## tests/integration/imap-attachment-preview.test.ts:113 "answers a real rendered page under the documents preview route's own headers, and creates no documents row"
 
 - 2026-11-04 · d69aff99 (`fix/v037-three-webkit-b`, rig test files and docs only; nothing near mail or previews) · pipeline 3553 / `integration` job 45644 · `expected 422 to be 200`: the preview route refused to render. The file alone passed 9 of 9 locally straight after. Likely the render-under-load shape of #1549. First sighting.
-
-## validation-index-equivalence.test.ts:491 "long runs > 3 MiB of e and no end at all"
-
-- 2026-11-04 · b3d9a653 (`fix/v037-three-webkit-b`, rig test files only; nothing near document validation) · pipeline 3550 / `fast` job 45566 · timed out at the 5 s default (1 failed of 11595). Same 3 MiB-input, loaded-runner shape as this file's two headings above. First sighting for this test; third sighting across the file's 3 MiB tests.
 
 ## src/server/boot.test.ts:256 "validates, reports auth, checks and migrates before workers"
 
@@ -391,11 +423,6 @@ timeout on this one case rather than a global raise.
 
 - 2026-11-01 · 1610-auth, 5bef5327 + the #1610 fixture-state change (nothing near mail or the inbox) · local `playwright test --project=rig-desktop --project=rig-phone` over the twelve #1610 rig specs, other agents' builds on the host · both rig-desktop tests failed with `apiResponse.json: Response has been disposed` (a `route.fetch()` body read in `tests/rig/mail-support.js:74` after the page had gone); rig-phone green. The identical run minutes before was green, 111 passed. First sighting.
 
-## api-route-set-contract test, ENOENT on scripts/index.js (host)
-
-- 2026-11-03 · 1980a41e (#1611 batch 3, tests only) · local full `pnpm vitest run`, loaded host · a transient ENOENT reading scripts/index.js; the file passed alone afterwards and the next full run was green. First sighting.
-- 2026-11-04 · aa7202d3 (#1612 lower-layer tests, none near this check) · local full `pnpm exec vitest run`, loaded host · the same ENOENT on scripts/index.js; the file passed alone afterwards. Second sighting.
-
 ## src/server/documents/preview.test.ts "draws the page asked for, every one of them, to the last", 5s timeout (host)
 
 - 2026-11-04 · aa7202d3 (#1612 lower-layer tests, none near documents) · local full `pnpm exec vitest run`, loaded host · timed out at the 5s default; passed alone afterwards. First sighting.
@@ -403,6 +430,7 @@ timeout on this one case rather than a global raise.
 ## scripts/ci/upgrade-versions.test.mjs "prints the exact KEY=value lines, in order, for a readable diff that touches nothing relevant", 60s timeout (host)
 
 - 2026-11-04 · aa7202d3 (#1612 lower-layer tests, none near CI scripts) · local full `pnpm exec vitest run`, loaded host · timed out at 60s (75 s); passed alone afterwards. First sighting.
+- 2026-11-11 · fix/1810-mediums (batch-a 0a7cf63b + #1810 mail-in sender fixes, nowhere near CI scripts) · local `scripts/test-backend.sh` fast gate, shared host · "Test timed out in 60000ms"; the file passed alone on the rerun (with its pair, 64/64). Second sighting.
 
 ## sidecar-pins-sync-guard test, 5s timeout (host)
 
@@ -478,3 +506,23 @@ timeout on this one case rather than a global raise.
 ## `film_webkit` job: killed at its 35 min limit (host) (#1546)
 
 - 2026-11-05 · dbc2e3ba (chore/batch-a-intake-1, !1174) · pipeline 3615 / `film_webkit` job 46467 · "execution took longer than 35m0s"; 22 of the pocket-webkit specs had passed and the last running was `tour-pocket-webkit.spec.js:1418` (chapter 8, at 390x844, 46 s in). host load; code unchanged since 3614. First sighting. #1546 (CI sharding) removes these kills.
+
+## tests/unit/archive-slot-upload-spool-1792.test.mjs "L4: ... a spooled preview waits (not 200, not 429) while another import processes, an export is still refused at once, and the waiters are served first come first served"
+
+- 2026-11-11 · chore/1801-repins (batch-b 6d00597b + a base-image pin and supply-chain policy data, nowhere near the archive slot) · pipeline 3955 / `fast` job 49133 · "the slot went to the one that waited longest first": got owner-1, owner-4, owner-2. Likely cause: the test waits only until owner-2's spool has started, not finished, so under load owner-4's spool can finish and queue first. Passed in pipeline 3949 on the same batch-b code. First sighting.
+
+## src/server/documents/pdf-structure-sandbox-poppler.test.ts "line 14: with check 1 / view 1, a render holding the view slot does not delay a structure check" (after-test check, :108)
+
+- 2026-11-12 · chore/v039-batch-b-ci d92e92b6 (Dockerfile pin and JSON policy only, nowhere near the PDF sandbox) · pipeline 4032 / fast (job 49856) · "§1.5 line 16: a child still in flight after the test: expected 1 to be +0"; the retried job 49859 passed. First sighting.
+
+## github-await-handoff.sh, a flaky GitHub › counts a successful read as a reset (scripts/ci/github-await-handoff.test.mjs)
+
+- 2026-11-15 · local, chore/next-4 on the dev merge plus the #1846 change (docs and the guarantees test only) · full `npx vitest run`, load average about 30 · `Test timed out in 30000ms`; the file re-run twice passed 53/53. First sighting.
+
+## src/server/documents/pdf-structure-sandbox-poppler.test.ts "D5: a background draw holding its one slot does not delay a view draw (within 2x its solo time)"
+
+- 2026-11-15 · fix/1834-undo-copies 605f583e (a one-line install.sh change since cb70f4e1, nowhere near the PDF sandbox) · pipeline 4220 / fast (job 51469) · failed at 1293 ms in a job that hit the 20-minute limit on a loaded runner; it passed in pipeline 4212 / fast (job 51358) on cb70f4e1. A wall-clock assertion. First sighting.
+
+## scripts/install.rollback.test.mjs "install.sh: an interrupt rolls a fresh install back (#1456) > emits one well-formed terminal `failed` event after the rollback events, even though the exit was not a planned failure"
+
+- 2026-11-15 · fix/1834-undo-copies 605f583e (a one-line change in install.sh's SMTP undo copy, not on the interrupt path) · pipeline 4220 / fast (job 51469) · failed in the same loaded job that hit the 20-minute limit; it passed in pipeline 4212 / fast (job 51358) on cb70f4e1, and passed twice locally on 605f583e. First sighting.

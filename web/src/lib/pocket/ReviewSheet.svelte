@@ -28,7 +28,7 @@
    *   householdId: string | null,
    *   households?: import('../../routes/create/entry.js').FormHousehold[],
    *   readings?: import('./review.js').FormReading[],
-   *   papers?: { id?: string | null, name: string, meta: string, drawable?: boolean }[],
+   *   papers?: { id?: string | null, name: string, meta: string, drawable?: boolean, flagged?: true }[],
    *   receiptId?: string | null,
    *   busy?: boolean,
    *   problem?: string | null,

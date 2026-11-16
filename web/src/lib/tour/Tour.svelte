@@ -22,7 +22,7 @@
    * same as it was the old engine's.
    *
    * WHY THIS LIVES IN THE LAYOUT. The film crosses /home, /inbox, /create
-   * and /settings/mail (chapters/index.js), so it outlives any one page
+   * and the Mail card of /settings (chapters/index.js), so it outlives any one page
    * component: mounted here it survives the navigation between them instead
    * of being unmounted mid-chapter. It stays inert everywhere else — the film
    * only ever STARTS on the reader's first landing on /home, and only when
@@ -53,7 +53,8 @@
   function walkTo(route) {
     if (route === "/inbox") return goto(resolve("/inbox"));
     if (route === "/create") return goto(resolve("/create"));
-    if (route === "/settings/mail") return goto(resolve("/settings/mail"));
+    /* #1509: the relay is the Mail card's `your relay` tab, which #mail opens. */
+    if (route === "/settings") return goto(`${resolve("/settings")}#mail`);
     return goto(resolve("/home"));
   }
 

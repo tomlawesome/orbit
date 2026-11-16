@@ -104,7 +104,8 @@ type ServerEntry = { address: string } | { host: string; port?: number };
  * rewrites what it does not understand (`[ipv6]:abc` becomes port 53, port
  * 99999 wraps, port 0 aborts the process): an address (`ip`, `ipv4:port`,
  * `[ipv6]`, `[ipv6]:port`) is checked; a hostname (`host`, `host:port`) is
- * returned for resolution. Anything else throws.
+ * returned for resolution. Anything else throws, including a host whose last label is
+ * all digits or `0x` hex (a mistyped IPv4, which the URL standard reads as one).
  */
 function parseServerEntry(entry: string): ServerEntry {
   if (entry === "") badServers();
@@ -118,7 +119,7 @@ function parseServerEntry(entry: string): ServerEntry {
   const host = colon === -1 ? entry : entry.slice(0, colon);
   const port = colon === -1 ? undefined : validPort(entry.slice(colon + 1));
   if (isIP(host) === 4) return { address: `${host}:${port}` };
-  if (!HOSTNAME.test(host)) badServers();
+  if (!HOSTNAME.test(host) || /^(?:\d+|0x[0-9a-f]*)$/iu.test(host.replace(/\.$/u, "").split(".").pop() ?? "")) badServers();
   return { host, port };
 }
 
@@ -195,14 +196,18 @@ export async function dkimKeyResolverFor(servers: string | undefined): Promise<D
  * Rejects with `DkimTemporaryFailure` only when nothing verified and at least
  * one key lookup failed temporarily: a signature that does verify settles the
  * question, whatever happened to the others.
+ *
+ * `maxMessageBytes` is the mail limit the ingestion cycle read (#1388); a
+ * larger message is not self-verified.
  */
 export async function selfVerifiedDkimDomains(
   rawMessage: Buffer,
   sendingDomain: string,
   resolver: DkimKeyResolver = dnsDkimKeyResolver,
   now?: Date,
+  maxMessageBytes: number = MAX_DKIM_MESSAGE_BYTES,
 ): Promise<string[]> {
-  if (rawMessage.length > MAX_DKIM_MESSAGE_BYTES) return [];
+  if (rawMessage.length > maxMessageBytes) return [];
   let temporary: DkimTemporaryFailure | undefined;
   const domains: string[] = [];
   try {
@@ -229,7 +234,7 @@ export async function selfVerifiedDkimDomains(
     for (const signature of signatures) {
       const lookup = await lookups.get(`${signature.selector}\0${signature.domain}`);
       temporary ??= lookup?.temporary;
-      const result = verifyDkimSignature(rawMessage, signature, lookup?.key, now);
+      const result = verifyDkimSignature(rawMessage, signature, lookup?.key, now, maxMessageBytes);
       if (result.ok && !domains.includes(result.domain)) domains.push(result.domain);
     }
   } catch {

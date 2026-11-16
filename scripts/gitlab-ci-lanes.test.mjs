@@ -16,7 +16,7 @@ import { dirname, join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { CI_LANE, CI_RISK, pathRisk } from "./classify-changed-paths.mjs";
+import { CI_LANE, CI_RISK, classifyCiLane, pathRisk } from "./classify-changed-paths.mjs";
 // A namespace import: a missing export fails the one test that reads it, not the file.
 import * as nightlyBrowsers from "./ci/nightly-browsers.mjs";
 import { UPGRADE_FROM_COUNT } from "./ci/upgrade-versions.mjs";
@@ -56,7 +56,7 @@ const jobs = [...allBlocks].filter(([name]) => !name.startsWith("."));
 // `private-details` (#1562).
 const laneMembers = {
   [CI_LANE.IGNORE_POLICY]: ["gitleaks", "licence_policy", "private-details", "supply_chain_source"],
-  [CI_LANE.CI]: ["fast", "fast_docker", "gitleaks", "private-details", "supply_chain_source"],
+  [CI_LANE.CI]: ["fast", "fast_checks", "fast_docker", "gitleaks", "private-details", "supply_chain_source"],
   // #1597: a proven empty diff runs the same four as the ignore/policy lane.
   // Spelled as a literal, not CI_LANE.NO_CHANGE, so the key means what it says
   // whether or not the classifier exports the constant yet.
@@ -203,6 +203,7 @@ describe("pipeline lanes", () => {
       // #1608: the same build on every ref but the release branches.
       "build_launcher_branch",
       "fast",
+      "fast_checks",
       "fast_docker",
       // #1692: the phone film, split out of rig_webkit.
       "film_webkit",
@@ -256,6 +257,20 @@ describe("pipeline lanes", () => {
     expect([...named].sort()).toEqual([CI_LANE.CI, CI_LANE.FULL, CI_LANE.IGNORE_POLICY, "no_change"].sort());
   });
 
+  // #1823 D-F2: the Dockerfile fails the image build on an apk licence that
+  // supply-chain/licence-policy.yml does not allow, so a change to that file
+  // can only be proven by a build. Whichever way the lane is drawn, the lane the
+  // classifier hands a policy-only change must admit build_image. Run, not
+  // read: the real classifier, then the shell function itself.
+  it("a change confined to supply-chain/licence-policy.yml runs in a lane that admits build_image (#1823 D-F2)", () => {
+    const dockerfile = readFileSync(new URL("../Dockerfile", import.meta.url), "utf8");
+    expect(dockerfile, "the image build reads the licence policy").toMatch(/^COPY supply-chain\/licence-policy\.yml /mu);
+    const lane = classifyCiLane(["supply-chain/licence-policy.yml"]);
+    const script = `${hiddenBlockScript(".reach_helpers")}\norbit_lane_admits build_image && echo ADMITTED || echo STOPPED`;
+    const stdout = execFileSync("sh", ["-c", script], { encoding: "utf8", env: { PATH: process.env.PATH, ORBIT_LANE: lane } });
+    expect(stdout, `the ${lane} lane`).toMatch(/ADMITTED/u);
+  });
+
   it("exports no_change as a lane value", () => {
     expect(CI_LANE.NO_CHANGE).toBe("no_change");
   });
@@ -279,7 +294,7 @@ describe("pipeline lanes", () => {
     const everyJob = new Set(["classify", "flake_check", ...jobs.map(([name]) => name), ...laneMembers.no_change]);
     const admitted = [...everyJob].filter((job) => verdict("no_change", job).admitted).sort();
     expect(admitted).toEqual(["gitleaks", "licence_policy", "private-details", "supply_chain_source"]);
-    for (const job of ["fast", "fast_docker", "build_image", "integration", "smoke", "acceptance"]) {
+    for (const job of ["fast", "fast_checks", "fast_docker", "build_image", "integration", "smoke", "acceptance"]) {
       const { admitted: ran, stdout } = verdict("no_change", job);
       expect(ran, job).toBe(false);
       expect(stdout.trim(), job).toBe(`skipped: the no_change lane does not run ${job} (#889)`);
@@ -755,8 +770,13 @@ const BROWSER_JOBS = [
   // #1546: the Chromium pixel screens, split out of rig_chromium.
   "screens_chromium",
 ];
+// #1763: these four run only in the nightly browser pipeline; the other
+// browser jobs keep their promotion rules.
+const NIGHTLY_ONLY_JOBS = ["rig_chromium", "rig_firefox", "rig_webkit", "film_webkit"];
+const PROMOTION_BROWSER_JOBS = BROWSER_JOBS.filter((name) => !NIGHTLY_ONLY_JOBS.includes(name));
 // What the nightly needs besides the browsers: the build and the image.
-const NIGHTLY_SUPPORT_JOBS = ["classify", "fast", "build_image"];
+// fast_checks since #1831: it publishes the web/build the rig jobs serve.
+const NIGHTLY_SUPPORT_JOBS = ["classify", "fast", "fast_checks", "build_image"];
 
 // The `rules:` list of a block as [{ if, when }], with `- *alias` entries
 // replaced by the hidden key's own rule (or, when the hidden key is itself a
@@ -796,7 +816,7 @@ function listRules(entries, indent) {
       }
       const rule = {};
       for (const entry of hidden.split("\n").slice(1)) {
-        const pair = entry.match(/^ {2}(if|when): (.*)$/u);
+        const pair = entry.match(/^ {2}(if|when|allow_failure): (.*)$/u);
         if (pair) rule[pair[1]] = pair[2];
       }
       rules.push(rule);
@@ -807,7 +827,7 @@ function listRules(entries, indent) {
       rules.push({ [first[1]]: first[2] });
       continue;
     }
-    const more = line.match(new RegExp(`^${lead}  (if|when): (.*)$`, "u"));
+    const more = line.match(new RegExp(`^${lead}  (if|when|allow_failure): (.*)$`, "u"));
     if (more && rules.length > 0) rules[rules.length - 1][more[1]] = more[2];
   }
   return rules;
@@ -882,12 +902,12 @@ describe("browser jobs by event (#1412)", () => {
     }
   });
 
-  it("starts every browser job at promotion: the preview push and the merge request into main (#1546)", () => {
+  it("starts every browser job but the four nightly-only ones at promotion: the preview push and the merge request into main (#1546, #1763)", () => {
     for (const environment of [
       events.previewPush,
       { CI_PIPELINE_SOURCE: "merge_request_event", CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "main" },
     ]) {
-      for (const name of BROWSER_JOBS) {
+      for (const name of PROMOTION_BROWSER_JOBS) {
         // #1692 removed the one-off preview skip of rig_webkit (owner decision 61).
         expect(jobVerdict(name, environment), `${name} on ${JSON.stringify(environment)}`).toBe("run");
       }
@@ -923,11 +943,13 @@ describe("browser jobs by event (#1412)", () => {
   it("starts the same jobs on the dev -> preview merge request as on a merge request into dev (#1546)", () => {
     /* Except the upgrade cells: owner answer 59a (#1665) runs them on this
        merge request alone, overriding #1546 for these two jobs only. Their own
-       rules are checked under "upgrade matrix wiring (#1665)". */
+       rules are checked under "upgrade matrix wiring (#1665)". And
+       release_readiness, which #1860 runs on promotion merge requests only;
+       scripts/ci/release-readiness-ci.test.mjs checks its rules. */
     const everyJob = jobs
       .filter(([, block]) => /^ {2}stage: /mu.test(block))
       .map(([name]) => name)
-      .filter((name) => name !== "upgrade_cell" && name !== "upgrade_cell_launcher");
+      .filter((name) => name !== "upgrade_cell" && name !== "upgrade_cell_launcher" && name !== "release_readiness");
     for (const name of everyJob) {
       expect(jobVerdict(name, events.promotionMergeRequest), name).toBe(jobVerdict(name, events.devMergeRequest));
     }
@@ -943,10 +965,66 @@ describe("browser jobs by event (#1412)", () => {
     expect(jobVerdict("promote_stable", events.mainPush)).toBe("manual");
   });
 
-  it("leaves a pipeline started by hand on dev as it was", () => {
-    for (const name of BROWSER_JOBS) {
+  it("leaves a pipeline started by hand on dev as it was, except the four nightly-only jobs (#1763)", () => {
+    for (const name of PROMOTION_BROWSER_JOBS) {
       expect(jobVerdict(name, { CI_PIPELINE_SOURCE: "web", CI_COMMIT_BRANCH: "dev" }), name).toBe("run");
     }
+    for (const name of NIGHTLY_ONLY_JOBS) {
+      expect(jobVerdict(name, { CI_PIPELINE_SOURCE: "web", CI_COMMIT_BRANCH: "dev" }), name).toBe("never");
+    }
+  });
+
+  // #1763: the nightly-only browser jobs.
+  describe("rig and film jobs run only in the nightly browser pipeline (#1763)", () => {
+    const elsewhere = {
+      "a preview push": events.previewPush,
+      "a merge request into dev": events.devMergeRequest,
+      "a merge request into preview": events.promotionMergeRequest,
+      "a push to dev": events.devPush,
+      "a push to main": events.mainPush,
+    };
+
+    it.each(NIGHTLY_ONLY_JOBS)("%s is never started outside the nightly", (name) => {
+      for (const [kind, environment] of Object.entries(elsewhere)) {
+        expect(jobVerdict(name, environment), `${name} on ${kind}`).toBe("never");
+      }
+    });
+
+    it.each(NIGHTLY_ONLY_JOBS)("%s runs on the nightly browser schedule", (name) => {
+      expect(jobVerdict(name, events.nightly)).toBe("run");
+    });
+
+    it("keeps screens_chromium running on a preview push and the nightly", () => {
+      expect(jobVerdict("screens_chromium", events.previewPush)).toBe("run");
+      expect(jobVerdict("screens_chromium", events.nightly)).toBe("run");
+    });
+
+    it("leaves record_image needing screens_chromium and none of the four", () => {
+      const needs = needsOf(allBlocks.get("record_image"));
+      expect(needs).toMatch(/- job: screens_chromium\n/u);
+      for (const name of NIGHTLY_ONLY_JOBS) expect(needs, name).not.toMatch(new RegExp(`job: ${name}\\n`, "u"));
+    });
+
+    it("has no job with a non-optional need on one of the four (the pipeline stays valid on a preview push)", () => {
+      const offenders = [];
+      for (const [name, block] of jobs) {
+        const lines = needsOf(block).split("\n");
+        lines.forEach((line, at) => {
+          const need = line.match(/^\s*- job: (\S+)\s*$/u);
+          if (!need || !NIGHTLY_ONLY_JOBS.includes(need[1])) return;
+          // The entry runs to the next "- " item or a line of lesser indent.
+          const indent = line.search(/\S/u);
+          let optional = false;
+          for (const next of lines.slice(at + 1)) {
+            if (/^\s*#/u.test(next) || next.trim() === "") continue;
+            if (next.search(/\S/u) <= indent) break;
+            if (/^\s*optional: true\s*$/u.test(next)) optional = true;
+          }
+          if (!optional) offenders.push(`${name} -> ${need[1]}`);
+        });
+      }
+      expect(offenders).toEqual([]);
+    });
   });
 
   it("starts every browser job, and only the jobs they need, on the nightly schedule", () => {
@@ -1149,9 +1227,15 @@ const TOKEN_MODES = { "nightly-browsers.mjs": ["moved"] };
       .join("\n");
   }
 
+  // Top-level scripts that read a token on a job's behalf (#1830: the signing
+  // image lives in the private base-image registry; #1860 owner 50a: release
+  // readiness reads earlier pipelines with ORBIT_REUSE_TOKEN).
+  const TOKEN_READING_TOP_SCRIPTS = ["check-signing-image-age.sh", "release-readiness.mjs"];
+
   function readsToken(block) {
     const text = code(block);
     if (TOKEN.test(text)) return true;
+    if (TOKEN_READING_TOP_SCRIPTS.some((file) => text.includes(`scripts/${file}`))) return true;
     return readingScripts.some((file) => {
       const calls = [...text.matchAll(new RegExp(`scripts/ci/${file.replace(".", "\\.")}(?:\\s+(\\S+))?`, "gu"))];
       const modes = TOKEN_MODES[file];
@@ -1169,6 +1253,13 @@ const TOKEN_MODES = { "nightly-browsers.mjs": ["moved"] };
     // hand it to jobs this test cannot see.
     const hiddenReaders = [...allBlocks].filter(([name, block]) => name.startsWith(".") && readsToken(block));
     expect(hiddenReaders.map(([name]) => name)).toEqual([]);
+  });
+
+  it("signing_image_age reads the pull pair through its script, so it is a reader (#1830)", () => {
+    for (const file of TOKEN_READING_TOP_SCRIPTS) {
+      expect(readFileSync(new URL(file, import.meta.url), "utf8"), file).toMatch(TOKEN);
+    }
+    expect(readers).toContain("signing_image_age");
   });
 
   it("every job that reads a token declares environment ci-read-tokens with action: prepare", () => {
@@ -1385,6 +1476,41 @@ describe("merge requests run changed-reachable tests, the dev push runs everythi
       });
     }
 
+    // #1812 step 2: a batch -> dev merge request is the last gate before dev, so it
+    // runs the whole suite with the coverage floors, as the preview push does.
+    // Every other merge request keeps the narrowed, no-coverage run.
+    const mergeRequestFor = (source, target) => ({
+      ...mergeRequestEnv,
+      CI_MERGE_REQUEST_SOURCE_BRANCH_NAME: source,
+      CI_MERGE_REQUEST_TARGET_BRANCH_NAME: target,
+    });
+
+    for (const batch of ["batch-a", "batch-b"]) {
+      it(`on a ${batch} -> dev merge request runs the whole suite with coverage (#1812)`, () => {
+        const seen = fastDecision(mergeRequestFor(batch, "dev"));
+        expect(seen.ran).toBe(true);
+        expect(seen.base).toBe("");
+        expect(seen.coverage).toBe("true");
+        expect(seen.skip_docker).toBe("true");
+      });
+    }
+
+    for (const [label, source, target] of [
+      ["a feature -> batch-b", "fix/1815-changelog-lows", "batch-b"],
+      ["a batch-a -> preview", "batch-a", "preview"],
+      ["a batch-b -> main", "batch-b", "main"],
+      ["a non-batch -> dev", "fix/1815-changelog-lows", "dev"],
+      ["a branch merely named like a batch -> dev", "batch-abc", "dev"],
+    ]) {
+      it(`on ${label} merge request keeps the narrowed run without coverage (#1812)`, () => {
+        const seen = fastDecision(mergeRequestFor(source, target));
+        expect(seen.ran).toBe(true);
+        expect(seen.base).toBe(MERGE_BASE);
+        expect(seen.coverage).not.toBe("true");
+        expect(seen.skip_docker).toBe("true");
+      });
+    }
+
     it("does not treat a merge base variable on a non-merge-request pipeline as a reason to narrow", () => {
       // A variable alone changes nothing: the pipeline source decides.
       const seen = fastDecision({ CI_PIPELINE_SOURCE: "push", CI_COMMIT_BRANCH: "dev", CI_MERGE_REQUEST_DIFF_BASE_SHA: MERGE_BASE });
@@ -1471,8 +1597,13 @@ describe("merge requests run changed-reachable tests, the dev push runs everythi
           writeFileSync(join(stubs, name), STUB(name));
           chmodSync(join(stubs, name), 0o755);
         }
+        // test-backend.sh stops at once without poppler (#1793); stubs keep it going.
+        for (const name of ["pdfinfo", "pdftoppm"]) {
+          writeFileSync(join(stubs, name), "#!/bin/sh\nexit 0\n");
+          chmodSync(join(stubs, name), 0o755);
+        }
         const env = { ...process.env, PATH: `${stubs}:/usr/bin:/bin`, STUB_LOG: log, ...(base ? { ORBIT_TEST_CHANGED_BASE: base } : {}), ...environment };
-        for (const key of ["CI", "ORBIT_TEST_COVERAGE", "ORBIT_TEST_CHANGED_BASE"]) if (!(key in environment) && !(key === "ORBIT_TEST_CHANGED_BASE" && base)) delete env[key];
+        for (const key of ["CI", "ORBIT_TEST_COVERAGE", "ORBIT_TEST_CHANGED_BASE", "ORBIT_TEST_PHASE"]) if (!(key in environment) && !(key === "ORBIT_TEST_CHANGED_BASE" && base)) delete env[key];
         const result = spawnSync("bash", [join(repo, "scripts", "test-backend.sh")], {
           cwd: repo,
           encoding: "utf8",
@@ -1584,6 +1715,8 @@ describe("merge requests run changed-reachable tests, the dev push runs everythi
           POSTGRES_PASSWORD: "test-only",
           POSTGRES_DB: "orbit_integration",
           CI_JOB_ID: "1",
+          CI_NODE_INDEX: "2",
+          CI_NODE_TOTAL: "4",
           ...environment,
         }), directory);
         const calls = existsSync(log) ? readFileSync(log, "utf8").split("\n").filter(Boolean) : [];
@@ -1599,12 +1732,12 @@ describe("merge requests run changed-reachable tests, the dev push runs everythi
     const STUB_LOGGER = (name) => `#!/bin/sh\nprintf '${name}\\t%s\\n' "$*" >> "$STUB_LOG"\nexit 0\n`;
 
     it("on a merge request runs only the changed-reachable integration tests", () => {
-      expect(integrationVitestCalls(mergeRequestEnv)).toEqual([`exec vitest run --project integration --changed ${MERGE_BASE}`]);
+      expect(integrationVitestCalls(mergeRequestEnv)).toEqual([`exec vitest run --project integration --changed ${MERGE_BASE} --shard=2/4 --passWithNoTests`]);
     });
 
     for (const [event, environment] of Object.entries(fullRunEvents)) {
       it(`on ${event} runs the whole integration project`, () => {
-        expect(integrationVitestCalls(environment)).toEqual(["exec vitest run --project integration"]);
+        expect(integrationVitestCalls(environment)).toEqual(["exec vitest run --project integration --shard=2/4 --passWithNoTests"]);
       });
     }
 
@@ -1620,7 +1753,7 @@ describe("merge requests run changed-reachable tests, the dev push runs everythi
 
     it("on a merge request whose base is in the clone writes no reuse evidence", () => {
       const run = integrationRun(mergeRequestEnv);
-      expect(run.vitest).toEqual([`exec vitest run --project integration --changed ${MERGE_BASE}`]);
+      expect(run.vitest).toEqual([`exec vitest run --project integration --changed ${MERGE_BASE} --shard=2/4 --passWithNoTests`]);
       expect(run.evidence).toEqual([]);
       expect(run.output).not.toMatch(BASE_MISSING_LINE);
     });
@@ -1632,7 +1765,7 @@ describe("merge requests run changed-reachable tests, the dev push runs everythi
       it(`on a merge request whose base ${absence} says so and runs the whole integration project`, () => {
         const run = integrationRun({ ...mergeRequestEnv, CI_MERGE_REQUEST_DIFF_BASE_SHA: base, GIT_STUB_PRESENT: present });
         expect(run.output).toMatch(BASE_MISSING_LINE);
-        expect(run.vitest).toEqual(["exec vitest run --project integration"]);
+        expect(run.vitest).toEqual(["exec vitest run --project integration --shard=2/4 --passWithNoTests"]);
       });
 
       it(`on a merge request whose base ${absence} still writes reuse evidence, as the full run it is`, () => {
@@ -1663,12 +1796,28 @@ describe("merge requests run changed-reachable tests, the dev push runs everythi
 describe("job timeouts (#1620)", () => {
   const timeoutOf = (name) => allBlocks.get(name).match(/^ {2}timeout: (\S+)\s*$/mu)?.[1];
 
-  it("gives fast a 20m timeout", () => {
-    expect(timeoutOf("fast")).toBe("20m");
+  it("gives fast a 30m timeout (#1861)", () => {
+    expect(timeoutOf("fast")).toBe("30m");
+  });
+
+  it("documents fast's 30m timeout with its measured basis and hang-detector role (#1861)", () => {
+    const lines = allBlocks.get("fast").split("\n");
+    const at = lines.findIndex((line) => /^ {2}timeout: /u.test(line));
+    const above = lines.slice(Math.max(0, at - 10), at).join("\n");
+    expect(above).toContain("4308");
+    expect(above).toContain("hang detector");
+  });
+
+  it("gives fast_checks a 10m timeout (#1831)", () => {
+    expect(timeoutOf("fast_checks")).toBe("10m");
   });
 
   it("keeps fast_docker at 15m", () => {
     expect(timeoutOf("fast_docker")).toBe("15m");
+  });
+
+  it("gives each integration shard a 15m timeout (#1806)", () => {
+    expect(timeoutOf("integration")).toBe("15m");
   });
 });
 
@@ -1750,7 +1899,7 @@ describe("rig jobs by runner (#1615, ADR-0039)", () => {
       expect(gated.length, "the gated set").toBeGreaterThan(0);
       const needs = jobNeeds(name);
       for (const need of gated) expect(needs, `${name}: keeps need ${need.job}`).toContainEqual(need);
-      expect(needs.find((need) => need.job === "fast"), `${name}: fast with artifacts`).toMatchObject({ artifacts: true });
+      expect(needs.find((need) => need.job === "fast_checks"), `${name}: fast_checks with artifacts (#1831)`).toMatchObject({ artifacts: true });
       expect(block, `${name}: no Docker`).not.toMatch(/^ {2}(extends|services|resource_group):/mu);
       expect(commandsOf(name), `${name}: no Docker`).not.toMatch(/docker/u);
       // Workers are set, not taken from the host's CPU count: os.cpus() in a
@@ -1980,10 +2129,12 @@ exit 0
 
   it("gates publication on the promotion job list of ADR-0039 section 4", () => {
     const needs = needsOf(allBlocks.get("record_image"));
-    for (const name of [...RIG_JOBS, "smoke", "smoke_webkit", "smoke_webkit_mobile"]) {
+    // #1763: the four rig and film jobs left the list; screens_chromium stays.
+    for (const name of ["screens_chromium", "smoke", "smoke_webkit", "smoke_webkit_mobile"]) {
       expect(needs, name).toMatch(new RegExp(`- job: ${name}\\n\\s+optional: true\\n`, "u"));
     }
     expect(needs).toMatch(/- job: smoke_local_only\n/u);
+    for (const name of NIGHTLY_ONLY_JOBS) expect(needs, name).not.toMatch(new RegExp(`job: ${name}\\n`, "u"));
     for (const name of RETIRED) expect(needs, name).not.toMatch(new RegExp(`job: ${name}\\n`, "u"));
   });
 
@@ -2049,9 +2200,14 @@ exit 0
     }
   });
 
+  it("splits integration into four `parallel:` jobs, equal to its `shards` in job-inputs.json (#1806)", () => {
+    expect(inputsJson().jobs.integration?.shards, "integration: shards in job-inputs.json").toBe(4);
+    expect(parallelOf("integration"), "integration: parallel:").toBe("4");
+  });
+
   it("shards no other job by `shards`, and gives screens_chromium no `parallel:` (one worker cannot shard, #1148)", () => {
     for (const [name, declared] of Object.entries(inputsJson().jobs)) {
-      if (name in SHARDED) continue;
+      if (name in SHARDED || name === "integration") continue;
       expect(declared.shards, `${name}: shards`).toBeUndefined();
     }
     expect(parallelOf("screens_chromium")).toBeUndefined();
@@ -2070,8 +2226,9 @@ exit 0
     expect(commandsOf("screens_chromium")).toMatch(/- if \[ -f \.quarantine-failed \]; then exit 3; fi/u);
   });
 
-  it("starts screens_chromium and the rig jobs on the same events (#1546)", () => {
-    expect(rulesText("screens_chromium")).toBe(rulesText("rig_webkit"));
+  it("starts screens_chromium on a preview push, unlike the nightly-only rig jobs (#1546, #1763)", () => {
+    expect(jobVerdict("screens_chromium", events.previewPush)).toBe("run");
+    expect(rulesText("screens_chromium")).not.toBe(rulesText("rig_webkit"));
   });
 
   it("makes every sharded rig job and screens_chromium resource-peak-aware: the `resource peak` trap, before the browsers run (#1546, b0a12513)", () => {
@@ -2988,5 +3145,215 @@ describe("D-SEC2: the tap-floor filing token never meets a dependency install", 
     expect(missed.filed).toBe("scripts/ci/nightly-browsers.mjs tap-floor pocket-measure.log");
     // A log that names no screen makes the filer fail; the job fails with it.
     expect(filingRun({ marker: true, filerExit: 1 }).status).not.toBe(0);
+  });
+});
+
+// #1755: base_image blocks only on the way to publishing; elsewhere it warns.
+// The rule shape assumed: the four skip rules first, in their order, then
+// `allow_failure: false` on the rules for the publishing pipelines, and a last
+// `when: on_success` with `allow_failure: true` for everything else.
+describe("base_image blocks only on the way to publishing (#1755)", () => {
+  const kinds = {
+    "a merge request into preview": [{ CI_PIPELINE_SOURCE: "merge_request_event", CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "preview", CI_MERGE_REQUEST_SOURCE_BRANCH_NAME: "dev" }, "blocks"],
+    "a merge request into preview from a feature branch": [{ CI_PIPELINE_SOURCE: "merge_request_event", CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "preview", CI_MERGE_REQUEST_SOURCE_BRANCH_NAME: "feature/z" }, "blocks"],
+    "a push to preview": [{ CI_PIPELINE_SOURCE: "push", CI_COMMIT_BRANCH: "preview" }, "blocks"],
+    "a merge request into main": [{ CI_PIPELINE_SOURCE: "merge_request_event", CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "main", CI_MERGE_REQUEST_SOURCE_BRANCH_NAME: "preview" }, "blocks"],
+    "a push to hotfix/*": [{ CI_PIPELINE_SOURCE: "push", CI_COMMIT_BRANCH: "hotfix/1.2" }, "blocks"],
+    "a merge request into dev": [events.devMergeRequest, "warns"],
+    "a labelled merge request into dev": [{ ...events.devMergeRequest, CI_MERGE_REQUEST_LABELS: "ci: acceptance" }, "warns"],
+    "a push to dev (starts no pipeline)": [events.devPush, "never"],
+    "a merge request into hotfix/*": [{ CI_PIPELINE_SOURCE: "merge_request_event", CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "hotfix/1.2", CI_MERGE_REQUEST_SOURCE_BRANCH_NAME: "fix/y" }, "warns"],
+    "a pipeline started by hand": [{ CI_PIPELINE_SOURCE: "web", CI_COMMIT_BRANCH: "dev" }, "warns"],
+    "a pipeline started through the API on a feature branch": [{ CI_PIPELINE_SOURCE: "api", CI_COMMIT_BRANCH: "feature/x" }, "warns"],
+    "a push to a feature branch (starts no pipeline)": [{ CI_PIPELINE_SOURCE: "push", CI_COMMIT_BRANCH: "feature/x" }, "never"],
+    "a push to main": [events.mainPush, "never"],
+    "a schedule": [events.nightly, "never"],
+    "a merge request into a batch under intake": [{ CI_PIPELINE_SOURCE: "merge_request_event", CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "batch-a", BATCH_INTAKE: "true" }, "never"],
+  };
+
+  // "never" | "blocks" | "warns" for the first rule that matches.
+  const outcome = (env) => {
+    if (verdictOf(rulesOf("workflow"), env) === "never") return "never";
+    for (const rule of rulesOf("base_image")) {
+      if (rule.if !== undefined && !evaluate(rule.if, env)) continue;
+      if ((rule.when ?? "on_success") === "never") return "never";
+      return String(rule.allow_failure ?? "false").trim() === "true" ? "warns" : "blocks";
+    }
+    return "never";
+  };
+
+  it.each(Object.entries(kinds))("%s", (kind, [environment, expected]) => {
+    expect(outcome(environment), `base_image on ${kind}`).toBe(expected);
+  });
+
+  it("starts base_image the same way as before wherever it starts", () => {
+    for (const [kind, [environment, expected]] of Object.entries(kinds)) {
+      const starts = jobVerdict("base_image", environment) !== "never";
+      expect(starts, kind).toBe(expected !== "never");
+    }
+  });
+
+  it("keeps the four skip rules first, in their order", () => {
+    const text = allBlocks.get("base_image");
+    const at = ["!reference [.backmerge-skip, job_rule]", "- *batch_intake_skip", "- *not_on_main_push", "- *not_scheduled"].map((item) => text.indexOf(item));
+    expect(at.every((index) => index !== -1)).toBe(true);
+    expect([...at].sort((a, b) => a - b)).toEqual(at);
+    expect(text.indexOf("allow_failure")).toBeGreaterThan(at[3]);
+  });
+
+  it("leaves no job taking base_image's artefacts", () => {
+    for (const [name, block] of allBlocks) {
+      expect(block, name).not.toMatch(/- job: base_image\n\s+artifacts: true/u);
+    }
+  });
+
+  it("says where base_image blocks and cites #1755 in the comment above it", () => {
+    const above = gitlabCi.slice(0, gitlabCi.indexOf("\nbase_image:\n")).split("\n").slice(-14).join("\n");
+    expect(above).toContain("#1755");
+    expect(above).toMatch(/preview/u);
+    expect(above).toMatch(/hotfix/u);
+    expect(above).toMatch(/main/u);
+    expect(above).not.toMatch(/^# Blocking, like the old workflow's job/mu);
+  });
+});
+
+// #1831: `fast` is split by phase. `fast_checks` runs the static checks, the web
+// build and the render proof and publishes web/build; `fast` keeps the tests.
+describe("the fast job is split by phase (#1831)", () => {
+  const code = (name) =>
+    (allBlocks.get(name) ?? "")
+      .split("\n")
+      .filter((line) => !/^\s*#/u.test(line))
+      .join("\n");
+  const needsText = (name) => code(name).match(/\n {2}needs:\n((?: {4}[^\n]*\n| *\n)*)/u)?.[1] ?? null;
+  const artifactPaths = (name) => {
+    const section = code(name).match(/\n {2}artifacts:\n((?: {4}[^\n]*\n| *\n)*)/u)?.[1] ?? "";
+    return [...section.matchAll(/^ {6}- (\S+)\s*$/gmu)].map((m) => m[1]);
+  };
+
+  // Every list of `- job: x` entries in the file, anchors and inline needs alike.
+  function needLists() {
+    const lists = [];
+    let current = null;
+    let indent = -1;
+    for (const line of gitlabCi.split("\n")) {
+      const entry = /^(\s*)- job: (\S+)\s*$/u.exec(line);
+      if (entry) {
+        if (current === null || entry[1].length !== indent) {
+          current = [];
+          indent = entry[1].length;
+          lists.push(current);
+        }
+        current.push({ job: entry[2], artifacts: undefined });
+        continue;
+      }
+      const flag = /^\s+artifacts: (true|false)\s*$/u.exec(line);
+      if (flag && current?.length) {
+        current[current.length - 1].artifacts = flag[1] === "true";
+        continue;
+      }
+      if (/^\s*(#.*)?$/u.test(line) || /^\s+optional: /u.test(line)) continue;
+      current = null;
+    }
+    return lists;
+  }
+
+  it("defines fast_checks in stage fast", () => {
+    expect(allBlocks.has("fast_checks")).toBe(true);
+    expect(code("fast_checks")).toMatch(/^ {2}stage: fast$/mu);
+  });
+
+  it("gives fast_checks the same rules as fast", () => {
+    expect(rulesText("fast_checks")).toBe(rulesText("fast"));
+  });
+
+  it("gives fast_checks the same needs as fast", () => {
+    expect(needsText("fast_checks")).not.toBeNull();
+    expect(needsText("fast_checks")).toBe(needsText("fast"));
+  });
+
+  it("gives fast a 30m timeout and keeps fast_checks at 10m (#1861)", () => {
+    expect(code("fast")).toMatch(/^ {2}timeout: 30m\s*$/mu);
+    expect(code("fast_checks")).toMatch(/^ {2}timeout: 10m\s*$/mu);
+  });
+
+  it("names fast_checks in every needs list that names fast", () => {
+    const withFast = needLists().filter((list) => list.some((need) => need.job === "fast"));
+    expect(withFast.length, "lists naming fast").toBeGreaterThan(0);
+    for (const list of withFast) {
+      expect(list.map((need) => need.job), JSON.stringify(list)).toContain("fast_checks");
+    }
+  });
+
+  it("makes every job that takes fast's artifacts take fast_checks' as well", () => {
+    const takers = needLists().filter((list) => list.some((need) => need.job === "fast" && need.artifacts === true));
+    expect(takers.length, "lists taking fast's artifacts").toBeGreaterThan(0);
+    for (const list of takers) {
+      expect(list.find((need) => need.job === "fast_checks"), JSON.stringify(list)).toMatchObject({ artifacts: true });
+    }
+  });
+
+  it("publishes web/build from fast_checks and not from fast", () => {
+    expect(artifactPaths("fast_checks")).toContain("web/build/");
+    expect(artifactPaths("fast")).not.toContain("web/build/");
+  });
+
+  it("still publishes coverage/ from fast", () => {
+    expect(artifactPaths("fast")).toContain("coverage/");
+  });
+
+  it("calls test-backend.sh with ORBIT_TEST_PHASE=checks in fast_checks and tests in fast", () => {
+    expect(code("fast_checks")).toMatch(/ORBIT_TEST_PHASE=['"]?checks\b[^\n]*test-backend\.sh|ORBIT_TEST_PHASE: ["']?checks/u);
+    expect(code("fast_checks")).not.toMatch(/ORBIT_TEST_PHASE=['"]?tests/u);
+    expect(code("fast")).toMatch(/ORBIT_TEST_PHASE=['"]?tests\b[^\n]*test-backend\.sh|ORBIT_TEST_PHASE: ["']?tests/u);
+    expect(code("fast")).not.toMatch(/ORBIT_TEST_PHASE=['"]?checks/u);
+  });
+
+  it("lists ci:fast_checks in the lane case list", () => {
+    expect(gitlabCi).toMatch(/\bci:fast_checks\b/u);
+  });
+});
+
+// #1830: Orbit warns, and never fails, when the pinned signing image is stale.
+// Same placement as base_image (a dind job on the fast stage) but it only
+// warns: exit code 3 from scripts/check-signing-image-age.sh is the warning,
+// and `allow_failure: exit_codes: 3` keeps the pipeline passing on it.
+describe("signing_image_age warns without failing the pipeline (#1830)", () => {
+  const block = () => allBlocks.get("signing_image_age") ?? "";
+
+  it("defines the job", () => {
+    expect(allBlocks.has("signing_image_age")).toBe(true);
+  });
+
+  it("runs the check script", () => {
+    expect(block()).toContain("scripts/check-signing-image-age.sh");
+  });
+
+  it("tolerates the warning exit code, and only that one", () => {
+    expect(block()).toMatch(/allow_failure:\s*\n\s+exit_codes:\s*3\s*$/mu);
+  });
+
+  // #1823 D-F1 / X-F3: in GitLab a rule-level `allow_failure` replaces the
+  // job-level one, so a rule saying `allow_failure: true` makes exit codes 1 and
+  // 2 (a broken check) non-blocking too, whatever `exit_codes: 3` says.
+  it("no rule sets allow_failure, so the job-level exit_codes: 3 is the only tolerance (#1823 D-F1)", () => {
+    const rules = block().match(/^ {2}rules:\n((?: {4}.*\n| *\n)+)/mu)?.[1] ?? "";
+    const entries = rules.split(/^ {4}- /mu).slice(1);
+    expect(entries.length).toBeGreaterThan(0);
+    for (const entry of entries) expect(entry).not.toMatch(/allow_failure/u);
+  });
+
+  it("has no rule that makes it block", () => {
+    expect(block()).not.toMatch(/allow_failure:\s*false/u);
+  });
+
+  it("is not guarded by a narrow lane, and takes nothing from base_image", () => {
+    expect(block()).not.toMatch(/- job: base_image\n\s+artifacts: true/u);
+  });
+
+  it("cites #1830 and orbit-base-image #33 in the comment above it", () => {
+    const above = gitlabCi.slice(0, gitlabCi.indexOf("\nsigning_image_age:\n")).split("\n").slice(-14).join("\n");
+    expect(above).toContain("#1830");
+    expect(above).toContain("orbit-base-image #33");
   });
 });

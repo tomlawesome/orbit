@@ -14,6 +14,7 @@ import { resetMetadataKeyCacheForTests } from "@/server/metadata/keys";
 import { seedSenderAddress } from "@/server/mail-in/sender-addresses";
 import { cleanupIntegrationEnvironment, createIntegrationFixture, type IntegrationFixture, type IntegrationSession } from "./support/fixtures";
 import { callRouteForSession, loadRoute, type RouteHandler } from "./support/request-event";
+import { clearSending, setUpSending } from "./support/mail-sending-1629";
 
 /*
  * Issue #1403, owner decision 2026-10-14 (note 38581): the route that sends
@@ -88,35 +89,26 @@ let route: RouteHandler | undefined;
 const verificationRoute = async () => route ?? (route = (await loadRoute("settings/mail-relay/verification")).POST);
 
 let fixture: IntegrationFixture;
-const savedEnvironment: Record<string, string | undefined> = {};
 
-/* Outbound mail as the config contract reads it since SMTP_URL was retired (#1403 D3). */
-const setSmtp = () => { process.env.SMTP_HOST = "smtp.example.test"; process.env.SMTP_PORT = "587"; process.env.SMTP_USER = "orbit-test"; process.env.SMTP_PASSWORD = "fake-smtp-password"; };
+/* Outbound mail as an administrator sets it on the Mail card: the sending row since #1629, not SMTP_*. */
+const setSmtp = () => setUpSending(fixture.users.admin.id);
 
 beforeEach(async () => {
   mail.sent.length = 0;
   route = undefined;
-  for (const name of ["SMTP_PORT", "SMTP_FROM", "SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD"]) savedEnvironment[name] = process.env[name];
-  delete process.env.SMTP_HOST;
-  delete process.env.SMTP_USER;
-  delete process.env.SMTP_PASSWORD;
-  setSmtp();
-  process.env.SMTP_FROM = "Orbit <orbit@example.test>";
   fixture = await createIntegrationFixture("sender-check-limit");
+  await setSmtp();
 });
 
 afterEach(async () => {
   vi.useRealTimers();
-  for (const [name, value] of Object.entries(savedEnvironment)) {
-    if (value === undefined) delete process.env[name];
-    else process.env[name] = value;
-  }
   const db = getDb();
   await db.delete(imapRecipientAliases);
   await db.delete(mailInSenderAddresses);
   await db.delete(mailInRelays);
   await db.update(mailInMailbox).set({ passwordSecretId: null, aliasKeySecretId: null });
   await db.delete(mailInMailbox);
+  await clearSending();
   await db.delete(mailInSecrets);
   await db.delete(auditLog);
   await fixture.cleanup();
@@ -313,7 +305,7 @@ describe("refused requests do not count", () => {
   });
 
   it("does not count a 503 (mail not configured) against the limit", async () => {
-    delete process.env.SMTP_HOST;
+    await clearSending();
     for (let attempt = 0; attempt < 6; attempt += 1) {
       at(attempt * 61);
       const response = await send();
@@ -321,7 +313,7 @@ describe("refused requests do not count", () => {
     }
     expect(mail.sent).toEqual([]);
 
-    setSmtp();
+    await setSmtp();
     at(6 * 61);
     expect((await send()).status).toBe(202);
     expect(mail.sent).toHaveLength(1);

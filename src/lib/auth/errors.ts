@@ -44,7 +44,12 @@ export type AuthErrorCode =
      themselves out — at least one USABLE method has to survive, and an
      identity is not usable while `ORBIT_AUTH_OIDC` is false. */
   | "link_exists"
-  | "link_last_method";
+  | "link_last_method"
+  /* The sign-in could not be decided because the instance could not read the
+     setting the second factor turns on (S-data3-1). A 503 that names no
+     subsystem: a signed-out visitor learning which one failed is
+     reconnaissance, the availability route's own rule. */
+  | "sign_in_unavailable";
 
 /**
  * Closed internal diagnostic reasons for a token-exchange failure.

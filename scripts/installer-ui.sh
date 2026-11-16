@@ -100,7 +100,7 @@ installer_ui_safe_field() {
     state:waiting|state:starting|state:running|state:healthy|state:skipped|state:completed|state:blocked|state:failed)
       printf '%s' "$value"
       ;;
-    reason:initial|reason:target|reason:channel|reason:digest|reason:source-revision|reason:semantic-version|reason:revision|reason:configuration|reason:configuration-required|reason:discovery|reason:compose-config|reason:database-image|reason:service-start|reason:status-verified|reason:installed|reason:host-tools|reason:image-identity|reason:assets-verified|reason:configuration-migration|reason:provider-discovery|reason:compose-validation|reason:service-preparation|reason:database-health|reason:application-health|reason:optional-status|reason:deployment-ready|reason:docker-host|reason:image-registry|reason:configuration-failure|reason:provider-unavailable|reason:database-auth-migration|reason:application-startup|reason:health-timeout|reason:optional-unavailable|reason:failure|reason:rollback|reason:repair-unavailable|reason:update-path|reason:unknown)
+    reason:initial|reason:target|reason:channel|reason:digest|reason:source-revision|reason:semantic-version|reason:revision|reason:configuration|reason:configuration-required|reason:discovery|reason:compose-config|reason:database-image|reason:service-start|reason:status-verified|reason:installed|reason:host-tools|reason:image-identity|reason:assets-verified|reason:configuration-migration|reason:provider-discovery|reason:compose-validation|reason:service-preparation|reason:database-health|reason:application-health|reason:optional-status|reason:deployment-ready|reason:docker-host|reason:image-registry|reason:configuration-failure|reason:provider-unavailable|reason:database-auth-migration|reason:application-startup|reason:health-timeout|reason:optional-unavailable|reason:failure|reason:rollback|reason:repair-unavailable|reason:update-path|reason:update-readiness|reason:folder-moved|reason:unknown)
       printf '%s' "$value"
       ;;
     action:begin|action:validate|action:pull|action:inspect|action:fetch|action:configure|action:verify|action:check|action:start|action:wait|action:health|action:skip|action:status|action:complete|action:retry|action:rollback|action:repair|action:continue|action:display|action:abort)
@@ -484,10 +484,14 @@ installer_ui_select() {
 installer_ui_read_value() {
   [[ $# -eq 4 ]] || return 2
   local terminal_fd="$1" prompt="$2" maximum="$3" visibility="$4"
-  local value="" saved_state status=0 restore_status=0 interrupted=0 key insert="" cursor=0 tail=0 repaint=1
+  local value="" saved_state status=0 restore_status=0 interrupted=0 key insert="" cursor=0 tail=0 repaint=1 plain_echo=0
   [[ "$maximum" =~ ^[1-9][0-9]{0,5}$ ]] || return 2
   [[ "$visibility" == text || "$visibility" == secret ]] || return 2
   [[ "${TERM:-}" != dumb && "${ORBIT_INSTALLER_PLAIN:-0}" != 1 ]] || repaint=0
+  # Plain mode does not repaint, so visible text is echoed as typed, with no
+  # escape sequences: the cursor stays at the end (arrow keys are ignored),
+  # and a backspace erases the last character (#1834).
+  [[ "$visibility" != text || "${ORBIT_INSTALLER_PLAIN:-0}" != 1 ]] || plain_echo=1
 
   saved_state="$(stty -g <&"$terminal_fd" 2>/dev/null)" || return 1
   # Trap before raw mode, as in installer_ui_select: a signal landing between
@@ -517,6 +521,7 @@ installer_ui_read_value() {
         status=130
         break
         ;;
+      left | right | home | end | delete) ((plain_echo == 0)) || continue ;;&
       left) ((cursor > 0)) && cursor=$((cursor - 1)) ;;
       right) ((cursor < ${#value})) && cursor=$((cursor + 1)) ;;
       home) cursor=0 ;;
@@ -525,6 +530,7 @@ installer_ui_read_value() {
         if ((cursor > 0)); then
           value="${value:0:cursor-1}${value:cursor}"
           cursor=$((cursor - 1))
+          ((plain_echo == 0)) || printf '\b \b' >&"$terminal_fd"
         fi
         ;;
       delete)
@@ -539,6 +545,7 @@ installer_ui_read_value() {
         }
         value="${value:0:cursor}${insert}${value:cursor}"
         cursor=$((cursor + ${#insert}))
+        ((plain_echo == 0)) || printf '%s' "$insert" >&"$terminal_fd"
         ;;
       char:*)
         insert="${key#char:}"
@@ -548,6 +555,7 @@ installer_ui_read_value() {
         }
         value="${value:0:cursor}${insert}${value:cursor}"
         cursor=$((cursor + ${#insert}))
+        ((plain_echo == 0)) || printf '%s' "$insert" >&"$terminal_fd"
         ;;
       *) ;;
     esac

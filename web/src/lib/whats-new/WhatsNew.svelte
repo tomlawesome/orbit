@@ -8,7 +8,8 @@
 </script>
 
 <script>
-  import { tick } from "svelte";
+  import { onDestroy, tick } from "svelte";
+  import { whatsNewOpen } from "./open.js";
   import { page } from "$app/state";
   import { dismissWhatsNew, readWhatsNew } from "$lib/data/workspace.js";
 
@@ -47,6 +48,9 @@
   let asked = false;
 
   const open = $derived(notice !== null && !dismissed && !tourShowing && page.url.pathname === HOME);
+  /* The importance pill stays off while the sheet is open (#1757). */
+  $effect(() => whatsNewOpen.set(open));
+  onDestroy(() => whatsNewOpen.set(false));
   /* The sheet's eyebrow sets the version without its "v". */
   const shownVersion = $derived(notice ? notice.version.replace(/^v/, "") : "");
 

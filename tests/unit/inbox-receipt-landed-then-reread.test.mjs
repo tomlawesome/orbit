@@ -91,3 +91,20 @@ describe("the sheet contract that makes the answer matter (source check, passes 
     expect(src("web/src/lib/pocket/ReviewSheet.svelte")).toMatch(/if \(await onsave\([^\n]*\)\) open = false/u);
   });
 });
+
+describe("an approval the scanner refuses as a flagged file (#1398 rework)", () => {
+  it("reads the inbox again, so the card can show the flagged attachment and its two buttons; the receipt has not left review", async () => {
+    ws.approveWithOperation.mockRejectedValue(Object.assign(
+      new Error("not added — the virus scanner flagged an attachment; your mail is kept."), { code: "document_malware_detected", status: 422 }));
+    const reload = vi.fn(async () => {});
+    const landed = vi.fn();
+    const acts = createReceiptActs({
+      view: () => /** @type {any} */ ({ suggestions: [suggestion], primary: "h1" }),
+      operationIds: new Map(), reload, say: vi.fn(), busy: vi.fn(), landed,
+    });
+
+    expect(await acts.decide({ id: "r1" }, "approve")).toBe(false);
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(landed).not.toHaveBeenCalled();
+  });
+});

@@ -75,9 +75,8 @@ export default defineConfig({
     /* The engine is a linked workspace package of TypeScript source, not a
        built artifact (#735). Vite has to transform it rather than hand it to
        Node, in dev and in the adapter-node build alike. Its own runtime
-       dependencies stay external: `pdfjs-dist` resolves worker and cmap
-       assets by on-disk path and `@napi-rs/canvas` is native, so neither
-       survives bundling. */
+       dependencies stay external: `@napi-rs/canvas` is native and does not
+       survive bundling. */
     noExternal: ["orbit"],
   },
 });

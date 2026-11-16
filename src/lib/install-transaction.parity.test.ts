@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { DEPLOYMENT_ASSETS, DEPLOYMENT_FILE_LIST, buildManagedPaths } from "./deployment-assets";
 import { readGolden } from "./__fixtures__/golden";
 import { InstallTransaction, type ManagedPath } from "./install-transaction";
 
@@ -140,5 +141,30 @@ describe("install-transaction parity against install.sh's staging functions (gol
     const final = JSON.parse(JSON.stringify(snapshotTree(target)).split(target).join("<target>")) as Snapshot;
     expect(final.config).toEqual(golden.bash.final.config);
     expect(final.elsewhere.entries).toEqual(golden.bash.final.elsewhere.entries);
+  });
+
+  // #1496: .orbit-files is a managed file like .env-orbit, so it is backed up
+  // when present and put back on rollback; absent, it is removed as new.
+  it("backs up .orbit-files into rollback/original when present and restores it on rollback (#1496)", () => {
+    seedInitialState(target);
+    writeFileSync(join(target, DEPLOYMENT_FILE_LIST), "# previous list\nold-file\n", { mode: 0o644 });
+
+    const tx = InstallTransaction.begin(target, buildManagedPaths(DEPLOYMENT_ASSETS));
+    const original = snapshotTree(tx.originalDir);
+    expect(original[DEPLOYMENT_FILE_LIST]).toEqual({ mode: 0o644, type: "file", content: "# previous list\nold-file\n" });
+
+    writeFileSync(join(target, DEPLOYMENT_FILE_LIST), "# new list\n", { mode: 0o644 });
+    expect(tx.rollback().ok).toBe(true);
+    expect(snapshotTree(target)[DEPLOYMENT_FILE_LIST]).toEqual({ mode: 0o644, type: "file", content: "# previous list\nold-file\n" });
+  });
+
+  it("removes an .orbit-files the transaction created when it rolls back (#1496)", () => {
+    seedInitialState(target);
+    const tx = InstallTransaction.begin(target, buildManagedPaths(DEPLOYMENT_ASSETS));
+    expect(snapshotTree(tx.originalDir)[DEPLOYMENT_FILE_LIST]).toBeUndefined();
+
+    writeFileSync(join(target, DEPLOYMENT_FILE_LIST), "# new list\n", { mode: 0o644 });
+    expect(tx.rollback().ok).toBe(true);
+    expect(snapshotTree(target)[DEPLOYMENT_FILE_LIST]).toBeUndefined();
   });
 });

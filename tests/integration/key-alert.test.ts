@@ -1,8 +1,11 @@
 /**
- * The alert mail for a locked instance (#1405, design section 5), against a
- * real PostgreSQL for the one thing it keeps there: an `audit_log` row that
- * says "already sent", which is what makes the alert once per fault and at most
- * once a day across restarts. Only the mail wire is stood in for
+ * The alert for a locked instance (#1405, design section 5), as #1629 left
+ * it, against a real PostgreSQL for the one thing it keeps there: an
+ * `audit_log` row that says a fault was held, which is what makes the
+ * working-again notice follow it once. Since #1629 the sending password is
+ * encrypted under the very key that is unusable, so the alert itself is
+ * never mailed (ADR-0017 amendment "One alert cannot mail"); the operator
+ * hears on the first clean start instead. Only the mail wire is stood in for
  * (`sendBoundedMail`), so what is asserted is who is written to, what is said,
  * what is recorded and when it is tried again.
  *
@@ -11,9 +14,9 @@
  * and not the functions.
  *
  * Owner answers on #1405: no fallback to the public contact address (log
- * only when OPERATOR_ALERT_ADDRESS is unset), one "working again" mail after
- * the first clean start that follows an alert, and a repeat at most once in
- * 24 hours.
+ * only when OPERATOR_ALERT_ADDRESS is unset), and one "working again" mail
+ * after the first clean start that follows an alert. The 24-hour repeat and
+ * the hourly retry went with #1629: neither could ever reach the wire.
  */
 import { createHash, randomUUID } from "node:crypto";
 import { and, eq, inArray } from "drizzle-orm";
@@ -38,6 +41,7 @@ const sendKeyAlert = async (...args: Parameters<KeyAlertModule["sendKeyAlert"]>)
 const sendKeyRestoredNotice = async () => (await import("@/server/key-alert")).sendKeyRestoredNotice();
 
 const ALERT = "encryption_key_alert_sent";
+const HELD_ROW = "encryption_key_alert_held";
 const RESTORED = "encryption_key_restored";
 const HELD = "0123456789abcdef01234567";
 const STORED = "fedcba9876543210fedcba98";
@@ -54,7 +58,6 @@ const sentOk = { sentAt: new Date(), sendError: null };
    so a corrected address is a new fault (round 4, unit A). */
 const addressHashOf = (address: string) => createHash("sha256").update(address).digest("hex").slice(0, 16);
 const OPERATOR_HASH = addressHashOf(OPERATOR);
-const DAY_MS = 24 * 3_600_000;
 
 async function rows(action: string) {
   return getDb().select().from(auditLog).where(eq(auditLog.action, action));
@@ -89,326 +92,129 @@ afterEach(async () => {
   vi.useRealTimers();
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
-  await getDb().delete(auditLog).where(inArray(auditLog.action, [ALERT, RESTORED]));
+  await getDb().delete(auditLog).where(inArray(auditLog.action, [ALERT, HELD_ROW, RESTORED]));
 });
 
 afterAll(async () => {
   await cleanupIntegrationEnvironment();
 });
 
-describe("the alert (#1405 section 5)", () => {
-  it("writes once to the operator's own address, and records that it did", async () => {
-    await sendKeyAlert(mismatch);
-
-    expect(mocks.sendBoundedMail).toHaveBeenCalledTimes(1);
-    const [to, mail] = mocks.sendBoundedMail.mock.calls[0] as [string, { subject: string; text: string }];
-    expect(to).toBe(OPERATOR);
-    expect(mail.subject).toBe("Orbit is locked: its encryption key needs attention");
-
-    const recorded = await rows(ALERT);
-    expect(recorded).toHaveLength(1);
-    expect(recorded[0]).toMatchObject({ entityType: "instance_authority", householdId: null, actorUserId: null });
-    expect(recorded[0].changes).toMatchObject({ reason: "mismatch", heldKeyId: HELD, storedKeyId: STORED });
-  });
-
-  it("says what is wrong, what is not, what to do, and that it will repeat; for a wrong key it gives both ids", async () => {
-    await sendKeyAlert(mismatch);
-
-    const mail = (mocks.sendBoundedMail.mock.calls[0] as [string, { subject: string; text: string }])[1];
-    expect(mail.text).toContain("cannot open anyone's records or sign anyone in");
-    expect(mail.text).toContain("Nothing is lost");
-    expect(mail.text).toContain("administrators included");
-    expect(mail.text).toContain("restarted");
-    expect(mail.text).toContain("Restoring the document key-encryption key");
-    expect(mail.text).toContain("24 hours");
-    expect(mail.text).toContain("not the key this database was written under");
-    expect(mail.text).toContain(HELD);
-    expect(mail.text).toContain(STORED);
-    expect(mail.text).toContain(new URL(process.env.APP_URL ?? "http://127.0.0.1:3000").origin);
-  });
-
+describe("the alert while the key is unusable (#1405 section 5, as #1629 left it)", () => {
+  /* #1629: the sending password is encrypted under the very key that is
+     unusable, so the alert itself is never mailed (ADR-0017 amendment "One
+     alert cannot mail"). What is kept is a held record, once per fault, so
+     the first clean start tells the operator. */
   it.each([
-    ["missing", "missing"],
-    ["unreadable", "unreadable"],
-    ["malformed", "malformed"],
-    ["both_forms", "set twice"],
-  ] as const)("calls a %s key %s, and names no key id (there is none to name)", async (reason, phrase) => {
-    await sendKeyAlert({ verdict: "unusable", reason } as never);
+    ["mismatch", mismatch],
+    ["missing", missing],
+    ["unreadable", { verdict: "unusable", reason: "unreadable" }],
+  ] as const)("mails nothing for a %s key, records the fault as held, and records nothing as sent", async (_name, state) => {
+    await sendKeyAlert(state as never);
 
-    const mail = (mocks.sendBoundedMail.mock.calls[0] as [string, { subject: string; text: string }])[1];
-    expect(mail.text).toContain(phrase);
-    expect(mail.text).not.toContain("the database was written under");
+    expect(mocks.sendBoundedMail).not.toHaveBeenCalled();
+    expect(await rows(ALERT)).toHaveLength(0);
+    const held = await rows(HELD_ROW);
+    expect(held).toHaveLength(1);
+    expect(held[0]).toMatchObject({ entityType: "instance_authority", householdId: null, actorUserId: null });
+    expect(held[0].changes).toMatchObject({ reason: (state as { reason: string }).reason });
   });
 
-  it("never carries the key, a path to it, or a private address", async () => {
+  it("keeps the key ids of a wrong key with the fault, and never the key, its path or the address", async () => {
     vi.stubEnv("DOCUMENT_KEK_FILE", "/run/secrets/orbit-kek-private-path");
 
     await sendKeyAlert(mismatch);
-    await sendKeyAlert({ verdict: "unusable", reason: "unreadable" } as never);
 
-    for (const [, mail] of mocks.sendBoundedMail.mock.calls as Array<[string, { subject: string; text: string }]>) {
-      expect(mail.text).not.toContain(KEK);
-      expect(mail.text).not.toContain("orbit-kek-private-path");
-      expect(mail.text).not.toMatch(/\b(?:10|192\.168)\.\d+\.\d+(?:\.\d+)?\b/u);
-    }
-    expect(JSON.stringify(await rows(ALERT))).not.toContain(KEK);
+    const [held] = await rows(HELD_ROW);
+    expect(held.changes).toMatchObject({ reason: "mismatch", heldKeyId: HELD, storedKeyId: STORED, addressHash: OPERATOR_HASH });
+    const recorded = JSON.stringify(held.changes);
+    expect(recorded).not.toContain(KEK);
+    expect(recorded).not.toContain("orbit-kek-private-path");
+    expect(recorded).not.toContain(OPERATOR);
   });
 
-  describe("not twice in a day", () => {
-    it("does not repeat a fault already alerted 23 hours ago, and says so in the log", async () => {
-      await priorRow(ALERT, 23, { reason: "mismatch", heldKeyId: HELD, storedKeyId: STORED, addressHash: OPERATOR_HASH });
+  it("says in the log that it was not mailed and where the fault shows instead", async () => {
+    await sendKeyAlert(mismatch);
 
-      await sendKeyAlert(mismatch);
-
-      expect(mocks.sendBoundedMail).not.toHaveBeenCalled();
-      expect(await rows(ALERT)).toHaveLength(1);
-      expect(infoLines()).toContainEqual(expect.objectContaining({
-        event: "encryption.key",
-        state: "blocked",
-        reason: "key_unavailable",
-        action: "check_configuration",
-        impact: "none",
-      }));
-    });
-
-    it("repeats it once 25 hours have passed", async () => {
-      await priorRow(ALERT, 25, { reason: "mismatch", heldKeyId: HELD, storedKeyId: STORED });
-
-      await sendKeyAlert(mismatch);
-
-      expect(mocks.sendBoundedMail).toHaveBeenCalledTimes(1);
-      expect(await rows(ALERT)).toHaveLength(2);
-    });
-
-    it("alerts at once for a different fault: the operator tried another wrong key", async () => {
-      await priorRow(ALERT, 1, { reason: "mismatch", heldKeyId: HELD, storedKeyId: OTHER_STORED });
-
-      await sendKeyAlert(mismatch);
-
-      expect(mocks.sendBoundedMail).toHaveBeenCalledTimes(1);
-    });
-
-    it("alerts at once when the reason changes from one kind to another", async () => {
-      await priorRow(ALERT, 1, { reason: "missing" });
-
-      await sendKeyAlert(mismatch);
-
-      expect(mocks.sendBoundedMail).toHaveBeenCalledTimes(1);
-    });
-
-    it("holds a key that is missing to the same day as any other", async () => {
-      await priorRow(ALERT, 2, { reason: "missing", addressHash: OPERATOR_HASH });
-
-      await sendKeyAlert(missing);
-
-      expect(mocks.sendBoundedMail).not.toHaveBeenCalled();
-    });
-
-    it("a fault alerted 2 hours ago and then recorded as restored alerts again at once", async () => {
-      await priorRow(ALERT, 2, { reason: "missing", addressHash: OPERATOR_HASH });
-      await priorRow(RESTORED, 1, {});
-
-      await sendKeyAlert(missing);
-
-      expect(mocks.sendBoundedMail).toHaveBeenCalledTimes(1);
-      expect(await rows(ALERT)).toHaveLength(2);
-    });
-
-    it("still holds back an alert that is newer than the restored record", async () => {
-      await priorRow(RESTORED, 3, {});
-      await priorRow(ALERT, 1, { reason: "missing", addressHash: OPERATOR_HASH });
-
-      await sendKeyAlert(missing);
-
-      expect(mocks.sendBoundedMail).not.toHaveBeenCalled();
-    });
-
-    it("a changed alert address is a new fault: the corrected address hears at once", async () => {
-      await priorRow(ALERT, 1, { reason: "mismatch", heldKeyId: HELD, storedKeyId: STORED, addressHash: addressHashOf("typo@example.invalid") });
-
-      await sendKeyAlert(mismatch);
-
-      expect(mocks.sendBoundedMail).toHaveBeenCalledTimes(1);
-      expect(mocks.sendBoundedMail.mock.calls[0][0]).toBe(OPERATOR);
-    });
-
-    it("records a hash of the alert address with the fault, and never the address", async () => {
-      await sendKeyAlert(mismatch);
-
-      const recorded = await rows(ALERT);
-      expect(recorded).toHaveLength(1);
-      expect(recorded[0].changes).toMatchObject({ addressHash: OPERATOR_HASH });
-      expect(JSON.stringify(recorded[0].changes)).not.toContain(OPERATOR);
-    });
+    expect(infoLines()).toContainEqual(expect.objectContaining({
+      event: "encryption.key",
+      state: "blocked",
+      reason: "key_unavailable",
+      action: "check_configuration",
+      impact: "none",
+      detail: expect.stringMatching(/not mailed.*Administration.*health check/iu),
+    }));
   });
 
-  describe("the 24-hour repeat while still locked", () => {
-    /* Only the clock and the timer registry are watched: the database driver's
-       own timers must keep running. Elapsed time is simulated by moving the
-       clock and calling the timer's callback, as the retry case below does. */
-    const repeatTimers = (timers: ReturnType<typeof vi.spyOn>) =>
-      (timers.mock.calls as Array<[() => unknown, number | undefined]>).filter(([, delay]) => (delay ?? 0) > 23 * 3_600_000);
+  it("records the same fault once, however many starts see it", async () => {
+    await sendKeyAlert(mismatch);
+    await sendKeyAlert(mismatch);
+    await sendKeyAlert(mismatch);
 
-    it("repeats the alert 24 hours later while the process stays locked", async () => {
-      vi.useFakeTimers({ toFake: ["Date"] });
-      const timers = vi.spyOn(globalThis, "setTimeout");
-
-      await sendKeyAlert(mismatch);
-      expect(mocks.sendBoundedMail).toHaveBeenCalledTimes(1);
-
-      const repeats = repeatTimers(timers);
-      expect(repeats, "no timer of about 24 hours was armed after the send").toHaveLength(1);
-      expect(repeats[0][1]).toBeLessThanOrEqual(DAY_MS + 60_000);
-
-      vi.setSystemTime(Date.now() + DAY_MS + 60_000);
-      await repeats[0][0]();
-      await vi.waitFor(() => expect(mocks.sendBoundedMail).toHaveBeenCalledTimes(2));
-      await vi.waitFor(async () => expect(await rows(ALERT)).toHaveLength(2));
-    });
-
-    it("counts the day from the newest alert already sent, so a restart does not reset the clock", async () => {
-      await priorRow(ALERT, 5, { reason: "mismatch", heldKeyId: HELD, storedKeyId: STORED, addressHash: OPERATOR_HASH });
-      const timers = vi.spyOn(globalThis, "setTimeout");
-
-      await sendKeyAlert(mismatch);
-
-      expect(mocks.sendBoundedMail).not.toHaveBeenCalled();
-      const waits = (timers.mock.calls as Array<[unknown, number | undefined]>)
-        .map(([, delay]) => delay ?? 0)
-        .filter((delay) => delay > 17 * 3_600_000 && delay < 21 * 3_600_000);
-      expect(waits, "no timer for the remaining ~19 hours was armed after the already-sent branch").toHaveLength(1);
-      expect(Math.abs(waits[0] - 19 * 3_600_000)).toBeLessThan(5 * 60_000);
-    });
-
-    it("does not hold the process open for the repeat timer", async () => {
-      const timers = vi.spyOn(globalThis, "setTimeout");
-
-      await sendKeyAlert(mismatch);
-
-      const index = timers.mock.calls.findIndex(([, delay]) => (delay ?? 0) > 23 * 3_600_000);
-      expect(index, "no repeat timer was armed").toBeGreaterThanOrEqual(0);
-      const handle = timers.mock.results[index].value as { hasRef?: () => boolean };
-      expect(handle.hasRef?.()).toBe(false);
-    });
-
-    it("keeps one repeat timer: arming again clears the one before", async () => {
-      const timers = vi.spyOn(globalThis, "setTimeout");
-      const cleared = vi.spyOn(globalThis, "clearTimeout");
-
-      await sendKeyAlert(mismatch);
-      const index = timers.mock.calls.findIndex(([, delay]) => (delay ?? 0) > 23 * 3_600_000);
-      expect(index, "no repeat timer was armed").toBeGreaterThanOrEqual(0);
-      const first = timers.mock.results[index].value;
-
-      await sendKeyAlert(mismatch);
-
-      expect(cleared).toHaveBeenCalledWith(first);
-    });
-
-    it("arms no repeat when the alert address is not configured", async () => {
-      vi.stubEnv("OPERATOR_ALERT_ADDRESS", "");
-      const timers = vi.spyOn(globalThis, "setTimeout");
-
-      await sendKeyAlert(mismatch);
-
-      expect(repeatTimers(timers)).toEqual([]);
-    });
+    expect(await rows(HELD_ROW)).toHaveLength(1);
   });
 
-  describe("when it cannot be sent", () => {
-    it("only logs, and sends nothing, when there is no alert address (no fallback to the public contact address)", async () => {
-      vi.stubEnv("OPERATOR_ALERT_ADDRESS", "");
+  it("records a different fault at once: the operator tried another wrong key", async () => {
+    await priorRow(HELD_ROW, 1, { reason: "mismatch", heldKeyId: HELD, storedKeyId: OTHER_STORED, addressHash: OPERATOR_HASH });
 
-      await sendKeyAlert(mismatch);
+    await sendKeyAlert(mismatch);
 
-      expect(mocks.sendBoundedMail).not.toHaveBeenCalled();
-      expect(await rows(ALERT)).toHaveLength(0);
-      expect(infoLines()).toContainEqual(expect.objectContaining({
-        event: "encryption.key",
-        state: "degraded",
-        reason: "not_configured",
-        action: "repair_configuration",
-        impact: "none",
-      }));
-    });
+    expect(await rows(HELD_ROW)).toHaveLength(2);
+  });
 
-    it("says an alert address that is not an address is invalid, not missing", async () => {
-      vi.stubEnv("OPERATOR_ALERT_ADDRESS", "not-an-address");
+  it("records a fault again once it was recorded as restored in between", async () => {
+    await priorRow(HELD_ROW, 2, { reason: "missing", addressHash: OPERATOR_HASH });
+    await priorRow(RESTORED, 1, {});
 
-      await sendKeyAlert(mismatch);
+    await sendKeyAlert(missing);
 
-      expect(mocks.sendBoundedMail).not.toHaveBeenCalled();
-      expect(await rows(ALERT)).toHaveLength(0);
-      expect(infoLines()).toContainEqual(expect.objectContaining({
-        reason: "configuration_optional",
-        setting: "alerts",
-        detail: expect.stringMatching(/not a valid address/iu),
-      }));
-      expect(infoLines().map((line) => String(line.detail ?? ""))).not.toContainEqual(expect.stringMatching(/no OPERATOR_ALERT_ADDRESS/u));
-      expect(JSON.stringify([...infoLines(), ...warnLines()])).not.toContain("not-an-address");
-    });
+    expect(await rows(HELD_ROW)).toHaveLength(2);
+  });
 
-    it("only logs, with no timer, when outbound mail is not configured", async () => {
-      mocks.sendBoundedMail.mockResolvedValue({ sentAt: null, sendError: "smtp_unconfigured" });
-      const timers = vi.spyOn(globalThis, "setTimeout");
+  it("arms no timer: waiting does not make the sending password readable", async () => {
+    const timers = vi.spyOn(globalThis, "setTimeout");
 
-      await sendKeyAlert(mismatch);
+    await sendKeyAlert(mismatch);
 
-      expect(await rows(ALERT)).toHaveLength(0);
-      expect(infoLines()).toContainEqual(expect.objectContaining({
-        event: "encryption.key",
-        state: "degraded",
-        reason: "smtp_unconfigured",
-        action: "repair_configuration",
-        impact: "none",
-      }));
-      expect(timers.mock.calls.filter(([, delay]) => delay === 3_600_000)).toEqual([]);
-    });
+    expect((timers.mock.calls as Array<[unknown, number | undefined]>).filter(([, delay]) => (delay ?? 0) >= 3_600_000)).toEqual([]);
+  });
 
-    it.each(["smtp_unavailable", "smtp_rejected", "unknown"] as const)("records nothing after %s, says it will retry, and tries again in an hour", async (sendError) => {
-      mocks.sendBoundedMail.mockResolvedValueOnce({ sentAt: null, sendError });
-      const timers = vi.spyOn(globalThis, "setTimeout");
+  it("only logs, and records nothing, when there is no alert address (no fallback to the public contact address)", async () => {
+    vi.stubEnv("OPERATOR_ALERT_ADDRESS", "");
 
-      await sendKeyAlert(mismatch);
+    await sendKeyAlert(mismatch);
 
-      expect(await rows(ALERT)).toHaveLength(0);
-      expect(warnLines()).toContainEqual(expect.objectContaining({
-        event: "delivery.smtp",
-        state: "retrying",
-        reason: sendError,
-        action: "check_configuration",
-        impact: "none",
-      }));
-      const retry = timers.mock.calls.find(([, delay]) => delay === 3_600_000);
-      expect(retry, "no one-hour retry was scheduled").toBeDefined();
+    expect(mocks.sendBoundedMail).not.toHaveBeenCalled();
+    expect(await rows(HELD_ROW)).toHaveLength(0);
+    expect(infoLines()).toContainEqual(expect.objectContaining({
+      event: "encryption.key",
+      state: "degraded",
+      reason: "not_configured",
+      action: "repair_configuration",
+      impact: "none",
+    }));
+  });
 
-      // The hour passes and the mail now goes through.
-      await (retry![0] as () => unknown)();
-      await vi.waitFor(() => expect(mocks.sendBoundedMail).toHaveBeenCalledTimes(2));
-      await vi.waitFor(async () => expect(await rows(ALERT)).toHaveLength(1));
-    });
+  it("says an alert address that is not an address is invalid, not missing", async () => {
+    vi.stubEnv("OPERATOR_ALERT_ADDRESS", "not-an-address");
 
-    it("does not hold the process open for its retry", async () => {
-      mocks.sendBoundedMail.mockResolvedValueOnce({ sentAt: null, sendError: "smtp_unavailable" });
-      const timers = vi.spyOn(globalThis, "setTimeout");
+    await sendKeyAlert(mismatch);
 
-      await sendKeyAlert(mismatch);
+    expect(mocks.sendBoundedMail).not.toHaveBeenCalled();
+    expect(await rows(HELD_ROW)).toHaveLength(0);
+    expect(infoLines()).toContainEqual(expect.objectContaining({
+      reason: "configuration_optional",
+      setting: "alerts",
+      detail: expect.stringMatching(/not a valid address/iu),
+    }));
+    expect(infoLines().map((line) => String(line.detail ?? ""))).not.toContainEqual(expect.stringMatching(/no OPERATOR_ALERT_ADDRESS/u));
+    expect(JSON.stringify([...infoLines(), ...warnLines()])).not.toContain("not-an-address");
+  });
 
-      const index = timers.mock.calls.findIndex(([, delay]) => delay === 3_600_000);
-      expect(index).toBeGreaterThanOrEqual(0);
-      const handle = timers.mock.results[index].value as { hasRef?: () => boolean };
-      expect(handle.hasRef?.()).toBe(false);
-    });
+  it("does nothing for a usable verdict", async () => {
+    await sendKeyAlert({ verdict: "usable" } as never);
 
-    it("says it was sent, once, when it was", async () => {
-      await sendKeyAlert(mismatch);
-
-      expect(infoLines()).toContainEqual(expect.objectContaining({
-        event: "delivery.smtp",
-        state: "completed",
-        action: "none",
-      }));
-    });
+    expect(mocks.sendBoundedMail).not.toHaveBeenCalled();
+    expect(await rows(HELD_ROW)).toHaveLength(0);
   });
 });
 
@@ -434,6 +240,64 @@ describe("the all-clear (#1405, owner answer 10a)", () => {
     await sendKeyRestoredNotice();
 
     expect(mocks.sendBoundedMail).toHaveBeenCalledTimes(1);
+    expect(await rows(RESTORED)).toHaveLength(1);
+  });
+
+  it("after a fault that was held, not mailed, sends one notice that says what was wrong and why it could not mail", async () => {
+    await priorRow(HELD_ROW, 3, { reason: "missing", addressHash: OPERATOR_HASH });
+
+    await sendKeyRestoredNotice();
+    await sendKeyRestoredNotice();
+
+    expect(mocks.sendBoundedMail).toHaveBeenCalledTimes(1);
+    const [to, mail] = mocks.sendBoundedMail.mock.calls[0] as [string, { subject: string; text: string }];
+    expect(to).toBe(OPERATOR);
+    expect(mail.subject).toBe("Orbit's encryption key is working again");
+    expect(mail.text).toContain("missing");
+    expect(mail.text).toMatch(/could not mail you/iu);
+    expect(mail.text).toContain("Nothing was lost");
+    expect(mail.text).toContain(new URL(process.env.APP_URL ?? "http://127.0.0.1:3000").origin);
+    expect(mail.text).not.toContain(KEK);
+    expect(await rows(RESTORED)).toHaveLength(1);
+  });
+
+  it.each([
+    ["missing", "missing"],
+    ["unreadable", "unreadable"],
+    ["malformed", "malformed"],
+    ["both_forms", "set twice"],
+    ["mismatch", "not the key this database was written under"],
+  ] as const)("calls a held %s key %s in the notice", async (reason, phrase) => {
+    await priorRow(HELD_ROW, 3, { reason, addressHash: OPERATOR_HASH });
+
+    await sendKeyRestoredNotice();
+
+    const mail = (mocks.sendBoundedMail.mock.calls[0] as [string, { subject: string; text: string }])[1];
+    expect(mail.text).toContain(phrase);
+  });
+
+  it("never carries the key, a path to it, or a private address in the notice", async () => {
+    vi.stubEnv("DOCUMENT_KEK_FILE", "/run/secrets/orbit-kek-private-path");
+    await priorRow(HELD_ROW, 3, { reason: "mismatch", heldKeyId: HELD, storedKeyId: STORED, addressHash: OPERATOR_HASH });
+
+    await sendKeyRestoredNotice();
+
+    const mail = (mocks.sendBoundedMail.mock.calls[0] as [string, { subject: string; text: string }])[1];
+    expect(mail.text).not.toContain(KEK);
+    expect(mail.text).not.toContain("orbit-kek-private-path");
+    expect(mail.text).not.toMatch(/\b(?:10|192\.168)\.\d+\.\d+(?:\.\d+)?\b/u);
+  });
+
+  it("leaves the notice for the next start, and records nothing, when it cannot be sent", async () => {
+    await priorRow(HELD_ROW, 3, { reason: "missing", addressHash: OPERATOR_HASH });
+    mocks.sendBoundedMail.mockResolvedValueOnce({ sentAt: null, sendError: "smtp_unavailable" });
+
+    await sendKeyRestoredNotice();
+    expect(await rows(RESTORED)).toHaveLength(0);
+    expect(warnLines()).toContainEqual(expect.objectContaining({ event: "delivery.smtp", reason: "smtp_unavailable" }));
+
+    await sendKeyRestoredNotice();
+    expect(mocks.sendBoundedMail).toHaveBeenCalledTimes(2);
     expect(await rows(RESTORED)).toHaveLength(1);
   });
 
@@ -479,74 +343,28 @@ describe("the all-clear (#1405, owner answer 10a)", () => {
 
 describe("key alert survives database errors (#1316 r5 U1)", () => {
   const SECRET_TEXT = "db-failure-text-that-must-not-be-logged";
-  const HOUR_MS = 3_600_000;
 
-  /* Only the clock is faked, as in the repeat cases above: the database
-     driver's own timers must keep running. Elapsed time is simulated by moving
-     the clock and calling the callback of the timer the alert armed. */
-  const timerCallsSince = (timers: ReturnType<typeof vi.spyOn>, from: number) =>
-    (timers.mock.calls as Array<[() => unknown, number | undefined]>).slice(from);
-
-  /* A first alert goes out, which arms the 24-hour repeat timer; returns the
-     timer spy and that timer's callback, with the clock moved past the day. */
-  async function firstAlertThenDayPasses() {
-    vi.useFakeTimers({ toFake: ["Date"] });
-    const timers = vi.spyOn(globalThis, "setTimeout");
-    await sendKeyAlert(mismatch);
-    expect(mocks.sendBoundedMail).toHaveBeenCalledTimes(1);
-    const repeat = (timers.mock.calls as Array<[() => unknown, number | undefined]>)
-      .find(([, delay]) => (delay ?? 0) > 23 * HOUR_MS);
-    expect(repeat, "no 24-hour repeat timer was armed after the first send").toBeDefined();
-    vi.setSystemTime(Date.now() + DAY_MS + 60_000);
-    return { timers, fireRepeat: repeat![0] };
-  }
-
-  it("a database read that throws in the repeat is not the end of the alert: one warning without the error text, a retry in an hour, and the mail goes when the database answers", async () => {
-    const { timers, fireRepeat } = await firstAlertThenDayPasses();
-    const armedBefore = timers.mock.calls.length;
-    vi.spyOn(getDb(), "select").mockImplementationOnce(() => {
-      throw new Error(SECRET_TEXT);
-    });
-
-    await fireRepeat();
-
-    expect(mocks.sendBoundedMail, "the mail went out although the dedupe read threw").toHaveBeenCalledTimes(1);
-    const keyWarnings = warnLines().filter((line) => line.event === "encryption.key");
-    expect(keyWarnings, "expected exactly one encryption.key warning").toHaveLength(1);
-    expect(JSON.stringify([...warnLines(), ...infoLines()])).not.toContain(SECRET_TEXT);
-    const retry = timerCallsSince(timers, armedBefore).find(([, delay]) => delay === HOUR_MS);
-    expect(retry, "no one-hour retry was armed after the database error").toBeDefined();
-
-    // The hour passes and the database answers again.
-    vi.setSystemTime(Date.now() + HOUR_MS);
-    await retry![0]();
-    await vi.waitFor(() => expect(mocks.sendBoundedMail).toHaveBeenCalledTimes(2));
-    await vi.waitFor(async () => expect(await rows(ALERT)).toHaveLength(2));
-  });
-
-  it("an 'alert sent' record that throws after the mail went still arms the 24-hour repeat, and logs a warning", async () => {
-    const { timers, fireRepeat } = await firstAlertThenDayPasses();
-    const armedBefore = timers.mock.calls.length;
+  it("a fault record that throws is one warning without the error text, and never a mail or a throw", async () => {
     vi.spyOn(getDb(), "insert").mockImplementationOnce(() => {
       throw new Error(SECRET_TEXT);
     });
 
-    await fireRepeat();
+    await expect(sendKeyAlert(mismatch)).resolves.toBeUndefined();
 
-    expect(mocks.sendBoundedMail).toHaveBeenCalledTimes(2);
-    expect(warnLines().length, "no warning was logged for the failed record").toBeGreaterThanOrEqual(1);
+    expect(mocks.sendBoundedMail).not.toHaveBeenCalled();
+    const keyWarnings = warnLines().filter((line) => line.event === "encryption.key");
+    expect(keyWarnings, "expected exactly one encryption.key warning").toHaveLength(1);
     expect(JSON.stringify([...warnLines(), ...infoLines()])).not.toContain(SECRET_TEXT);
-    const repeats = timerCallsSince(timers, armedBefore).filter(([, delay]) => (delay ?? 0) > 23 * HOUR_MS);
-    expect(repeats, "no 24-hour repeat was armed after the record failed").toHaveLength(1);
   });
 
-  it("a 'working again' record older than 24 hours does not extend the window: an alert sent 25 hours ago is repeated", async () => {
-    await priorRow(RESTORED, 72, {});
-    await priorRow(ALERT, 25, { reason: "mismatch", heldKeyId: HELD, storedKeyId: STORED, addressHash: OPERATOR_HASH });
+  it("a read that throws is one warning without the error text", async () => {
+    vi.spyOn(getDb(), "select").mockImplementationOnce(() => {
+      throw new Error(SECRET_TEXT);
+    });
 
-    await sendKeyAlert(mismatch);
+    await expect(sendKeyAlert(mismatch)).resolves.toBeUndefined();
 
-    expect(mocks.sendBoundedMail).toHaveBeenCalledTimes(1);
-    expect(await rows(ALERT)).toHaveLength(2);
+    expect(warnLines().filter((line) => line.event === "encryption.key")).toHaveLength(1);
+    expect(JSON.stringify([...warnLines(), ...infoLines()])).not.toContain(SECRET_TEXT);
   });
 });

@@ -8,8 +8,9 @@
 // from ORIGIN on every request. It also sets one constant response header,
 // X-Frame-Options: DENY, on every response: the adapter serves the prerendered
 // pages (/login, /logout, /auth/error) ahead of kit, so their frame-ancestors
-// sits in a <meta> tag browsers ignore (#1411). It never routes, serves, reads
-// a body or looks at a path.
+// sits in a <meta> tag browsers ignore (#1411). It turns Node's request
+// deadline off and holds every body to a minimum rate instead (#1390). It
+// never routes, serves, reads a body or looks at a path.
 
 const PROTOCOL_HEADER = "x-orbit-forwarded-proto";
 const HOST_HEADER = "x-orbit-forwarded-host";
@@ -55,6 +56,85 @@ if (!server || typeof server.prependListener !== "function") {
   console.error("orbit web server: the adapter's index.js exports no `server`; refusing to start without the origin headers");
   process.exit(1);
 }
+
+// No whole-request deadline (#1390). Node's default requestTimeout (300 s)
+// cut any request still arriving at five minutes, body included, so a
+// household archive of a few GiB on a slow link could never finish. The
+// archive routes and every drained body are bounded by a 30 s stall instead
+// (web/src/lib/server/archive-slot.js, body-limit.js), as nginx's
+// client_body_timeout does. adapter-node 6 exports the http.Server itself as
+// `server`; without the property this cannot be set, so refuse to start.
+if (typeof server.requestTimeout !== "number") {
+  console.error("orbit web server: the adapter's server has no requestTimeout; refusing to start with Node's 300 s request deadline");
+  process.exit(1);
+}
+server.requestTimeout = 0;
+
+// A minimum body rate for every request (#1390), Apache mod_reqtimeout's
+// MinRate: while a request's body is still arriving, the socket's byte count
+// is sampled every 30 s, and a window in which under 30 KiB arrived (1 KiB/s)
+// destroys the socket. With no request deadline this is the floor for every
+// route, kit's own drain of a refused body included (its CSRF 403 runs before
+// the hooks' 30 s stall cuts). Reading socket.bytesRead consumes nothing and
+// attaches no data listener, so the shim still never reads a body.
+//
+// It measures the client only over time the server spends waiting for its
+// bytes (#1390 second review, F1; Kestrel's MinRequestBodyDataRate): while
+// the server has paused the request (the route is scanning, checking or
+// encrypting rather than reading, so adapter-node stopped taking bytes off
+// the socket) the clock stops. Waiting time is added up across pauses, and
+// each time 30 s or more of it has gathered since the last check the client
+// must have brought 1 KiB for every second of it. Listening for `pause` and
+// `resume` reads no body either.
+const MIN_RATE_WINDOW_MS = 30_000;
+const MIN_RATE_WINDOW_BYTES = 30 * 1024;
+server.prependListener("request", (request) => {
+  const socket = request.socket;
+  if (request.complete || !socket) return;
+  let seen = socket.bytesRead;
+  /** Waiting time gathered since the last check, not counting the wait now open. */
+  let waitedMs = 0;
+  /** When the open wait began, or null while the request is paused. */
+  let waitingSince = Date.now();
+  const onPause = () => {
+    if (waitingSince === null) return;
+    waitedMs += Date.now() - waitingSince;
+    waitingSince = null;
+  };
+  const onResume = () => {
+    if (waitingSince === null) waitingSince = Date.now();
+  };
+  request.on("pause", onPause);
+  request.on("resume", onResume);
+  const timer = setInterval(() => {
+    if (request.complete || socket.destroyed) {
+      stop();
+      return;
+    }
+    const at = Date.now();
+    const waited = waitedMs + (waitingSince === null ? 0 : at - waitingSince);
+    if (waited < MIN_RATE_WINDOW_MS) return;
+    const now = socket.bytesRead;
+    if (now - seen < (waited / MIN_RATE_WINDOW_MS) * MIN_RATE_WINDOW_BYTES) {
+      stop();
+      socket.destroy();
+      return;
+    }
+    seen = now;
+    waitedMs = 0;
+    if (waitingSince !== null) waitingSince = at;
+  }, MIN_RATE_WINDOW_MS);
+  timer.unref?.();
+  // Cleared with the request; the keep-alive socket's own listener goes with it.
+  function stop() {
+    clearInterval(timer);
+    request.removeListener("pause", onPause);
+    request.removeListener("resume", onResume);
+    socket.removeListener("close", stop);
+  }
+  request.once("close", stop);
+  socket.once("close", stop);
+});
 
 // Whatever ORIGIN says: framing is refused even when the origin headers are not set.
 server.prependListener("request", (_request, response) => {

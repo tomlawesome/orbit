@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   DatabaseVolumeSafetyRefusal,
@@ -611,12 +611,12 @@ describe("moved folder versus another folder (#1570)", () => {
 
   describe("a label naming a folder that no longer exists", () => {
     it("does not refuse when the other proofs pass", () => {
-      expect(evaluate(inFolder(GONE, { [GONE]: missing }))).toEqual({ status: "proven", project: PROJECT, appImage: EXPECTED_IMAGE });
+      expect(evaluate(inFolder(GONE, { [GONE]: missing }))).toEqual({ status: "proven", project: PROJECT, appImage: EXPECTED_IMAGE, movedFrom: GONE });
     });
 
     it("does not refuse when only the application container carries the missing label", () => {
       const adapter = inFolder(GONE, { [GONE]: missing }, { listContainersByVolume: () => `${DB_CONTAINER_ID}|${PROJECT}|orbit-db|${PHYSICAL}` });
-      expect(evaluate(adapter)).toEqual({ status: "proven", project: PROJECT, appImage: EXPECTED_IMAGE });
+      expect(evaluate(adapter)).toEqual({ status: "proven", project: PROJECT, appImage: EXPECTED_IMAGE, movedFrom: GONE });
     });
 
     it.each([
@@ -644,6 +644,67 @@ describe("moved folder versus another folder (#1570)", () => {
         listContainersByVolume: () => `${DB_CONTAINER_ID}|${PROJECT}|orbit-db|${ELSEWHERE}`,
       });
       expect(evaluate(adapter)).toMatchObject({ status: "not-proven", reason: "other-folder", folder: ELSEWHERE });
+    });
+  });
+
+  // #1576 step 1: a label naming a gone folder is a finding, not a refusal: the proven outcome carries
+  // `movedFrom`, the old path as the label spells it.
+  describe("the folder-moved finding (#1576)", () => {
+    it("a gone folder is a finding carrying the old path", () => {
+      expect(evaluate(inFolder(GONE, { [GONE]: missing }))).toEqual({ status: "proven", project: PROJECT, appImage: EXPECTED_IMAGE, movedFrom: GONE });
+    });
+
+    it("trailing slashes are ignored when comparing, and the old path is reported without them", () => {
+      expect(evaluate(inFolder(`${GONE}/`, { [`${GONE}/`]: missing }))).toMatchObject({ status: "proven", movedFrom: GONE });
+    });
+
+    it("an existing other folder keeps the unchanged other-folder refusal", () => {
+      expect(evaluate(inFolder(ELSEWHERE, { [ELSEWHERE]: exists(ELSEWHERE) }))).toEqual({ status: "not-proven", reason: "other-folder", folder: ELSEWHERE });
+    });
+
+    it("mixed labels: an existing other folder wins over a gone one", () => {
+      const adapter = inFolder(GONE, { [GONE]: missing, [ELSEWHERE]: exists(ELSEWHERE) }, { listContainersByVolume: () => `${DB_CONTAINER_ID}|${PROJECT}|orbit-db|${ELSEWHERE}` });
+      const result = evaluate(adapter);
+      expect(result).toMatchObject({ status: "not-proven", reason: "other-folder", folder: ELSEWHERE });
+      expect(result).not.toHaveProperty("movedFrom");
+    });
+
+    it.each([
+      ["the physical spelling", PHYSICAL],
+      ["the logical spelling", LINK_A],
+      ["the logical spelling with a trailing slash", `${LINK_A}/`],
+    ])("this folder (%s) is no finding", (_name, label) => {
+      expect(evaluate(inFolder(label, { [label]: exists(PHYSICAL) }))).toEqual({ status: "proven", project: PROJECT, appImage: EXPECTED_IMAGE });
+    });
+
+    // Labels are shown to the operator, so one holding a control character is never trusted: verify-error.
+    it.each([
+      ["an ESC-bearing label whose folder is gone", "/srv/gone-\u001b[31mred", { exists: false, physical: null }],
+      ["an ESC-bearing label whose folder exists elsewhere", "/srv/other-\u001b[31mred", { exists: true, physical: "/srv/other-\u001b[31mred" }],
+      ["a label with a C1 byte (U+009B)", "/srv/c1-\u009bold", { exists: false, physical: null }],
+      ["a label with a NUL byte", "/srv/nul-\u0000old", { exists: false, physical: null }],
+      ["a label with DEL", "/srv/del-\u007fold", { exists: false, physical: null }],
+    ])("%s is a verify-error with no finding", (_name, label, fact) => {
+      const result = evaluate(inFolder(label, { [label]: fact }));
+      expect(result).toEqual({ status: "verify-error" });
+      expect(result).not.toHaveProperty("movedFrom");
+    });
+
+    it("no finding when the update folder is not given (a fresh install never looks)", () => {
+      const inspect = vi.fn(facts({ [GONE]: missing }));
+      const result = evaluateVolumeOwnership(CANDIDATE_VOLUME, EXPECTED_IMAGE, inFolder(GONE, {}, { inspectWorkingDir: inspect }), undefined);
+      expect(result).not.toHaveProperty("movedFrom");
+      expect(inspect).not.toHaveBeenCalled();
+    });
+
+    it("an update with no containers carrying a label reports no finding", () => {
+      const adapter = inFolder("", {});
+      expect(evaluate(adapter)).not.toHaveProperty("movedFrom");
+    });
+
+    it("another proof failing still refuses on that proof, with no finding", () => {
+      const result = evaluate(inFolder(GONE, { [GONE]: missing }, { inspectContainerImage: () => "ghcr.io/tomlawesome/orbit@sha256:" + "f".repeat(64) }));
+      expect(result).toMatchObject({ status: "not-proven", reason: "image-mismatch" });
     });
   });
 
@@ -950,6 +1011,25 @@ describe("the proof accepts the image the last committed update replaced", () =>
     expect(result.databaseVolumeSeen).toBe(true);
     expect(result.databaseVolumeName).toBe(CANDIDATE_VOLUME);
     expect(result).toMatchObject({ attachedAppImage: IMAGE_A });
+  });
+
+  // #1576 step 1: the state carries the finding as `folderMovedFrom` (the old path), set only when a gone folder was named.
+  it("reports folderMovedFrom in the state when the containers' label names a folder that is gone", () => {
+    writeEnvironment(`ORBIT_IMAGE=${IMAGE_B}`);
+    const GONE_FOLDER = "/srv/orbit-before-the-move";
+    const adapter = makeFullAdapter({
+      inspectContainerImage: () => IMAGE_B,
+      listContainersByVolume: () => `${DB_CONTAINER_ID}|${PROJECT}|orbit-db|${GONE_FOLDER}`,
+      listContainersByProject: () => `${APP_CONTAINER_ID}|${PROJECT}|orbit-app|${GONE_FOLDER}`,
+      inspectWorkingDir: () => ({ exists: false, physical: null }),
+    } as Partial<DatabaseVolumeSafetyAdapter>);
+    const result = verifyDatabaseVolumeSafety(targetDir, undefined, "fallback", freshState(), readyPassword, adapter, ["/srv/orbit"]);
+    expect(result).toMatchObject({ databaseVolumeSeen: true, folderMovedFrom: GONE_FOLDER });
+  });
+
+  it("reports no folderMovedFrom when nothing was moved", () => {
+    writeEnvironment(`ORBIT_IMAGE=${IMAGE_B}`);
+    expect(verify(appRunning(IMAGE_B))).not.toHaveProperty("folderMovedFrom");
   });
 
   it("still attaches when the app runs the saved image, and reports that one", () => {

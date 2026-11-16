@@ -3,17 +3,15 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { NEEDS_POPPLER, popplerIt } from "../../../tests/support/poppler-sandbox";
 import { LocalDocumentStorage } from "./storage";
 import {
   classifyDocumentStructure,
   detectDocumentMediaType,
-  hasPdfIndexBudget,
   normalizedDocumentFilename,
-  PDF_STRUCTURE_PARSER_OPTIONS,
-  type PdfDocumentParameters,
   validateSupportedDocumentStructure,
 } from "./validation";
-import { syntheticJpeg, syntheticPdf, syntheticPdfWithXrefStream, syntheticPng } from "../../../tests/support/synthetic-documents";
+import { syntheticJpeg, syntheticPdf, syntheticPng } from "../../../tests/support/synthetic-documents";
 import {
   classicChainPdf,
   syntheticModernPdf,
@@ -21,7 +19,6 @@ import {
   syntheticPdfWithPages,
   syntheticStructurePdfFixtures,
   xrefStmChainPdf,
-  xrefStreamPdf,
 } from "../../../tests/support/generated-pdf-documents";
 import { syntheticOwnerPasswordPdf, syntheticUserPasswordPdf } from "../../../tests/support/encrypted-pdf-documents";
 
@@ -50,132 +47,96 @@ function forgedPdfObjectOffset(): Buffer {
   return Buffer.from(value);
 }
 
-describe("structural document classification", () => {
-  it.each([
+/** The verdict's reason alone: the check also answers the page count (#1436 D3). */
+async function reasonOf(bytes: Buffer, mediaType: Parameters<typeof classifyDocumentStructure>[1]): Promise<string> {
+  return (await classifyDocumentStructure(bytes, mediaType)).reason;
+}
+
+/*
+ * The PDF cases run the real pdfinfo (#1436): `popplerIt` skips them where
+ * poppler is not installed outside CI, and fails them in CI.
+ */
+describe(`structural document classification ${NEEDS_POPPLER}`, () => {
+  // The hand-made xref-stream fixture is gone from this list: its stream holds
+  // no real entries and it has no trailer, which only pdf.js's index model
+  // forgave; pdfinfo answers "Couldn't read xref table". Real xref streams
+  // are covered by the qpdf producer fixtures below (#1436).
+  popplerIt.each([
     [validPdf, "application/pdf", "supported_structure"],
-    [syntheticPdfWithXrefStream(), "application/pdf", "supported_structure"],
-    [validJpeg, "image/jpeg", "supported_structure"],
-    [validPng, "image/png", "supported_structure"],
   ] as const)("classifies supported %s as supported_structure", async (bytes, mediaType, expected) => {
-    await expect(classifyDocumentStructure(bytes, mediaType)).resolves.toBe(expected);
+    await expect(reasonOf(bytes, mediaType)).resolves.toBe(expected);
     await expect(validateSupportedDocumentStructure(bytes, mediaType)).resolves.toBe(true);
   });
 
   it.each([
+    [validJpeg, "image/jpeg", "supported_structure"],
+    [validPng, "image/png", "supported_structure"],
+  ] as const)("classifies supported %s as supported_structure", async (bytes, mediaType, expected) => {
+    await expect(reasonOf(bytes, mediaType)).resolves.toBe(expected);
+    await expect(validateSupportedDocumentStructure(bytes, mediaType)).resolves.toBe(true);
+  });
+
+  it("answers an image's page count as 1 (#1436 D8)", async () => {
+    await expect(classifyDocumentStructure(validPng, "image/png")).resolves.toEqual({ reason: "supported_structure", pageCount: 1 });
+  });
+
+  popplerIt.each([
     ["Chromium PDF producer", chromiumPdf],
     ["qpdf object and xref streams", qpdfObjectStreamPdf],
     ["qpdf incremental update", qpdfIncrementalPdf],
     ["qpdf compressed object streams with a predicted xref stream", qpdfCompressedObjectStreamPdf],
   ] as const)("accepts independent producer fixture: %s", async (_name, bytes) => {
-    await expect(classifyDocumentStructure(bytes, "application/pdf")).resolves.toBe("supported_structure");
+    await expect(reasonOf(bytes, "application/pdf")).resolves.toBe("supported_structure");
     await expect(validateSupportedDocumentStructure(bytes, "application/pdf")).resolves.toBe(true);
   });
 
-  it.each(syntheticStructurePdfFixtures)("accepts synthetic standards-valid PDF structure from $name", async ({ bytes }) => {
-    await expect(classifyDocumentStructure(bytes, "application/pdf")).resolves.toBe("supported_structure");
+  popplerIt.each(syntheticStructurePdfFixtures.map((fixture) => [fixture.name, fixture.bytes] as const))("accepts synthetic standards-valid PDF structure from %s", async (_name, bytes) => {
+    await expect(reasonOf(bytes, "application/pdf")).resolves.toBe("supported_structure");
     await expect(validateSupportedDocumentStructure(bytes, "application/pdf")).resolves.toBe(true);
   });
 
   describe("modern producer structure: object streams indexed by a compressed cross-reference stream", () => {
-    it("accepts the ordinary shape, with a nested /DecodeParms ahead of /Size", async () => {
-      await expect(classifyDocumentStructure(syntheticModernPdf(), "application/pdf")).resolves.toBe("supported_structure");
+    popplerIt("accepts the ordinary shape, with a nested /DecodeParms ahead of /Size", async () => {
+      await expect(reasonOf(syntheticModernPdf(), "application/pdf")).resolves.toBe("supported_structure");
     });
 
-    it("accepts a cross-reference dictionary long enough to push /Type /XRef past its first 512 bytes", async () => {
-      await expect(classifyDocumentStructure(syntheticModernPdf({ longIndex: true }), "application/pdf"))
+    popplerIt("accepts a cross-reference dictionary long enough to push /Type /XRef past its first 512 bytes", async () => {
+      await expect(reasonOf(syntheticModernPdf({ longIndex: true }), "application/pdf"))
         .resolves.toBe("supported_structure");
     });
   });
 
-  describe("a cross-reference stream that declares a huge entry count is refused (#1316)", () => {
-    it("refuses the control: one /Index subsection of two billion entries", async () => {
-      await expect(classifyDocumentStructure(xrefStreamPdf({ dictionary: "/Index [0 2000000000]" }), "application/pdf"))
-        .resolves.toBe("unsupported_structure");
+  describe("cross-reference chains poppler reads (the index bound of #1316 is retired, ADR-0046)", () => {
+    popplerIt("accepts a small xref stream named by /XRefStm from two chained classic tables", async () => {
+      await expect(reasonOf(xrefStmChainPdf(), "application/pdf")).resolves.toBe("supported_structure");
     });
 
-    it.each([
-      ["/Index subsections whose counts cancel out to zero", "/Index [0 2000000000 0 -2000000000]"],
-      ["/Index with a huge count followed by non-numeric pairs", "/Index [0 2000000000 /X /Y]"],
-      ["a nested /DecodeParms /Index ahead of the real huge /Index", "/DecodeParms << /Index [0 1] >> /Index [0 2000000000]"],
-    ])("refuses %s", async (_name, dictionary) => {
-      await expect(classifyDocumentStructure(xrefStreamPdf({ dictionary }), "application/pdf")).resolves.toBe("unsupported_structure");
+    popplerIt("accepts the same chain when the first table's /Prev points back at the final table", async () => {
+      await expect(reasonOf(xrefStmChainPdf({ cycle: true }), "application/pdf")).resolves.toBe("supported_structure");
     });
 
-    it("refuses a small final xref stream whose /Prev is an xref stream with /Size 2000000000", async () => {
-      const bytes = xrefStreamPdf({ dictionary: "/Index [0 8]", previous: { dictionary: "/Size 2000000000 /Index [0 7]", via: "Prev" } });
-      await expect(classifyDocumentStructure(bytes, "application/pdf")).resolves.toBe("unsupported_structure");
-    });
-
-    it("refuses a classic xref table whose trailer /XRefStm is an xref stream with /Size 2000000000", async () => {
-      const bytes = xrefStreamPdf({ previous: { dictionary: "/Size 2000000000 /Index [0 7]", via: "XRefStm" } });
-      await expect(classifyDocumentStructure(bytes, "application/pdf")).resolves.toBe("unsupported_structure");
-    });
-
-    it("accepts a small xref stream named by /XRefStm from two chained classic tables (pdf.js reads it once)", async () => {
-      await expect(classifyDocumentStructure(xrefStmChainPdf(), "application/pdf")).resolves.toBe("supported_structure");
-    });
-
-    it("accepts the same chain when the first table's /Prev points back at the final table (pdf.js skips the revisit)", async () => {
-      await expect(classifyDocumentStructure(xrefStmChainPdf({ cycle: true }), "application/pdf")).resolves.toBe("supported_structure");
-    });
-
-    // #1397 left the new section limit to be decided from real files. Its own reasoning gives the rule:
-    // the entry cap (1,250,000) already bounds the checking work, so the section cap only needs to sit
-    // well above what repeated Acrobat saves and signatures produce. Chosen: 256. Change it here only.
-    const SECTION_CAP = 256;
-
-    it("accepts a chain of 33 classic tables, one past the old limit of 32 (#1397)", async () => {
-      await expect(classifyDocumentStructure(classicChainPdf({ sections: 33 }), "application/pdf")).resolves.toBe("supported_structure");
-    });
-
-    it("accepts a chain of 100 classic tables, a file saved incrementally many times (#1397)", async () => {
-      await expect(classifyDocumentStructure(classicChainPdf({ sections: 100 }), "application/pdf")).resolves.toBe("supported_structure");
-    });
-
-    it(`accepts a chain of ${SECTION_CAP} classic tables (the section cap is not reached)`, async () => {
-      await expect(classifyDocumentStructure(classicChainPdf({ sections: SECTION_CAP }), "application/pdf")).resolves.toBe("supported_structure");
-    });
-
-    it(`refuses a chain of ${SECTION_CAP + 1} classic tables linked by /Prev (the section cap)`, async () => {
-      await expect(classifyDocumentStructure(classicChainPdf({ sections: SECTION_CAP + 1 }), "application/pdf")).resolves.toBe("unsupported_structure");
-    });
-
-    it("reports a many-section chain as within budget, and one past the cap as not", () => {
-      expect(hasPdfIndexBudget(classicChainPdf({ sections: 33 }))).toBe(true);
-      expect(hasPdfIndexBudget(classicChainPdf({ sections: SECTION_CAP }))).toBe(true);
-      expect(hasPdfIndexBudget(classicChainPdf({ sections: SECTION_CAP + 1 }))).toBe(false);
-    });
-
-    it("still refuses a many-section chain whose declared counts sum past the entry cap (#1397)", async () => {
-      // 40 sections is within the section cap; 40 x 40,000 = 1,600,000 declared entries is over 1,250,000.
-      await expect(classifyDocumentStructure(classicChainPdf({ sections: 40, countEach: 40_000 }), "application/pdf"))
-        .resolves.toBe("unsupported_structure");
-      expect(hasPdfIndexBudget(classicChainPdf({ sections: 40, countEach: 40_000 }))).toBe(false);
-    });
-
-    it("refuses two chained classic tables whose declared counts are each under the entry cap but sum past it", async () => {
-      await expect(classifyDocumentStructure(classicChainPdf({ sections: 2, countEach: 700_000 }), "application/pdf"))
-        .resolves.toBe("unsupported_structure");
+    popplerIt("accepts a chain of 100 classic tables, a file saved incrementally many times (#1397)", async () => {
+      await expect(reasonOf(classicChainPdf({ sections: 100 }), "application/pdf")).resolves.toBe("supported_structure");
     });
   });
 
-  describe("pdf.js opens it with no password and finds page one (ADR-0033)", () => {
-    it.each(syntheticPdfActiveContent)("accepts a PDF carrying $name: the renderer runs none of it", async ({ options }) => {
-      await expect(classifyDocumentStructure(syntheticModernPdf(options), "application/pdf")).resolves.toBe("supported_structure");
+  describe("poppler opens it with no password and finds page one (ADR-0033, ADR-0046)", () => {
+    popplerIt.each(syntheticPdfActiveContent.map((fixture) => [fixture.name, fixture.options] as const))("accepts a PDF carrying %s: the renderer runs none of it", async (_name, options) => {
+      await expect(reasonOf(syntheticModernPdf(options), "application/pdf")).resolves.toBe("supported_structure");
     });
 
-    it("accepts an owner-password-only PDF with an encrypted object stream: pdf.js decrypts it itself (#1292)", async () => {
-      await expect(classifyDocumentStructure(syntheticOwnerPasswordPdf(), "application/pdf")).resolves.toBe("supported_structure");
+    popplerIt("accepts an owner-password-only PDF with an encrypted object stream: poppler decrypts it itself (#1292)", async () => {
+      await expect(reasonOf(syntheticOwnerPasswordPdf(), "application/pdf")).resolves.toBe("supported_structure");
     });
 
-    it("refuses a PDF that needs a password to open, and says that is why", async () => {
-      await expect(classifyDocumentStructure(syntheticUserPasswordPdf(), "application/pdf")).resolves.toBe("password_required");
+    popplerIt("refuses a PDF that needs a password to open, and says that is why", async () => {
+      await expect(reasonOf(syntheticUserPasswordPdf(), "application/pdf")).resolves.toBe("password_required");
       await expect(validateSupportedDocumentStructure(syntheticUserPasswordPdf(), "application/pdf")).resolves.toBe(false);
     });
 
-    it("accepts a PDF whose final offset is wrong but which pdf.js repairs and draws, since that is the file it shows", async () => {
+    popplerIt("accepts a PDF whose final offset is wrong but which poppler repairs and draws, since that is the file it shows", async () => {
       const wrongOffset = Buffer.from(validPdf.toString("latin1").replace(/startxref\n\d+/u, "startxref\n1"), "latin1");
-      await expect(classifyDocumentStructure(wrongOffset, "application/pdf")).resolves.toBe("supported_structure");
+      await expect(reasonOf(wrongOffset, "application/pdf")).resolves.toBe("supported_structure");
     });
 
     it("refuses a file that is not a PDF, JPEG or PNG by its magic bytes, whatever it is called", () => {
@@ -183,9 +144,9 @@ describe("structural document classification", () => {
       expect(() => detectDocumentMediaType(html)).toThrow(expect.objectContaining({ code: "document_type_unsupported" }));
     });
 
-    it("refuses a PDF over the page cap, though pdf.js would open it", async () => {
-      await expect(classifyDocumentStructure(syntheticPdfWithPages(1_000), "application/pdf")).resolves.toBe("supported_structure");
-      await expect(classifyDocumentStructure(syntheticPdfWithPages(1_001), "application/pdf")).resolves.toBe("unsupported_structure");
+    popplerIt("refuses a PDF over the page cap of 100, though poppler would open it (#1436 D7)", async () => {
+      await expect(classifyDocumentStructure(syntheticPdfWithPages(100), "application/pdf")).resolves.toEqual({ reason: "supported_structure", pageCount: 100 });
+      await expect(reasonOf(syntheticPdfWithPages(101), "application/pdf")).resolves.toBe("unsupported_structure");
     });
 
     it("refuses a file over the size limit as it arrives, before anything reads it", async () => {
@@ -202,9 +163,9 @@ describe("structural document classification", () => {
       }
     });
 
-    it("refuses a PDF whose page tree names no page pdf.js can find", async () => {
+    popplerIt("refuses a PDF whose page tree names no page poppler can find", async () => {
       const noPage = Buffer.from(validPdf.toString("latin1").replace("/Kids [3 0 R] /Count 1", "/Kids [] /Count 0"), "latin1");
-      await expect(classifyDocumentStructure(noPage, "application/pdf")).resolves.toBe("unsupported_structure");
+      await expect(reasonOf(noPage, "application/pdf")).resolves.toBe("unsupported_structure");
     });
   });
 
@@ -230,52 +191,16 @@ describe("structural document classification", () => {
       ["JPEG over the pixel cap", jpegWithDeclaredSize(10_000, 10_000), "image/jpeg"],
       ["PNG declaring no pixels", pngWithDeclaredSize(0, 1), "image/png"],
     ] as const)("refuses a %s from its header, before decoding", async (_name, bytes, mediaType) => {
-      await expect(classifyDocumentStructure(bytes, mediaType)).resolves.toBe("unsupported_structure");
+      await expect(reasonOf(bytes, mediaType)).resolves.toBe("unsupported_structure");
     });
 
     it("refuses an image whose header is within the cap but whose data the decoder cannot read", async () => {
       const cutShort = Buffer.concat([validPng.subarray(0, 24), Buffer.from([0, 0, 0, 0])]);
-      await expect(classifyDocumentStructure(cutShort, "image/png")).resolves.toBe("unsupported_structure");
+      await expect(reasonOf(cutShort, "image/png")).resolves.toBe("unsupported_structure");
     });
   });
 
-  it("names no pdf.js option the pinned version does not have (#1294)", () => {
-    // Neither is a getDocument parameter in pdfjs-dist 6.3: eval was removed,
-    // and scripting belongs to the viewer's annotation layer, which Orbit
-    // never builds. Naming them did nothing.
-    expect(PDF_STRUCTURE_PARSER_OPTIONS).not.toHaveProperty("isEvalSupported");
-    expect(PDF_STRUCTURE_PARSER_OPTIONS).not.toHaveProperty("enableScripting");
-    // The type check is the guard for the next upgrade: a name pdf.js drops
-    // stops compiling. These two lines fail `pnpm typecheck` if it ever stops.
-    // @ts-expect-error -- not a getDocument parameter in the pinned pdf.js
-    const removedEval = { isEvalSupported: false } satisfies PdfDocumentParameters;
-    // @ts-expect-error -- scripting is the viewer's option, not getDocument's
-    const viewerScripting = { enableScripting: false } satisfies PdfDocumentParameters;
-    expect([removedEval, viewerScripting]).toHaveLength(2);
-  });
-
-  it("keeps parser security options explicit", () => {
-    expect(PDF_STRUCTURE_PARSER_OPTIONS).toMatchObject({
-      disableAutoFetch: true,
-      disableFontFace: true,
-      disableRange: true,
-      disableStream: true,
-      enableXfa: false,
-      isImageDecoderSupported: false,
-      isOffscreenCanvasSupported: false,
-      stopAtErrors: true,
-      useSystemFonts: false,
-      useWasm: false,
-      useWorkerFetch: false,
-    });
-  });
-
-  it("caps the pixels pdf.js will decode for one embedded image at the same cap as a raster upload (#1316)", () => {
-    // MAX_IMAGE_PIXELS, 40M, which safeImageDimensions holds PNG and JPEG to.
-    expect(PDF_STRUCTURE_PARSER_OPTIONS).toHaveProperty("maxImageSize", 40_000_000);
-  });
-
-  it("does not expose parser failure details to console output", async () => {
+  popplerIt("does not expose parser failure details to console output", async () => {
     const sentinel = "hostile-filename-provider-sentinel";
     let value = `%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Title (${sentinel}) >>\nendobj\n`;
     const xrefOffset = Buffer.byteLength(value);
@@ -288,7 +213,7 @@ describe("structural document classification", () => {
     ];
     spies.forEach((spy) => spy.mockImplementation(() => undefined));
     try {
-      await expect(classifyDocumentStructure(Buffer.from(value), "application/pdf"))
+      await expect(reasonOf(Buffer.from(value), "application/pdf"))
         .resolves.toBe("unsupported_structure");
       const output = spies.flatMap((spy) => spy.mock.calls.flat()).map(String).join(" ");
       expect(output).not.toContain(sentinel);
@@ -297,15 +222,21 @@ describe("structural document classification", () => {
     }
   });
 
-  it.each([
+  popplerIt.each([
     [Buffer.from("%PDF-1.7\nheader only"), "application/pdf", "unsupported_structure"],
     [forgedPdfXref(), "application/pdf", "unsupported_structure"],
     [forgedPdfObjectOffset(), "application/pdf", "unsupported_structure"],
+  ] as const)("classifies unsupported %s as unsupported_structure", async (bytes, mediaType, expected) => {
+    await expect(reasonOf(bytes, mediaType)).resolves.toBe(expected);
+    await expect(validateSupportedDocumentStructure(bytes, mediaType)).resolves.toBe(false);
+  });
+
+  it.each([
     [Buffer.from([0xff, 0xd8, 0xff, 0xe0]), "image/jpeg", "unsupported_structure"],
     [Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), "image/png", "unsupported_structure"],
     [Buffer.concat([validPng.subarray(0, 24), Buffer.from([0, 0, 0, 0])]), "image/png", "unsupported_structure"],
   ] as const)("classifies unsupported %s as unsupported_structure", async (bytes, mediaType, expected) => {
-    await expect(classifyDocumentStructure(bytes, mediaType)).resolves.toBe(expected);
+    await expect(reasonOf(bytes, mediaType)).resolves.toBe(expected);
     await expect(validateSupportedDocumentStructure(bytes, mediaType)).resolves.toBe(false);
   });
 });
@@ -330,18 +261,26 @@ describe("document content validation", () => {
     expect(normalizedDocumentFilename("../private/\u0000\u202epolicy.pdf", "application/pdf")).toBe("policy.pdf");
   });
 
+  popplerIt("accepts a bounded structurally valid PDF fixture", async () => {
+    await expect(validateSupportedDocumentStructure(validPdf, "application/pdf")).resolves.toBe(true);
+  });
+
   it.each([
-    [validPdf, "application/pdf"],
     [validJpeg, "image/jpeg"],
     [validPng, "image/png"],
   ] as const)("accepts a bounded structurally valid %s fixture", async (bytes, mediaType) => {
     await expect(validateSupportedDocumentStructure(bytes, mediaType)).resolves.toBe(true);
   });
 
-  it.each([
+  popplerIt.each([
     [Buffer.from("%PDF-1.7\nheader only"), "application/pdf"],
     [forgedPdfXref(), "application/pdf"],
     [forgedPdfObjectOffset(), "application/pdf"],
+  ] as const)("rejects a magic-byte-valid malformed PDF fixture", async (bytes, mediaType) => {
+    await expect(validateSupportedDocumentStructure(bytes, mediaType)).resolves.toBe(false);
+  });
+
+  it.each([
     [Buffer.from([0xff, 0xd8, 0xff, 0xe0]), "image/jpeg"],
     [Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), "image/png"],
     [Buffer.concat([validPng.subarray(0, 24), Buffer.from([0, 0, 0, 0])]), "image/png"],

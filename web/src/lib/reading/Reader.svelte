@@ -67,7 +67,7 @@
    * picture, never the new page number over the old page.
    * @typedef {{
    *   open?: boolean,
-   *   doc: { name: string, href?: string, previewHref?: string },
+   *   doc: { name: string, href?: string, previewHref?: string, pageCount?: ?number },
    *   itemTitle: string,
    *   onremove: () => Promise<unknown>,
    *   staged?: boolean,
@@ -117,7 +117,8 @@
   /* What is drawn: the host's page (`picture`) or the reader's own. */
   const shownSrc = $derived(picture ? picture.src : source ? pageUrl : previewSrc);
   const drawnPage = $derived(picture ? picture.page : shownPage);
-  const count = $derived(picture ? picture.count : pageCount);
+  /* #1436: the stored count seeds the reader before any page answers. */
+  const count = $derived(picture ? picture.count : (pageCount ?? (typeof doc.pageCount === "number" ? doc.pageCount : null)));
   const lost = $derived((picture ? picture.failed : ownLost) || (brokenSrc !== "" && brokenSrc === shownSrc));
   const turn = $derived(pageTurn(pageNo, count));
   const UNDRAWN = "this page could not be drawn";

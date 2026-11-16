@@ -87,24 +87,73 @@ saying so, and the folder's own is used.
 
 ## Profile request (v0)
 
-A consumer installing without a terminal (for `orbit-launcher`: plain mode)
+A consumer running without a terminal (for `orbit-launcher`: plain mode)
 chooses the deployment profile by setting `ORBIT_INSTALL_PROFILE` before it
-runs `install.sh` (#1504). `install.sh` forwards the variable to the engine
-by name only, so the value never appears on a command line.
+runs `install.sh`: on a fresh install (#1504), and on an update to change an
+existing deployment's profile (#1542, the launcher's Configure option).
+`install.sh` forwards the variable to the engine by name only, so the value
+never appears on a command line.
+
+| Value | Fresh install | Update |
+|---|---|---|
+| unset | `standard`, as before | the deployment's profile is kept, as before |
+| `standard` | `standard` | over `standard` or `processing`: `standard`; `COMPOSE_PROFILES` and `TIKA_URL` are emptied, and a running `orbit-tika` is stopped and removed |
+| `processing` | `processing`: `COMPOSE_PROFILES=processing`, `TIKA_URL=http://orbit-tika:9998`, and `orbit-tika` is started | over `standard` or `processing`: `processing`, set and started as on a fresh install |
+| `standard` or `processing` over an `ai` or `full` deployment | (no existing deployment) | refused before the engine writes anything: `phase=host component=host state=failed`, message `ORBIT_INSTALL_PROFILE cannot change a deployment that uses a local model; use the installer at a terminal.` |
+| anything else, empty included | refused before the engine writes anything: `phase=host component=host state=failed`, message `ORBIT_INSTALL_PROFILE must be standard or processing.` | refused the same way, with the same message, whatever the deployment's profile |
+
+`ai` and `full` are refused here on purpose: the local model's choice and
+download stay with the terminal wizard (guarantee #20), and so does a change
+away from a deployment that has a local model. The request is read only on a
+run that shows no wizard: an interactive run takes the wizard's answer. The
+outcome file's `profile=` names the profile now in place. Requesting the
+profile a deployment already has changes nothing.
+
+Compose does not treat a service behind a now-inactive profile as an orphan,
+so `up -d --remove-orphans` leaves it running (checked with Compose v5.7.0,
+#1542). When a profile change drops an optional service -- from this
+variable or the wizard's change path -- the engine names it in the outcome
+file's `drop-services=` line, and `install.sh` stops and removes it by name
+after `up`; its named volumes stay. Failing to stop it does not fail the
+run: the completion screen names the command to run by hand.
+
+## Scanner request (v0)
+
+The private virus scanner (ClamAV) is on by default (#1170). A consumer
+installing without a terminal can set `ORBIT_INSTALL_SCANNER` before it runs
+`install.sh`; it is forwarded to the engine by name only, like the profile.
 
 | Value | Fresh install |
 |---|---|
-| unset | `standard`, as before |
-| `standard` | `standard` |
-| `processing` | `processing`: `COMPOSE_PROFILES=processing`, `TIKA_URL=http://orbit-tika:9998`, and `orbit-tika` is started |
-| anything else, empty included | refused before the engine writes anything: `phase=host component=host state=failed`, message `ORBIT_INSTALL_PROFILE must be standard or processing.` |
+| unset | on, as before |
+| `on` | on |
+| `off` | `DOCUMENT_SCAN_MODE=disabled` and `docker-compose.scanner-off.yml` in `COMPOSE_FILE`; `orbit-clamav` is not pulled, started or waited on |
+| anything else, empty included | refused before the engine writes anything: `phase=host component=host state=failed`, message `ORBIT_INSTALL_SCANNER must be on or off.` |
 
-`ai` and `full` are refused here on purpose: the local model's choice and
-download stay with the terminal wizard (guarantee #20). The request is read
-only on a fresh install that shows no wizard: an interactive run takes the
-wizard's answer, and an update keeps the deployment's profile whatever the
-variable holds. A later option to change an existing deployment's profile
-would ride this same variable on an update, and be documented here first.
+An interactive run asks instead (after the profile; Enter keeps it on). An
+update never reads the variable and keeps the deployment's choice; to change
+it, run `scripts/configure.sh --set-scanner on|off` and then update. The
+engine's outcome carries `scanner=on|off`, the choice in the final
+`.env-orbit`.
+
+## Folder-moved request (v0)
+
+An update whose containers were made in a folder that no longer exists (the
+deployment folder was moved or renamed, #1576) is a finding, not a failure
+by itself. The engine never moves the folder. A consumer without a terminal
+sets `ORBIT_INSTALL_FOLDER_MOVED` before it runs `install.sh`; it is
+forwarded to the engine by name only, like the profile.
+
+| Value | Update with the finding |
+|---|---|
+| unset or empty | at a terminal, a choice: "Run from this folder (containers made again; data kept)" or "Move it back to the old path first" (stops, nothing written). Plain or without a terminal: refused before Compose, `phase=host component=host state=failed reason=folder-moved`, naming the old path and both ways on |
+| `recreate` | no prompt; the containers are made again from this folder (`--force-recreate`); data volumes are kept |
+| anything else | refused before the engine writes anything, on any run: `phase=host component=host state=failed`, message `ORBIT_INSTALL_FOLDER_MOVED must be recreate.` |
+
+The variable is ignored when there is no finding and on a fresh install. A
+label naming another folder that still exists keeps the other-folder refusal
+(#1570), whatever the variable holds. The engine's outcome always carries
+`recreate=0|1`: 1 only when the update made the containers again.
 
 ## Vocabulary
 
@@ -206,6 +255,8 @@ failure
 rollback
 repair-unavailable
 update-path
+update-readiness
+folder-moved
 unknown
 ```
 
@@ -253,6 +304,22 @@ action=abort`, then one stderr line `Orbit installer: <line>` that names the
 release to update to first. It comes before anything is pulled or changed; a
 consumer should show that line as written and stop.
 
+`reason=update-readiness` (#1779) ends an update the new release's database
+migrations would refuse, or one whose database could not be asked:
+`phase=identity component=image state=failed reason=update-readiness
+action=retry`. With Orbit's database running, the installer runs the new
+image's `orbit update --preflight` as a one-off before anything is changed.
+When it reports that the running version has not finished preparing the data
+(for example, documents still being moved under the household key), the
+engine's lines follow on stderr as `Orbit installer: <line>`, the first
+`update-preflight: blocked <table.column> rows=<n>`; when the check could not
+run, the last line is `Orbit installer: Orbit could not check whether the
+database is ready for this release; see the lines above.` Nothing was changed
+and the running version keeps running, so the next step is to run the update
+again later. A database that is not running is not asked: the installer says
+so on one line and goes on, and the new version makes the same check when it
+starts.
+
 ### recovery
 
 ```
@@ -292,7 +359,9 @@ before it on stdout is a `recovery-command:` line ("Recovery command (v0)").
   where. `.env-orbit` and `.orbit-secrets/` are put back whole from the copy
   taken at the start, so an edit or a file added inside them while the
   install ran is replaced (the closing line says so when the rollback
-  finishes). An update is never rolled back, and its failures keep their usual action (an interrupt: below). A fresh install's interrupt or other unplanned exit after the commit is
+  finishes). `.orbit-files`, the list of files Orbit installed that the
+  launcher's Remove reads, is written with the other files on every install
+  and update and is put back or removed with them on rollback (#1496). An update is never rolled back, and its failures keep their usual action (an interrupt: below). A fresh install's interrupt or other unplanned exit after the commit is
   rolled back the same way, and then ends with one terminal
   `state=failed reason=failure` event for the phase it stopped in.
 - An update is never rolled back; once the engine has committed it, it
@@ -335,6 +404,16 @@ before it on stdout is a `recovery-command:` line ("Recovery command (v0)").
   each such service. A failed confirmed model download ends the same way
   for any install (`component=ollama ... action=continue`). An update keeps
   failing on an optional service with `optional-unavailable` and `repair`.
+- The private scanner off by choice (#1170: `DOCUMENT_SCAN_MODE=disabled`,
+  the engine's outcome `scanner=off`): `clamav` is not pulled or waited on,
+  on an install or an update, and its events are
+  `phase=preparation component=clamav state=skipped
+  reason=service-preparation action=skip` and `phase=optional
+  component=clamav state=skipped reason=optional-status action=skip`. A
+  still-running `orbit-clamav` is then stopped and removed after the
+  containers are started (`compose rm -s -f`, bounded); that step emits no
+  event of its own, and a failure of it does not fail the run (the
+  completion screen names the command to run by hand).
 - The rollback is disarmed once the database and the application are
   ready. An interrupt after that ends the optional waits: each component
   not yet ready ends `waiting reason=optional-status action=continue`, and
@@ -871,10 +950,10 @@ docker run --rm --init [-i [-t]] [-e ORBIT_INSTALL_INTERACTIVE=1] \
   [-v "<launcher-tree>:/orbit-launcher-config-tree:rw" \
    -e ORBIT_LAUNCHER_CONFIG_TREE=/orbit-launcher-config-tree
    | -e ORBIT_LAUNCHER_CONFIG_TREE_UNAVAILABLE=<reason>] \
-  -e ORBIT_HOST_UID=<uid> -e ORBIT_HOST_GID=<gid> \
+  -e ORBIT_HOST_UID=<uid> -e ORBIT_HOST_GID=<gid> -e ORBIT_HOST_DEPLOY_DIR=<host-deployment-dir> \
   -e ORBIT_IMAGE=<verified digest reference> -e ORBIT_CHANNEL=<channel> \
   -e ORBIT_INSTALLER_ELAPSED=<seconds> -e ORBIT_INSTALL_HOST_FACTS \
-  -e ORBIT_INSTALL_PROFILE \
+  -e ORBIT_INSTALL_PROFILE -e ORBIT_INSTALL_SCANNER -e ORBIT_INSTALL_FOLDER_MOVED \
   -e ORBIT_CONFIGURE_PROMPTS -e ORBIT_CONFIGURE_APP_URL \
   -e ORBIT_CONFIGURE_OIDC_ISSUER -e ORBIT_CONFIGURE_OIDC_CLIENT_ID \
   -e ORBIT_CONFIGURE_AUTH_MODE \
@@ -902,7 +981,9 @@ docker run --rm --init [-i [-t]] [-e ORBIT_INSTALL_INTERACTIVE=1] \
 - The engine prints its own events (assets, configuration, oidc) as plain
   lines and asks its own questions; the shell renders the phases before and
   after it. The outcome file is owner-only `key=value` lines: `status=ok`
-  with `fresh`, `profile`, `model-pull` and `database-volume`;
+  with `fresh`, `profile`, `scanner`, `model-pull`, `database-volume`,
+  `recreate` (0 or 1) and, only when a profile change dropped an optional
+  service, `drop-services` (space-separated service names, #1542);
   `status=failed` with `phase`, `component`, `reason`, `action` and
   `message`; `status=stopped` with `message`; or `status=repair`. Exit
   status 0, 1, 130 (cancelled), 2 (an answer refused) or 3 (Repair). The
@@ -1116,10 +1197,11 @@ dangerous result=<result> done=<n> failed=<n> reason=<reason>
 
 The `plan action=` line's trailing three fields are #681's preview contract:
 `target` repeats the resolved finding's own target enum, `rollback` names
-the rollback point (`recovery-directory | credential-checkpoint |
-prior-mode | not-required`), and `expect` names the expected result of the
-action succeeding (`files-restored | compose-file-restored | permissions-safe
-| secret-recreated | authentication-restored | services-healthy |
+the rollback point (`recovery-directory | backup-folder-except-secret |
+credential-checkpoint | prior-mode | not-required`), and `expect` names the
+expected result of the action succeeding (`files-restored |
+compose-file-restored | permissions-safe | secret-recreated |
+authentication-restored | services-healthy | smtp-lines-retired |
 configuration-valid | operator-action`). All three are closed enums; unknown-key tolerance means
 a pre-#681 consumer keeps working unchanged. `execution result=refused`
 carries a `reason=` key (currently only `deployment-version-unsupported`);
@@ -1157,16 +1239,81 @@ compose-file-restorable                 managed-file-permissions
 compose-interpolation-failed            managed-file-symlink
 configuration-incomplete                migration-failed
 configuration-invalid                   not-orbit-directory
-configuration-migration-interrupted     secret-missing
-container-foreign-owner                 secret-permissions
-database-credential-mismatch            secrets-directory-invalid
-database-credential-unverifiable        staging-evidence-present
-database-schema-mismatch                stale-container
-database-unreachable                    unrelated-resource-present
-deployment-version-unsupported          volume-retained-without-credentials
-docker-unavailable
-document-volume-retained-without-key
+configuration-migration-interrupted     restore-unfinished
+container-foreign-owner                 scanner-configuration-mismatch
+database-credential-mismatch            secret-missing
+database-credential-unverifiable        secret-permissions
+database-schema-mismatch                secrets-directory-invalid
+database-unreachable                    service-restarting
+database-volume-missing                 services-not-running
+deployment-version-unsupported          staging-evidence-present
+docker-unavailable                      stale-container
+document-volume-retained-without-key    unrelated-resource-present
+folder-elsewhere                        volume-retained-without-credentials
+folder-moved                            smtp-lines-retirable
 ```
+
+`services-not-running` (#1535): a required service's container (`orbit-db`,
+`orbit-app`) is absent or not running. It replaces `database-unreachable` when
+the database container is absent or stopped; `database-unreachable` now means
+only that the database container is running but `pg_isready` did not succeed,
+and stays `manual`.
+
+`folder-moved` and `folder-elsewhere` (#1576) come from the Compose
+`working_dir` label of this project's containers: a folder that no longer
+exists, or another folder that still exists. `folder-elsewhere` is manual
+only and wins when both are present. A label that is not absolute, is over
+4096 bytes or holds a control character gives neither finding and is never
+printed. Neither finding ever puts a path on stdout; the folder is named on
+stderr only. `folder-elsewhere` is also one of the `start-services`
+preconditions, so it plans `services-not-running` as `manual`. A label that
+cannot be read or trusted leaves the folder check undecided, and that blocks
+`start-services` too (#1798): `services-not-running` is planned `manual`,
+telling the operator to check the containers with `docker ps -a`.
+
+`restore-unfinished` (#1804, `target=restore severity=warn`): a restore left
+its journal, `<backups>/.orbit-restore/restore.journal`, where `<backups>` is
+`${ORBIT_BACKUP_DIR:-<deployment folder>/backups}` exactly as `backup.sh` and
+`restore.sh` read it, so repair must run with the same `ORBIT_BACKUP_DIR` as
+restore. Anything at that path counts, a symlink too (dangling or not; never
+followed, read or removed), and so does a `.orbit-restore` folder, or a backups
+folder, that cannot be searched (for the backups folder the guidance says
+repair can't tell whether a restore is unfinished). So does anything at
+`<deployment folder>/.orbit-restore-pending` (#1823), the marker `restore.sh`
+writes, holding the journal's absolute path, before it stops Orbit and removes
+only once that journal is gone; it is found whatever `ORBIT_BACKUP_DIR` says,
+and a marker that is a symlink, unreadable or the wrong type counts too. It is `manual` (run `restore.sh --finish` and follow what it
+says, which includes when Orbit may be started, or roll back with
+`restore.sh --recover`; repair never reads the journal, so its start command
+is given only for when `--finish` asks for it, #1848 O-F2) and a `start-services`
+precondition, so `services-not-running` and `folder-moved` are planned
+`manual` with that guidance. Repair's other actions are planned as usual.
+
+`service-restarting` (#1804, `target=container severity=fail`): a required
+service's container keeps restarting. It is `manual` (read that container's
+logs), is not counted for `services-not-running`, and is a `start-services`
+precondition. With `orbit-db` restarting the database checks still run, so
+`database-unreachable` and its guidance appear as for a running database.
+
+`smtp-lines-retirable` (#1817, `target=env-file severity=warn`): Orbit holds
+outgoing mail in its own Mail settings (`orbit mail-sending-status`, asked once
+in `orbit-app` with `compose exec -T`, answers `source=imported` or
+`source=ui` in at most 256 bytes; it answers `none` unless Orbit can open the
+stored password) and the old `SMTP_*` lines, the `docker-compose.mail.yml`
+entry in `COMPOSE_FILE` or `.orbit-secrets/smtp-password` are still there. The
+shipped overlay file alone does not count. Asked only while orbit-app is
+running and something is left; a `none` answer, an older image without the
+command, a non-zero exit or any other answer gives no finding. As a warn it
+makes `--check` say `result=attention` (exit 3), and `--plan` exits 3 too. It
+is planned as `retire-smtp-lines`, offered only in the safe batch.
+
+`database-volume-missing` (#1804, `target=database severity=fail`): raised
+beside `services-not-running` when there is no `orbit-db` container at all (not
+merely a stopped one) and this project's database volume does not exist, or
+could not be listed. Starting would make a new, empty database, so it is
+`manual` (restore from a backup or run the installer) and a `start-services`
+precondition. When the volume list failed, the guidance says instead that
+repair could not list Docker's volumes and to check with `docker volume ls`.
 
 ### action, mutation and backup
 
@@ -1182,11 +1329,104 @@ off — never the action's name.
 | `regenerate-secret` | `reversible` | `not-required` |
 | `rotate-database-credential` | `credential-rotation` | `required` |
 | `restart-services` | `service-restart` | `not-required` |
+| `start-services` | `service-start` | `not-required` |
+| `recreate-services` | `containers` | `not-required` |
+| `retire-smtp-lines` | `secret-deletion` | `required` |
 | `rerun-configuration` | `none` | `not-required` |
 | `manual` | `none` | `not-required` |
 
+`recreate-services` (#1576) replaces `restart-services` in a run that plans
+it, and never removes a volume, runs `down` or moves a folder. When it is
+planned (a `folder-moved` finding), neither `restart-services` nor
+`start-services` is also planned. Since #1804 it is planned only when every
+`start-services` precondition below holds; otherwise `folder-moved` is planned
+`manual`, naming the first unmet one. A failed recreate writes one bounded
+`Docker said:` line to stderr, as `start-services` does.
+
+`retire-smtp-lines` (#1817) resolves `smtp-lines-retirable` with
+`rollback=backup-folder-except-secret expect=smtp-lines-retired`, and runs
+only in the safe batch the operator chooses (owner decision 1): only
+`--execute --safe-only` (alone or with `--dangerous`) runs it. `--check`
+reports `smtp-lines-retirable`; `--plan` and `--export-diagnostics` list
+`retire-smtp-lines`, followed by the no-rollback stderr line, because they
+show what `--execute --safe-only` would do. `--execute --dangerous` without
+`--safe-only` does not run it and says so in one stderr line (#1848 O-F10). It copies only the lines it
+removes from `.env-orbit` (never `SMTP_PASSWORD=` or any other line) and the
+overlay into an undo copy, `orbit-install-backups/<stamp>-repair/` (mode 700,
+its path named on stderr), rewrites `.env-orbit` without the `SMTP_*` keys and the overlay's
+`COMPOSE_FILE` entry (refused with no change if `.env-orbit` changed after it
+was read), runs `up -d --no-build`, waits until Orbit gives the same
+answer again, then deletes the overlay and `.orbit-secrets/smtp-password`. The
+secret is deleted, never copied, so it cannot be rolled back: `mutation` is
+`secret-deletion`, and every plan line for it is followed on stderr by a line
+saying so. Once the secret is gone it asks Orbit again (#1834): a usable answer
+removes the undo copy, its folder when empty, and the step record; otherwise
+they stay and one stderr line names the copy, and the next run removes them. A
+crash between steps leaves the step record `.orbit-smtp-retirement` and the
+next run resumes; the secret stays until the stack has restarted
+without it.
+
 `manual` is not an action repair performs: it marks a finding a human must
-resolve, and carries one value-free guidance line on stderr.
+resolve, and carries one value-free guidance line on stderr. `--execute` prints
+the same guidance line for each `manual` entry it reports `skipped`, whether
+the safe batch ran or was declined (#1804).
+
+`start-services` (#1535, ADR-0014 amendment) resolves `services-not-running`
+in the safe batch, with `rollback=not-required expect=services-healthy`. It
+runs Compose's own reconcile with the deployment's project and files,
+`up -d --no-build --no-recreate` (never orphan removal), bounded at 300 s as
+`install.sh`'s Compose start is (#1518). It is planned only when the deployment
+is complete on disk and only Docker is missing: any `managed-file-*`,
+`compose-file-restorable`, `secret-*`, `secrets-directory-invalid`,
+`configuration-incomplete`, `configuration-invalid`,
+`configuration-migration-interrupted`, `compose-interpolation-failed`,
+`docker-unavailable`, `container-foreign-owner`, `unrelated-resource-present`,
+`deployment-version-unsupported`, `image-identity-mismatch`,
+`staging-evidence-present`, `volume-retained-without-credentials`,
+`document-volume-retained-without-key`, `restore-unfinished`,
+`service-restarting` or `database-volume-missing` finding, at any severity, or
+an undecided folder check, plans it `manual` instead, with a guidance line
+naming the first of them in diagnosis order. On failure it reports
+`execute action=start-services result=failed` and writes Docker's own words to
+stderr as one bounded `Docker said:` line with control characters removed;
+re-diagnosis follows as for every action.
+
+Refusals at execution (#1798, #1804). The plan may be stale, so just before
+acting:
+
+- `start-services` and `recreate-services` both refuse when the backups folder
+  cannot be searched ("repair can't check whether a backup, restore or export
+  is running: <folder> can't be searched"), while the restore journal is
+  present ("a restore has not been finished (journal at <path>)"), and, when
+  `flock` is on `PATH`, while another process holds
+  `<backups>/.orbit-backup-restore.lock` ("a backup, restore or export is
+  running right now": `backup.sh`, `restore.sh` and a recovery-bundle export
+  all hold it). A lock file nobody holds does not block; one that is not a
+  regular, non-symlink, readable file is refused without being opened ("the
+  lock at <path> can't be read"); one that `flock` cannot test (for example
+  on an NFSv4 mount, where an exclusive lock on a read-only descriptor is
+  refused) is refused with flock's own words ("the lock at <path> can't be
+  tested on that filesystem (flock said: ...)", with how to start Orbit by
+  hand). Once past these checks, both actions take that lock themselves and
+  hold it for the whole Compose call (#1823), so a backup or restore starting
+  meanwhile finds it held and is never reported as a running backup. When
+  the lock file does not exist and the backups folder or the lock file
+  cannot be created (#1848 O-F5), the refusal names the folder and says how
+  to fix it: create or mount it and make it writable, or point
+  `ORBIT_BACKUP_DIR` at the folder `backup.sh` uses. Without `flock` the lock is not checked; the
+  journal still is.
+- `recreate-services`' Compose call is bounded with `--kill-after`, as
+  `start-services`' is.
+- `start-services` also reads the containers' `working_dir` labels again and
+  refuses when any names another folder (gone or existing) or cannot be read
+  or trusted, and refuses when the database container and volume are both
+  gone.
+
+A refusal changes nothing, prints
+`Orbit repair: <action> refused, nothing was changed: <reason>.` on stderr, and
+reports `execute action=<action> result=failed` (exit 4). The few seconds
+between `backup.sh` stopping Orbit and its engine taking the lock are not
+detected.
 
 ### Exit codes
 

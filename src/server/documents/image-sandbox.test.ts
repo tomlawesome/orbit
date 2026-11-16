@@ -42,7 +42,11 @@ import {
   pdfStructureSandboxInFlightForTests,
   renderImageInSandbox,
 } from "./pdf-structure-sandbox";
-import { classifyDocumentStructure, declaredImageDimensionsWithinCap } from "./validation";
+import { classifyDocumentStructure as classifyVerdict, declaredImageDimensionsWithinCap } from "./validation";
+import { popplerIt } from "../../../tests/support/poppler-sandbox";
+
+/** The check's reason alone; it also answers the page count since #1436, which images give as 1. */
+const classifyDocumentStructure = async (...args: Parameters<typeof classifyVerdict>): Promise<string> => (await classifyVerdict(...args)).reason;
 
 /**
  * #1572 (ADR-0033 pattern G, ADR-0038): the image decoder runs in the sandbox
@@ -248,7 +252,7 @@ describe("the open check decodes in the sandbox child (#1572)", () => {
 
   describe("the render job's ceiling and the check's clock bound the decode", () => {
     it("answers structure_check_unavailable for the progressive fixture at a 64 MiB ceiling, still saying memory under document.inspection", async () => {
-      setSandboxLimits({ wallMs: 60_000, renderMemoryMb: 64 });
+      setSandboxLimits({ wallMs: 60_000, imageMemoryMb: 64 });
       const before = lastPdfSandboxChildPidForTests();
 
       const captured = await withCapturedLogs(() => classifyDocumentStructure(progressive, "image/jpeg"));
@@ -264,7 +268,7 @@ describe("the open check decodes in the sandbox child (#1572)", () => {
     }, TEST_TIMEOUT_MS);
 
     it("keeps the decoded pixels out of the server: the stopped decode does not grow this process by 100 MiB", async () => {
-      setSandboxLimits({ wallMs: 60_000, renderMemoryMb: 64 });
+      setSandboxLimits({ wallMs: 60_000, imageMemoryMb: 64 });
       // The child's code and the backend's first load are not the decode.
       await classifyDocumentStructure(syntheticJpeg(), "image/jpeg");
 
@@ -321,7 +325,7 @@ describe("the open check decodes in the sandbox child (#1572)", () => {
       expect(pdfStructureSandboxInFlightForTests()).toBe(0);
     }, TEST_TIMEOUT_MS);
 
-    it("runs at most two jobs at once across six images and three PDFs, and answers all nine", async () => {
+    popplerIt("runs at most two jobs at once across six images and three PDFs, and answers all nine (the check pool, #1436 D5)", async () => {
       setSandboxLimits({ wallMs: 8_000 });
       let highest = 0;
       const sampler = setInterval(() => {
@@ -513,7 +517,7 @@ describe("renderImageInSandbox: one child draws the bounded preview after the ga
   }, TEST_TIMEOUT_MS);
 
   it("answers failed on memory at a 64 MiB ceiling, saying memory under document.preview, and leaves no child", async () => {
-    setSandboxLimits({ wallMs: 60_000, renderMemoryMb: 64 });
+    setSandboxLimits({ wallMs: 60_000, imageMemoryMb: 64 });
     const before = lastPdfSandboxChildPidForTests();
 
     const captured = await withCapturedLogs(() => renderImageInSandbox(progressive, {
@@ -562,7 +566,10 @@ describe("the image child loads the canvas backend before it says it is ready (D
     await expectChildGone(before);
   }, TEST_TIMEOUT_MS);
 
-  it("answers a 1x1 render as failed with stop crash when the backend cannot load", async () => {
+  // #1433 D20: a backend that cannot load is a fault on Orbit's side, not the
+  // file's, so a draw says so (`unavailable`: the view answers 503, nothing is
+  // stored) rather than `crash` (a remembered refusal of the file).
+  it("answers a 1x1 render as failed with stop unavailable when the backend cannot load", async () => {
     setSandboxLimits({ wallMs: 8_000, canvasUrl: throwingCanvasUrl });
 
     const rendered = await renderImageInSandbox(syntheticJpeg(), {
@@ -573,7 +580,7 @@ describe("the image child loads the canvas backend before it says it is ready (D
       wallMs: 8_000,
     });
 
-    expect(rendered).toEqual({ outcome: "failed", stop: "crash" });
+    expect(rendered).toEqual({ outcome: "failed", stop: "unavailable" });
     expect(pdfStructureSandboxInFlightForTests()).toBe(0);
   }, TEST_TIMEOUT_MS);
 });
@@ -616,7 +623,7 @@ describe("a sandbox stop is no verdict; a decoder's refusal is one (D-S1)", () =
 
 describe("the sandbox stop record names the job that stopped (D-F2, W-F1)", () => {
   const decodeMemoryStop = () => {
-    setSandboxLimits({ wallMs: 60_000, renderMemoryMb: 64 });
+    setSandboxLimits({ wallMs: 60_000, imageMemoryMb: 64 });
     return withLogRecords(() => classifyDocumentStructure(progressive, "image/jpeg"));
   };
 
@@ -645,7 +652,7 @@ describe("the sandbox stop record names the job that stopped (D-F2, W-F1)", () =
   }, TEST_TIMEOUT_MS);
 
   it("says the image sandbox stopped the preview, under document.preview, for an image render memory stop", async () => {
-    setSandboxLimits({ wallMs: 60_000, renderMemoryMb: 64 });
+    setSandboxLimits({ wallMs: 60_000, imageMemoryMb: 64 });
 
     const { result, records } = await withLogRecords(() => renderImageInSandbox(progressive, {
       mediaType: "image/jpeg",
@@ -662,7 +669,7 @@ describe("the sandbox stop record names the job that stopped (D-F2, W-F1)", () =
   }, TEST_TIMEOUT_MS);
 
   it("keeps the render-body record's reason, action and impact for an image render memory stop (guard)", async () => {
-    setSandboxLimits({ wallMs: 60_000, renderMemoryMb: 64 });
+    setSandboxLimits({ wallMs: 60_000, imageMemoryMb: 64 });
 
     const { records } = await withLogRecords(() => renderImageInSandbox(progressive, {
       mediaType: "image/jpeg",
@@ -692,7 +699,7 @@ describe("the sandbox stop record names the job that stopped (D-F2, W-F1)", () =
   }, TEST_TIMEOUT_MS);
 
   it.each([
-    ["a memory stop", () => ({ wallMs: 60_000, renderMemoryMb: 64 })],
+    ["a memory stop", () => ({ wallMs: 60_000, imageMemoryMb: 64 })],
     ["a timeout", () => ({ wallMs: 1 })],
     ["a crash", () => ({ wallMs: 8_000, canvasUrl: throwingCanvasUrl })],
   ] as const)("records %s of the check with reason processing_interrupted, not unsupported_structure", async (_name, limitsFor) => {

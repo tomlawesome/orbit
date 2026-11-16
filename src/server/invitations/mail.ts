@@ -79,73 +79,27 @@ function escapeHtml(value: string): string {
     .replace(/'/gu, "&#39;");
 }
 
+/* The card's outline. Gold #f0b429 mixed about 30% into the card's own
+   #0b0f1a, because a low-alpha gold does not survive every mail client. It
+   replaced the mockup's gold top edge on the owner's verdict of 2026-09-06;
+   changing or dropping the outline is this line and nothing else. */
+const cardBorder = "1px solid #4f4118";
+
 /**
- * The whole mail, in both parts, from the five things it is allowed to know.
- *
- * There are no item names, no other members and no household detail beyond its
- * name (#481, "Nothing else"): this is the first thing a person sees of Orbit,
- * and it is also a message to an address nobody has proved anyone reads.
+ * Everything above the headline, shared by the invitation and every other mail
+ * (#1648): the document head with the motion-only style block, the hidden
+ * preheader, the mark, the card's outline, the sky, the sun and rings, and the
+ * caption. Ends where the first slot begins. Title and preheader are escaped
+ * here.
  */
-export function renderInvitationMail(context: InvitationMailContext): InvitationMail {
-  const inviter = context.inviterName.trim();
-  const given = firstName(inviter);
-  const household = context.householdName.trim();
-  const host = hostOf(context.link);
-  const expires = formatInvitationDate(context.expiresAt);
-
-  const subject = `${inviter} invited you to ${household} on Orbit`;
-
-  const text = [
-    `${inviter} has a place for you in ${household} on Orbit.`,
-    "",
-    "Orbit keeps a household's year in one calm view - the boiler service,",
-    `the insurance renewal, the MOT - and ${given} would like you in theirs.`,
-    "",
-    "Open your invitation and sign in with this address; you'll land",
-    "straight in the house:",
-    "",
-    `  ${context.link}`,
-    "",
-    `Sent to ${context.email}. Good until ${expires}.`,
-    "Not expecting this? There is nothing to do - the link simply lapses.",
-    "",
-    `Orbit at ${host}, run by ${given}'s household, not a company.`,
-    "",
-  ].join("\n");
-
-  /*
-   * "The living system" — round 3 direction G, ratified 2026-09-06 on #481 and
-   * carried across from `design/v19/mail/round-3/g-the-living-system.html`.
-   *
-   * Tables and inline styles, 560px at most, no SVG, no images, no web fonts,
-   * no gradients and no `position:` anywhere — the comet's tail and the sun's
-   * warmth are stacked circles placed with margins. The `<style>` block is
-   * progressive enhancement: Gmail and Outlook for Windows drop it and show the
-   * finished frame, which is the design in its own right; the clients that keep
-   * it play the story once. `prefers-reduced-motion` stops all of it.
-   */
-  const safe = {
-    inviter: escapeHtml(inviter),
-    given: escapeHtml(given),
-    household: escapeHtml(household),
-    email: escapeHtml(context.email),
-    link: escapeHtml(context.link),
-    host: escapeHtml(host),
-    expires: escapeHtml(expires),
-  };
-  /* The card's outline. Gold #f0b429 mixed about 30% into the card's own
-     #0b0f1a, because a low-alpha gold does not survive every mail client. It
-     replaced the mockup's gold top edge on the owner's verdict of 2026-09-06;
-     changing or dropping the outline is this line and nothing else. */
-  const cardBorder = "1px solid #4f4118";
-
-  const html = `<!doctype html>
+function cardTop(title: string, preheader: string): string {
+  return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width">
 <meta name="color-scheme" content="dark">
-<title>${escapeHtml(subject)}</title>
+<title>${escapeHtml(title)}</title>
 <style>
   /* the sky: each star twinkles at its own rate, forever */
   @keyframes orbit-twinkle { 0%, 100% { opacity: .18; } 50% { opacity: 1; } }
@@ -202,7 +156,7 @@ export function renderInvitationMail(context: InvitationMailContext): Invitation
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#05070d;">
 <tr><td align="center" style="padding:36px 16px 56px;">
 
-  <div style="display:none;max-height:0;overflow:hidden;font-size:1px;line-height:1px;color:#05070d;">${safe.given} has a place for you in ${safe.household}. The link is good until ${safe.expires}.</div>
+  <div style="display:none;max-height:0;overflow:hidden;font-size:1px;line-height:1px;color:#05070d;">${escapeHtml(preheader)}</div>
 
   <table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:560px;">
 
@@ -271,7 +225,65 @@ export function renderInvitationMail(context: InvitationMailContext): Invitation
         </td></tr>
         <tr><td align="center" style="padding:4px 32px 0;font-family:'Courier New',Courier,monospace;font-size:11px;letter-spacing:.18em;color:#4a5468;">A SUN · ONE RING · TWELVE MONTHS</td></tr>
 
-        <!-- the words: the headline draws in, the line under it settles -->
+`;
+}
+
+/**
+ * The whole mail, in both parts, from the five things it is allowed to know.
+ *
+ * There are no item names, no other members and no household detail beyond its
+ * name (#481, "Nothing else"): this is the first thing a person sees of Orbit,
+ * and it is also a message to an address nobody has proved anyone reads.
+ */
+export function renderInvitationMail(context: InvitationMailContext): InvitationMail {
+  const inviter = context.inviterName.trim();
+  const given = firstName(inviter);
+  const household = context.householdName.trim();
+  const host = hostOf(context.link);
+  const expires = formatInvitationDate(context.expiresAt);
+
+  const subject = `${inviter} invited you to ${household} on Orbit`;
+
+  const text = [
+    `${inviter} has a place for you in ${household} on Orbit.`,
+    "",
+    "Orbit keeps a household's year in one calm view - the boiler service,",
+    `the insurance renewal, the MOT - and ${given} would like you in theirs.`,
+    "",
+    "Open your invitation and sign in with this address; you'll land",
+    "straight in the house:",
+    "",
+    `  ${context.link}`,
+    "",
+    `Sent to ${context.email}. Good until ${expires}.`,
+    "Not expecting this? There is nothing to do - the link simply lapses.",
+    "",
+    `Orbit at ${host}, run by ${given}'s household, not a company.`,
+    "",
+  ].join("\n");
+
+  /*
+   * "The living system" — round 3 direction G, ratified 2026-09-06 on #481 and
+   * carried across from `design/v19/mail/round-3/g-the-living-system.html`.
+   *
+   * Tables and inline styles, 560px at most, no SVG, no images, no web fonts,
+   * no gradients and no `position:` anywhere — the comet's tail and the sun's
+   * warmth are stacked circles placed with margins. The `<style>` block is
+   * progressive enhancement: Gmail and Outlook for Windows drop it and show the
+   * finished frame, which is the design in its own right; the clients that keep
+   * it play the story once. `prefers-reduced-motion` stops all of it.
+   */
+  const safe = {
+    inviter: escapeHtml(inviter),
+    given: escapeHtml(given),
+    household: escapeHtml(household),
+    email: escapeHtml(context.email),
+    link: escapeHtml(context.link),
+    host: escapeHtml(host),
+    expires: escapeHtml(expires),
+  };
+
+  const html = cardTop(subject, `${given} has a place for you in ${household}. The link is good until ${expires}.`) + `        <!-- the words: the headline draws in, the line under it settles -->
         <tr><td class="o-title" align="center" style="padding:26px 40px 0;font-family:Georgia,'Times New Roman',serif;font-size:22px;line-height:1.3;color:#f2f0ea;">
           ${safe.inviter} has a place for you in
         </td></tr>
@@ -315,4 +327,111 @@ export function renderInvitationMail(context: InvitationMailContext): Invitation
 `;
 
   return { subject, text, html };
+}
+
+/**
+ * What every other mail Orbit sends says inside the same card (#1648, round 4
+ * direction L, `design/v19/mail/round-4/`). Five slots below the fixed shell:
+ * the headline, the body paragraphs, an optional button, an optional facts
+ * block and the footer lines.
+ */
+export interface MailCardInput {
+  subject: string;
+  /** The hidden line mail clients show beside the subject. */
+  preheader: string;
+  headline: string;
+  /** One paragraph per entry. */
+  body: string[];
+  /** The one action. Its link is the only link in the html. */
+  button?: { label: string; href: string };
+  /** One `label · value` line per entry, in mono. */
+  facts?: Array<{ label: string; value: string; /** Pieces of the value that must not wrap. */ keep?: string[] }>;
+  /** Quiet lines under the card, one per entry. */
+  footer?: string[];
+  /** The plain-text alternative, passed through untouched. */
+  text: string;
+}
+
+/** The footer's last line. A host that cannot be read is left out, not invented. */
+export function householdLine(host: string): string {
+  return host ? `Orbit at ${host}, run by a household, not a company.` : "Orbit, run by a household, not a company.";
+}
+
+/** The host of the instance's own `APP_URL`, or "" when it is missing or unreadable. */
+export function appHost(environment: NodeJS.ProcessEnv = process.env): string {
+  return hostOf(environment.APP_URL ?? "");
+}
+
+/** Wraps each already-escaped piece in a no-wrap span, as the mock-ups do. */
+function keepTogether(escaped: string, pieces: string[]): string {
+  return pieces.reduce((out, piece) => out.split(piece).join(`<span style="white-space:nowrap;">${piece}</span>`), escaped);
+}
+
+/** Whether a link may be a mail button: absolute, and http or https. */
+export function isMailLink(href: string): boolean {
+  try {
+    const { protocol } = new URL(href);
+    return protocol === "http:" || protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+/** The whole mail for a sender: its own text part and the ratified card. */
+export function renderMail(input: MailCardInput): InvitationMail {
+  /* The button is the one link in the html. Only an absolute http(s) address
+     is allowed: anything else (javascript:, data:, a relative or
+     protocol-relative path) would be a link a reader could be sent through. */
+  if (input.button && !isMailLink(input.button.href)) throw new Error("The mail button needs an absolute http or https link");
+  const e = escapeHtml;
+  const sans = "font-family:Helvetica,Arial,sans-serif;font-size:15px;line-height:1.6;color:#7c8699;";
+  const rows: string[] = [
+    `        <tr><td class="o-title" align="center" style="padding:26px 36px 0;font-family:Georgia,'Times New Roman',serif;font-size:28px;line-height:1.25;color:#f2f0ea;">${e(input.headline)}</td></tr>`,
+  ];
+  input.body.forEach((paragraph, index) => {
+    rows.push(`        <tr><td class="o-lede" align="center" style="padding:${index === 0 ? 16 : 12}px 40px 0;${sans}">${e(paragraph)}</td></tr>`);
+  });
+  if (input.button) {
+    rows.push(`        <tr><td class="o-act" align="center" style="padding:32px 24px 0;">
+          <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center"><tr>
+            <td class="o-button" style="background:#7dd3fc;border-radius:999px;">
+              <a href="${e(input.button.href)}" style="display:inline-block;padding:16px 36px;font-family:Georgia,'Times New Roman',serif;font-size:17px;line-height:1.3;letter-spacing:.02em;color:#05070d;text-decoration:none;">${e(input.button.label)}</a>
+            </td>
+          </tr></table>
+        </td></tr>`);
+  }
+  if (input.facts && input.facts.length > 0) {
+    const lines = input.facts.map((fact) => `${e(fact.label)} · <span style="color:#7c8699;">${keepTogether(e(fact.value), (fact.keep ?? []).map(e))}</span>`);
+    rows.push(`        <tr><td class="o-facts" align="center" style="padding:32px 40px 0;font-family:'Courier New',Courier,monospace;font-size:12px;line-height:1.9;color:#4a5468;">
+          ${lines.join("<br>\n          ")}
+        </td></tr>`);
+  }
+  rows.push(`        <tr><td style="padding:0;height:40px;line-height:40px;font-size:1px;">&nbsp;</td></tr>`);
+
+  /* The mock-ups pick the host out in the lighter grey inside the
+     "Orbit at {host}, run by a household" line. */
+  const footer = (input.footer ?? []).map((line, index) => {
+    const shown = e(line).replace(/^(Orbit at )(.+)(, run by a household, not a company\.)$/u,
+      (_all, lead: string, host: string, tail: string) => `${lead}<span style="color:#7c8699;">${host}</span>${tail}`);
+    return `      <div style="margin:${index === 0 ? 0 : 8}px 0 0;">${shown}</div>`;
+  });
+
+  const html = `${cardTop(input.subject, input.preheader)}        <!-- slots: headline, body, button, facts -->
+${rows.join("\n\n")}
+
+      </table>
+    </td></tr>
+
+    <!-- slot: footer, quiet, centred -->
+    <tr><td align="center" style="padding:22px 8px 0;font-family:Helvetica,Arial,sans-serif;font-size:12px;line-height:1.6;color:#4a5468;">
+${footer.join("\n")}
+    </td></tr>
+
+  </table>
+</td></tr>
+</table>
+</body>
+</html>
+`;
+  return { subject: input.subject, text: input.text, html };
 }

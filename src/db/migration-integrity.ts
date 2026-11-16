@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { operationalDetail, type OperationalDetail } from "@/lib/logger";
+import { operationalDetail, type OperationalDetail } from "../lib/logger";
 
 export type SqlClient = { unsafe(query: string): Promise<Array<Record<string, unknown>>> };
 

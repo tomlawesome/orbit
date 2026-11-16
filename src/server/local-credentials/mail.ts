@@ -8,18 +8,15 @@
  * invitation's words, and for the same reason: the wording is one file's
  * diff, pinned by a unit test rather than discovered in a mailbox.
  *
- * Plain text only. The invitation is the one message drawn like the product —
- * it is a stranger's first sight of Orbit — while this one goes to somebody
- * an administrator has just told about their new account, and its job is a
- * link and a deadline. Giving it an HTML part is a design round nobody has
- * held; until then a text part written to stand alone is the honest message,
- * not a fallback.
+ * The text part stands alone for a text-only reader; the html part is the
+ * ratified card (#1648, round 4), saying the same things.
  *
  * Nothing here reaches a database, a clock or the environment: it is a pure
  * function of what it is handed.
  */
 
-import { firstName, formatInvitationDate, hostOf } from "@/server/invitations/mail";
+import { firstName, formatInvitationDate, hostOf, householdLine, isMailLink, renderMail } from "@/server/invitations/mail";
+import { formatApprovalMoment } from "@/server/sign-in-approvals/mail";
 import type { CredentialSetupTokenPurpose } from "@/server/local-credentials";
 
 export interface SetupMailContext {
@@ -37,6 +34,7 @@ export interface SetupMailContext {
 export interface SetupMail {
   subject: string;
   text: string;
+  html: string;
 }
 
 /** Two digits, so a time reads 09:05 rather than 9:5. */
@@ -97,5 +95,31 @@ export function renderSetupMail(context: SetupMailContext): SetupMail {
     "",
   ].join("\n");
 
-  return { subject, text };
+  /* The card (#1648). The html shows the expiry with its time, as the
+     ratified mock-up does; the text keeps its date for a setup link. */
+  const when = formatApprovalMoment(context.expiresAt);
+  return renderMail({
+    subject,
+    preheader: recovery ? "Choose a new password and you’re back in." : "Choose a password and you’re in.",
+    headline: subject,
+    body: [
+      `Hello ${given},`,
+      recovery
+        ? `An administrator has sent you a new link for your Orbit account at ${host}. Choose a new password and you’re back in.`
+        : `An administrator has created an Orbit account for you at ${host}. Choose a password and you’re in.`,
+    ],
+    /* A link that is not a usable address is left off the card rather than
+       thrown at the sender; the text part still carries what it was given. */
+    ...(isMailLink(context.link) ? { button: { label: recovery ? "choose a new password" : "choose a password", href: context.link } } : {}),
+    facts: [
+      { label: "sent to", value: context.email },
+      { label: "good until", value: when },
+    ],
+    footer: [
+      "The button works once. If it lapses, ask your administrator for another.",
+      "Not expecting this? There’s nothing to do — the link simply lapses.",
+      householdLine(host),
+    ],
+    text,
+  });
 }

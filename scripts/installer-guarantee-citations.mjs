@@ -120,3 +120,99 @@ export function staleInstallShCitations(docText, installShText) {
   }
   return problems;
 }
+
+/**
+ * #1846: the `install.sh:<lines> (main script, ...)` citations name top-level
+ * code, not a function, so the check above cannot see them. A segment counts
+ * as a main-script citation when its parenthetical starts "main script", or it
+ * is a bare range (no parenthetical) followed by one that does
+ * (`2943-2947, 2971-2987 (main script, ...)`). Returns every one as
+ * `{ guarantee, index, citation, first, last }`, `index` being the segment's
+ * position among the guarantee's `install.sh` citations.
+ */
+export function mainScriptCitations(docText) {
+  const found = [];
+  for (const { guarantee, text } of numberedGuarantees(docText)) {
+    const segments = installShSegments(text);
+    let pending = [];
+    segments.forEach((segment, index) => {
+      const entry = { guarantee, index, citation: segment.citation, first: segment.first, last: segment.last };
+      if (segment.parenthetical === "") {
+        pending.push(entry);
+        return;
+      }
+      if (/^main script/u.test(segment.parenthetical.trim())) found.push(...pending, entry);
+      pending = [];
+    });
+  }
+  return found;
+}
+
+/**
+ * Main-script citations that sit inside a function body, run past the end of
+ * the script, or start or end on a blank line.
+ */
+export function mainScriptCitationProblems(docText, installShText) {
+  const lines = installShText.split("\n");
+  const spans = [...functionSpans(installShText).entries()];
+  const problems = [];
+  for (const { guarantee, citation, first, last } of mainScriptCitations(docText)) {
+    const report = (problem) => problems.push({ guarantee, citation, problem });
+    if (first > last || last > lines.length) {
+      report("range is outside the script");
+      continue;
+    }
+    const inside = spans.find(([, span]) => first <= span.end && last >= span.start);
+    if (inside) report(`lines overlap function ${inside[0]}`);
+    if ((lines[first - 1] ?? "").trim() === "") report("first line is blank");
+    if ((lines[last - 1] ?? "").trim() === "") report("last line is blank");
+  }
+  return problems;
+}
+
+/**
+ * `expectations` is a list of `{ guarantee, index, contains: [substring] }`;
+ * `guarantee` is "install.sh #17" or "Summary #4" and `index` picks the
+ * guarantee's n-th `install.sh` citation segment (from 0). Returns one
+ * `{ guarantee, citation, problem }` for each substring the cited lines lack
+ * and for each expectation whose citation is missing.
+ */
+export function citationContentProblems(docText, installShText, expectations) {
+  const lines = installShText.split("\n");
+  const byGuarantee = new Map();
+  for (const { guarantee, text } of numberedGuarantees(docText)) {
+    const segments = installShSegments(text);
+    if (segments.length > 0 && !byGuarantee.has(guarantee)) byGuarantee.set(guarantee, segments);
+  }
+  const problems = [];
+  for (const { guarantee, index, contains } of expectations) {
+    const segment = byGuarantee.get(guarantee)?.[index];
+    if (!segment) {
+      problems.push({ guarantee, citation: `segment ${index}`, problem: "citation not found" });
+      continue;
+    }
+    const cited = lines.slice(segment.first - 1, segment.last).join("\n");
+    for (const needle of contains) {
+      if (!cited.includes(needle)) {
+        problems.push({ guarantee, citation: segment.citation, problem: `lines lack ${needle}` });
+      }
+    }
+  }
+  return problems;
+}
+
+/**
+ * #1852: the lines of `fileName` (e.g. "docker-compose.yml") that a guarantee
+ * cites as `<fileName>:<first>[-<last>]`, joined by newlines; null when the
+ * guarantee has no such citation. `guarantee` is "install.sh #39".
+ */
+export function citedFileLines(docText, fileText, guarantee, fileName) {
+  const escaped = fileName.replaceAll(".", "\\.");
+  const pattern = new RegExp(`(?<![\\w./-])${escaped}:(\\d+)(?:-(\\d+))?`, "u");
+  const entry = numberedGuarantees(docText).find((item) => item.guarantee === guarantee);
+  const match = entry && pattern.exec(entry.text);
+  if (!match) return null;
+  const first = Number(match[1]);
+  const last = match[2] === undefined ? first : Number(match[2]);
+  return fileText.split("\n").slice(first - 1, last).join("\n");
+}

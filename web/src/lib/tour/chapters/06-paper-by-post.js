@@ -8,14 +8,16 @@
  *
  * THE COPY IS ALREADY RATIFIED. The real, non-cinematic tour this film
  * replaced had a stop with `id: "relay"` carrying
- * these exact two lines, pointed at `route: "/settings/mail"` and
- * `target: ".relay-card"` — so this chapter reuses that ratified route and
- * selector rather than inventing its own; the design decision was already
- * made once for this exact content and is not re-litigated here.
+ * these exact two lines, pointed at the relay's own page and its card — so
+ * this chapter reuses that ratified stop rather than inventing its own; the
+ * design decision was already made once for this exact content and is not
+ * re-litigated here. Since #1509 the relay is the `your relay` tab of
+ * Settings' Mail card, so the stop is `/settings` and the card is `#mail`
+ * (`#p-mail` on a phone).
  *
  * WHERE THE MOCKUP'S SCREEN LANDS. `setBg("relay.png")` is
- * `/settings/mail` (`web/src/routes/settings/mail/+page.svelte`), the
- * member's own relay: a private forwarding address that becomes a reviewable
+ * the member's own relay, now Settings' Mail card
+ * (`web/src/routes/settings/RelayPanel.svelte`, and pocket.svelte on a phone): a private forwarding address that becomes a reviewable
  * receipt with a parsed proposal when mail arrives at it
  * (`web/src/lib/data/documents.js`'s `viaRelay` receipts) — nothing is filed
  * without a member's approval, which is exactly what "Orbit reads a copy"
@@ -48,27 +50,24 @@
 /**
  * Every element this chapter names, in one place, so
  * tests/unit/v19-tour-chapter-paper-by-post.test.mjs can pin it against
- * `/settings/mail`'s real markup.
+ * Settings' real markup.
  *
- * #1174: the pocket is NOT the same set. #1083 §6 assumed the relay page's
- * ≤620px rules laid the desk card full width on a phone; by the time the
- * pocket cut was built, /settings/mail had its own pocket dialect
- * (`routes/settings/mail/pocket.svelte`, `.rl-pocket`), and the desk
- * `.relay-card` is display:none there — a 0x0 box the film ringed and
- * pinned both lines to, at the top-left corner of the screen. The pocket's
- * relay card is its address card.
+ * #1174: the pocket is NOT the same set: the desk's card is display:none on a
+ * phone — a 0x0 box the film once ringed and pinned both lines to, at the
+ * top-left corner of the screen. Settings' pocket draws its own Mail card,
+ * `#p-mail`, and that is what the phone's line points at (#1509).
  */
 export const SELECTORS = Object.freeze({
   DESK: Object.freeze({
-    /** The relay card — the same target the ratified walk already points at
-     *  for this exact copy (its own "relay" stop). */
-    card: ".relay-card",
+    /** The Mail card, whose `your relay` tab #mail opens — the same card the
+     *  ratified walk already points at for this exact copy. */
+    card: "#mail",
   }),
   POCKET: Object.freeze({
-    /** The pocket relay's own address card (pocket.svelte's first
-     *  `.p-card`, labelled "Your address"): the address, share, status,
-     *  ingest and the two acts — what "your relay address" points at. */
-    card: '.rl-pocket section[aria-label="Your address"]',
+    /** The pocket's Mail card (pocket.svelte), opened on `your relay`: the
+     *  address, status, ingest and the two acts — what "your relay address"
+     *  points at. */
+    card: "#p-mail",
   }),
 });
 
@@ -88,7 +87,7 @@ export default {
     /* "One movement into the relay" — the mockup's own scene cut, dimmed
        before the screen changes under it, same as any other setScreen. */
     veil(true);
-    await setScreen("/settings/mail");
+    await setScreen("/settings");
 
     /* "Forward a bill to your relay address and Orbit reads a copy to import
        it." — the whole card, named once. Its second line, "Your mail is never

@@ -39,11 +39,17 @@ export interface ExpectedQuarantineContent {
   contentSha256: string;
 }
 
-/** Where a sealed copy goes: `objects/aa/bb/<key>.bin` or `staging/<key>.bin`. */
+/**
+ * Where a sealed copy goes: `objects/aa/bb/<key>.bin`, `staging/<key>.bin`,
+ * or a kept page preview at `previews/aa/bb/<key>.bin` (#1433 D14).
+ */
 export interface SealDestination {
-  kind: "object" | "staging";
+  kind: "object" | "staging" | "preview";
   storageKey: string;
 }
+
+/** A sealed object to read back: the same three places. */
+export type SealedSource = SealDestination;
 
 /** The size of the one reusable buffer a sealing or unsealing pass reads its source file through. */
 const PASS_READ_BYTES = 1_048_576;
@@ -90,6 +96,7 @@ export class LocalDocumentStorage {
     await Promise.all([
       mkdir(join(this.storageRoot, "objects"), { recursive: true, mode: 0o700 }),
       mkdir(join(this.storageRoot, "staging"), { recursive: true, mode: 0o700 }),
+      mkdir(join(this.storageRoot, "previews"), { recursive: true, mode: 0o700 }),
       mkdir(this.quarantineRoot, { recursive: true, mode: 0o700 }),
     ]);
   }
@@ -187,9 +194,7 @@ export class LocalDocumentStorage {
     sealer: DocumentSealer,
     destination: SealDestination,
   ): Promise<{ ciphertextSize: number; envelope: CryptoEnvelope }> {
-    const finalPath = destination.kind === "object"
-      ? this.objectPath(destination.storageKey)
-      : this.stagingPath(destination.storageKey);
+    const finalPath = this.sealedPath(destination);
     const invalid = () => new AppError("document_quarantine_invalid", "The quarantined document is invalid", 422);
 
     const source = await open(path, "r");
@@ -283,14 +288,13 @@ export class LocalDocumentStorage {
    * the file is removed. The read buffer is zeroed when the pass ends.
    */
   async unsealToQuarantine(
-    source: { kind: "object" | "staging"; storageKey: string },
+    source: SealedSource,
     documentId: string,
     expected: { ciphertextSize: number; plaintextSize: number },
     unsealer: DocumentUnsealer,
   ): Promise<{ quarantinePath: string; contentSha256: string }> {
     requireDocumentId(documentId);
-    const sourcePath = source.kind === "object" ? this.objectPath(source.storageKey) : this.stagingPath(source.storageKey);
-    const input = await open(sourcePath, "r");
+    const input = await open(this.sealedPath(source), "r");
     const buffer = Buffer.alloc(PASS_READ_BYTES);
     let quarantinePath: string | undefined;
     let output: FileHandle | undefined;
@@ -327,13 +331,15 @@ export class LocalDocumentStorage {
    * Decrypts a stored object straight into one buffer of `plaintextSize`
    * bytes: no ciphertext copy, no second plaintext copy. The buffer is
    * returned only once `final()` has passed and is zeroed on any failure.
+   * A bare storage key names a document object; a kept page preview is read
+   * as `{ kind: "preview", storageKey }` (#1433).
    */
   async unsealIntoBuffer(
-    storageKey: string,
+    from: string | SealedSource,
     expected: { ciphertextSize: number; plaintextSize: number },
     unsealer: DocumentUnsealer,
   ): Promise<Buffer> {
-    const source = await open(this.objectPath(storageKey), "r");
+    const source = await open(this.sealedPath(typeof from === "string" ? { kind: "object", storageKey: from } : from), "r");
     const buffer = Buffer.alloc(PASS_READ_BYTES);
     const plaintext = Buffer.alloc(expected.plaintextSize);
     try {
@@ -448,6 +454,39 @@ export class LocalDocumentStorage {
     return join(this.storageRoot, "staging", `${storageKey}.bin`);
   }
 
+  private previewPath(storageKey: string): string {
+    requireStorageKey(storageKey);
+    return join(this.storageRoot, "previews", storageKey.slice(0, 2), storageKey.slice(2, 4), `${storageKey}.bin`);
+  }
+
+  private sealedPath(where: SealedSource): string {
+    if (where.kind === "object") return this.objectPath(where.storageKey);
+    if (where.kind === "staging") return this.stagingPath(where.storageKey);
+    if (where.kind === "preview") return this.previewPath(where.storageKey);
+    throw new Error("Invalid document storage destination");
+  }
+
+  /**
+   * Seals one plaintext buffer into `destination` (a drawn page, #1433 D14),
+   * through the same stage-then-rename write as every other object. The
+   * buffer is the caller's; the sealed copy is zeroed once written.
+   */
+  async sealBuffer(
+    plaintext: Buffer,
+    sealer: DocumentSealer,
+    destination: SealDestination,
+  ): Promise<{ ciphertextSize: number; envelope: CryptoEnvelope }> {
+    const body = sealer.update(plaintext);
+    const { tail, envelope } = sealer.final();
+    const ciphertext = tail.length === 0 ? body : Buffer.concat([body, tail]);
+    try {
+      await this.writeAtomic(this.sealedPath(destination), ciphertext);
+      return { ciphertextSize: ciphertext.length, envelope };
+    } finally {
+      releaseBuffer(ciphertext);
+    }
+  }
+
   async writeCiphertext(storageKey: string, ciphertext: Buffer): Promise<void> {
     await this.writeAtomic(this.objectPath(storageKey), ciphertext);
   }
@@ -517,6 +556,37 @@ export class LocalDocumentStorage {
     return this.listObjects(join(this.storageRoot, "staging"));
   }
 
+  /**
+   * The kept page previews under previews/ (#1433 D20): every one, or only
+   * those under one first-level shard (`previews/<shard>/`, two hex digits),
+   * so reconciliation can walk the volume a bounded piece at a time.
+   */
+  async listPreviewObjects(shard?: string): Promise<StoredCiphertextObject[]> {
+    if (shard !== undefined && !/^[a-f0-9]{2}$/.test(shard)) throw new Error("Invalid preview shard");
+    return this.listObjects(shard === undefined ? join(this.storageRoot, "previews") : join(this.storageRoot, "previews", shard));
+  }
+
+  /** The first-level shards that exist under previews/, in order. */
+  async listPreviewShards(): Promise<string[]> {
+    try {
+      const entries = await readdir(join(this.storageRoot, "previews"), { withFileTypes: true });
+      return entries.filter((entry) => entry.isDirectory() && /^[a-f0-9]{2}$/.test(entry.name)).map((entry) => entry.name).sort();
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw error;
+    }
+  }
+
+  /** Whether a kept page's object is on the volume; only a confirmed absence (ENOENT) is false. */
+  async previewExists(storageKey: string): Promise<boolean> {
+    try {
+      return (await stat(this.previewPath(storageKey))).isFile();
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+      throw error;
+    }
+  }
+
   private async listObjects(objectsRoot: string): Promise<StoredCiphertextObject[]> {
     const objects: StoredCiphertextObject[] = [];
     const walk = async (directory: string): Promise<void> => {
@@ -544,7 +614,7 @@ export class LocalDocumentStorage {
   }
 
   /**
-   * Removes `*.tmp` files left in objects/, staging/ and the quarantine root
+   * Removes `*.tmp` files left in objects/, staging/, previews/ and the quarantine root
    * by a process killed between a temporary write and its rename: nothing
    * else ever names them. A younger one may be a write still in flight.
    */
@@ -573,6 +643,7 @@ export class LocalDocumentStorage {
     };
     await sweep(join(this.storageRoot, "objects"), true);
     await sweep(join(this.storageRoot, "staging"), false);
+    await sweep(join(this.storageRoot, "previews"), true);
     await sweep(this.quarantineRoot, false);
   }
 
@@ -582,6 +653,10 @@ export class LocalDocumentStorage {
 
   async deleteStagingCiphertext(storageKey: string): Promise<void> {
     await rm(this.stagingPath(storageKey), { force: true });
+  }
+
+  async deletePreviewCiphertext(storageKey: string): Promise<void> {
+    await rm(this.previewPath(storageKey), { force: true });
   }
 }
 

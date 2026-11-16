@@ -18,8 +18,10 @@ import { WORKSPACE_FIXTURE, WORKSPACE_FIXTURE_TODAY } from "../../web/src/lib/da
  *  - `sectionKeyOf(sections, bodies?)`, exported from chart.js, is the key
  *    under the sky: `{ colour: string, name: string }[]`, one per colour worn
  *    by any visible section (not by planets; bodies are accepted and ignored),
- *    in SECTION_COLOURS order, named for the first visible section by
- *    position that wears the colour.
+ *    in SECTION_COLOURS order, named for EVERY visible section that wears the
+ *    colour (owner answer 12a), in position order, joined with " · ". The
+ *    sections carry no `position` field: array order is position order, and
+ *    callers (home, pocket) pass the household's sections as stored.
  */
 const TODAY = WORKSPACE_FIXTURE_TODAY;
 
@@ -124,9 +126,12 @@ describe("sectionKeyOf: the key under the sky", () => {
     ]);
   });
 
-  it("lists Harlow's four although no Harlow planet is in Services (colours of sections, not planets)", () => {
+  it("lists Harlow's four although no Harlow planet is in Services (colours of sections, not planets); a calendar-marked section shares Home's colour", () => {
     const harlow = WORKSPACE_FIXTURE.households.find((one) => one.id === "hh-harlow-1");
     expect(sectionKeyOf(harlow.sections).map((one) => one.name)).toEqual(["Home", "Vehicles", "Devices", "Services"]);
+    // the fixture holds the four defaults (#1769): add the fifth here, as the rig does
+    const withDates = [...harlow.sections, { id: "s-dates", name: "Dates & renewals", icon: "calendar", accent: "coral", visible: true }];
+    expect(sectionKeyOf(withDates).map((one) => one.name)).toEqual(["Home · Dates & renewals", "Vehicles", "Devices", "Services"]);
     // bodies are optional and change nothing
     const bodies = dialBodiesOf(harlow, { today: TODAY });
     expect(sectionKeyOf(harlow.sections, bodies)).toEqual(sectionKeyOf(harlow.sections));
@@ -142,21 +147,37 @@ describe("sectionKeyOf: the key under the sky", () => {
     expect(keyOf([])).toEqual([]);
   });
 
-  it("follows a pick: Home picked 'vehicles' leaves Home's own dot out and names vehicles for Home", () => {
+  it("follows a pick: Home picked 'vehicles' leaves Home's own dot out and names vehicles for Home and Vehicles", () => {
     const picked = SECTIONS.map((s) => (s.id === "s-home" ? { ...s, colour: "vehicles" } : s));
     expect(keyOf(picked)).toEqual([
-      { colour: "vehicles", name: "Home" }, { colour: "devices", name: "Devices" }, { colour: "services", name: "Services" },
+      { colour: "vehicles", name: "Home · Vehicles" }, { colour: "devices", name: "Devices" }, { colour: "services", name: "Services" },
     ]);
   });
 
-  it("names a shared colour for the first visible section, by position, that wears it", () => {
+  it("names a shared colour for every visible section that wears it, in position order, joined with ' · '", () => {
     const shared = [
-      { id: "s-a", name: "Allotment", icon: "home", accent: "sage", visible: false },   // hidden: wears nothing in the key
+      { id: "s-a", name: "Allotment", icon: "home", accent: "sage", visible: false },   // hidden: left out of its colour's label
       { id: "s-b", name: "Boat", icon: "vehicle", accent: "blue", visible: true, colour: "home" },
       { id: "s-c", name: "Cellar", icon: "calendar", accent: "coral", visible: true },  // calendar mark: home colour
       { id: "s-d", name: "Dens", icon: "device", accent: "sand", visible: true, colour: "home" },
     ];
-    expect(keyOf(shared)).toEqual([{ colour: "home", name: "Boat" }]);
+    expect(keyOf(shared)).toEqual([{ colour: "home", name: "Boat · Cellar · Dens" }]);
+  });
+
+  it("lists the sections of a shared colour in the order given, not alphabetically", () => {
+    const shared = [
+      { id: "s-z", name: "Zed", icon: "vehicle", visible: true, colour: "services" },
+      { id: "s-a", name: "Alpha", icon: "device", visible: true, colour: "services" },
+      { id: "s-m", name: "Mid", icon: "home", visible: true, colour: "home" },
+    ];
+    expect(keyOf(shared)).toEqual([{ colour: "home", name: "Mid" }, { colour: "services", name: "Zed · Alpha" }]);
+  });
+
+  it("leaves a hidden section out of its colour's label, and the colour out when only hidden ones wear it", () => {
+    const sections = SECTIONS.map((one) => (one.id === "s-devices" ? { ...one, colour: "vehicles" } : one))
+      .concat([{ id: "s-x", name: "Hidden", icon: "home", visible: false, colour: "vehicles" }, { id: "s-y", name: "Ghost", icon: "home", visible: false, colour: "services" }])
+      .map((one) => (one.id === "s-services" ? { ...one, visible: false } : one));
+    expect(keyOf(sections)).toEqual([{ colour: "home", name: "Home" }, { colour: "vehicles", name: "Vehicles · Devices" }]);
   });
 
   it("skips a section whose colour is unknown (no mark Orbit knows, no pick)", () => {

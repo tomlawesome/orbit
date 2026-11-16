@@ -239,7 +239,6 @@ describe("administrator mailbox settings (ADR-0017 decision 1, slice 2)", () => 
       mailbox: "INBOX",
       mailboxUidValidity: "1",
       mailboxUid: 42,
-      contentSha256: "a".repeat(64),
       recipientAliasSha256: "b".repeat(64),
       userId: fixture.users.member.id,
       expiresAt: new Date(Date.now() + 86_400_000),
@@ -447,7 +446,22 @@ describe("the retired trusted authserv-id (#1681)", () => {
     expect(config).not.toHaveProperty("trustedAuthservId");
   });
 
-  it.each(["gmail", "outlook"] as const)("gives the %s profile no built-in authserv-id either", async (providerProfile) => {
+  it("reads a stored outlook profile back as other, leaving the row as stored (#1780)", async () => {
+    await setUpMailbox();
+    await getDb().execute(sql`UPDATE mail_in_mailbox SET provider_profile = 'outlook', host = 'outlook.office365.com', port = 993, tls_server_name = 'outlook.office365.com'`);
+
+    const read = await readMailboxSettings(admin);
+    expect(read).toMatchObject({ configured: true, providerProfile: "other", host: "outlook.office365.com", port: 993, tlsServerName: "outlook.office365.com" });
+    const [row] = await getDb().select().from(mailInMailbox);
+    expect(row?.providerProfile).toBe("outlook");
+    expect(row?.host).toBe("outlook.office365.com");
+  });
+
+  it("refuses to save the retired outlook profile as an unknown provider (#1780)", async () => {
+    await expect(setMailboxSettings(admin, null, { ...settings, providerProfile: "outlook" } as unknown as MailboxSettingsInput, providerReady)).rejects.toMatchObject({ code: "mailbox_provider_invalid", status: 400 });
+  });
+
+  it.each(["gmail", "other"] as const)("gives the %s profile no built-in authserv-id either", async (providerProfile) => {
     await setMailboxSettings(admin, null, { ...settings, providerProfile, trustedAuthservId: "" } as MailboxSettingsInput, providerReady);
 
     expect(await readMailboxSettings(admin)).not.toHaveProperty("effectiveAuthservId");

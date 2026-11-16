@@ -34,6 +34,8 @@ const CANDIDATE_VOLUME_SUFFIX_PATTERN = /(^|_)orbit-db-data$/;
 const BUNDLED_COMPOSE_PROJECT_NAME = "orbit";
 /** The `com.docker.compose.project.working_dir` label is a path: bounded like the other labels (#1570). */
 const MAXIMUM_WORKING_DIR_LENGTH = 4096;
+/** A control character anywhere in a container listing but its line breaks: a label holding one is never shown to the operator (#1576). */
+const LISTING_CONTROL_CHARACTER = /[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/;
 
 function trimTrailingSlashes(path: string): string {
   return path.length > 1 ? path.replace(/\/+$/, "") || "/" : path;
@@ -80,7 +82,7 @@ export type VolumeNotProvenReason =
 
 export type VolumeOwnershipOutcome =
   /** `appImage` is the running orbit-app's image, the accepted image it matched. */
-  | { status: "proven"; project: string; appImage: string }
+  | { status: "proven"; project: string; appImage: string; movedFrom?: string }
   /**
    * bash `return 1`: a docker fact was cleanly obtained but ownership could
    * not be proven. `folder` names the other folder (other-folder); `service`
@@ -153,11 +155,17 @@ export function evaluateVolumeOwnership(
   const ownFolders = folderSpellings.length === 0 ? undefined : folderSpellings.map(trimTrailingSlashes);
   // A label is also this folder when its physical path is one of them; a label
   // naming a folder that no longer exists is a deployment that was moved or
-  // renamed, not another folder, and the other proofs decide.
+  // renamed (#1576): not another folder, but recorded as the old path, and the
+  // other proofs decide.
+  let movedFrom: string | undefined;
   const otherFolder = (workingDir: string): string | undefined => {
     if (ownFolders === undefined || workingDir === "" || ownFolders.includes(trimTrailingSlashes(workingDir))) return undefined;
     const folder = adapter.inspectWorkingDir?.(workingDir) ?? null;
-    if (folder !== null && (!folder.exists || (folder.physical !== null && ownFolders.includes(trimTrailingSlashes(folder.physical))))) return undefined;
+    if (folder !== null && !folder.exists) {
+      movedFrom ??= trimTrailingSlashes(workingDir);
+      return undefined;
+    }
+    if (folder !== null && folder.physical !== null && ownFolders.includes(trimTrailingSlashes(folder.physical))) return undefined;
     return workingDir;
   };
   const inOtherFolder = (folder: string): VolumeOwnershipOutcome => ({ status: "not-proven", reason: "other-folder", folder });
@@ -165,11 +173,13 @@ export function evaluateVolumeOwnership(
   const dbContainers = adapter.listContainersByVolume(candidateVolume);
   if (dbContainers === null) return { status: "verify-error" };
   if (dbContainers.length > 65536) return { status: "verify-error" };
+  if (LISTING_CONTROL_CHARACTER.test(dbContainers)) return { status: "verify-error" };
   let appContainers: string | null | undefined;
   /** A failed proof, unless another folder's container explains it; reads what has not been read yet, and only on this failure path. */
   const notProven = (reason: VolumeNotProvenReason, service?: string, container?: string): VolumeOwnershipOutcome => {
     if (ownFolders !== undefined) {
       if (appContainers === undefined) appContainers = adapter.listContainersByProject(volumeProject);
+      if (appContainers !== null && LISTING_CONTROL_CHARACTER.test(appContainers)) return { status: "verify-error" };
       for (const [listing, onlyService] of [[dbContainers, undefined], [appContainers, "orbit-app"]] as const) {
         for (const line of (listing ?? "").split("\n")) {
           const [id, project, containerService, workingDir] = splitPipeFields(line, 4);
@@ -207,6 +217,7 @@ export function evaluateVolumeOwnership(
   appContainers ??= adapter.listContainersByProject(volumeProject);
   if (appContainers === null) return { status: "verify-error" };
   if (appContainers.length > 65536) return { status: "verify-error" };
+  if (LISTING_CONTROL_CHARACTER.test(appContainers)) return { status: "verify-error" };
   let appCount = 0;
   let acceptedAppImage = "";
   for (const line of appContainers.split("\n")) {
@@ -230,7 +241,7 @@ export function evaluateVolumeOwnership(
   }
   if (appCount !== 1) return notProven("no-app-container");
 
-  return { status: "proven", project: volumeProject, appImage: acceptedAppImage };
+  return { status: "proven", project: volumeProject, appImage: acceptedAppImage, ...(movedFrom === undefined ? {} : { movedFrom }) };
 }
 
 /** The additional docker calls verify_database_volume_safety itself makes, beyond volume ownership. */
@@ -334,6 +345,8 @@ export interface DatabaseVolumeSafetyState {
    * ORBIT_PREVIOUS_IMAGE.
    */
   attachedAppImage?: string;
+  /** #1576: the old path of the folder the containers were made from, when it no longer exists (an update only). */
+  folderMovedFrom?: string;
 }
 
 export interface PostgresPasswordFacts {
@@ -548,5 +561,6 @@ export function verifyDatabaseVolumeSafety(
     databaseVolumeSeen: true,
     databaseVolumeName: candidateVolume,
     attachedAppImage: ownership.appImage,
+    ...(ownership.movedFrom === undefined ? {} : { folderMovedFrom: ownership.movedFrom }),
   };
 }

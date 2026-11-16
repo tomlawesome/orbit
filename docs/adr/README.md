@@ -60,3 +60,5 @@ changing implementation status.
 - [ADR-0042: A delivery push stands on trusted passes of the same work; only what changed runs again](0042-delivery-push-stands-on-trusted-passes.md) (Proposed; supersedes part of ADR-0028, amends ADR-0020; #1546)
 - [ADR-0043: One layout switch: 840 px wide, 480 px tall](0043-one-layout-switch.md) (Accepted, 2026-11-05; #1382)
 - [ADR-0044: An item has no type; its schedule follows from its date and its repeat](0044-an-item-has-no-type.md) (Accepted, 2026-11-05; amends ADR-0034 decision 2; #1466, #1468)
+- [ADR-0045: The portable archive is a stream of independently authenticated segments, imported by staging every document and switching once](0045-portable-archive-v2-streamed-segments.md) (Proposed, 2026-11-07; #1390)
+- [ADR-0046: PDF checks and page draws run poppler in a kernel-limited child; page previews are drawn once and kept encrypted](0046-poppler-renderer-and-kept-previews.md) (Accepted, 2026-11-07; supersedes in part ADR-0038, amends ADR-0033; #1436, #1433)

@@ -1,4 +1,5 @@
-import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -58,8 +59,13 @@ const COSIGN_STUB = [
   '# this stub must refuse rather than absorb.',
   'while [ "$#" -gt 0 ]; do',
   '  case "$1" in',
-  '    --key|--type)',
+  '    --key)',
   '      [ "$#" -ge 2 ] || refuse "flag needs an argument: $1"',
+  "      shift 2",
+  "      ;;",
+  '    --type)',
+  '      [ "$#" -ge 2 ] || refuse "flag needs an argument: $1"',
+  '      verify_type="$2"',
   "      shift 2",
   "      ;;",
   '    --insecure-ignore-tlog|--insecure-ignore-tlog=*)',
@@ -72,6 +78,14 @@ const COSIGN_STUB = [
   'if [ -n "${STUB_COSIGN_FAIL:-}" ]; then',
   "  printf '%s\\n' \"$STUB_COSIGN_FAIL\" >&2",
   "  exit 1",
+  "fi",
+  '# D-S6 43a: the SBOM is verified with a second call, --type spdxjson, which',
+  '# prints one DSSE line per verified SBOM attestation (cosign 3.1.4); with',
+  '# none it fails like cosign does.',
+  'if [ "${verify_type:-}" = "spdxjson" ]; then',
+  '  [ -s "${STUB_COSIGN_SBOM_OUTPUT:-/nonexistent}" ] || refuse "no matching attestations: none of the attestations match the predicate type: spdxjson"',
+  '  cat "$STUB_COSIGN_SBOM_OUTPUT"',
+  "  exit 0",
   "fi",
   'cat "$STUB_COSIGN_OUTPUT"',
   "exit 0",
@@ -92,6 +106,7 @@ function envelope({
   pipelineUrl = "https://gitlab.tomlawson.io/ai/orbit/-/pipelines/4242",
   policyVersion = POLICY,
   recordedAt = isoDaysAgo(0),
+  sbomSha256 = undefined,
   predicateType = PREDICATE_TYPE,
   predicateOverride = null,
 } = {}) {
@@ -107,6 +122,7 @@ function envelope({
       imageDigest,
       policyVersion,
       recordedAt,
+      ...(sbomSha256 === undefined ? {} : { sbomSha256 }),
     },
   };
   return JSON.stringify({
@@ -116,7 +132,25 @@ function envelope({
   });
 }
 
-function run({ lines = [envelope()], cosignFail = null, env = {}, withOutput = false, scriptPath = script } = {}) {
+const SPDX_TYPE = "https://spdx.dev/Document";
+
+/** One verified spdxjson DSSE line: an in-toto statement whose predicate is the SPDX document. */
+function sbomEnvelope({ document, created, subjectDigest = DIGEST, predicateType = SPDX_TYPE } = {}) {
+  const doc = document ?? { spdxVersion: "SPDX-2.3", name: "orbit", creationInfo: { created } };
+  const statement = {
+    _type: "https://in-toto.io/Statement/v0.1",
+    predicateType,
+    subject: [{ name: IMAGE, digest: { sha256: subjectDigest.replace(/^sha256:/u, "") } }],
+    predicate: doc,
+  };
+  return JSON.stringify({
+    payloadType: "application/vnd.in-toto+json",
+    payload: Buffer.from(JSON.stringify(statement)).toString("base64"),
+    signatures: [{ keyid: "", sig: "c3R1Yg==" }],
+  });
+}
+
+function run({ lines = [envelope()], sbomLines = null, cosignFail = null, env = {}, withOutput = false, scriptPath = script } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "verify-evidence-"));
   const cosign = join(dir, "cosign");
   writeFileSync(cosign, COSIGN_STUB);
@@ -127,6 +161,8 @@ function run({ lines = [envelope()], cosignFail = null, env = {}, withOutput = f
   writeFileSync(logFile, "");
   const publicKey = join(dir, "cosign.pub");
   writeFileSync(publicKey, "-----BEGIN PUBLIC KEY-----\nTEST-NOT-A-REAL-KEY\n-----END PUBLIC KEY-----\n");
+  const sbomOutputFile = join(dir, "cosign-sbom-output");
+  if (sbomLines !== null) writeFileSync(sbomOutputFile, sbomLines.join("\n") + (sbomLines.length ? "\n" : ""));
   const githubOutput = join(dir, "github-output");
   if (withOutput) writeFileSync(githubOutput, "");
 
@@ -144,6 +180,7 @@ function run({ lines = [envelope()], cosignFail = null, env = {}, withOutput = f
         COSIGN_PUBLIC_KEY: publicKey,
         STUB_LOG: logFile,
         STUB_COSIGN_OUTPUT: outputFile,
+        STUB_COSIGN_SBOM_OUTPUT: sbomOutputFile,
         ...(cosignFail ? { STUB_COSIGN_FAIL: cosignFail } : {}),
         ...(withOutput ? { GITHUB_OUTPUT: githubOutput } : {}),
         ...env,
@@ -179,6 +216,305 @@ describe("verify-validation-evidence.sh", () => {
     expect(cosignCall[1]).toContain(`--type ${PREDICATE_TYPE}`);
     expect(cosignCall[1]).toContain("--insecure-ignore-tlog=true");
     expect(cosignCall[1]).toContain(`${IMAGE}@${DIGEST}`);
+  });
+
+  // D-S6 43a (#1848): the SBOM is attested itself (cosign --type spdxjson),
+  // so the verifier no longer binds a file to an sbomSha256. Given an output
+  // path in ORBIT_SBOM_OUT it verifies the SBOM attestations over the digest
+  // (a second cosign call, --type spdxjson), takes the one with the newest
+  // signed SPDX creationInfo.created, and writes that SPDX document, verified,
+  // to the path for publishing. Callers that set no ORBIT_SBOM_OUT
+  // (countersign, promote-stable) are unchanged. Refusals: no SBOM attestation
+  // or a missing/unparseable created is exit 11 (missing); two different
+  // documents at the same instant is exit 12 (ambiguous), naming both digests.
+  describe("the SBOM attestation (D-S6 43a)", () => {
+    const OLD = { spdxVersion: "SPDX-2.3", name: "older", creationInfo: { created: "2026-11-01T10:00:00Z" } };
+    const NEW = { spdxVersion: "SPDX-2.3", name: "newer", creationInfo: { created: "2026-11-01T11:30:00Z" } };
+    // The output path has to be known before the run, so it is built here and passed in.
+    const withOut = (options) => {
+      const dir = mkdtempSync(join(tmpdir(), "verify-sbom-out-"));
+      const out = join(dir, "image.spdx.json");
+      const r = run({ ...options, env: { ...(options.env ?? {}), ORBIT_SBOM_OUT: out } });
+      return { ...r, out, written: () => (existsSync(out) ? readFileSync(out, "utf8") : null) };
+    };
+
+    it("writes the SPDX document of a single SBOM attestation, verified, to ORBIT_SBOM_OUT", () => {
+      const { result, written } = withOut({ sbomLines: [sbomEnvelope({ document: NEW })] });
+      expect(result.stderr).toBe("");
+      expect(result.status).toBe(0);
+      expect(JSON.parse(written())).toEqual(NEW);
+    });
+
+    it("asks cosign for the SBOM with the committed key, --type spdxjson and the exact digest", () => {
+      const { calls } = withOut({ sbomLines: [sbomEnvelope({ document: NEW })] });
+      const sbomCall = calls().map((call) => call[1]).find((call) => /--type spdxjson(\s|$)/u.test(call));
+      expect(sbomCall, "a verify-attestation --type spdxjson call").toBeDefined();
+      expect(sbomCall).toContain("verify-attestation");
+      expect(sbomCall).toContain("--key ");
+      expect(sbomCall).toContain("--insecure-ignore-tlog=true");
+      expect(sbomCall).toContain(`${IMAGE}@${DIGEST}`);
+    });
+
+    for (const order of ["older first", "newer first"]) {
+      it(`picks the attestation with the newer created, ${order}`, () => {
+        const lines = [sbomEnvelope({ document: OLD }), sbomEnvelope({ document: NEW })];
+        const { result, written } = withOut({ sbomLines: order === "older first" ? lines : lines.reverse() });
+        expect(result.stderr).toBe("");
+        expect(result.status).toBe(0);
+        expect(JSON.parse(written())).toEqual(NEW);
+      });
+    }
+
+    for (const order of ["first", "last"]) {
+      it(`compares created as instants, not text: a lexically larger +02:00 stamp that is earlier loses (${order})`, () => {
+        // 12:00+02:00 is 10:00Z, earlier than 11:00Z although the string sorts later.
+        const early = { spdxVersion: "SPDX-2.3", name: "early", creationInfo: { created: "2026-11-01T12:00:00+02:00" } };
+        const late = { spdxVersion: "SPDX-2.3", name: "late", creationInfo: { created: "2026-11-01T11:00:00Z" } };
+        const lines = order === "first" ? [sbomEnvelope({ document: early }), sbomEnvelope({ document: late })] : [sbomEnvelope({ document: late }), sbomEnvelope({ document: early })];
+        const { result, written } = withOut({ sbomLines: lines });
+        expect(result.status, result.stderr).toBe(0);
+        expect(JSON.parse(written())).toEqual(late);
+      });
+    }
+
+    it("accepts two byte-identical documents at the same instant, in either order", () => {
+      const { result, written } = withOut({ sbomLines: [sbomEnvelope({ document: NEW }), sbomEnvelope({ document: NEW })] });
+      expect(result.stderr).toBe("");
+      expect(result.status).toBe(0);
+      expect(JSON.parse(written())).toEqual(NEW);
+    });
+
+    it("refuses (ambiguous, exit 12) different documents at the same instant, naming both digests, writing nothing", () => {
+      const a = { ...NEW, name: "one" };
+      const b = { ...NEW, name: "two" };
+      for (const lines of [[a, b], [b, a]]) {
+        const { result, written } = withOut({ sbomLines: lines.map((document) => sbomEnvelope({ document })) });
+        expect(result.status, result.stderr).toBe(12);
+        expect(result.stderr).toContain("refused (ambiguous)");
+        expect(result.stderr).toMatch(/SBOM/u);
+        // Both documents' digests (sha256, 64 hex) are named, and they differ.
+        const named = new Set(result.stderr.match(/\b[0-9a-f]{64}\b/gu) ?? []);
+        expect(named.size).toBeGreaterThanOrEqual(2);
+        expect(written()).toBeNull();
+      }
+    });
+
+    it("treats the same instant written with different offsets as the same instant", () => {
+      const a = { ...NEW, name: "one", creationInfo: { created: "2026-11-01T11:30:00Z" } };
+      const b = { ...NEW, name: "two", creationInfo: { created: "2026-11-01T13:30:00+02:00" } };
+      const { result, written } = withOut({ sbomLines: [a, b].map((document) => sbomEnvelope({ document })) });
+      expect(result.status, result.stderr).toBe(12);
+      expect(written()).toBeNull();
+    });
+
+    for (const [label, creationInfo] of [
+      ["no creationInfo", undefined],
+      ["no created", {}],
+      ["a non-string created", { created: 20261101 }],
+      ["an unparseable created", { created: "yesterday" }],
+      ["a date without a time", { created: "2026-11-01" }],
+      ["an empty created", { created: "" }],
+    ]) {
+      it(`refuses (missing, exit 11) an SBOM with ${label}, writing nothing`, () => {
+        const bad = { spdxVersion: "SPDX-2.3", name: "bad", ...(creationInfo === undefined ? {} : { creationInfo }) };
+        const { result, written } = withOut({ sbomLines: [sbomEnvelope({ document: bad })] });
+        expect(result.status, result.stderr).toBe(11);
+        expect(result.stderr).toContain("refused (missing)");
+        expect(result.stderr).toContain("creationInfo.created");
+        expect(written()).toBeNull();
+      });
+    }
+
+    it("refuses when any one of several SBOM attestations has a bad created, even if another is fine", () => {
+      const bad = { spdxVersion: "SPDX-2.3", name: "bad", creationInfo: { created: "nope" } };
+      const { result, written } = withOut({ sbomLines: [sbomEnvelope({ document: NEW }), sbomEnvelope({ document: bad })] });
+      expect(result.status).toBe(11);
+      expect(written()).toBeNull();
+    });
+
+    it("refuses (missing, exit 11) when no SBOM attestation verifies, naming the SBOM", () => {
+      const { result, written } = withOut({ sbomLines: null });
+      expect(result.status).toBe(11);
+      expect(result.stderr).toContain("refused (missing)");
+      expect(result.stderr).toMatch(/SBOM/u);
+      expect(written()).toBeNull();
+    });
+
+    it("refuses (missing, exit 11) when cosign prints no SBOM lines at all", () => {
+      const { result, written } = withOut({ sbomLines: [] });
+      expect(result.status).toBe(11);
+      expect(result.stderr).toMatch(/SBOM/u);
+      expect(written()).toBeNull();
+    });
+
+    it("refuses (missing, exit 11) an SBOM payload that is not decodable in-toto JSON", () => {
+      const { result, written } = withOut({ sbomLines: ["not json"] });
+      expect(result.status).toBe(11);
+      expect(written()).toBeNull();
+    });
+
+    it("does not count a verified attestation of another predicate type as an SBOM", () => {
+      const other = sbomEnvelope({ document: NEW, predicateType: "https://example.com/other/v1" });
+      const { result, written } = withOut({ sbomLines: [other] });
+      expect(result.status).toBe(11);
+      expect(written()).toBeNull();
+    });
+
+    it("still applies every validation check first and writes nothing when one refuses", () => {
+      const { result, written } = withOut({
+        lines: [envelope({ commit: OTHER_COMMIT })],
+        sbomLines: [sbomEnvelope({ document: NEW })],
+      });
+      expect(result.status).toBe(10);
+      expect(result.stderr).toContain("evidence is for commit");
+      expect(written()).toBeNull();
+    });
+
+    it("ignores any sbomSha256 in an old record: it no longer binds or refuses anything", () => {
+      const { result, written } = withOut({
+        lines: [envelope({ sbomSha256: "f".repeat(64) })],
+        sbomLines: [sbomEnvelope({ document: NEW })],
+      });
+      expect(result.stderr).toBe("");
+      expect(result.status).toBe(0);
+      expect(JSON.parse(written())).toEqual(NEW);
+    });
+
+    it("refuses (mismatch, exit 10) an SBOM attestation whose subject is another digest, naming both, writing nothing (D-S6 43a addendum 1)", () => {
+      const { result, written } = withOut({ sbomLines: [sbomEnvelope({ document: NEW, subjectDigest: OTHER_DIGEST })] });
+      expect(result.status, result.stderr).toBe(10);
+      expect(result.stderr).toContain("refused (mismatch)");
+      expect(result.stderr).toContain(OTHER_DIGEST);
+      expect(result.stderr).toContain(DIGEST);
+      expect(written()).toBeNull();
+    });
+
+    it("refuses a wrong-subject SBOM even when a right-subject one is also verified, writing nothing", () => {
+      const { result, written } = withOut({
+        sbomLines: [sbomEnvelope({ document: OLD }), sbomEnvelope({ document: NEW, subjectDigest: OTHER_DIGEST })],
+      });
+      expect(result.status, result.stderr).toBe(10);
+      expect(written()).toBeNull();
+    });
+
+    // Bounded reads (D-S6 43a addendum 3). The fakes are shell scripts that
+    // generate their output on the fly, so no large fixture is kept on disk.
+    it("logs the sha256 of exactly the bytes it writes to ORBIT_SBOM_OUT, so it equals sha256sum of the file (D-S6 43a addendum 2)", () => {
+      const { result, written, out } = withOut({ sbomLines: [sbomEnvelope({ document: NEW })] });
+      expect(result.status, result.stderr).toBe(0);
+      const logged = /SBOM sha256 ([0-9a-f]{64})\b/u.exec(result.stdout)?.[1];
+      expect(logged).toBeDefined();
+      const fileSha = createHash("sha256").update(readFileSync(out)).digest("hex");
+      expect(written()).not.toBeNull();
+      expect(logged).toBe(fileSha);
+    });
+
+    describe("bounded reads", () => {
+      const MAX_SBOM_BYTES = 64 * 1024 * 1024;
+      const fakeCosign = (spdxBody) => {
+        const dir = mkdtempSync(join(tmpdir(), "verify-fake-cosign-"));
+        const path = join(dir, "cosign");
+        writeFileSync(
+          path,
+          ["#!/usr/bin/env bash", 'case "$*" in', "  *spdxjson*)", `    ${spdxBody}`, "    ;;", "  *) cat \"$STUB_COSIGN_OUTPUT\" ;;", "esac", ""].join("\n"),
+        );
+        chmodSync(path, 0o755);
+        return path;
+      };
+
+      it("refuses (missing, exit 11) a cosign SBOM output larger than 64 MiB, before parsing it, writing nothing", () => {
+        const cosign = fakeCosign(`head -c ${MAX_SBOM_BYTES + 1} /dev/zero`);
+        const { result, written } = withOut({ env: { ORBIT_COSIGN: cosign } });
+        expect(result.status, result.stderr.slice(0, 500)).toBe(11);
+        expect(result.stderr).toContain("refused (missing)");
+        expect(result.stderr).toMatch(/SBOM/u);
+        // Refused for its size, not merely for being undecodable.
+        expect(result.stderr).toMatch(/64 ?MiB|67108864|too large|larger than|exceeds|size limit/iu);
+        expect(written()).toBeNull();
+      });
+
+      it("cuts the cosign stderr echoed on a validation refusal to at most 4096 bytes (D-S6 43a addendum 2)", () => {
+        const cosign = fakeCosign("exit 0");
+        // The validation call (no spdxjson in its arguments) fails with 200000 bytes of stderr.
+        writeFileSync(
+          cosign,
+          ["#!/usr/bin/env bash", 'case "$*" in', "  *spdxjson*) exit 0 ;;", "esac", "head -c 200000 /dev/zero | tr '\\0' 'Z' >&2; echo >&2; exit 1", ""].join("\n"),
+        );
+        const { result, written } = withOut({ env: { ORBIT_COSIGN: cosign } });
+        expect(result.status, result.stderr.slice(0, 500)).toBe(11);
+        expect(result.stderr).toContain("refused (missing)");
+        expect(result.stderr).toContain("no verifiable validation attestation");
+        const zs = Buffer.byteLength(result.stderr.replace(/[^Z]/gu, ""));
+        expect(zs).toBeGreaterThan(0);
+        expect(zs).toBeLessThanOrEqual(4096);
+        expect(written()).toBeNull();
+      });
+
+      it("cuts the cosign stderr echoed on an SBOM refusal to at most 4096 bytes", () => {
+        const cosign = fakeCosign("head -c 200000 /dev/zero | tr '\\0' 'Z' >&2; echo >&2; exit 1");
+        const { result, written } = withOut({ env: { ORBIT_COSIGN: cosign } });
+        expect(result.status, result.stderr.slice(0, 500)).toBe(11);
+        const longestRun = Math.max(0, ...(result.stderr.match(/Z+/gu) ?? []).map((run) => run.length));
+        expect(longestRun).toBeGreaterThan(0);
+        expect(Buffer.byteLength(result.stderr.replace(/[^Z]/gu, ""))).toBeLessThanOrEqual(4096);
+        expect(written()).toBeNull();
+      });
+    });
+
+    it("without ORBIT_SBOM_OUT makes no SBOM call and needs no SBOM attestation (countersign, promote-stable)", () => {
+      const { result, calls } = run({ sbomLines: null });
+      expect(result.stderr).toBe("");
+      expect(result.status).toBe(0);
+      expect(calls()).toHaveLength(1);
+      expect(calls()[0][1]).toContain(`--type ${PREDICATE_TYPE}`);
+    });
+
+    it("no longer reads ORBIT_SBOM_FILE or checks an sbomSha256", () => {
+      const source = readFileSync(script, "utf8");
+      const codeOnly = source.split("\n").filter((line) => !/^\s*#/u.test(line)).join("\n");
+      expect(codeOnly).not.toContain("ORBIT_SBOM_FILE");
+      expect(codeOnly).not.toContain("sbomSha256");
+      expect(codeOnly).not.toContain("ORBIT_SBOM_SHA256");
+    });
+  });
+
+  // 43a: matching validation records are selected from what cosign prints;
+  // anything else it printed is ignored and counted in the log, and the
+  // ambiguity and mismatch checks run on the matching ones only.
+  describe("selecting the validation records (D-S6 43a)", () => {
+    const sbomLine = () => sbomEnvelope({ created: "2026-11-01T10:00:00Z" });
+
+    it("ignores attestations of another predicate type, saying how many, and accepts the validation record", () => {
+      const { result } = run({ lines: [sbomLine(), envelope(), sbomLine()] });
+      expect(result.stderr + result.stdout).toMatch(/ignored 2\b/u);
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain(`accepted ${DIGEST}`);
+    });
+
+    it("runs the mismatch checks on the validation records only: another type's subject or content never refuses", () => {
+      const foreign = sbomEnvelope({ created: "2026-11-01T10:00:00Z", subjectDigest: OTHER_DIGEST });
+      const { result } = run({ lines: [foreign, envelope()] });
+      expect(result.status, result.stderr).toBe(0);
+    });
+
+    it("refuses (missing, exit 11) when nothing printed is a validation record, however many other attestations there are", () => {
+      const { result } = run({ lines: [sbomLine(), sbomLine()] });
+      expect(result.status).toBe(11);
+      expect(result.stderr).toContain("refused (missing)");
+    });
+
+    for (const [field, a, b] of [
+      ["commit", {}, { commit: OTHER_COMMIT }],
+      ["ref", {}, { ref: "dev" }],
+      ["pipeline", {}, { pipelineId: 4243 }],
+      ["policy", {}, { policyVersion: OTHER_POLICY }],
+    ]) {
+      it(`still refuses (ambiguous, exit 12) matching validation records that disagree on ${field}, with SBOM lines mixed in`, () => {
+        const { result } = run({ lines: [envelope(a), sbomLine(), envelope(b)] });
+        expect(result.status, result.stderr).toBe(12);
+        expect(result.stderr).toContain("refused (ambiguous)");
+      });
+    }
   });
 
   it("refuses (mismatch, exit 10) evidence naming a different digest", () => {
@@ -373,4 +709,38 @@ describe("verify-validation-evidence.sh without a digest pattern (#1363)", () =>
     expect(result.stderr).toBe("");
     expect(result.status).toBe(0);
   });
+});
+
+// D-S6 43a addendum 1, item 5: the docs say what the verifier now does. Matched
+// loosely, by key phrases.
+describe("docs for the SBOM attestation (D-S6 43a addendum 1)", () => {
+  const releasing = readFileSync(new URL("../docs/releasing.md", import.meta.url), "utf8");
+  const adrFull = readFileSync(
+    new URL("../docs/adr/0020-validation-evidence-binds-digest-and-policy.md", import.meta.url),
+    "utf8",
+  );
+  const start = adrFull.indexOf("### Amendment (2026-11-16, #1848");
+  const adr = start === -1 ? "" : adrFull.slice(start);
+  for (const [name, text] of [["docs/releasing.md", releasing], ["the ADR-0020 amendment", adr]]) {
+    describe(name, () => {
+      it("exists", () => {
+        expect(text.length).toBeGreaterThan(0);
+      });
+      it("says a wrong-subject SBOM attestation is refused with exit 10", () => {
+        expect(text).toMatch(/subject[\s\S]{0,300}exit 10|exit 10[\s\S]{0,300}subject/iu);
+      });
+      it("says the logged SBOM sha256 is of the written, re-serialised file, matching sha256sum, not GitLab's image.spdx.json", () => {
+        expect(text).toMatch(/sha256sum/u);
+        expect(text).toMatch(/re-?serialis/iu);
+        expect(text).toMatch(/image\.spdx\.json/u);
+        expect(text).toMatch(/ORBIT_SBOM_OUT/u);
+      });
+      it("says digests attested before 43a have no SBOM attestation, GitHub refuses them, and they must be re-validated on GitLab", () => {
+        expect(text).toMatch(/before 43a/iu);
+        expect(text).toMatch(/no SBOM attestation/iu);
+        expect(text).toMatch(/re-?validate/iu);
+        expect(text).toMatch(/GitLab/u);
+      });
+    });
+  }
 });

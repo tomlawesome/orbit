@@ -33,8 +33,9 @@
 # orbit-acceptance-local) that no container uses; plain --remove or --all
 # removes those by name, never with -f and never by pruning. They belong to no
 # project, so --project leaves them alone. A killed scripts/test-e2e-local.sh
-# run leaves its orbit-e2e-local-<run>-orbit-oidc image behind (#1423): that one
-# counts as unused when its Compose project has no container left.
+# run leaves its orbit-e2e-local-<run>-orbit-oidc and
+# orbit-e2e-local-<run>-orbit-dkim-dns images behind (#1423, #1727): those count
+# as unused when their Compose project has no container left.
 # Output is plain text, never coloured.
 set -uo pipefail
 
@@ -184,6 +185,7 @@ fetch_images() {
     done
     case "$repo" in
       orbit-e2e-local-*-orbit-oidc) keep=true; run_project="${repo%-orbit-oidc}" ;;
+      orbit-e2e-local-*-orbit-dkim-dns) keep=true; run_project="${repo%-orbit-dkim-dns}" ;;
     esac
     [ "$keep" = true ] || continue
     row="$repo|$tag|$id|$age|$size|no"

@@ -304,19 +304,19 @@ describe("the household page on a phone, mounted", () => {
     const { flushSync } = await mountHousehold();
     const names = (/** @type {HTMLElement} */ el) =>
       [...el.querySelectorAll("[data-row-acts] > *")].map((a) => a.getAttribute("aria-label"));
-    const services = row(".hh-sections", "Services");
-    $("[data-row-face]", services).click();
+    const devices = row(".hh-sections", "Devices");
+    $("[data-row-face]", devices).click();
     flushSync();
-    expect(names(services)).toEqual(["Edit Services", "Move Services up", "Move Services down", "Remove Services"]);
+    expect(names(devices)).toEqual(["Edit Devices", "Move Devices up", "Move Devices down", "Remove Devices"]);
     const home = row(".hh-sections", "Home");
     $("[data-row-face]", home).click();
     flushSync();
     expect(names(home)).not.toContain("Move Home up");
     expect(names(home)).toContain("Move Home down");
-    const dates = row(".hh-sections", "Dates & renewals");
-    $("[data-row-face]", dates).click();
+    const services = row(".hh-sections", "Services");
+    $("[data-row-face]", services).click();
     flushSync();
-    expect(names(dates)).not.toContain("Move Dates & renewals down");
-    expect(names(dates)).toContain("Move Dates & renewals up");
+    expect(names(services)).not.toContain("Move Services down");
+    expect(names(services)).toContain("Move Services up");
   });
 });

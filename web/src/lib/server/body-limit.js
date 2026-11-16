@@ -1,19 +1,21 @@
-/* Per-route request body limits (#1285): one generous server-wide ceiling,
- * and a tighter limit for each route chosen in the request pipeline.
+/* Per-route request body limits (#1285): this module is the one gate.
  *
  * adapter-node's `BODY_SIZE_LIMIT` is one number for every route. Its 512 KB
- * default refused every document over 512 KB, so the image sets it to the
- * largest body any route may take (`SERVER_BODY_LIMIT`, Dockerfile). This
- * module then gives each route its own, smaller limit, so raising the
- * server-wide one does not let a 100 MB body reach a route that reads JSON:
+ * default refused every document over 512 KB; since #1390 the image turns it
+ * off (`BODY_SIZE_LIMIT=Infinity`, Dockerfile), because the archive routes'
+ * limit follows the household quota in the configuration and a fixed image
+ * value cannot. This module gives each route its own limit, so no route
+ * takes a body larger than it reads, and a 100 MB body never reaches a route
+ * that reads JSON:
  *
  *  - the document upload routes take the upload size limit an administrator
  *    sets (src/server/upload-limit.ts), read fresh on every request;
  *  - the portable-archive routes carry a whole household, document bytes
  *    included, as an archive file in a multipart upload read in pieces
- *    (#1566), so they get the largest archive the import accepts
- *    (src/server/portable-archive-limits.ts) plus room for the fields that
- *    come before it (#1290);
+ *    (#1566), so they get the largest archive the import accepts,
+ *    `maxArchiveFileBytes` of the configuration read on every request
+ *    (src/server/portable-archive-limits.ts, #1390), plus room for the
+ *    fields that come before it (#1290);
  *  - every other route gets `SMALL_BODY_LIMIT`, twice the 512 KB every route
  *    has run under until now.
  *
@@ -25,26 +27,26 @@
  * envelope, never a 500.
  */
 import { AppError } from "orbit/lib/app-error";
-import { DOCUMENT_MAX_BYTES_CEILING } from "orbit/server/documents/config";
-import { MAX_ARCHIVE_CIPHERTEXT_CHARACTERS } from "orbit/server/portable-archive-limits";
+import { DOCUMENT_MAX_BYTES_CEILING, documentHouseholdQuotaBytes } from "orbit/server/documents/config";
+import { maxArchiveFileBytes } from "orbit/server/portable-archive-limits";
 
 const MIB = 1_048_576;
 
 export const SMALL_BODY_LIMIT = MIB;
 
 /**
- * An archive import or preview: the encrypted archive at the longest
- * ciphertext the import accepts, and a small limit's room for the rest of
- * the body (the passphrase, the conflict list, the archive's other fields).
+ * An archive import or preview: the largest archive file the import accepts
+ * under the current configuration (the household quota plus the manifest
+ * cap, sealed), and a small limit's room for the rest of the body (the
+ * passphrase, the conflict list). Read per request, as the upload limit is.
+ * The quota is read without the document key, so a missing key still gives
+ * the route a limit; the import itself cannot run without it.
+ *
+ * @returns {number}
  */
-export const ARCHIVE_BODY_LIMIT = MAX_ARCHIVE_CIPHERTEXT_CHARACTERS + SMALL_BODY_LIMIT;
-
-/**
- * The largest body any route may take, rounded up to whole MiB because the
- * image states it in MiB. Must match the image's `BODY_SIZE_LIMIT=343M`
- * (Dockerfile).
- */
-export const SERVER_BODY_LIMIT = Math.ceil(Math.max(DOCUMENT_MAX_BYTES_CEILING + SMALL_BODY_LIMIT, ARCHIVE_BODY_LIMIT) / MIB) * MIB;
+export function archiveBodyLimit() {
+  return maxArchiveFileBytes({ householdQuotaBytes: documentHouseholdQuotaBytes() }) + SMALL_BODY_LIMIT;
+}
 
 /** Route ids, not pathnames: the router's own truth, as hooks.server.js's gates use. */
 export const UPLOAD_ROUTES = new Set([
@@ -85,9 +87,12 @@ export async function bodyLimitFor(routeId, readUploadLimit) {
     }
   }
   const [code, message] = REQUEST_TOO_LARGE;
-  if (routeId !== null && ARCHIVE_ROUTES.has(routeId)) return { limit: ARCHIVE_BODY_LIMIT, code, message };
+  if (routeId !== null && ARCHIVE_ROUTES.has(routeId)) return { limit: archiveBodyLimit(), code, message };
   return { limit: SMALL_BODY_LIMIT, code, message };
 }
+
+/** How long a body being thrown away may go without a byte before it is cut (#1390): the archive slot's stall. */
+export const DISCARD_STALL_MS = 30_000;
 
 /**
  * Reads a refused request's body to its end and throws it away, as Node does
@@ -95,15 +100,53 @@ export async function bodyLimitFor(routeId, readUploadLimit) {
  * and pauses after the first chunk, so Node never does this for us: a body
  * left there stalls the connection, and a browser still sending it never
  * sees the answer (Firefox reports a network error instead). Draining costs
- * bandwidth, not memory; a sender that stalls is cut by Node's keep-alive and
- * request timeouts. Never rejects; a request with no body is left alone.
+ * bandwidth, not memory. A sender that stops is cut once no byte has arrived
+ * for `DISCARD_STALL_MS` (#1390): the body is cancelled, which under
+ * adapter-node destroys the socket. Node's whole-request timeout no longer
+ * bounds it (scripts/web-server.mjs turns that off). Never rejects; a
+ * request with no body is left alone.
  *
  * @param {Request} request
  * @returns {Promise<void>}
  */
 export function discardBody(request) {
   if (request.body === null) return Promise.resolve();
-  return request.body.pipeTo(new WritableStream()).catch(() => undefined);
+  let reader;
+  try {
+    reader = request.body.getReader();
+  } catch {
+    return Promise.resolve();
+  }
+  const source = reader;
+  return new Promise((resolve) => {
+    /** @type {ReturnType<typeof setTimeout> | undefined} */
+    let timer;
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      resolve();
+    };
+    const arm = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        source.cancel().catch(() => undefined);
+        finish();
+      }, DISCARD_STALL_MS);
+      /* A watchdog must never be what keeps the process alive. */
+      timer.unref?.();
+    };
+    const pump = () => {
+      arm();
+      source.read().then(({ done }) => {
+        if (finished) return;
+        if (done) finish();
+        else pump();
+      }, finish);
+    };
+    pump();
+  });
 }
 
 /**

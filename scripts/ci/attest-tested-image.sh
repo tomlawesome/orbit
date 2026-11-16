@@ -11,9 +11,11 @@
 # Only the signing job may run this: the key pair exists solely on the
 # `orbit-signing` runner's host, mounted read-only into its jobs, and exactly
 # one job carries that runner tag (sign_evidence in .gitlab-ci.yml). GitLab
-# CE has no protected environments or environment-scoped variables, so a
-# CI/CD variable would be readable by every protected-branch job; the runner
-# mount is what keeps the key away from the jobs that publish. If the
+# CE has no protected environments. It does scope a variable to an
+# environment, but any branch can declare that environment in its own
+# .gitlab-ci.yml, so a CI/CD variable would in the end be readable by any job
+# in a protected-branch pipeline (docs/releasing.md); the runner mount is what
+# keeps the key away from the jobs that publish. If the
 # publishing job could reach the key, the split would be theatre -- #661
 # criterion 6; ADR-0020 records the CE correction.
 #
@@ -39,6 +41,12 @@
 #   CI_COMMIT_REF_NAME     }  the predicate's provenance fields, from the
 #   CI_PIPELINE_ID         }  predefined GitLab job environment
 #   CI_PIPELINE_URL        }
+#   ORBIT_SBOM_FILE        Optional; the image's SBOM (image.spdx.json). When
+#                          set, it is attested itself over the same digest, as
+#                          a second cosign attestation (--type spdxjson) with
+#                          the same key and flags (D-S6 43a, #1848), so a
+#                          swapped SBOM no longer verifies. sign_evidence
+#                          always sets it.
 #   ORBIT_POLICY_VERSION   Optional; the policy version to bind. Computed by
 #                          scripts/ci/policy-version.sh when unset.
 #   ORBIT_COSIGN           Optional; the cosign command to run, overridable
@@ -89,6 +97,12 @@ policy_version="${ORBIT_POLICY_VERSION:-$(bash scripts/ci/policy-version.sh)}"
 [[ "$policy_version" =~ $ORBIT_DIGEST_PATTERN ]] ||
   fail "policy version is not a sha256 value: ${policy_version}"
 
+sbom_file="${ORBIT_SBOM_FILE:-}"
+if [[ -n "$sbom_file" ]]; then
+  [[ -f "$sbom_file" && -r "$sbom_file" ]] ||
+    fail "ORBIT_SBOM_FILE is not a readable file: ${sbom_file}"
+fi
+
 recorded_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 # Every field above is validated to shapes that need no JSON escaping, the
@@ -119,15 +133,25 @@ fi
 # --tlog-upload=false alongside it ("not supported with --signing-config or
 # --use-signing-config"). Verified against the pinned binary, 2026-09-08.
 # --yes answers cosign's interactive prompts, which a job cannot.
-"$cosign_cmd" attest \
-  --predicate "$predicate_file" \
-  --type "$PREDICATE_TYPE" \
-  --key "$COSIGN_PRIVATE_KEY" \
-  --use-signing-config=false \
-  --tlog-upload=false \
-  --yes \
-  "$image_reference" ||
+attest() { # $1 predicate file, $2 predicate type
+  "$cosign_cmd" attest \
+    --predicate "$1" \
+    --type "$2" \
+    --key "$COSIGN_PRIVATE_KEY" \
+    --use-signing-config=false \
+    --tlog-upload=false \
+    --yes \
+    "$image_reference"
+}
+attest "$predicate_file" "$PREDICATE_TYPE" ||
   fail "cosign could not attest ${image_reference}"
+
+# The SBOM, attested itself (D-S6 43a): verifiers pick the newest by its signed
+# SPDX creationInfo.created (scripts/ci/verify-validation-evidence.sh).
+if [[ -n "$sbom_file" ]]; then
+  attest "$sbom_file" spdxjson ||
+    fail "cosign could not attest the SBOM (spdxjson) for ${image_reference}"
+fi
 
 printf 'attest-tested-image: attested %s (policy %s) as %s\n' \
   "$image_digest" "$policy_version" "$PREDICATE_TYPE"

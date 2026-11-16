@@ -100,22 +100,25 @@ import { bandOf, daysBetween, dayMonth, monthOnly, MONTHS } from "$lib/format.js
 /**
  * The key under the sky (#1466, round 6 M): one entry per colour worn by a
  * VISIBLE SECTION (not by planets, so a section with nothing in it still
- * shows), in SECTION_COLOURS order, named for the first visible section, by
- * position, that wears it. `bodies` is accepted for the callers' symmetry and
- * ignored. This labelling is the build's reading of M; the owner may overrule.
+ * shows), in SECTION_COLOURS order, named for every visible section that wears
+ * it, in position order, joined with " · " (owner answer 12a). `bodies` is
+ * accepted for the callers' symmetry and ignored.
  * @param {{ id?: string, name?: string, icon?: string, colour?: ?string, visible?: boolean }[] | null | undefined} sections
  * @param {unknown} [_bodies]
  * @returns {{ colour: string, name: string }[]}
  */
 export function sectionKeyOf(sections, _bodies) {
-  /** @type {Map<string, string>} */
+  /** @type {Map<string, string[]>} */
   const named = new Map();
   for (const section of sections ?? []) {
     if (section.visible === false) continue;
     const colour = sectionColourOf(section);
-    if (colour && !named.has(colour)) named.set(colour, section.name ?? "");
+    if (!colour) continue;
+    const names = named.get(colour);
+    if (names) names.push(section.name ?? "");
+    else named.set(colour, [section.name ?? ""]);
   }
-  return SECTION_COLOURS.filter((colour) => named.has(colour)).map((colour) => ({ colour, name: /** @type {string} */ (named.get(colour)) }));
+  return SECTION_COLOURS.filter((colour) => named.has(colour)).map((colour) => ({ colour, name: /** @type {string[]} */ (named.get(colour)).join(" · ") }));
 }
 
 const DIAL_CENTRE = 190;

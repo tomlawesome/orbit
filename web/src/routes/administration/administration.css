@@ -213,7 +213,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .mission-page .placerow button:hover{border-color:var(--accent);color:var(--accent-text)}
 .mission-page .adminproblem{margin-top:10px;font:0.6875rem var(--mono);color:var(--warm-text)}
 
-/* Mail machinery, live (#743, ADR-0017 slice 2). The controls borrow the
+/* The Mail card, live (#743, ADR-0017 slice 2). The controls borrow the
    panel's existing furniture — .kv rows, .placerow buttons, .adminproblem —
    so this reads as the same card rather than a second design; only the form
    itself is new, because the sheet had no form to borrow from. */
@@ -235,6 +235,27 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .mission-page .mailboxform .mailboxrow{grid-column:1 / -1}
 .mission-page .mailboxform .mailboxnote{font:0.65625rem var(--mono);line-height:1.5;color:var(--ink-quiet);margin-top:2px}
 .mission-page .adminproblem.ok{color:var(--ok-text)}
+
+/* The one Mail card (#1629, design/v19/mail-setup/round-1, direction J):
+   the half titles, the "send through" pill pair and the calm imported
+   notice. Taken from the ratified mock-up as drawn; no new colours. */
+.mission-page .sublabel{font-size:0.84375rem;font-weight:530;color:var(--ink);padding:4px 2px 8px}
+.mission-page .sublabel.next{margin-top:26px}
+.mission-page .mailboxform .whole{grid-column:1 / -1}
+.mission-page .mailboxform .choice{grid-column:1 / -1;display:flex;flex-direction:column;gap:6px;
+  font:0.65625rem var(--mono);letter-spacing:.06em;color:var(--ink-quiet)}
+/* The security toggle takes one column, beside the user (#1629, J). */
+.mission-page .mailboxform .choice.cell{grid-column:auto}
+.mission-page .choice .opts{display:flex;gap:6px;flex-wrap:wrap}
+.mission-page .choice button{font:0.65625rem var(--mono);letter-spacing:0;color:var(--ink-mid);background:none;
+  border:1px solid var(--line);border-radius:99px;padding:4px 11px;cursor:pointer}
+.mission-page .choice button:hover:not(:disabled),.mission-page .choice button[aria-pressed=true]{border-color:var(--accent);color:var(--accent-text)}
+.mission-page .choice button:disabled{opacity:.5;cursor:default}
+.mission-page .adminproblem.calm{color:var(--ink-mid)}
+.mission-page .adminproblem .how{font:inherit;color:var(--accent-text);background:none;border:0;border-bottom:1px solid currentColor;
+  padding:0;cursor:pointer;text-decoration:none}
+.mission-page .adminproblem .how:hover{color:var(--ink)}
+.mission-page #mail-card .kv > :nth-child(2){min-width:0;text-align:right}
 
 /* THE ROSTER ROW HAS TWO ACTIONS NOW (#915), and two of them plus a name, an
    address and a role pill do not fit across the People card's half of the

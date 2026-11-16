@@ -15,14 +15,19 @@ bash scripts/backup.sh
 
 This makes one file in `backups/`, named like `orbit-YYYYMMDD-HHMMSS.tar`, and
 prints `Orbit backup created:` followed by its path. The file holds a copy of
-the database and an encrypted copy of the stored documents.
+the database and an encrypted copy of the stored documents, with the page
+pictures Orbit keeps for them (#1433). A backup taken while pages were still
+being drawn restores cleanly: Orbit draws any missing picture again.
 
 - Orbit is stopped while the backup runs, so the copy is of one moment in time,
   and is started again afterwards.
 - To keep backups somewhere else, set `ORBIT_BACKUP_DIR` to that directory
   when you run the script. If you set it, set it the same way for every
   backup, restore, `--recover` and `--finish`: a restore keeps its recovery
-  record in that directory.
+  record in that directory. On a network filesystem where `flock` cannot
+  lock a read-only file (NFSv4), repair cannot check for a running backup and
+  refuses to start services, saying so; check that no backup, restore or
+  export is running, then start Orbit by hand.
 - The scripts read the settings in `.env-orbit`. If yours are in another
   file, set `ORBIT_ENV_FILE` to it when you run the script, the same way for
   every backup and restore.
@@ -61,8 +66,17 @@ open. See
    mkdir -p backups
    cp .env-orbit backups/orbit-pre-upgrade.env
    ```
-3. Run the install line from [Installing Orbit](installing.md#install) again,
-   in the deployment directory, and choose **Update**.
+3. Run `./update.sh` in the deployment directory, and choose **Update**:
+   ```sh
+   ./update.sh
+   ```
+   It first updates itself from its fixed address on GitHub, then runs the
+   current installer for that directory, with the same checks as the
+   install line in [Installing Orbit](installing.md#install). If it cannot
+   download its newest copy, it says so and stops without running anything;
+   run it again once the network is back. A
+   deployment installed before `update.sh` was shipped does not have it:
+   run that install line in the deployment directory instead, once.
 
 If it stops part-way, run the update again; see
 [If an update stops](installing.md#if-an-update-stops).
@@ -80,7 +94,7 @@ names the release to update to first, for example `This install is on v0.3.1.
 Update to v0.3.4 first, then to v0.3.6.`
 
 To step through, install the release it names (pin it with its version tag,
-for example `ORBIT_VERSION=v0.3.4`, as in [Installing Orbit](installing.md)), check `/api/health`, then run the update
+for example `ORBIT_VERSION=v0.3.4 ./update.sh`), check `/api/health`, then run the update
 again for the next release. Each stop repeats the check, so a long way back
 takes a few steps. An install whose `.env-orbit` records an applied
 digest (`ORBIT_CONFIG_APPLIED_DIGEST`) but no `ORBIT_CONFIG_APPLIED_VERSION`, or
@@ -91,6 +105,20 @@ is on a version that is not a stable release, is refused with a line saying so
 This rule is for stable installs. A preview install (`ORBIT_CHANNEL=preview`,
 with a preview manifest) can update from any earlier version, and never to
 an older one ([Installing a preview build](installing-preview.md)).
+
+### The database is checked before anything changes
+
+Before it replaces anything, the installer asks Orbit's running database
+whether it is ready for the new release. Some releases remove data the
+previous version was still moving in the background, for example documents
+still being moved under the household key. Then the update stops with
+`update-preflight: blocked documents.content_sha256 rows=<n>` and says how
+many remain. Nothing has changed: leave Orbit running, and it finishes in the
+background, about 200 documents a minute. Run the update again later. If
+Orbit is locked because its household key is missing, restore the key and let
+Orbit run first. If the database was not running, the installer cannot ask:
+it says so on one line and goes on. To have it checked, start Orbit before you
+update.
 
 ## Go back after a failed update
 
@@ -114,6 +142,11 @@ saved copy:
 ```sh
 rm -f backups/orbit-pre-upgrade.env
 ```
+
+If restore.sh says outgoing mail is not set up, enter the SMTP password
+again in Administration > Mail. A backup taken before the update that moved
+that password into Orbit's Mail settings does not hold it, and the copy on
+the server was deleted then.
 
 [Installer guarantees](installer-guarantees.md#before-and-after-an-upgrade)
 lists exactly what the installer promises around an upgrade.

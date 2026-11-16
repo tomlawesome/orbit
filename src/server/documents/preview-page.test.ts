@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { PDF_STRUCTURE_MAX_PAGES } from "./validation";
 import { parseDocumentPreviewPage } from "./preview-page";
 
 /** The `page` query parameter every preview route reads (#1300). */
@@ -11,10 +10,15 @@ describe("parseDocumentPreviewPage", () => {
     expect(parse("other=2")).toBe(1);
   });
 
-  it("reads a plain whole page number up to the structure check's page cap", () => {
+  // Up to the old 1,000-page cap, not today's 100: documents stored then keep
+  // their pages, drawn when viewed past 100 (#1433, owner answer 10a).
+  it("reads a plain whole page number up to the highest page a stored document can have", () => {
     expect(parse("page=1")).toBe(1);
     expect(parse("page=7")).toBe(7);
-    expect(parse(`page=${PDF_STRUCTURE_MAX_PAGES}`)).toBe(PDF_STRUCTURE_MAX_PAGES);
+    // Literal numbers, so the bound cannot move with the constant that sets it.
+    expect(parse("page=100")).toBe(100);
+    expect(parse("page=101")).toBe(101);
+    expect(parse("page=1000")).toBe(1000);
   });
 
   it.each([
@@ -28,7 +32,7 @@ describe("parseDocumentPreviewPage", () => {
     ["a sign", "page=%2B2"],
     ["whitespace", "page=%202"],
     ["hex", "page=0x2"],
-    ["a page past the cap", `page=${PDF_STRUCTURE_MAX_PAGES + 1}`],
+    ["a page past the cap", "page=1001"],
     ["a huge number", "page=99999999999999999999"],
     ["the parameter twice", "page=1&page=2"],
   ])("refuses %s with a 400 in its own words", (_name, query) => {

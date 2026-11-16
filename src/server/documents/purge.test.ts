@@ -21,6 +21,8 @@ function driverFor(overrides: Partial<OwnedPurgeDriver> = {}, events: string[] =
       events.push("read");
       return state;
     },
+    // Kept previews (#1433) have their own order test, purge-previews.test.ts.
+    deletePreviews: async () => undefined,
     deleteCiphertext: async (storageKey) => {
       events.push(`delete:${storageKey}`);
     },

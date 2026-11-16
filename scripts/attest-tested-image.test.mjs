@@ -53,10 +53,15 @@ const COSIGN_STUB = [
   '  case "$1" in',
   '    --predicate)',
   '      [ "$#" -ge 2 ] || refuse "flag needs an argument: --predicate"',
-  '      cp "$2" "$STUB_PREDICATE_COPY"',
+  '      predicate_path="$2"',
   "      shift 2",
   "      ;;",
-  '    --type|--key)',
+  '    --type)',
+  '      [ "$#" -ge 2 ] || refuse "flag needs an argument: $1"',
+  '      attest_type="$2"',
+  "      shift 2",
+  "      ;;",
+  '    --key)',
   '      [ "$#" -ge 2 ] || refuse "flag needs an argument: $1"',
   "      shift 2",
   "      ;;",
@@ -68,6 +73,14 @@ const COSIGN_STUB = [
   "    *) shift ;;",
   "  esac",
   "done",
+  '# D-S6 43a: the script now attests two predicates (validation record and',
+  '# SPDX SBOM). The validation predicate lands in $STUB_PREDICATE_COPY, the',
+  '# SBOM one in $STUB_PREDICATE_COPY.spdxjson.',
+  'case "${attest_type:-}" in',
+  '  spdxjson) cp "${predicate_path:?}" "$STUB_PREDICATE_COPY.spdxjson" ;;',
+  '  *) cp "${predicate_path:?}" "$STUB_PREDICATE_COPY" ;;',
+  "esac",
+  '[ "${attest_type:-}" != "${STUB_FAIL_TYPE:-}" ] || refuse "crafted failure attesting ${attest_type}"',
   'exit "${STUB_COSIGN_EXIT:-0}"',
   "",
 ].join("\n");
@@ -109,7 +122,8 @@ function run({ args = [REFERENCE, DIGEST], env = {}, dropEnv = [] } = {}) {
       .filter(Boolean)
       .map((call) => call.split("\x1f").filter(Boolean));
   const predicate = () => (existsSync(predicateCopy) ? JSON.parse(readFileSync(predicateCopy, "utf8")) : null);
-  return { result, calls, predicate, keyFile };
+  const sbomPredicate = () => (existsSync(`${predicateCopy}.spdxjson`) ? readFileSync(`${predicateCopy}.spdxjson`, "utf8") : null);
+  return { result, calls, predicate, sbomPredicate, keyFile };
 }
 
 describe("attest-tested-image.sh", () => {
@@ -141,6 +155,69 @@ describe("attest-tested-image.sh", () => {
       policyVersion: POLICY,
     });
     expect(written.recordedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/u);
+  });
+
+  // D-S6 43a (#1848): the SBOM is attested itself, as a second cosign
+  // attestation (--type spdxjson) over the same digest with the same key and
+  // flags; the validation predicate no longer carries sbomSha256 (#1824).
+  // The SBOM file is still named by ORBIT_SBOM_FILE.
+  describe("the SBOM attestation (D-S6 43a)", () => {
+    const content = '{"spdxVersion":"SPDX-2.3","name":"the genuine one"}\n';
+    const sbomFile = () => {
+      const sbom = join(mkdtempSync(join(tmpdir(), "attest-sbom-")), "image.spdx.json");
+      writeFileSync(sbom, content);
+      return sbom;
+    };
+
+    it("attests the SBOM as spdxjson over the same digest, with the same key and flags as the validation record", () => {
+      const { result, calls, keyFile, sbomPredicate } = run({ env: { ORBIT_SBOM_FILE: sbomFile() } });
+      expect(result.stderr).toBe("");
+      expect(result.status).toBe(0);
+      const all = calls().map((call) => call[1]);
+      expect(all).toHaveLength(2);
+      const sbomCall = all.find((call) => /--type spdxjson(\s|$)/u.test(call));
+      const validationCall = all.find((call) => call.includes(`--type ${PREDICATE_TYPE}`));
+      expect(sbomCall, "an spdxjson attestation").toBeDefined();
+      expect(validationCall, "the validation attestation").toBeDefined();
+      for (const call of [sbomCall, validationCall]) {
+        expect(call).toMatch(/^attest\b/u);
+        expect(call).toContain(`--key ${keyFile}`);
+        expect(call).toContain("--tlog-upload=false");
+        expect(call).toContain("--use-signing-config=false");
+        expect(call).toContain("--yes");
+        expect(call.endsWith(REFERENCE)).toBe(true);
+      }
+      // The attested predicate is the SBOM file, byte for byte.
+      expect(sbomPredicate()).toBe(content);
+    });
+
+    it("leaves sbomSha256 out of the validation predicate, whatever the SBOM", () => {
+      const { predicate } = run({ env: { ORBIT_SBOM_FILE: sbomFile() } });
+      expect(predicate()).not.toHaveProperty("sbomSha256");
+      expect(predicate()).toMatchObject({ commit: COMMIT, ref: "preview", imageDigest: DIGEST, policyVersion: POLICY });
+      expect(readFileSync(script, "utf8")).not.toContain("sbomSha256");
+    });
+
+    it("without an SBOM file attests the validation record only, as before", () => {
+      const { result, calls, sbomPredicate } = run();
+      expect(result.status).toBe(0);
+      expect(calls()).toHaveLength(1);
+      expect(sbomPredicate()).toBeNull();
+    });
+
+    it("fails, naming the SBOM, when cosign cannot attest it, and does not report success", () => {
+      const { result } = run({ env: { ORBIT_SBOM_FILE: sbomFile(), STUB_FAIL_TYPE: "spdxjson" } });
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toMatch(/SBOM|spdxjson/u);
+      expect(result.stdout).not.toContain(`attested ${DIGEST}`);
+    });
+  });
+
+  it("refuses an ORBIT_SBOM_FILE that cannot be read, signing nothing", () => {
+    const { result, calls } = run({ env: { ORBIT_SBOM_FILE: "/nonexistent/image.spdx.json" } });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("ORBIT_SBOM_FILE");
+    expect(calls()).toEqual([]);
   });
 
   it("takes both key and password from ORBIT_SIGNING_DIR, the runner mount, when set", () => {

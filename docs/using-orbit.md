@@ -177,8 +177,8 @@ morning in the household's time zone.
   and final warnings: 14 days and 3 days before. Press the chips 7, 14, 30,
   60 or 90 to change them; several can be on at once. A saved day that is not
   one of these chips shows as an extra chip, which you can press to remove.
-  You can see your first and final warnings under **Settings → Reminders**,
-  as **first warning** and **final warning**; they cannot be changed in the
+  You can see your first and final warnings in **Settings**, on the **Mail**
+  card's **reminders** tab, as **first warning** and **final warning**; they cannot be changed in the
   app.
 - **To change an item's reminders later**, edit the item and change
   **reminders**. An item can have up to 8 reminders, each up to 365 days
@@ -187,11 +187,11 @@ morning in the household's time zone.
   reminders start again for its next date. A retired item gets none, and a
   snoozed item gets none before the day it is snoozed until.
 
-<!-- screenshot: settings, Reminders card on the "reminders" tab with both switches on -->
+<!-- screenshot: settings, Mail card on the "reminders" tab with both switches on -->
 
 ### Choose how reminders reach you
 
-Open **Settings** and find the **Reminders** card.
+Open **Settings**, find the **Mail** card and choose its **reminders** tab.
 
 - **email reminders** turns reminder emails on or off for you.
 - **browser alerts · this device** turns alerts on or off in the browser you
@@ -204,7 +204,7 @@ If both switches are off, Orbit sends you nothing.
 
 ### See what was sent
 
-The **sent to you lately** tab lists recent reminders: which item, which
+The Mail card's **sent to you lately** tab (**sent lately** on a phone) lists recent reminders: which item, which
 warning, and whether it went by email or browser alert. A reminder that
 could not be sent says so. Press one to open its item.
 
@@ -218,8 +218,11 @@ scanning off.
 
 On the full form, drop a file on **drop a document**, or press it to choose
 one. The screen splits: the form on one side and the first page of your
-document on the other. Nothing is saved until you press **Add to orbit**;
-the item and the document are saved together.
+document on the other. Orbit stores the file as soon as you choose it, to
+check it and to see whether you already hold it, but no item is made until
+you press **Add to orbit**: the item and the document are then saved
+together. A file you take back out, replace, or leave behind without adding
+is deleted.
 
 If your administrator has set up document reading, Orbit reads the file
 and fills any empty **provider**, **reference / policy no.**, **key date**
@@ -232,6 +235,21 @@ item cannot be added until you drop another file or press **remove it** to
 save without one.
 
 ![The create form on the left and page one of a dropped PDF in the reading lane on the right](images/using-document-create.png)
+
+### Already in your orbit
+
+If the file is byte for byte one your household already holds, the form
+says **Already in your orbit** before it reads anything: which entry holds
+the file and the day it was added, with a link to open it. If that entry is
+due within 30 days, or overdue, it says so, in case you meant to add this
+year's paper. Press **keep it anyway** to add the file as a second copy (a
+quiet line keeps that in view until you save), or **not this one** to take
+it back out. Only your own household's files are compared, and only exact
+copies: a new scan of the same paper is a different file.
+
+A mail-in suggestion whose attachment you already hold says so on its
+receipt in the inbox, with the same link. **Add to orbit** keeps it as a
+second copy; dismissing the mail drops the mail, not the copy you hold.
 
 ### Attach a document to an existing item
 
@@ -266,10 +284,10 @@ This only works if your administrator has set up Orbit's mailbox.
 
 ### Set up your relay
 
-Open **Settings** and press **open the relay →** in the **Your relay** card.
-The relay screen shows your **address**; click it (tap it on a phone) to
+Open **Settings** and choose the **your relay** tab of the **Mail** card.
+The tab shows your **address**; click it (tap it on a phone) to
 copy it. If your administrator has paused ingest, the address stays and the
-screen says collection is paused by the administrator: mail you send now
+tab says collection is paused by the administrator: mail you send now
 waits and is read when it resumes.
 
 Orbit only accepts mail forwarded from the address shown as
@@ -278,14 +296,14 @@ Orbit only accepts mail forwarded from the address shown as
 while signed in to Orbit. This email needs your administrator to have set
 up outbound mail.
 
-On the same screen:
+On the same tab:
 
 - **rotate address** gives you a new relay address (press twice to
   confirm);
 - **pause ingest** stops Orbit collecting your forwarded mail until you
   press **resume ingest**.
 
-![The relay screen with a private address, the sending-from address, sender check marked checked, status, and the rotate address and pause ingest buttons](images/using-relay.png)
+![The your relay tab with a private address, the sending-from address, sender check marked checked, status, and the rotate address and pause ingest buttons](images/using-relay.png)
 
 ### Review what arrived
 
@@ -376,7 +394,8 @@ household and when reminders arrive.
 2. Choose a passphrase and type it twice. Orbit never keeps it: lose it and
    the file cannot be opened.
 3. Press **write the archive**, press again, then **download the file**.
-   The file is kept for a day.
+   The file is kept for six hours unless your administrator set otherwise,
+   and Orbit keeps only your last two: writing a third replaces the oldest.
 
 Entries and their documents go in the file; people never do. The
 **bring one in** tab merges an archive into the household. Entries that are

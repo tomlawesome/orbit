@@ -9,7 +9,7 @@
  */
 import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { auditLog, documentCrypto, documentJobs, documents } from "@/db/schema";
+import { auditLog, documentCrypto, documentJobs, documentPreviews, documents } from "@/db/schema";
 import { log } from "@/lib/logger";
 import { openDocumentStorage, STORAGE_KEY_PATTERN } from "@/server/documents/storage";
 import { processOwnedPurge, type OwnedPurgeState } from "@/server/documents/purge";
@@ -106,6 +106,17 @@ export async function processPurgeJob(job: ClaimedDocumentJob): Promise<"complet
         };
       });
     },
+    // Every kept page's object first (#1433 D20): the rows stay until
+    // finalization, so a purge interrupted here is redone from them. No page
+    // is added meanwhile: a page is stored only while the document is
+    // `available`, under the same document lock deletion takes.
+    deletePreviews: async (documentId) => {
+      const kept = await getDb().select({ storageKey: documentPreviews.storageKey }).from(documentPreviews)
+        .where(eq(documentPreviews.documentId, documentId));
+      for (const { storageKey } of kept) {
+        if (storageKey && STORAGE_KEY_PATTERN.test(storageKey)) await storage.deletePreviewCiphertext(storageKey);
+      }
+    },
     deleteCiphertext: (storageKey) => storage.deleteCiphertext(storageKey),
     finalizeOwnedPurge: async (claimedJob, state): Promise<boolean> => {
       return getDb().transaction(async (transaction) => {
@@ -159,6 +170,8 @@ export async function processPurgeJob(job: ClaimedDocumentJob): Promise<"complet
           eq(documentCrypto.storageKey, state.storageKey),
         )).returning({ documentId: documentCrypto.documentId });
         if (deletedCrypto.length !== 1) throw new Error("Purge finalization lost crypto metadata");
+        // The kept pages' rows go with the crypto row: their objects are gone.
+        await transaction.delete(documentPreviews).where(eq(documentPreviews.documentId, claimedJob.documentId));
 
         const completedJob = await completeJob(transaction, and(
           holdsJobLease(claimedJob),

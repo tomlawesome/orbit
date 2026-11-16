@@ -3,9 +3,11 @@ import { AppError } from "@/lib/app-error";
 import {
   categorizeProviderError,
   createSmtpTransport,
-  getNotificationWorkerConfig,
+  getNotificationWorkerSettings,
+  type NotificationWorkerConfig,
   type SmtpNotification,
 } from "@/server/notification-worker";
+import { configFor, noteMailSent, resolveSendingAccount } from "@/server/mail-in/sending-settings";
 import { renderInvitationMail, type InvitationMailContext } from "@/server/invitations/mail";
 
 /**
@@ -68,25 +70,37 @@ export function invitationLink(token: string, environment: NodeJS.ProcessEnv = p
  * A long-lived transporter would be cheaper, but this send happens inside a
  * person's request rather than in a worker loop, and a pooled connection held
  * open across requests is a socket nobody owns.
+ *
+ * The account is the sending row's (#1629), never the `SMTP_*` lines: no row
+ * is `smtp_unconfigured`, a password the key cannot open `smtp_unavailable`.
  */
-function defaultMailer(): InvitationMailer | null {
-  const config = getNotificationWorkerConfig();
-  if (!config.smtpUrl) return null;
+async function defaultMailer(): Promise<
+  | { state: "ready"; mailer: InvitationMailer; from: string; security: NotificationWorkerConfig["smtpSecurity"] }
+  | { state: "unconfigured" | "locked" }
+> {
+  const account = await resolveSendingAccount();
+  if (account.state !== "ready") return account;
+  const config = configFor(account, account.from);
   return {
-    async sendEmail(notification) {
-      let transporter: ReturnType<typeof nodemailer.createTransport> | undefined;
-      try {
-        transporter = createSmtpTransport(config);
-        await transporter.sendMail({
-          from: notification.from,
-          to: notification.to,
-          subject: notification.subject,
-          text: notification.text,
-          ...(notification.html ? { html: notification.html } : {}),
-        });
-      } finally {
-        transporter?.close();
-      }
+    state: "ready",
+    from: account.from,
+    security: account.security,
+    mailer: {
+      async sendEmail(notification) {
+        let transporter: ReturnType<typeof nodemailer.createTransport> | undefined;
+        try {
+          transporter = createSmtpTransport(config);
+          await transporter.sendMail({
+            from: notification.from,
+            to: notification.to,
+            subject: notification.subject,
+            text: notification.text,
+            ...(notification.html ? { html: notification.html } : {}),
+          });
+        } finally {
+          transporter?.close();
+        }
+      },
     },
   };
 }
@@ -94,18 +108,26 @@ function defaultMailer(): InvitationMailer | null {
 /**
  * Whether a send through `sendBoundedMail` with this `mailer` could go out at
  * all: a supplied mailer counts as ready, `null` as not, and `undefined` asks
- * whether the instance has an SMTP transport and a sender it can parse. For a
- * caller that must refuse before changing anything rather than discover the
- * answer one failed send at a time (#1676).
+ * whether sending is set up and its password readable. For a caller that must
+ * refuse before changing anything rather than discover the answer one failed
+ * send at a time (#1676).
  */
-export function outgoingMailReady(mailer?: InvitationMailer | null): boolean {
+export async function outgoingMailReady(mailer?: InvitationMailer | null): Promise<boolean> {
+  if (mailer !== undefined) return mailer !== null;
   try {
-    const provider = mailer === undefined ? defaultMailer() : mailer;
-    void getNotificationWorkerConfig().smtpFrom;
-    return provider !== null;
+    return (await defaultMailer()).state === "ready";
   } catch {
     return false;
   }
+}
+
+/** The From header and TLS mode a supplied mailer is handed: the row's, or the default sender when there is none. */
+async function senderForSuppliedMailer(): Promise<{ from: string; security: NotificationWorkerConfig["smtpSecurity"] }> {
+  try {
+    const account = await resolveSendingAccount();
+    if (account.state === "ready") return { from: account.from, security: account.security };
+  } catch { /* fall through to the default sender */ }
+  return { from: getNotificationWorkerSettings().smtpFrom, security: "starttls" };
 }
 
 export interface InvitationSendOutcome {
@@ -125,18 +147,27 @@ export interface InvitationSendOutcome {
  */
 export async function sendBoundedMail(
   to: string,
-  mail: { subject: string; text: string; html?: string },
+  mail: { subject: string; text: string; html?: string; what?: string },
   mailer?: InvitationMailer | null,
   now: Date = new Date(),
 ): Promise<InvitationSendOutcome> {
   let provider: InvitationMailer | null;
   let from: string;
+  let security: NotificationWorkerConfig["smtpSecurity"];
+  const viaRow = mailer === undefined;
   try {
-    provider = mailer === undefined ? defaultMailer() : mailer;
-    from = getNotificationWorkerConfig().smtpFrom;
+    if (viaRow) {
+      const resolved = await defaultMailer();
+      if (resolved.state === "locked") return { sentAt: null, sendError: "smtp_unavailable" };
+      if (resolved.state !== "ready") return { sentAt: null, sendError: "smtp_unconfigured" };
+      ({ mailer: provider, from, security } = resolved);
+    } else {
+      provider = mailer;
+      ({ from, security } = await senderForSuppliedMailer());
+    }
   } catch {
-    /* An SMTP configuration this instance cannot even parse is the same fact
-       to an owner as no SMTP configuration at all. */
+    /* A sending row this instance cannot even read is the same fact to an
+       owner as no sending set up at all. */
     return { sentAt: null, sendError: "smtp_unconfigured" };
   }
   if (!provider) return { sentAt: null, sendError: "smtp_unconfigured" };
@@ -148,8 +179,9 @@ export async function sendBoundedMail(
       subject: mail.subject,
       text: mail.text,
       ...(mail.html ? { html: mail.html } : {}),
-      tlsMode: getNotificationWorkerConfig().smtpSecurity,
+      tlsMode: security,
     });
+    if (viaRow) await noteMailSent(mail.what ?? "a message", now);
     return { sentAt: now, sendError: null };
   } catch (error) {
     const category = categorizeProviderError("email", error);
@@ -174,5 +206,5 @@ export async function sendInvitationMail(
   mailer?: InvitationMailer | null,
   now: Date = new Date(),
 ): Promise<InvitationSendOutcome> {
-  return sendBoundedMail(context.email, renderInvitationMail(context), mailer, now);
+  return sendBoundedMail(context.email, { ...renderInvitationMail(context), what: "an invitation" }, mailer, now);
 }

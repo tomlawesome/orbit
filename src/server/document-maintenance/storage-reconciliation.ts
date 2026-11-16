@@ -7,11 +7,12 @@
  * deliberately preserved rather than rewritten: their durable evidence is what
  * the purge job's retry depends on.
  */
-import { and, eq, inArray, lt, or, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, lt, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { auditLog, documentCrypto, documentStagingObjects, documents, imapIngestionAttachments, imapIngestionStagingObjects } from "@/db/schema";
+import { auditLog, documentCrypto, documentPreviews, documentStagingObjects, documents, imapIngestionAttachments, imapIngestionStagingObjects } from "@/db/schema";
 import { log } from "@/lib/logger";
-import { openDocumentStorage } from "@/server/documents/storage";
+import { type LocalDocumentStorage, openDocumentStorage } from "@/server/documents/storage";
+import { discardKeptPreview } from "@/server/documents/preview-store";
 import { reconcileMissingDocument } from "@/server/documents/reconciliation";
 import { workerState } from "@/server/document-maintenance/worker-state";
 
@@ -155,7 +156,7 @@ export async function reconcileDocumentStorage(): Promise<void> {
             }).where(and(
               eq(documents.id, snapshot.documentId),
               eq(documents.lifecycle, "available"),
-            )).returning({ id: documents.id });
+            )).returning({ id: documents.id, sizeBytes: documents.sizeBytes });
             if (!rejected) return false;
             await transaction.insert(auditLog).values({
               householdId: snapshot.householdId,
@@ -163,7 +164,7 @@ export async function reconcileDocumentStorage(): Promise<void> {
               entityType: "document",
               entityId: snapshot.documentId,
               action: "document_storage_missing",
-              changes: { itemId: snapshot.itemId },
+              changes: { itemId: snapshot.itemId, sizeBytes: rejected.sizeBytes },
             });
             return true;
           },
@@ -197,9 +198,64 @@ export async function reconcileDocumentStorage(): Promise<void> {
       await storage.deleteStagingCiphertext(object.storageKey);
     }
   }
+  await reconcilePreviews(storage, orphanBoundary);
   for (const quarantine of await storage.listQuarantineFiles()) {
     if (quarantine.modifiedAt.getTime() < orphanBoundary) await storage.discardQuarantine(quarantine.path);
   }
   await storage.sweepTemporaryFiles(60 * 60 * 1_000);
   workerState.__orbitDocumentWorkerLastReconciliationAt = new Date().toISOString();
+}
+
+/** Rows and object keys each read this many at a time, so the sweep's memory does not grow with the volume. */
+const PREVIEW_RECONCILE_BATCH = 500;
+
+/**
+ * The kept pages' sweep (#1433 D19, D20), in bounded batches. Drawn rows are
+ * paged by storage key and each object checked on the volume; an object is
+ * always written before its row, so a row read is never ahead of its bytes.
+ * A drawn row whose object is gone (a backup taken mid-draw, a damaged
+ * volume) is deleted and its document's pages enqueued again, so a restore
+ * never fails on previews. Then the volume is walked one first-level shard at
+ * a time, and an object no row names is deleted once it is a day old, as for
+ * documents.
+ */
+async function reconcilePreviews(storage: LocalDocumentStorage, orphanBoundary: number): Promise<void> {
+  let missingCount = 0;
+  let after = "";
+  for (;;) {
+    const rows = await getDb().select({ documentId: documentPreviews.documentId, page: documentPreviews.page, storageKey: documentPreviews.storageKey })
+      .from(documentPreviews)
+      .where(and(eq(documentPreviews.status, "drawn"), gt(documentPreviews.storageKey, after)))
+      .orderBy(asc(documentPreviews.storageKey))
+      .limit(PREVIEW_RECONCILE_BATCH);
+    if (rows.length === 0) break;
+    after = rows.at(-1)!.storageKey!;
+    for (const row of rows) {
+      let present: boolean;
+      try {
+        present = await storage.previewExists(row.storageKey!);
+      } catch {
+        // A transient stat failure says nothing about the object; next sweep.
+        continue;
+      }
+      if (present) continue;
+      missingCount += 1;
+      await discardKeptPreview(storage, row as { documentId: string; page: number; storageKey: string }, "storage_object_missing");
+    }
+    if (rows.length < PREVIEW_RECONCILE_BATCH) break;
+  }
+  if (missingCount > 0) {
+    log.warn({ event: "document.lifecycle", state: "degraded", reason: "storage_object_missing", action: "retry_job", impact: "none" });
+  }
+  for (const shard of await storage.listPreviewShards()) {
+    const old = (await storage.listPreviewObjects(shard)).filter((object) => object.modifiedAt.getTime() < orphanBoundary);
+    for (let index = 0; index < old.length; index += PREVIEW_RECONCILE_BATCH) {
+      const batch = old.slice(index, index + PREVIEW_RECONCILE_BATCH).map((object) => object.storageKey);
+      const named = new Set((await getDb().select({ storageKey: documentPreviews.storageKey }).from(documentPreviews)
+        .where(inArray(documentPreviews.storageKey, batch))).map((row) => row.storageKey));
+      for (const storageKey of batch) {
+        if (!named.has(storageKey)) await storage.deletePreviewCiphertext(storageKey);
+      }
+    }
+  }
 }

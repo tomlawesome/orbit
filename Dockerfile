@@ -14,7 +14,7 @@
 # Default is GHCR so anyone can build from source with no credentials; CI passes
 # this GitLab's own registry (same digest, #1101). The digest pins the content.
 ARG BASE_IMAGE_REGISTRY=ghcr.io/tomlawesome
-FROM ${BASE_IMAGE_REGISTRY}/orbit-base-image:latest@sha256:212aad64466b240e4b02fc2ca46d93ea0d682384a113ed90b81ca0beb69196ca AS base
+FROM ${BASE_IMAGE_REGISTRY}/orbit-base-image:latest@sha256:acdeefd6b9b06c774524485ba1692a4dd4e01700e01aeda0250896c5d2606cb1 AS base
 
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
@@ -52,9 +52,8 @@ RUN node scripts/about-sbom.mjs web/static/about/sbom.spdx.json \
 # The front end's production node_modules, pruned by pnpm to what actually
 # runs (#735). The engine's own code is bundled by the stage above, but its
 # nine runtime dependencies stay external and must be present on disk:
-# `pdfjs-dist` resolves its worker and cmap assets by path, `@napi-rs/canvas`
-# is native, and the rest are listed in web/package.json `dependencies`
-# precisely so the adapter externalises them.
+# `@napi-rs/canvas` is native, and the rest are listed in web/package.json
+# `dependencies` precisely so the adapter externalises them.
 #
 # The deploy goes through scripts/web-deploy.sh rather than being spelled out
 # here, so the image and anyone reproducing its packaging locally run the same
@@ -85,7 +84,7 @@ RUN pnpm run build:cli
 
 # The runtime stage starts from the base image again rather than from `base`,
 # so it pins the same digest for the same reasons (see the base stage).
-FROM ${BASE_IMAGE_REGISTRY}/orbit-base-image:latest@sha256:212aad64466b240e4b02fc2ca46d93ea0d682384a113ed90b81ca0beb69196ca AS runner
+FROM ${BASE_IMAGE_REGISTRY}/orbit-base-image:latest@sha256:acdeefd6b9b06c774524485ba1692a4dd4e01700e01aeda0250896c5d2606cb1 AS runner
 
 # The three release-metadata patterns, copied in early because this layer's
 # content never varies between builds; the values themselves are declared,
@@ -103,12 +102,12 @@ ENV PORT=3000
 # address is visible in `docker inspect` rather than only in the adapter.
 ENV HOST=0.0.0.0
 # adapter-node's server-wide request body limit (#1285). Its 512K default
-# refused every document over 512 KB. Set to the largest body any route may
-# take -- a portable-archive import at the archive format's cap, about
-# 342 MiB (#1290) -- and the request pipeline then holds each route to its
-# own, smaller limit (web/src/lib/server/body-limit.js, SERVER_BODY_LIMIT
-# must match this).
-ENV BODY_SIZE_LIMIT=343M
+# refused every document over 512 KB. Infinity turns it off, adapter-node's
+# documented way to leave the check to the app: the request pipeline holds
+# each route to its own limit (web/src/lib/server/body-limit.js), and the
+# archive routes' limit follows the household quota in the configuration
+# (#1390), which a fixed value here cannot.
+ENV BODY_SIZE_LIMIT=Infinity
 ENV MIGRATE_ON_START=true
 ENV WORKER_ENABLED=true
 # Keep idle connections open longer than a reverse proxy in front does (Caddy
@@ -155,8 +154,17 @@ WORKDIR /opt/orbit
 # postgres server; src/lib/postgres-client-major.test.ts holds the two
 # together. Licence: PostgreSQL. BusyBox already provides the flock the
 # engine's backup/restore lock uses, so util-linux is not needed.
+# poppler-utils and font-liberation (#1436, ADR-0046): pdfinfo checks a PDF's
+# structure and pdftoppm draws its pages, each one short-lived process under
+# the sandbox's ulimit wrapper with an empty environment, so no PDF parser runs
+# in the server. Licences: GPL-2.0-or-later (poppler, run as a separate
+# program, never linked) and OFL-1.1 (Liberation). font-liberation gives the
+# standard-14 fonts (Helvetica, Times, Courier) metric-compatible faces;
+# fc-cache builds fontconfig's cache now so the first draw does not, and
+# scripts/pdf-renderer-runtime-check.mjs below proves both.
 RUN apk_retry() { "$@" || { sleep 5; "$@"; } || { sleep 10; "$@"; }; } \
-  && apk_retry apk add --no-cache su-exec postgresql18-client \
+  && apk_retry apk add --no-cache su-exec postgresql18-client poppler-utils font-liberation \
+  && fc-cache -f \
   && rm -rf /usr/local/lib/node_modules /opt/yarn-v* \
   && rm -f \
     /usr/local/bin/corepack \
@@ -191,23 +199,43 @@ COPY --from=web-deps --chown=orbit:orbit /opt/deploy-web/node_modules ./web/node
 RUN printf '{"type":"module"}\n' > ./web/package.json \
   && chown root:root ./web/package.json \
   && chmod 0444 ./web/package.json
-# Proves page-one previews can actually be rendered by what this image ships,
-# against the finished layout rather than a build stage's copy of it (#476,
-# #493, #735). It draws a real page with the native canvas that is here now;
-# parsing a PDF is not rendering one, and #493 shipped a container that could
-# do the first and not the second. The script is removed again immediately:
-# it is a build-time gate, not runtime surface.
-COPY scripts/web-pdfjs-runtime-check.mjs ./scripts/web-pdfjs-runtime-check.mjs
-RUN ORBIT_WEB_BUILD_ROOT=/opt/orbit/web node scripts/web-pdfjs-runtime-check.mjs \
-  && rm -f /opt/orbit/scripts/web-pdfjs-runtime-check.mjs
+# The Alpine packages join the About page's bill of materials, and their
+# licences are checked, in the same step (#1781). They exist only in this
+# stage, so the web-builder stage's about-sbom.mjs cannot list them: this reads
+# /lib/apk/db/installed and merges them into the shipped sbom.spdx.json and
+# libraries.json, failing the build on a licence supply-chain/licence-policy.yml
+# (`allow-licenses-apk`) does not allow. Deterministic: sorted, same epoch.
+# Dependency-free, so it runs without node_modules; the scripts it imports
+# are copied in, run and removed, like the check below.
+COPY scripts/about-sbom-apk.mjs scripts/about-sbom.mjs ./scripts/
+COPY scripts/ci/licence-policy.mjs ./scripts/ci/licence-policy.mjs
+COPY web/src/lib/about/group.js ./web/src/lib/about/group.js
+COPY supply-chain/licence-policy.yml ./supply-chain/licence-policy.yml
+RUN node scripts/about-sbom-apk.mjs --sbom web/client/about/sbom.spdx.json \
+  && rm -f scripts/about-sbom-apk.mjs scripts/about-sbom.mjs \
+    scripts/ci/licence-policy.mjs web/src/lib/about/group.js \
+    supply-chain/licence-policy.yml \
+  && rmdir scripts/ci web/src/lib/about web/src/lib web/src supply-chain
+# Proves previews can actually be drawn by what this image ships, against the
+# finished layout (#476, #493, #1436): pdfinfo and pdftoppm run through the
+# server's own /bin/sh ulimit wrapper on a Helvetica text page, the JPEG is
+# decoded with the shipped native canvas and must hold ink, and fontconfig must
+# name Liberation Sans for Helvetica. Parsing a PDF is not drawing one, and
+# #493 shipped a container that could do the first and not the second. The
+# script is removed again immediately: it is a build-time gate, not runtime
+# surface.
+COPY scripts/pdf-renderer-runtime-check.mjs ./scripts/pdf-renderer-runtime-check.mjs
+RUN ORBIT_WEB_RUNTIME_ROOT=/opt/orbit/web node scripts/pdf-renderer-runtime-check.mjs \
+  && rm -f /opt/orbit/scripts/pdf-renderer-runtime-check.mjs
 COPY --chown=orbit:orbit scripts/recovery-crypto.mjs ./scripts/recovery-crypto.mjs
 COPY --chown=root:root scripts/container-entrypoint.sh ./scripts/container-entrypoint.sh
-# The fourteen deployment assets, at the same relative paths an install uses
-# them at (ADR-0019). They travel with the digest, so the compose file an
+# The fifteen deployment assets, at the same relative paths an install uses
+# them at (ADR-0019); scripts/update.sh goes to the top, where `./update.sh`
+# runs it (#1770). They travel with the digest, so the compose file an
 # operator runs and the image it configures are the same artifact, and an
 # install needs nothing but the registry. Root-owned data: the install engine
 # copies them into the deployment and sets its own modes (#1212).
-COPY --chown=root:root docker-compose.yml docker-compose.mail.yml docker-compose.kek-rotation.yml docker-compose.no-document-key.yml .env-orbit.example ./deploy/
+COPY --chown=root:root docker-compose.yml docker-compose.mail.yml docker-compose.kek-rotation.yml docker-compose.no-document-key.yml docker-compose.scanner-off.yml .env-orbit.example scripts/update.sh ./deploy/
 COPY --chown=root:root config/tika-config.json ./deploy/config/
 COPY --chown=root:root \
   scripts/configure.sh \

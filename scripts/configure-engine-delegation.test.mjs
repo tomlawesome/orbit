@@ -100,6 +100,8 @@ describe("the docker run each flow becomes (D1)", () => {
     [["--check-rollback"], "ro", ["check", "--rollback"], false],
     [["--set-deployment-profile", "ai", "llama3:8b"], "rw", ["configure", "--set-deployment-profile", "ai", "llama3:8b"], false],
     [["--set-oidc-secret"], "rw", ["configure", "--set-oidc-secret"], true],
+    [["--set-scanner", "off"], "rw", ["configure", "--set-scanner", "off"], false],
+    [["--set-scanner", "on"], "rw", ["configure", "--set-scanner", "on"], false],
   ])("configure.sh %j", (args, mode, command, interactive) => {
     const targetDir = makeFixture({ envFile: `ORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_IMAGE=${LOCAL_IMAGE}\n` });
     const result = run(targetDir, args, { input: "delegation-secret\n" });
@@ -431,5 +433,56 @@ describe("exit codes", () => {
     const targetDir = makeFixture({ envFile: `ORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_IMAGE=${LOCAL_IMAGE}\n` });
     expect(run(targetDir, ["--init"], { env: { ORBIT_CONFIGURE_APP_URL: "https://orbit.delegation.invalid" } }).status).toBe(1);
     expect(run(targetDir, ["--set-deployment-profile", "bogus"]).status).toBe(2);
+  });
+});
+
+// #1170: ClamAV is optional, on by default. `configure.sh --set-scanner on|off`
+// is the documented switch; DOCUMENT_SCAN_MODE is the source of truth and the
+// docker-compose.scanner-off.yml entry in COMPOSE_FILE follows it.
+describe("configure.sh --set-scanner (#1170)", () => {
+  const OVERLAY = "docker-compose.scanner-off.yml";
+  const baseEnv = `ORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_IMAGE=${LOCAL_IMAGE}\n`;
+  const readEnvFile = (targetDir) => readFileSync(join(targetDir, ".env-orbit"), "utf8");
+
+  it("off writes DOCUMENT_SCAN_MODE=disabled and lists the overlay in COMPOSE_FILE", () => {
+    const targetDir = makeFixture({ envFile: baseEnv });
+    const result = run(targetDir, ["--set-scanner", "off"]);
+    expect(result.status).toBe(0);
+    const env = readEnvFile(targetDir);
+    expect(env).toMatch(/^DOCUMENT_SCAN_MODE=disabled$/mu);
+    expect(env).toMatch(new RegExp(`^COMPOSE_FILE=.*${OVERLAY.replace(/\./gu, "\\.")}$`, "mu"));
+  });
+
+  it("switching off, on, off again is idempotent: running each twice gives the same file", () => {
+    const targetDir = makeFixture({ envFile: baseEnv });
+    expect(run(targetDir, ["--set-scanner", "off"]).status).toBe(0);
+    const off = readEnvFile(targetDir);
+    expect(run(targetDir, ["--set-scanner", "off"]).status).toBe(0);
+    expect(readEnvFile(targetDir)).toBe(off);
+
+    expect(run(targetDir, ["--set-scanner", "on"]).status).toBe(0);
+    const on = readEnvFile(targetDir);
+    expect(on).not.toContain(OVERLAY);
+    expect(on).not.toMatch(/^DOCUMENT_SCAN_MODE=disabled$/mu);
+    expect(run(targetDir, ["--set-scanner", "on"]).status).toBe(0);
+    expect(readEnvFile(targetDir)).toBe(on);
+
+    expect(run(targetDir, ["--set-scanner", "off"]).status).toBe(0);
+    expect(readEnvFile(targetDir)).toBe(off);
+  });
+
+  it("keeps the other settings of the file", () => {
+    const targetDir = makeFixture({ envFile: `${baseEnv}APP_URL=https://orbit.delegation.invalid\n` });
+    run(targetDir, ["--set-scanner", "off"]);
+    expect(readEnvFile(targetDir)).toContain("APP_URL=https://orbit.delegation.invalid\n");
+  });
+
+  it("refuses a missing or unknown value without writing", () => {
+    const targetDir = makeFixture({ envFile: baseEnv });
+    for (const args of [["--set-scanner"], ["--set-scanner", "maybe"]]) {
+      const result = run(targetDir, args);
+      expect(result.status, args.join(" ")).toBe(2);
+    }
+    expect(readEnvFile(targetDir)).toBe(baseEnv);
   });
 });

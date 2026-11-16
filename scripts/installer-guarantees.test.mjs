@@ -2,7 +2,12 @@ import { existsSync, readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
-import { staleInstallShCitations } from "./installer-guarantee-citations.mjs";
+import {
+  citationContentProblems,
+  citedFileLines,
+  mainScriptCitationProblems,
+  staleInstallShCitations,
+} from "./installer-guarantee-citations.mjs";
 
 /*
  * #587: docs/installer-guarantees.md's per-script counts, family totals and
@@ -317,5 +322,253 @@ describe("install.sh citations in the guarantee catalogue (#1481)", () => {
       "utf8",
     ).replaceAll("\r\n", "\n");
     expect(staleInstallShCitations(catalogue, installShReal)).toEqual([]);
+  });
+});
+
+/*
+ * #1846: "main script" citations name top-level code. Each must lie outside
+ * every function body and start and end on a code line, and, for the rows in
+ * the fixed list below, the cited lines must hold the code the guarantee
+ * describes. `index` is the segment's position among the guarantee's
+ * install.sh citations.
+ */
+describe("install.sh main-script citations in the guarantee catalogue (#1846)", () => {
+  // Lines 1-2 filler, `alpha` at 4-6, top-level code at 8-9, blank at 7 and 10.
+  const installSh = [
+    "#!/usr/bin/env bash",
+    "set -euo pipefail",
+    "alpha() {",
+    "  echo inside",
+    "}",
+    "",
+    "recheck_volume=1",
+    "echo changed during installation",
+    "",
+    "echo end",
+    "",
+  ].join("\n");
+  const doc = (...entries) =>
+    ["## install.sh (the installer)", "", ...entries.map((e, i) => `${i + 1}. ${e}`), ""].join("\n");
+  const entry = (citation) => `Does a thing. \u2014 ${citation} \u2014 category: x \u2014 criticality: LOW`;
+
+  it("accepts a main-script range on top-level code", () => {
+    expect(
+      mainScriptCitationProblems(doc(entry("install.sh:7-8 (main script, check)")), installSh),
+    ).toEqual([]);
+  });
+
+  it("reports a main-script range inside a function body", () => {
+    const problems = mainScriptCitationProblems(doc(entry("install.sh:3-5 (main script, check)")), installSh);
+    expect(problems.map((p) => p.problem)).toEqual(["lines overlap function alpha"]);
+  });
+
+  it("reports a main-script range that starts or ends on a blank line", () => {
+    const problems = mainScriptCitationProblems(doc(entry("install.sh:6-8 (main script, check)")), installSh);
+    expect(problems.map((p) => p.problem)).toEqual(["first line is blank"]);
+    const trailing = mainScriptCitationProblems(doc(entry("install.sh:7-9 (main script, check)")), installSh);
+    expect(trailing.map((p) => p.problem)).toEqual(["last line is blank"]);
+  });
+
+  it("checks a bare range that precedes a main-script one, and ignores function citations", () => {
+    const text = doc(entry("install.sh:6, 7-8 (main script, reads); install.sh:3-5 (alpha)"));
+    expect(mainScriptCitationProblems(text, installSh).map((p) => p.problem)).toEqual(["first line is blank", "last line is blank"]);
+  });
+
+  it("reports code the cited lines lack, and a missing citation", () => {
+    const text = doc(entry("install.sh:6-7 (main script, check)"));
+    const problems = citationContentProblems(text, installSh, [
+      { guarantee: "install.sh #1", index: 0, contains: ["recheck_volume=", "changed during installation"] },
+      { guarantee: "install.sh #1", index: 1, contains: ["x"] },
+    ]);
+    expect(problems.map((p) => p.problem)).toEqual(["lines lack changed during installation", "citation not found"]);
+    expect(
+      citationContentProblems(doc(entry("install.sh:7-8 (main script, check)")), installSh, [
+        { guarantee: "install.sh #1", index: 0, contains: ["recheck_volume=", "changed during installation"] },
+      ]),
+    ).toEqual([]);
+  });
+
+  const installShReal = readFileSync(new URL("./install.sh", import.meta.url), "utf8").replaceAll("\r\n", "\n");
+
+  it("every main-script citation in the real catalogue lies outside functions and on code lines", () => {
+    expect(mainScriptCitationProblems(catalogue, installShReal)).toEqual([]);
+  });
+
+  it("install.sh #39 cites the docker-compose.yml lines of the model-pull service and its loopback OLLAMA_HOST (#1852)", () => {
+    const compose = readFileSync(new URL("../docker-compose.yml", import.meta.url), "utf8").replaceAll("\r\n", "\n");
+    const cited = citedFileLines(catalogue, compose, "install.sh #39", "docker-compose.yml");
+    expect(cited, "install.sh #39 has no docker-compose.yml citation").not.toBeNull();
+    expect(cited).toContain("orbit-ollama-model-pull:");
+    expect(cited).toContain("OLLAMA_HOST: 127.0.0.1");
+  });
+
+  // Fixed list from the #1846 spec; substrings are literal text of install.sh.
+  const expectations = [
+    { guarantee: "install.sh #17", index: 0, contains: ["recheck_volume=", "changed during installation"] },
+    {
+      guarantee: "install.sh #22",
+      index: 0,
+      contains: ["requested_action\" == repair", "exit 3"],
+    },
+    {
+      guarantee: "install.sh #40",
+      index: 0,
+      contains: ["command -v docker", "docker compose version", "command -v timeout"],
+    },
+    { guarantee: "install.sh #41", index: 0, contains: ["manifest_digest=", "^sha256:"] },
+    {
+      guarantee: "install.sh #41",
+      index: 1,
+      contains: ["docker pull", "RepoDigests", "digest_confirmed=1", "did not return an immutable digest"],
+    },
+    {
+      guarantee: "install.sh #42",
+      index: 0,
+      contains: ["org.opencontainers.image.revision", "does not record the source revision"],
+    },
+    {
+      guarantee: "install.sh #42",
+      index: 1,
+      contains: [
+        "io.orbit.deployment-assets",
+        "built before Orbit bundled its deployment assets",
+        "somewhere other than",
+      ],
+    },
+    {
+      guarantee: "install.sh #43",
+      index: 0,
+      contains: ["org.opencontainers.image.version", "$semver_pattern"],
+    },
+    { guarantee: "install.sh #44", index: 0, contains: ["--banner", "could not render its canonical banner"] },
+    { guarantee: "install.sh #55", index: 0, contains: ["compose config --quiet", "configuration is invalid"] },
+    { guarantee: "install.sh #56", index: 0, contains: ["# --- after the commit", "rollback_armed=0"] },
+    { guarantee: "Summary #4", index: 0, contains: ["@sha256:"] },
+    { guarantee: "Summary #6", index: 0, contains: ["semver_pattern="] },
+    { guarantee: "Summary #6", index: 1, contains: ["org.opencontainers.image.version", "$semver_pattern"] },
+    { guarantee: "Summary #7", index: 0, contains: ["^sha256:"] },
+    { guarantee: "Summary #7", index: 1, contains: ["applied_digest="] },
+    { guarantee: "Summary #10", index: 0, contains: ["requested_action\" == repair", "exit 3"] },
+  ];
+
+  for (const row of expectations) {
+    it(`${row.guarantee} citation ${row.index} contains the code it names`, () => {
+      expect(citationContentProblems(catalogue, installShReal, [row])).toEqual([]);
+    });
+  }
+});
+
+/*
+ * #1859: every `repair.sh:` citation list in the catalogue, e.g.
+ * `repair.sh:2144-2161 (`read_compose_project_name`), 3101-3126 (`run_diagnosis`, Step 6)`
+ * (a list runs up to its " — " separator). Backticked names in a segment's
+ * parenthesis that resolve to a repair.sh function, or to a multi-line
+ * `readonly|declare -A|-a name=(` array (span: that line to the next line that
+ * is just `)`), are checked: the segment must overlap them, start at the first
+ * line / inside / inside the `#` comment block directly above, and end no later
+ * than the closing line. With several resolved names the range may span them:
+ * start >= the earliest comment-block start, end <= the latest closing line.
+ * A lowercase snake_case name (env vars like `ORBIT_X` are not checked) that resolves to nothing fails, unless written as
+ * `readonly `name``: those are single lines, and the cited lines must contain
+ * `name=`. `, Step X` additionally requires the cited start line to be that
+ * step's `# ---` header (`Steps 9 and 9b` / `Steps 1-3` mean the first named).
+ */
+describe("repair.sh function and step citations (#1859)", () => {
+  const repairLines = readFileSync(new URL("./repair.sh", import.meta.url), "utf8").split("\n");
+  const lineAt = (n) => repairLines[n - 1] ?? "";
+
+  function commentStart(first) {
+    let commentFrom = first;
+    while (commentFrom > 1 && lineAt(commentFrom - 1).trimStart().startsWith("#")) commentFrom -= 1;
+    return commentFrom;
+  }
+
+  function nameSpan(name) {
+    const fnFirst = repairLines.findIndex((l) => l.startsWith(`${name}() {`)) + 1;
+    if (fnFirst > 0) {
+      let last = fnFirst + 1;
+      while (last <= repairLines.length && !lineAt(last).startsWith("}")) last += 1;
+      return { first: fnFirst, commentFrom: commentStart(fnFirst), last };
+    }
+    const arrayHead = new RegExp(`^(?:readonly|declare) -[Aa] ${name}=\\(\\s*$`, "u");
+    const arrFirst = repairLines.findIndex((l) => arrayHead.test(l)) + 1;
+    if (arrFirst > 0) {
+      let last = arrFirst + 1;
+      while (last <= repairLines.length && lineAt(last).trim() !== ")") last += 1;
+      return { first: arrFirst, commentFrom: commentStart(arrFirst), last };
+    }
+    return null;
+  }
+
+  const segments = [];
+  const unresolved = [];
+  for (const line of catalogue.split("\n")) {
+    for (const list of line.matchAll(/repair\.sh:(.*?)(?: — |$)/gu)) {
+      const segmentPattern = /(\d+)(?:-(\d+))?\s*(?:\(((?:[^()]|\([^()]*\))*)\))?/gu;
+      for (const m of list[1].matchAll(segmentPattern)) {
+        const paren = m[3] ?? "";
+        const start = Number(m[1]);
+        const end = Number(m[2] ?? m[1]);
+        const text = m[0].trim();
+        const names = [];
+        const readonlyNames = [];
+        for (const n of paren.matchAll(/(readonly\s+)?`([A-Za-z_][A-Za-z0-9_]*)`/gu)) {
+          (n[1] ? readonlyNames : names).push(n[2]);
+        }
+        for (const name of readonlyNames) {
+          const hit = repairLines.slice(start - 1, end).some((l) => l.includes(`${name}=`));
+          if (!hit) unresolved.push(`${text}: readonly \`${name}\` - no line ${start}-${end} contains "${name}="`);
+        }
+        const spans = [];
+        for (const name of names) {
+          const span = nameSpan(name);
+          if (span) spans.push({ name, ...span });
+          else if (/^[a-z0-9]+(?:_[a-z0-9]+)+$/u.test(name)) unresolved.push(`${text}: \`${name}\` is neither a repair.sh function nor a multi-line array`);
+        }
+        if (spans.length === 0) continue;
+        segments.push({
+          text,
+          label: spans.map((s) => s.name).join(", "),
+          spans,
+          first: Math.min(...spans.map((s) => s.first)),
+          commentFrom: Math.min(...spans.map((s) => s.commentFrom)),
+          last: Math.max(...spans.map((s) => s.last)),
+          start,
+          end,
+          step: /,\s*Steps?\s+(\d+[a-z]?)(?![0-9A-Za-z])/u.exec(paren)?.[1],
+        });
+      }
+    }
+  }
+
+  it("finds function citations to check", () => {
+    expect(segments.length).toBeGreaterThanOrEqual(92) // 102 at #1859, minus ~10%;
+  });
+
+  it("every identifier-like name in a citation resolves", () => {
+    expect(unresolved).toEqual([]);
+  });
+
+  it("each citation covers its function or array and stays inside it", () => {
+    const problems = [];
+    for (const { text, label, spans, first, commentFrom, last, start, end } of segments) {
+      const real = spans.map((s) => `${s.name} is at repair.sh:${s.first}-${s.last} (comment from ${s.commentFrom})`).join("; ");
+      if (end < first || start > last) problems.push(`${text} [${label}]: does not overlap; ${real}`);
+      else if (start < commentFrom) problems.push(`${text} [${label}]: starts before the first name and its comment; ${real}`);
+      else if (end > last) problems.push(`${text} [${label}]: ends past the last closing line; ${real}`);
+    }
+    expect(problems).toEqual([]);
+  });
+
+  it("each `Step X` citation starts at that step's `# ---` header", () => {
+    const problems = [];
+    for (const { text, label, start, step } of segments) {
+      if (!step) continue;
+      const header = new RegExp(`^\\s*# ---.*\\bStep ${step}(?![0-9A-Za-z])`, "u");
+      if (!header.test(lineAt(start))) {
+        problems.push(`${text}: line ${start} of ${label} is not the "Step ${step}" header, it is: ${lineAt(start).trim()}`);
+      }
+    }
+    expect(problems).toEqual([]);
   });
 });

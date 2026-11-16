@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { PortableArchiveStorage } from "./portable-archive-storage";
 
+const put = (storage: PortableArchiveStorage, key: string, contents: Buffer) => storage.writeStream(key, (write) => write(contents));
+
 const roots: string[] = [];
 
 afterEach(async () => {
@@ -16,7 +18,7 @@ describe("portable archive storage", () => {
     roots.push(root);
     const storage = new PortableArchiveStorage(root);
     const key = storage.createStorageKey();
-    await storage.write(key, Buffer.from("encrypted-content"));
+    await put(storage, key, Buffer.from("encrypted-content"));
     await expect(storage.read(key, 64)).resolves.toEqual(Buffer.from("encrypted-content"));
     await expect(storage.read(key, 4)).rejects.toThrow("exceeds its expected size");
     await storage.delete(key);
@@ -28,7 +30,7 @@ describe("portable archive storage", () => {
     roots.push(root);
     const storage = new PortableArchiveStorage(root);
     const versionSeven = "01890a5d-ac96-774b-bcce-b302099a8057";
-    await storage.write(versionSeven, Buffer.from("encrypted-content"));
+    await put(storage, versionSeven, Buffer.from("encrypted-content"));
     await expect(storage.read(versionSeven, 64)).resolves.toEqual(Buffer.from("encrypted-content"));
     await expect(storage.list()).resolves.toEqual([expect.objectContaining({ storageKey: versionSeven })]);
   });
@@ -37,7 +39,7 @@ describe("portable archive storage", () => {
     const root = await mkdtemp(join(tmpdir(), "orbit-portable-archive-"));
     roots.push(root);
     const storage = new PortableArchiveStorage(root);
-    await expect(storage.write("../outside", Buffer.from("x"))).rejects.toThrow("Invalid portable archive storage key");
+    await expect(put(storage, "../outside", Buffer.from("x"))).rejects.toThrow("Invalid portable archive storage key");
   });
 
   it("lists only valid archive ciphertext objects", async () => {
@@ -45,7 +47,7 @@ describe("portable archive storage", () => {
     roots.push(root);
     const storage = new PortableArchiveStorage(root);
     const key = storage.createStorageKey();
-    await storage.write(key, Buffer.from("encrypted-content"));
+    await put(storage, key, Buffer.from("encrypted-content"));
     await expect(storage.list()).resolves.toEqual([expect.objectContaining({ storageKey: key })]);
   });
 });

@@ -439,7 +439,7 @@ describe("transactional household lifecycle", () => {
     const config = getDocumentConfig();
     const documentStorage = new LocalDocumentStorage(config.storageRoot, config.quarantineRoot);
     const archiveStorage = new PortableArchiveStorage(join(config.storageRoot, "portable-archives"));
-    await archiveStorage.write(archiveRecord.storageKey, Buffer.from("encrypted archive orphan"));
+    await archiveStorage.writeStream(archiveRecord.storageKey, (write) => write(Buffer.from("encrypted archive orphan")));
 
     const documentDelete = vi.spyOn(LocalDocumentStorage.prototype, "deleteCiphertext").mockRejectedValue(new Error("injected storage outage"));
     const archiveDelete = vi.spyOn(PortableArchiveStorage.prototype, "delete").mockRejectedValue(new Error("injected storage outage"));

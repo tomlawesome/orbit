@@ -22,9 +22,9 @@ export const SESSION_FIXTURE = {
   csrfToken: "fixture-csrf-token",
   user: { id: "u-fixture", displayName: "Ned Harlow", email: "ned@harlow.example", firstWarningDays: 14 },
   /* The engine's own numbers as the session payload carries them (#1336), at
-     their values today: the archive file ceiling is the longest ciphertext
-     plus its envelope. */
-  limits: { archiveFileBytes: 179_022_508, passphraseMin: 12, passphraseMax: 256 },
+     their default values: the archive file ceiling is the household quota
+     (5 GiB) plus the manifest cap, sealed (maxArchiveFileBytes, #1390). */
+  limits: { archiveFileBytes: 5_435_900_992, passphraseMin: 12, passphraseMax: 256 },
   retention: { documentDays: 30, recoveryDays: 30, receiptDays: 45 },
 };
 
@@ -32,19 +32,16 @@ export const SESSION_FIXTURE = {
  * The primary household's sections, in the engine's own shape
  * (workspaceSectionSchema: id, name, icon, accent, visible).
  *
- * Five, not three, and each wearing its icon and accent: household management
- * (#410) draws the sections editor, and design/v19/household-manage.html's
- * five rows — Home, Vehicles, Devices, Services, Dates & renewals — are the
- * defaultSections five in src/lib/domain.ts. The two new ones hold nothing,
- * which is what makes them the rows that may be removed at all: a section
- * holding entries can be hidden, never removed.
+ * Exactly the four approved defaults (`defaultSections`, src/lib/domain.ts),
+ * each wearing its icon and accent: Home, Vehicles, Devices, Services (#1769).
+ * A test that needs more (an empty, removable section, or two sections that
+ * share a colour) adds it in its own setup, as a household that added one.
  */
 const HARLOW_SECTIONS = [
   { id: "s-home", name: "Home", icon: "home", accent: "sage", visible: true },
   { id: "s-vehicles", name: "Vehicles", icon: "vehicle", accent: "blue", visible: true },
   { id: "s-devices", name: "Devices", icon: "device", accent: "sand", visible: true },
   { id: "s-services", name: "Services", icon: "service", accent: "plum", visible: true },
-  { id: "s-dates", name: "Dates & renewals", icon: "calendar", accent: "coral", visible: true },
 ];
 
 /** The primary household's items — the manifest and dial of the design. */
@@ -287,7 +284,7 @@ export const DOCUMENTS_FIXTURE = {
 };
 
 /**
- * Two more papers on item i-svc for the rig's document-preview tests (#1610),
+ * More papers on item i-svc for the rig's document-preview tests (#1610),
  * kept apart from DOCUMENTS_FIXTURE so the archive's own tallies over that
  * list (tests/unit/v19-inbox.test.mjs) stay what they were. The documents
  * route lists them after the item's own, and the content routes find them by
@@ -299,6 +296,9 @@ export const DOCUMENTS_FIXTURE = {
  *   d-svc-removed     "removed-proving.pdf": pending_deletion, kept 30 days
  *                     from the removal, so its card holds still with its
  *                     "Removed" line and Restore.
+ *   d-svc-held        "held-proving.pdf" (#1419): scanning, not ready, and
+ *                     held while the virus scanner is down (`scanHeld`), so
+ *                     its row says `waiting` and its card the held line.
  * @type {Record<string, (import('../workspace.js').DocumentSummary & { recoveryExpiresAt?: ?string, recoveryStatus?: ?string })[]>}
  */
 export const PROVING_DOCUMENTS_FIXTURE = {
@@ -309,6 +309,7 @@ export const PROVING_DOCUMENTS_FIXTURE = {
       scanStatus: "clean", availableAt: "2026-06-12T10:37:00.000Z",
       deleteAfter: null, ready: true, failureCode: null, recoverable: false,
       recoveryExpiresAt: null, recoveryStatus: null,
+      pageCount: 3,
     },
     {
       id: "d-svc-removed", itemId: "i-svc", displayName: "removed-proving.pdf",
@@ -316,6 +317,15 @@ export const PROVING_DOCUMENTS_FIXTURE = {
       scanStatus: "clean", availableAt: "2026-06-12T10:38:00.000Z",
       deleteAfter: "2026-09-11T09:00:00.000Z", ready: true, failureCode: null, recoverable: false,
       recoveryExpiresAt: null, recoveryStatus: null,
+    },
+    {
+      id: "d-svc-held", itemId: "i-svc", displayName: "held-proving.pdf",
+      mediaType: "application/pdf", sizeBytes: 49152, lifecycle: "scanning",
+      /* null, as the server sends it until a paper is available; the
+         client's DocumentSummary types it as always a string. */
+      scanStatus: "error", availableAt: /** @type {string} */ (/** @type {unknown} */ (null)),
+      deleteAfter: null, ready: false, scanHeld: true, failureCode: "scanner_unavailable", recoverable: true,
+      recoveryExpiresAt: "2026-06-13T10:39:00.000Z", recoveryStatus: "retrying",
     },
   ],
 };

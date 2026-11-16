@@ -112,12 +112,16 @@ via `docker exec -e PGPASSWORD`, never argv); application container identity
 and health, with an unhealthy container's own log classified into
 `database-schema-mismatch` or `database-below-floor` (#437) because those are
 not restartable and must not masquerade as `application-unhealthy`.
+[Superseded: the code now pipes the password over stdin into `docker exec -i` on the database container, not `docker exec -e PGPASSWORD` (#610) — repair.sh:3330-3333.]
 
 The reason classes cover every distinction #261 names: `secret-missing`,
 `database-credential-mismatch`, `database-unreachable`,
 `database-schema-mismatch`/`database-below-floor` (unsupported schema),
 `application-unhealthy`, `stale-container`, `unrelated-resource-present` and
-`container-foreign-owner`, plus `volume-retained-without-credentials` — the
+`container-foreign-owner`, `folder-moved` and `folder-elsewhere` (#1576:
+containers created from a folder that is gone, or from another one that still
+exists; `folder-moved` plans the safe action `recreate-services`,
+`folder-elsewhere` is manual), plus `volume-retained-without-credentials` — the
 28P01 precursor, detected from the retained volume name and the absent
 password file alone, without opening a connection. The delta slice adds
 `migration-failed` and `image-identity-mismatch`; the reserved name
@@ -214,8 +218,11 @@ AES-256-GCM) under an operator passphrase collected twice, hidden, over stdin
 only. The bundle is immediately decrypted back and compared byte-for-byte
 before anything else runs; any failure refuses the whole batch
 (`checkpoint-failed`, exit 4) with the database untouched. The bundle lives
-in a mode-0700 `.orbit-repair-checkpoint.*` directory, is never deleted by
-the script, and its path appears only as stderr guidance, never on stdout.
+in a mode-0700 `.orbit-repair-checkpoint.*` directory and its path appears
+only as stderr guidance, never on stdout. It was originally never deleted by
+the script; since the 2026-11-15 amendment below, an `--execute` run removes
+it once that run's own full re-check is clean, and keeps and names it
+otherwise.
 
 The 28P01 journey then runs as an ordered step iterator: checkpoint →
 generate a fresh 64-hex credential and stage it at a fixed mode-600 path →
@@ -242,8 +249,10 @@ not its functions: `restore-transaction` recognizes the
 `.orbit-install-staging.*` layout, restores only paths on the mirrored
 literal managed-path allowlist (never paths enumerated from the staging
 directory, so tampered staging cannot smuggle targets), refuses symlinked
-parents on both sides, refuses outright when the `committed` marker is
-present, and removes the staging directory only on full success. The delta
+parents on both sides, refuses when the `committed` marker is present (except
+for a staging folder that exactly matches the live files with no engine
+transaction active, which is removed instead; see the 2026-11-15 amendment),
+and removes the staging directory only on full success. The delta
 slice extends the same discipline to `configuration.sh`'s
 `.orbit-config.rollback` boundary: restore it only when the live `.env-orbit`
 fails validation and the rollback copy passes — deterministic, no guessing.
@@ -305,8 +314,10 @@ that could drift.
   repair stream exists beside the installer-ui event grammar. Both
   duplications are deliberate isolation with a named maintenance cost, held
   honest by tests and the catalogue until engine convergence.
-- Checkpoint bundles accumulate until the operator deletes them; repair never
-  deletes recovery material it created for the operator.
+- Repair never deletes recovery material it created for the operator, with
+  one exception: the credential checkpoint, removed after a clean full
+  re-check in the same run (amendment 2026-11-15). A checkpoint whose
+  re-check is not clean is kept until a later clean run removes it.
 - Schema-class diagnosis depends on the application's stable
   `reason=database_mismatch`/`database_below_floor` log vocabulary — a
   cross-layer contract that now must be kept like any other. (Note,
@@ -400,3 +411,107 @@ journal (needs a running container — unavailable in exactly the
 failed-migration state), and a build-time image label carrying the journal
 hash (readable with the app down, but still only detects "behind"). Full
 trail on issue #528.
+
+**2026-11-09 — repair starts services that are not running (issue #1535;
+owner decisions 7a and 8a, 2026-10-27, on ai/orbit-launcher#256).** A
+deployment whose containers are absent or stopped (a failed update, a reboot,
+a hand-run `compose down`, a full disk, an update stopped after the commit)
+was previously reported as `database-unreachable` and planned `manual`.
+Decisions 3 and 5 are amended: a new finding, `services-not-running`, reports
+a required service's container (`orbit-db`, `orbit-app`) absent or not running,
+and `database-unreachable` narrows to a running database container whose
+`pg_isready` did not succeed. A new action, `start-services` (mutation
+`service-start`, backup and rollback `not-required`, expect
+`services-healthy`), joins the safe batch. It is reconcile to desired state:
+Compose's own `up -d --no-build --no-recreate` with the deployment's own
+project and files, which creates or starts containers and never touches a
+running one, never removes orphans, and is bounded by a timeout as
+`install.sh`'s Compose start is (#1518). Repair may start services only when
+the deployment is complete on disk and only Docker is missing: any
+managed-file, secret, configuration, Compose-interpolation, Docker
+availability, ownership, unrelated-resource, unsupported-version,
+image-identity, staging-evidence or retained-volume finding (8a) plans
+`manual` instead, naming the first of them. Diagnosis remains read-only:
+`--check` and `--plan` never start anything; the start runs only under
+`--execute`. Full contract in `docs/engine-events.md`, Repair stream.
+
+**2026-11-10 — repair does not start Orbit on an unfinished restore (issues
+#1804 and #1798).** A restore that stops partway leaves its journal and keeps
+Orbit stopped; starting Orbit then puts writes on data the rollback will throw
+away. The journal is the restore's lease on Orbit: repair checks it when
+planning and again just before acting, and fails closed when it cannot read it.
+A new finding, `restore-unfinished` (`target=restore`, `warn`), is raised when
+anything is at `<backups>/.orbit-restore/restore.journal` (a symlink too,
+never followed, read or removed) or that folder cannot be searched;
+`<backups>` is `${ORBIT_BACKUP_DIR:-<deployment folder>/backups}`, the rule
+`backup.sh` and `restore.sh` use, so repair must run with the same
+`ORBIT_BACKUP_DIR` as restore. It joins the `start-services` preconditions, and
+`recreate-services` is now held to the same list, so `services-not-running`
+and `folder-moved` are planned `manual` with restore's `--finish`/`--recover`
+guidance; repair's other actions are planned as usual. At execution both
+actions check the journal again and, when `flock` is available, refuse while
+`backup.sh` or `restore.sh` holds `.orbit-backup-restore.lock` (result
+`failed`, exit 4, nothing changed). Not covered: the seconds between
+`backup.sh` stopping Orbit and its engine taking the lock. Two more
+preconditions: `service-restarting` (`target=container`, `fail`, manual: read
+the container's logs; not counted as not running) and
+`database-volume-missing` (`target=database`, `fail`: no database container
+and no database volume, so a start would make a new, empty database). An
+undecided folder check (#1798) blocks `start-services` too, and
+`do_start_services` re-reads the `working_dir` labels before it acts. A failed
+`recreate-services` now gives Docker's words on stderr, and its Compose call is
+bounded with `--kill-after` like `start-services`'. install.sh's folder facts
+follow repair.sh's rule for a gone folder. Review fixes (#1804): a backups
+folder repair cannot search counts as `restore-unfinished` and refuses at
+execution; the lock is held by backup, restore and a recovery-bundle export,
+and one that is not a regular readable file is refused unopened; a failed
+restarting probe leaves the service unknown; a failed volume list keeps
+`database-volume-missing` with guidance saying the list failed; and
+`--execute` prints each manual entry's guidance, declined or skipped. Full
+contract in `docs/engine-events.md`, Repair stream.
+
+*Addendum 2026-11-13 (#1823):* the journal's folder follows `ORBIT_BACKUP_DIR`,
+which repair may not have, so `restore.sh` also writes a write-ahead marker,
+`<deployment folder>/.orbit-restore-pending`, holding the journal's absolute
+path, before it stops Orbit, and removes it only with the journal. Repair
+raises `restore-unfinished` for anything at that path (fail closed) and names
+the journal from it. `start-services` and `recreate-services` hold the
+backup/restore lock across their Compose call (acquire, act, release) instead
+of only probing it. The manual guidance names the start command,
+`docker compose up -d`.
+
+*Addendum 2026-11-12 (audit v0.3.9-b O-R1, #1820):* the lock probe tells
+"held" from "cannot be taken". `flock -n` exits 1 silently only when another
+process holds the lock; any other failure (for example NFSv4 refusing an
+exclusive lock on a read-only descriptor) is reported as such, with flock's
+words, and repair still refuses to act, since it cannot establish that
+starting Orbit is safe. The lock stays opened read-only and is never created.
+Not taken, left to the owner: probing with a write-opened descriptor, as the
+engine does, which would make the check work on NFSv4 but would have repair
+create or change a file in the backups folder.
+
+**2026-11-15 — repair removes its credential checkpoint after a clean
+re-check (issue #1834; owner decision 11b, 2026-11-14).** Decision 6 and its
+"never deletes recovery material" consequence are amended for the credential
+checkpoint only. An `--execute` run removes the
+`.orbit-repair-checkpoint.*` directories that existed when it started, plus
+the one it created (never one another run creates mid-run), once its full
+re-diagnosis is clean (`diagnosis result=healthy`: no credential finding,
+services ready) and no action in the run failed; "Orbit started" is never
+enough. Why: the checkpoint holds the *old* database password, and after the
+`ALTER ROLE` lands it opens nothing except a volume snapshot the operator
+took themselves, so keeping it only leaves a stale credential on disk. If
+the re-check is not clean, the checkpoint is kept, its path is named on
+stderr, and the run says to re-run repair; a later `--execute` run removes
+it after its own clean re-check. `--check` and `--plan` never remove it.
+Only a real, readable directory holding nothing but the bundle is removed;
+anything else under that name is named and left alone. When repair refuses
+the deployment's version (exit 6), the kept line's next step is to fix the
+version, since a re-run would refuse the same way. Every other piece of recovery
+material keeps decision 6's rule, with one more exception (issue #1834, slice
+4): an `.orbit-install-staging.*` folder from a killed run is removed, even
+when marked committed, when no engine transaction is active (no
+`.orbit-engine.lock`, or a regular file older than the engine's ten-minute
+reclaim age) the lock file is readable and no other process holds it, at least one original was saved, and every saved file matches the live one exactly (no managed
+path live without a saved original, no differing mode). Otherwise the
+restore-transaction rules above apply unchanged.

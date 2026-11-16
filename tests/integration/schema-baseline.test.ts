@@ -95,7 +95,7 @@ describe("the migration history is one baseline (#1403 slice E)", () => {
     expect(contract.indexes).toEqual(EXPECTED_INDEXES);
   });
 
-  it("seeds exactly the four singleton rows the old history seeded, and no other data", async () => {
+  it("seeds exactly the singleton rows (the old history's four, 0008's mail limit and 0013's archive retention), and no other data", async () => {
     const database = await freshDatabase("baseline-seeds");
     const tables = await database.client.unsafe(
       `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE' ORDER BY table_name`,
@@ -106,7 +106,9 @@ describe("the migration history is one baseline (#1403 slice E)", () => {
       if (Number(row.count) > 0) populated.push(`${String(table_name)}=${String(row.count)}`);
     }
     expect(populated).toEqual([
+      "instance_archive_retention=1",
       "instance_contact=1",
+      "instance_mail_limit=1",
       "instance_maintenance=1",
       "instance_upload_limit=1",
       "mail_probe_results=1",
@@ -230,7 +232,16 @@ describe("dead schema the owner approved dropping (#1403 slice E)", () => {
       [user.id, index],
     );
     await insertSender("sender-index");
-    await expect(insertSender("sender-index")).rejects.toMatchObject({ constraint_name: "mail_in_sender_address_unique_index" });
+    /* Since 0016 (#1650) one member cannot list an address twice... */
+    await expect(insertSender("sender-index")).rejects.toMatchObject({ constraint_name: "mail_in_sender_address_user_unique_index" });
+    /* ...and only a VERIFIED row is exclusive across members: two verified rows hit the partial index. */
+    const [other] = await insertUser("sender-other-account");
+    const insertVerified = (userId: string) => database.client.unsafe(
+      `INSERT INTO "mail_in_sender_addresses" ("user_id", "address_enc", "address_index", "verified_at") VALUES ($1, 'mdv1.a.b.c', 'verified-index', now())`,
+      [userId],
+    );
+    await insertVerified(user.id);
+    await expect(insertVerified(other.id)).rejects.toMatchObject({ constraint_name: "mail_in_sender_address_unique_index" });
 
     let digest = 0;
     const insertInvitation = (index: string) => database.client.unsafe(

@@ -143,7 +143,9 @@ branches; in a pipeline started by hand on `dev` (on any other working branch
 the smoke jobs wait to be started by hand); and on a merge request into `dev`
 labelled `ci: acceptance`, in a pipeline started on the merge request after
 the label is added (#1514). A merge request into `dev` without that label,
-and every push to `dev`, run none of them.
+and every push to `dev`, run none of them. The exception is `rig_chromium`,
+`rig_firefox`, `rig_webkit` and `film_webkit`: they run nightly and nowhere
+else, and nothing that publishes waits on them (owner answer 125, #1763).
 
 CodeQL runs separately on the GitHub mirror.
 
@@ -378,12 +380,14 @@ Each script's own header holds its full usage.
 This procedure moved here from
 [Administrator operations](administrator-operations.md#mailbox-provider-operation).
 The mailbox (IMAP) password is not a mounted file: it is entered on the
-administration screen and stored encrypted in the database. Only the SMTP
-password is a mounted file (`.orbit-secrets/smtp-password`).
+administration screen and stored encrypted in the database, and so is the
+sending password (the Sending half of the Mail card, #1629). The deprecated
+`SMTP_*` lines and `.orbit-secrets/smtp-password` are only read once, to copy
+an older install's set into the card.
 
 Acceptance against a real provider is release evidence, not an ordinary CI
 secret. Use provider identities set aside for it, keep their credentials only
-in the administration screen (mailbox) and the mounted SMTP password file, and deploy the exact build under test by its
+in the administration screen (the Mail card's two halves), and deploy the exact build under test by its
 digest (the fingerprint that names one build and nothing else). Record the
 image's `org.opencontainers.image.revision` label and require it to match the
 accepted source revision.
@@ -578,7 +582,7 @@ code that sets a tap size changes, cheapest first (ADR-0039 §6, #1616):
    (the first run builds the app, which takes longer
    than Playwright's server wait: run `pnpm --filter orbit-web build` first).
    `POCKET_SCREEN` is a comma-separated list of routes as `SIGNED_IN` in
-   `web/tests/fidelity/pocket-states.js` writes them (`/home`, `/settings/mail`,
+   `web/tests/fidelity/pocket-states.js` writes them (`/home`, `/settings`,
    `/household/hh-harlow-1`), each matched whole. It keeps that route's states
    at all four sizes and its extra-large text run, and leaves out the door
    family and the error page's graphic; reach those with `--grep` on the

@@ -96,11 +96,12 @@ describe("ClamAV first signature update before clamd starts (#1295)", () => {
     expect(result.events).not.toContain("notify-enabled");
   });
 
-  it("leaves a volume with no database to the image, which already downloads one before clamd starts", () => {
-    // A fresh install has nothing to update. The image's own entrypoint does
-    // the blocking first download (about 200 MB) with no time limit; a bounded
-    // run first would kill a slow download part-way and make the image start it
-    // over, which can outlast the installer's readiness wait.
+  it("leaves a bind mount or emptied volume with no database to the image, which downloads one before clamd starts", () => {
+    // Not a fresh install: Docker seeds a new named volume from the image's
+    // bundled database (#1585). With no database at all, the image's own
+    // entrypoint does the blocking first download (about 200 MB) with no time
+    // limit; a bounded run first would kill a slow download part-way and make
+    // the image start it over, which can outlast the installer's readiness wait.
     const result = run(entrypointScript(), sandbox({ freshclam: "ok", database: false }));
     expect(result.events).toEqual(["init-start"]);
     expect(result.status).toBe(0);

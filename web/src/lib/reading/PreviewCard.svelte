@@ -3,6 +3,7 @@
   import { tick, untrack } from "svelte";
   import { resolve } from "$app/paths";
   import { documentPreviewStateOf } from "$lib/data/belt.js";
+  import { FOCUS_HELD } from "$lib/data/document-read.js";
   import { daysWords } from "$lib/data/engine-limits.js";
   import { loadStagedPage, previewPageHref } from "$lib/data/staged-page.js";
   import { pageKeyTarget } from "$lib/data/page-turn.js";
@@ -20,8 +21,9 @@
    * carried over in markup, states and loading: the reticle while the page
    * is on its way, the page nearly edge to edge once it has landed (a button
    * that opens the reader over home), the pager under it, and the four
-   * honest states — still scanning, removed (restore), refused, could not
-   * draw (download) — with their plate held still.
+   * honest states — scanning, removed (restore), refused, could not
+   * draw (download) — with their plate held still, and (#1419) held while
+   * the virus scanner is down: `waiting`, the scan line parked, the foot empty.
    *
    * A SUGGESTION'S PAPER (#1319: a suggestion is reviewed in its home
    * drawer, owner-decisions §34) is staged with the mail, not stored
@@ -110,7 +112,10 @@
      "could not draw", the belt's own rule — never a stuck loading state. */
   const paperState = $derived(gone ? "gone" : imgFailed ? "undrawable" : docState);
   const showing = $derived(docState === "available" && imgLoaded && beatDone && !imgFailed);
-  const paged = $derived(showing && pageCount !== null);
+  /* #1433 D2.4: the count comes from the summary when the server knows it,
+     so the pager stands from the moment the paper opens, before its first
+     picture arrives; without one it waits for the first page's answer. */
+  const paged = $derived(docState === "available" && !gone && !imgFailed && pageCount !== null);
   const alt = $derived.by(() => (shown ? `Page ${shownPage === 1 ? "one" : shownPage} of ${shown.name}` : ""));
 
   function revoke() {
@@ -142,7 +147,7 @@
     src = "";
     pageNo = 1;
     shownPage = 1;
-    pageCount = null;
+    pageCount = typeof next.pageCount === "number" && next.pageCount >= 1 ? next.pageCount : null;
     readerOpen = false;
     const available = documentPreviewStateOf(next) === "available";
     /* create-v3's own walk: the page waits a beat so a fast load never
@@ -162,10 +167,11 @@
       there are (#1300). The page on show stays up until the next arrives.
       The card's fetch is the only one (#1501): the reader draws what it
       lands, so a turn costs one server render, wherever it was made.
-      Once a page is up, a failure is that turn's own (missed), never the
-      whole paper's.
-      @param {PreviewDoc} paper @param {number} n @param {number} mine */
-  function loadPage(paper, n, mine) {
+      A failure of a page turned to is that turn's own (missed), never the
+      whole paper's, even before page one has arrived (#1803); only the
+      first page's own load can fail the paper.
+      @param {PreviewDoc} paper @param {number} n @param {number} mine @param {boolean} [turned] */
+  function loadPage(paper, n, mine, turned = false) {
     abort?.abort();
     const controller = new AbortController();
     abort = controller;
@@ -183,11 +189,11 @@
       } else if (result.kind === "gone" && paper.staged) {
         clearTimeout(loadTimer);
         gone = true;
-      } else if (src) missed();
+      } else if (src || turned) missed();
       else failed();
     }).catch((error) => {
       if (mine !== token || (error instanceof DOMException && error.name === "AbortError")) return;
-      if (src) missed();
+      if (src || turned) missed();
       else failed();
     });
   }
@@ -203,7 +209,9 @@
     pageNo = n;
     problem = null;
     turnLost = false;
-    loadPage(shown, n, token);
+    /* From here the turn's own answer decides; the first load's deadline no longer applies. */
+    clearTimeout(loadTimer);
+    loadPage(shown, n, token, true);
   }
 
   function loaded() {
@@ -381,10 +389,21 @@
           <div class="focusline">Focusing on the anomaly</div>
           <div class="why">orbit is drawing the page it holds<br>nothing is changed, and nothing is assumed</div>
         </div>
-      {:else if st === "scanning"}
+      {:else if st === "held"}
+        <!-- #1419 (held-paper round 1, P): held while the virus scanner is
+             down. The scan plate with its line parked and nothing moving,
+             and one line that says it all. -->
         <div class="focus">
-          <div class="plate scanning" aria-hidden="true">still scanning</div>
-          <div class="focusline">Still scanning this file</div>
+          <div class="plate held" aria-hidden="true">waiting</div>
+          <div class="focusline">{FOCUS_HELD}</div>
+        </div>
+      {:else if st === "scanning"}
+        <!-- #1419: the ordinary scan, which is also what a held paper gets
+             once the scanner is back ("Still scanning" would read as the
+             wait going on). -->
+        <div class="focus">
+          <div class="plate scanning" aria-hidden="true">scanning</div>
+          <div class="focusline">Scanning this file now</div>
           <div class="why">the page comes once it scans clean<br>nothing is assumed</div>
         </div>
       {:else if st === "removed"}
@@ -458,6 +477,9 @@
                 aria-label="Restore {shown.name}">restore</button>
       </div>
       {#if problem}<div class="problem" role="alert">{problem}</div>{/if}
+    {:else if st === "held"}
+      <!-- #1419: nothing to do with a held paper; the foot is empty. -->
+      <div class="rcfoot"></div>
     {:else if st === "undrawable" && !shown.staged}
       <div class="rcfoot">
         <!-- the download endpoint, outside resolve()'s typed routes: the
@@ -546,6 +568,14 @@
   @keyframes pv-platebreath{from{border-color:color-mix(in srgb,var(--paper) 30%,transparent)}to{border-color:var(--paper)}}
   .plate.removed{border-style:dashed;opacity:.55;letter-spacing:.06em}
   .plate.removed::before{opacity:.5}
+  /* #1419, P: the held plate. The scanning plate with the scan line parked at
+     the top and nothing breathing, in the warm tone the belt uses for snooze:
+     held, not wrong. */
+  .plate.held{--paper:var(--warm);letter-spacing:.06em;animation:none}
+  .plate.held::before{opacity:.45}
+  .plate.held::after{content:"";position:absolute;left:5px;right:5px;top:6px;height:2px;border-radius:1px;
+    background:var(--paper);opacity:.55;
+    box-shadow:0 0 5px 1px color-mix(in srgb,var(--paper) 45%,transparent)}
 
   /* create-v3's topsheet: the page, whole, on the cream sheet with the
      tilted second sheet under it */

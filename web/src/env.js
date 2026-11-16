@@ -18,8 +18,6 @@ export const variables = defineEnvVars({
   ORBIT_FIXTURES: { schema: optional },
   /** Per-read stall limit for an archive upload body, in milliseconds. */
   ORBIT_ARCHIVE_BODY_STALL_MS: { schema: optional },
-  /** Whole-body deadline for an archive upload, in milliseconds. */
-  ORBIT_ARCHIVE_BODY_DEADLINE_MS: { schema: optional },
   /** The VAPID public key a browser needs before it can subscribe. */
   VAPID_PUBLIC_KEY: { schema: optional },
   /** The port the server listens on; the start-up warm-up dials it (#1575). */

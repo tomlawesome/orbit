@@ -26,7 +26,7 @@ import { fileURLToPath } from "node:url";
 import { expect } from "vitest";
 import { ptyWatchdog } from "./pty-deadline.mjs";
 import { failOnProcessDeadline, processGuard, processWatchdog } from "./process-budget.mjs";
-import { DEPLOYMENT_ASSETS } from "../src/lib/deployment-assets.ts";
+import { DEPLOYMENT_ASSETS, deploymentAssetSource } from "../src/lib/deployment-assets.ts";
 
 // scripts/install.sh, the bootstrap shell around the install engine (#1212).
 //
@@ -91,7 +91,7 @@ writeFileSync(
 export const assetsRoot = mkdtempSync(join(tmpdir(), "orbit-install-assets-"));
 for (const asset of deploymentAssets) {
   mkdirSync(dirname(join(assetsRoot, asset)), { recursive: true });
-  copyFileSync(join(repositoryRoot, asset), join(assetsRoot, asset));
+  copyFileSync(join(repositoryRoot, deploymentAssetSource(asset)), join(assetsRoot, asset));
 }
 
 // The fake docker. Every call is appended to FAKE_CALL_LOG as
@@ -287,6 +287,18 @@ function compose() {
     }
     exit(0);
   }
+  // #1779: the update readiness one-off (compose run, orbit-app, update --preflight).
+  // It records its argv and the ORBIT_IMAGE it was given, prints FAKE_READINESS_STDOUT / FAKE_READINESS_STDERR and exits FAKE_READINESS_EXIT (default 0).
+  if (sub === "run" && argv.includes("orbit-app")) {
+    if (env.FAKE_STATE_DIR) fs.appendFileSync(env.FAKE_STATE_DIR + "/readiness-oneoff.jsonl", JSON.stringify({ argv: argv.slice(1), orbitImage: env.ORBIT_IMAGE, composeFile: env.COMPOSE_FILE }) + "\\n");
+    if (env.FAKE_READINESS_STDOUT) out(env.FAKE_READINESS_STDOUT);
+    if (env.FAKE_READINESS_STDERR) process.stderr.write(env.FAKE_READINESS_STDERR);
+    exit(Number(env.FAKE_READINESS_EXIT ?? 0));
+  }
+  // #1170: the scanner-off stop of a hidden orbit-clamav (compose rm -s -f).
+  if (sub === "rm" && env.FAKE_COMPOSE_RM_FAIL === "1") exit(1);
+  // #1542: a dropped service that cannot be stopped.
+  if (sub === "stop" && env.FAKE_COMPOSE_STOP_FAIL === "1") exit(1);
   if (["rm", "stop", "kill"].includes(sub) && env.FAKE_STATE_DIR) {
     // Scoped to a service: only that service's container goes (the fake models just the model-pull one).
     const services = after.filter((arg) => !arg.startsWith("-"));
@@ -314,6 +326,19 @@ function compose() {
     exit(failing ? 1 : 0);
   }
   if (sub === "up") {
+    // #1817: what the stack's configuration says at the moment of each start, so a test can tell the order the SMTP lines were retired in.
+    {
+      const read = (name) => (fs.existsSync(name) ? fs.readFileSync(name, "utf8") : "");
+      const environment = read(".env-orbit");
+      const state = {
+        smtpLines: /^SMTP_/m.test(environment),
+        overlayListed: /^COMPOSE_FILE=.*docker-compose\\.mail\\.yml/m.test(environment),
+        secretPresent: fs.existsSync(".orbit-secrets/smtp-password"),
+      };
+      if (env.FAKE_STATE_DIR) fs.appendFileSync(env.FAKE_STATE_DIR + "/up-trace.jsonl", JSON.stringify(state) + "\\n");
+      // A crash after the SMTP lines left .env-orbit: every start from then on fails.
+      if (env.FAKE_UP_FAIL_AFTER_SMTP_RETIRED === "1" && !state.smtpLines && !state.overlayListed) exit(1);
+    }
     // R6-2: docker volume ls fails only once compose up has been tried (the pre-flight listing succeeds).
     if (env.FAKE_STATE_DIR) fs.writeFileSync(env.FAKE_STATE_DIR + "/up-called", "");
     // A failed first start that still created its database volume.
@@ -375,8 +400,20 @@ function compose() {
     // A probe is named by what it reaches: the service, or orbit-tika for
     // the probe the application runs against Tika.
     const text = after.join(" ");
+    // #1817: orbit mail-sending-status run in the app container. FAKE_MAIL_SENDING_STATUS is its stdout line, FAKE_MAIL_SENDING_STATUS_EXIT its exit status (default 0); unset, the command does not exist (an older image) and exits 1.
+    if (text.includes("mail-sending-status")) {
+      if (env.FAKE_MAIL_SENDING_STATUS === undefined) exit(1);
+      // #1834: FAKE_MAIL_SENDING_STATUS_AFTER_SECRET_GONE answers instead once .orbit-secrets/smtp-password is deleted: the re-check after the retirement.
+      if (env.FAKE_MAIL_SENDING_STATUS_AFTER_SECRET_GONE !== undefined && !fs.existsSync(".orbit-secrets/smtp-password")) {
+        out(env.FAKE_MAIL_SENDING_STATUS_AFTER_SECRET_GONE + "\\n");
+        exit(0);
+      }
+      out(env.FAKE_MAIL_SENDING_STATUS + "\\n");
+      exit(Number(env.FAKE_MAIL_SENDING_STATUS_EXIT ?? 0));
+    }
     const probe = ["orbit-tika", "orbit-ollama", "orbit-clamav", "orbit-db", "orbit-app"].find((name) => text.includes(name));
-    if (env.FAKE_HANG_PROBE && env.FAKE_HANG_PROBE === probe) hang("probe");
+    // FAKE_HANG_PROBE_AFTER_UP=1 hangs the probe only once up has been called, so a pre-engine readiness probe (#1779) is not caught.
+    if (env.FAKE_HANG_PROBE && env.FAKE_HANG_PROBE === probe && (env.FAKE_HANG_PROBE_AFTER_UP !== "1" || fs.existsSync((env.FAKE_STATE_DIR ?? "/nonexistent") + "/up-called"))) hang("probe");
     if (after.at(-1) === "true") exit(env.FAKE_APP_RUNNING === "1" ? 0 : 1);
     if ((env.FAKE_PROBE_FAIL ?? "").split(",").includes(probe)) exit(1);
     const transient = json("FAKE_PROBE_FAIL_TIMES", {})[probe];
@@ -476,6 +513,13 @@ switch (argv[0]) {
     break;
   case "ps": {
     const filter = flagValue("--filter") ?? "";
+    // The label-only listing (#1576): FAKE_WORKING_DIR_LABELS answers it, FAKE_WORKING_DIR_LABELS_FAIL=1 makes it fail.
+    const listFormat = flagValue("--format") ?? "";
+    if (listFormat.includes("working_dir") && !listFormat.includes(".ID") && (env.FAKE_WORKING_DIR_LABELS !== undefined || env.FAKE_WORKING_DIR_LABELS_FAIL === "1")) {
+      if (env.FAKE_WORKING_DIR_LABELS_FAIL === "1") exit(1);
+      out(env.FAKE_WORKING_DIR_LABELS);
+      exit(0);
+    }
     out(json("FAKE_PS", {})[filter] ?? "");
     exit(0);
     break;
@@ -652,6 +696,11 @@ export function runInstall(targetDir, envOverrides = {}, args = []) {
     ...result,
     calls: readOptional(join(logDir, "calls.log")),
     engineRuns: readOptional(join(logDir, "engine.log"))
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line)),
+    // #1779: the update readiness one-offs the fake docker recorded.
+    oneOffs: readOptional(join(logDir, "readiness-oneoff.jsonl"))
       .split("\n")
       .filter(Boolean)
       .map((line) => JSON.parse(line)),

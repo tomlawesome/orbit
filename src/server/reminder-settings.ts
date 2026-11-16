@@ -28,7 +28,7 @@ import {
   DEFAULT_FIRST_WARNING_DAYS,
   type ReminderPreference,
 } from "@/lib/preferences";
-import { getNotificationWorkerConfig } from "@/server/notification-worker";
+import { sendingConfigured } from "@/server/mail-in/sending-settings";
 
 /** The instance has somewhere to send mail. */
 export const OUTBOUND_CONFIGURED = "configured";
@@ -71,19 +71,20 @@ export function finalWarningLabel(count: number): string {
  * `verifySmtpProviderConnection` treats as `smtp_unconfigured`, so the screen
  * and the worker cannot disagree about whether mail can leave.
  */
-function outboundMailState(): OutboundMail {
+async function outboundMailState(): Promise<OutboundMail> {
   try {
-    return getNotificationWorkerConfig().smtpUrl ? OUTBOUND_CONFIGURED : OUTBOUND_NOT_CONFIGURED;
+    /* The sending row (#1629), the same "configured" test the sign-in door uses. */
+    return await sendingConfigured() ? OUTBOUND_CONFIGURED : OUTBOUND_NOT_CONFIGURED;
   } catch {
     return OUTBOUND_NOT_CONFIGURED;
   }
 }
 
-function settingsFor(row: {
+async function settingsFor(row: {
   emailNotifications: boolean;
   firstWarningDays: number;
   finalWarningDays: number;
-} | undefined): ReminderSettings {
+} | undefined): Promise<ReminderSettings> {
   // A user with no preferences row has never chosen: the column defaults are
   // the answer, and they are the same numbers the database would write.
   const emailEnabled = row?.emailNotifications ?? true;
@@ -95,7 +96,7 @@ function settingsFor(row: {
     finalWarningDays,
     firstWarning: firstWarningLabel(firstWarningDays),
     finalWarning: finalWarningLabel(finalWarningDays),
-    outboundMail: outboundMailState(),
+    outboundMail: await outboundMailState(),
   };
 }
 

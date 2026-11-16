@@ -1,0 +1,14 @@
+Ned Harlow has a place for you in The Harlows on Orbit.
+
+Orbit keeps a household's year in one calm view - the boiler service,
+the insurance renewal, the MOT - and Ned would like you in theirs.
+
+Open your invitation and sign in with this address; you'll land
+straight in the house:
+
+  https://orbit.harlow.example/invite/k4Ws-example-token
+
+Sent to ally@harlow.example. Good until 14 Nov 2026.
+Not expecting this? There is nothing to do - the link simply lapses.
+
+Orbit at orbit.harlow.example, run by Ned's household, not a company.

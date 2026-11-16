@@ -50,6 +50,19 @@ export class RateLimitedError extends AppError {
 }
 
 /**
+ * A request Orbit cannot serve right now for a reason of its own (a busy or
+ * full scratch space, a tool that cannot start), not the request's (503). It
+ * names how long to wait, in whole seconds, and the response carries that as
+ * `Retry-After` (RFC 9110 section 10.2.3).
+ */
+export class RetryLaterError extends AppError {
+  constructor(code: string, message: string, public readonly retryAfterSeconds: number) {
+    super(code, message, 503);
+    this.name = "RetryLaterError";
+  }
+}
+
+/**
  * The bounded blocked-request contract of ADR-0013 decision 2 (#523).
  * Deliberately outside the `{ error: { code, message } }` envelope: the body
  * is the fixed `{"error":"maintenance_active"}` and never carries the

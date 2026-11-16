@@ -23,8 +23,12 @@ import {
   wrapKeyWithAad,
 } from "@/server/documents/crypto";
 
-/** `oauth_refresh_token` is reserved for the XOAUTH2 slice; this slice writes only the first two. */
-export type MailInSecretKind = "imap_password" | "alias_key" | "oauth_refresh_token";
+/**
+ * `oauth_refresh_token` is reserved for the XOAUTH2 slice. `smtp_password` is
+ * the outgoing account's password (#1629), bound to the sending row's own
+ * host and user, never the mailbox's.
+ */
+export type MailInSecretKind = "imap_password" | "alias_key" | "oauth_refresh_token" | "smtp_password";
 
 /**
  * What a `mail_in_secrets` row's ciphertext is bound to. Every field here is

@@ -133,7 +133,7 @@ test.describe("reduced motion", () => {
       { path: "/inbox", state: "rest" },
       { path: "/create", state: null },
       { path: "/settings", state: "rest" },
-      { path: "/settings/mail", state: "rest" },
+      { path: "/settings", state: "mail" },
       { path: "/administration", state: null },
     ];
     for (const route of routes) {

@@ -195,12 +195,17 @@ export class MetadataCipher {
 
   /**
    * The blind index for a column that needs exact-match lookup (ADR-0024
-   * decision 2), or null when there is nothing to index. Four columns do:
+   * decision 2), or null when there is nothing to index. Six columns do:
    * `items.reference`; `household_invitations.email`, whose database rule "one
    * open invitation per address" would otherwise be lost with the plaintext;
-   * and `users.email` and `mail_in_sender_addresses.address` (#969), which are
+   * `users.email` and `mail_in_sender_addresses.address` (#969), which are
    * both looked up by exact address on every sign-in and every attributed
-   * mail-in, and carry a uniqueness rule across the same way. Nothing else is
+   * mail-in, and carry a uniqueness rule across the same way; and
+   * `documents.content_sha256` (#1437), looked up to tell a household it
+   * already holds a file it is uploading; and
+   * `imap_ingestion_attachments.content_sha256` (#1778), whose only reader
+   * is the unique (message_id, content_index) that stores one copy of a file
+   * a mail carries twice. Nothing else is
    * indexed, deliberately — an index that serves no query leaks equality for
    * nothing.
    */
@@ -222,6 +227,30 @@ export class MetadataCipher {
   /** `blindIndex` for `mail_in_sender_addresses.address` (#969). */
   senderAddressIndex(value: string | null | undefined): string | null {
     return this.blindIndex("mail_in_sender_addresses.address", value);
+  }
+
+  /**
+   * `documents.content_index` (#1437): the blind index of a file's SHA-256,
+   * given as the lowercase hex `content_sha256` the receive already computed.
+   * Under the household key, so equal files in two households get unrelated
+   * values and no lookup can cross households.
+   */
+  contentIndex(sha256Hex: string): string | null {
+    return this.blindIndex("documents.content_sha256", sha256Hex);
+  }
+
+  /**
+   * `imap_ingestion_attachments.content_index` (#1778): the blind index of
+   * `<messageId>:<sha256Hex>`, used under the INSTANCE key. Its one reader is
+   * the per-mail unique constraint, which fires at insert, before any
+   * household is known, so the instance key keeps it the same for the
+   * receipt's whole life and it is never re-keyed. The message id is in the
+   * value so a database copy learns only what the constraint states ("these
+   * two attachments of this one mail are equal"), never that two mails, or
+   * two recipients, carried the same file.
+   */
+  attachmentContentIndex(messageId: string, sha256Hex: string): string | null {
+    return this.blindIndex("imap_ingestion_attachments.content_sha256", `${messageId}:${sha256Hex}`);
   }
 }
 

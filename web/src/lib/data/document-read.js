@@ -31,6 +31,16 @@ export const FOCUS_PREVIEWING = "Making a preview…";
 export const WHY_READING = "orbit is reading the pages it was given<br>nothing is saved, and nothing is assumed";
 export const FOCUS_UNDRAWABLE = "Orbit could not draw a picture of this document.";
 export const WHY_UNDRAWABLE = "it is still attached when you add this entry<br>orbit just could not turn it into a page to read here";
+/* #1419: the virus scanner could not be reached, so nothing may open the file
+   to draw it. The card's held line (design/v19/held-paper/round-1, P), said
+   where the lane said "could not draw"; the entry still saves and the file is
+   held until the scanner is back. */
+export const FOCUS_HELD = "The scanner couldn't be reached, Admin have been notified";
+/* #1810 W-F2: the scanner did not answer in time. One slow scan is load, not
+   an outage, so nobody is told; the file is still attached and checked again
+   when the entry is added. Never the held line, which says admins were told. */
+export const FOCUS_SLOW = "The scanner didn’t answer in time.";
+export const WHY_SLOW = "it is still attached when you add this entry<br>orbit checks it again then";
 export const TOO_LARGE = "this file is too large to send — it is larger than this orbit accepts";
 export const WHY_TOO_LARGE = `${TOO_LARGE}<br>choose a smaller document`;
 export const FOCUS_REFUSED = "Orbit refused this file.";
@@ -69,10 +79,15 @@ export const SUGGESTION_FIELDS = /** @type {const} */ (["provider", "reference",
  * focus block breathing on `line` / `why` (a refusal, or a page that could not
  * be drawn); `read` is the read being done, `caption` what it ended on, and
  * `message` the server's own words about the read (the desk's `#rc-honest`).
+ * #1437: `held` is what the server said the household already holds while
+ * the card asks about it, `renewal` the days until its entry is due when
+ * that is inside the 30-day window, and `kept` the same once the person
+ * kept the file anyway.
  * @typedef {{
  *   key: number, head?: string, name: string, size: number, page: string | null, scanned: boolean,
  *   refused: boolean, settled: boolean, line: string, why: string, read: boolean, caption: string,
- *   message: string,
+ *   message: string, held?: import("./workspace.js").AlreadyHeld | null, renewal?: number | null,
+ *   kept?: import("./workspace.js").AlreadyHeld | null,
  * }} PickedRead
  */
 
@@ -87,7 +102,22 @@ export function focusAfterScan(scanned) {
 
 /** @param {string} why */
 export function whyLines(why) {
-  return why === WHY_READING || why === WHY_UNDRAWABLE || why === WHY_TOO_LARGE || why === WHY_REFUSED ? why.split("<br>") : [why];
+  return why === WHY_READING || why === WHY_UNDRAWABLE || why === WHY_TOO_LARGE || why === WHY_REFUSED || why === WHY_SLOW
+    ? why.split("<br>")
+    : [why];
+}
+
+/**
+ * The lane's focus line and second line for a page that was not drawn. The
+ * held line (#1419) is the whole message, said once; a timed-out scan (#1810)
+ * has its own line over its own two.
+ * @param {string} why  an `undrawable` outcome's why
+ * @returns {{ line: string, why: string }}
+ */
+export function undrawnFocus(why) {
+  if (why === FOCUS_HELD) return { line: FOCUS_HELD, why: "" };
+  if (why === WHY_SLOW) return { line: FOCUS_SLOW, why };
+  return { line: FOCUS_UNDRAWABLE, why };
 }
 
 /** @param {unknown} error */
@@ -112,12 +142,19 @@ const tooLarge = (error) =>
  * before the picture is drawn, so the card can move its focus line on; the
  * same `current()` check applies.
  *
+ * `readAfter` (#1437) holds the read back: the inspection is only asked for
+ * once it resolves, so the fields are not filled from a file the household
+ * already holds until the person keeps it. If it rejects (the file was
+ * dropped), the read never starts and resolves `unread`, which the caller's
+ * `current()` check discards. Page one does not wait: it is how the eye
+ * confirms the match.
+ *
  * @param {string} householdId
  * @param {File} file
- * @param {{ signal?: AbortSignal, onScanned?: (scanned: boolean) => void, documentReading?: boolean }} [options]
+ * @param {{ signal?: AbortSignal, onScanned?: (scanned: boolean) => void, documentReading?: boolean, readAfter?: Promise<unknown> }} [options]
  * @returns {{ page: Promise<PageOutcome>, read: Promise<ReadOutcome> }}
  */
-export function readPickedDocument(householdId, file, { signal, onScanned, documentReading = true } = {}) {
+export function readPickedDocument(householdId, file, { signal, onScanned, documentReading = true, readAfter = Promise.resolve() } = {}) {
   const onStage = onScanned
     ? (/** @type {"scanned"} */ _stage, /** @type {{ scanned: boolean }} */ detail) => onScanned(detail.scanned)
     : undefined;
@@ -127,6 +164,11 @@ export function readPickedDocument(householdId, file, { signal, onScanned, docum
       const code = codeOf(error);
       if (code === "document_malware_detected") return /** @type {PageOutcome} */ ({ kind: "refused", why: WHY_REFUSED });
       if (tooLarge(error)) return /** @type {PageOutcome} */ ({ kind: "undrawable", why: WHY_TOO_LARGE });
+      /* #1419: the scanner is down (a JSON 503 or the stream's own error
+         event, both carried here as the code). The file is held, not refused. */
+      if (code === "document_scanner_unreachable") return /** @type {PageOutcome} */ ({ kind: "undrawable", why: FOCUS_HELD });
+      /* #1810 W-F2: the scan timed out; nobody was told, so not the held line. */
+      if (code === "document_scanner_timeout") return /** @type {PageOutcome} */ ({ kind: "undrawable", why: WHY_SLOW });
       /* Unsupported or undrawable is the page's own fault and the file is
          fine; anything else (the scanner, the connection) is said in the
          server's own words, since the save will meet the same wall. */
@@ -143,7 +185,7 @@ export function readPickedDocument(householdId, file, { signal, onScanned, docum
      it is, and nothing here says a read failed. */
   if (!documentReading) return { page, read: Promise.resolve(/** @type {ReadOutcome} */ ({ kind: "attached" })) };
 
-  const read = inspectPickedDocument(householdId, file, { signal }).then(
+  const read = readAfter.then(() => inspectPickedDocument(householdId, file, { signal })).then(
     (result) => {
       /* The upload would refuse it too, so it leaves the entry now. */
       if (result.attachmentDisposition === "rejected") {

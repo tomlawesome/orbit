@@ -1,5 +1,5 @@
 import { ZodError } from "zod";
-import { AppError, KeyUnavailableError, MaintenanceActiveError, MalformedJsonError, RateLimitedError } from "@/lib/errors";
+import { AppError, KeyUnavailableError, MaintenanceActiveError, MalformedJsonError, RateLimitedError, RetryLaterError } from "@/lib/errors";
 import { AuthError } from "@/lib/auth/errors";
 import { log, operationalErrorDetail } from "@/lib/logger";
 
@@ -7,7 +7,7 @@ import { log, operationalErrorDetail } from "@/lib/logger";
    1) so operator artifacts can bundle domain code without linking Next.
    They are re-exported here because this is where the rest of the codebase
    already imports them from, and that should keep working. */
-export { AppError, KeyUnavailableError, MaintenanceActiveError, MalformedJsonError, RateLimitedError };
+export { AppError, KeyUnavailableError, MaintenanceActiveError, MalformedJsonError, RateLimitedError, RetryLaterError };
 
 function isPayloadTooLarge(error: unknown): boolean {
   return typeof error === "object" && error !== null && (error as { status?: unknown }).status === 413;
@@ -30,7 +30,7 @@ export function appErrorResponse(error: unknown): Response {
   }
   if (error instanceof AuthError || error instanceof AppError) {
     const headers: Record<string, string> = { "Cache-Control": "no-store" };
-    if (error instanceof RateLimitedError) headers["Retry-After"] = String(error.retryAfterSeconds);
+    if (error instanceof RateLimitedError || error instanceof RetryLaterError) headers["Retry-After"] = String(error.retryAfterSeconds);
     return Response.json(
       { error: { code: error instanceof AuthError ? error.code : error.code, message: error.message } },
       { status: error.status, headers },
@@ -43,7 +43,8 @@ export function appErrorResponse(error: unknown): Response {
     );
   }
   /* A body over a request size limit that is not an AppError: SvelteKit's
-     own 413 when a body runs past the server-wide BODY_SIZE_LIMIT (#1285).
+     own 413 when a body runs past the server-wide BODY_SIZE_LIMIT (#1285;
+     the image sets it to Infinity since #1390, but a deployment may not).
      It is the client's request at fault, not Orbit, so it answers 413 and
      never the 500 below. */
   if (isPayloadTooLarge(error)) {

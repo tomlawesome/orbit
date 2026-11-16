@@ -96,7 +96,7 @@ describe("portable archive download route: streams the stored file (#1428)", () 
     expect(response.headers.get("content-length")).toBe(String(CONTENT.length));
     expect(response.headers.get("cache-control")).toBe("private, no-store");
     expect(response.headers.get("content-disposition")).toMatch(/^attachment/u);
-    expect(response.headers.get("content-type")).toMatch(/^application\/json/u);
+    expect(response.headers.get("content-type")).toMatch(/^application\/octet-stream/u);
     expect(response.headers.get("x-content-type-options")).toBe("nosniff");
   });
 

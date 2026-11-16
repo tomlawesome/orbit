@@ -93,6 +93,16 @@ vi.mock("@/db", async () => {
   return { getDb: () => fakeDb };
 });
 
+/* #1437: an upload keys its fingerprint with the household's metadata key and
+   asks whether the household already holds the bytes. Neither is under test
+   here; no key means no fingerprint and no match. #1771 seals the hash with
+   the same writer: an opaque stand-in. */
+vi.mock("@/server/metadata/fields", async (importActual) => ({
+  ...await importActual<typeof import("@/server/metadata/fields")>(),
+  openMetadataWriter: async () => ({ contentIndex: () => null, encryptText: () => "sealed-hash" }),
+  openMetadataReader: async () => ({ contentIndex: () => null }),
+}));
+
 vi.mock("@/server/documents/authorization", () => ({
   canAccessHouseholdDocuments: () => true,
 }));
@@ -118,7 +128,7 @@ vi.mock("@/server/upload-limit", () => ({
 vi.mock("@/server/documents/validation", () => ({
   detectDocumentMediaType: () => "application/pdf",
   normalizedDocumentFilename: (name: string) => name,
-  classifyDocumentStructure: async () => "supported_structure",
+  classifyDocumentStructure: async () => ({ reason: "supported_structure", pageCount: 1 }),
 }));
 
 const SEALED_ENVELOPE = {

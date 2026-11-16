@@ -25,7 +25,13 @@ export interface DocumentEncryptionContext {
   itemId: string;
   mediaType: string;
   plaintextSize: number;
-  purpose?: "document" | "scanner_recovery";
+  purpose?: "document" | "scanner_recovery" | "preview";
+  /**
+   * The 1-based page of a kept page preview (#1433 D15). Bound into the
+   * content AAD only when `purpose` is "preview", so one page never opens as
+   * another and the AAD of every other purpose is byte-for-byte unchanged.
+   */
+  page?: number;
 }
 
 /**
@@ -82,7 +88,7 @@ function decodeFixed(value: string, expectedBytes: number, name: string): Buffer
 }
 
 function contentAdditionalData(context: DocumentEncryptionContext): Buffer {
-  return Buffer.from(JSON.stringify({
+  const fields: Record<string, unknown> = {
     envelopeVersion: ENVELOPE_VERSION,
     documentId: context.documentId,
     householdId: context.householdId,
@@ -90,12 +96,23 @@ function contentAdditionalData(context: DocumentEncryptionContext): Buffer {
     mediaType: context.mediaType,
     plaintextSize: context.plaintextSize,
     purpose: context.purpose ?? "document",
-  }), "utf8");
+  };
+  if (context.purpose === "preview") {
+    if (!Number.isSafeInteger(context.page) || (context.page ?? 0) < 1) throw new Error("A preview context needs a page number");
+    fields.page = context.page;
+  }
+  return Buffer.from(JSON.stringify(fields), "utf8");
 }
+
+const KEY_AAD_PURPOSE: Record<NonNullable<DocumentEncryptionContext["purpose"]>, string> = {
+  document: "orbit-document-dek",
+  scanner_recovery: "orbit-document-staging-dek",
+  preview: "orbit-document-preview-dek",
+};
 
 function keyAdditionalData(documentId: string, keyId: string, purpose: DocumentEncryptionContext["purpose"] = "document"): Buffer {
   return Buffer.from(JSON.stringify({
-    purpose: purpose === "scanner_recovery" ? "orbit-document-staging-dek" : "orbit-document-dek",
+    purpose: KEY_AAD_PURPOSE[purpose],
     envelopeVersion: ENVELOPE_VERSION,
     documentId,
     keyId,

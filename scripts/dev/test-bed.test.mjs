@@ -385,14 +385,15 @@ const nginxConf = readFileSync(join(repoRoot, "demo-tls/nginx.conf"), "utf8");
 const scriptHeader = readFileSync(realScript, "utf8").split(/^set -Eeuo/m)[0];
 
 describe("the bed's HTTPS front, demo-tls/nginx.conf", () => {
-  it("accepts uploads up to Orbit's own limit, 343m, and its comment says so (#1507)", () => {
-    expect(nginxConf).toMatch(/^\s*client_max_body_size\s+343m\s*;/m);
-    expect(nginxConf).not.toMatch(/client_max_body_size\s+(?!343m\b)\S+;/);
-    // The Dockerfile's BODY_SIZE_LIMIT is what the figure matches.
-    expect(readFileSync(join(repoRoot, "Dockerfile"), "utf8")).toContain("BODY_SIZE_LIMIT=343M");
+  it("accepts uploads up to the largest archive at the default quota, 5200m, and its comment says so (#1507, #1390)", () => {
+    expect(nginxConf).toMatch(/^\s*client_max_body_size\s+5200m\s*;/m);
+    expect(nginxConf).not.toMatch(/client_max_body_size\s+(?!5200m\b)\S+;/);
+    // The Dockerfile leaves the server-wide limit off; installing.md gives the figure.
+    expect(readFileSync(join(repoRoot, "Dockerfile"), "utf8")).toContain("BODY_SIZE_LIMIT=Infinity");
+    expect(readFileSync(join(repoRoot, "docs/installing.md"), "utf8")).toContain("5200m");
     const comment = nginxConf.slice(0, nginxConf.search(/client_max_body_size/)).split("\n").filter((l) => l.trim().startsWith("#")).join("\n");
     expect(comment).toContain("BODY_SIZE_LIMIT");
-    expect(comment).toContain("343");
+    expect(comment).toContain("5200");
   });
 
   it("proxies to the app by its Compose service name, not a fixed container name (#1158)", () => {

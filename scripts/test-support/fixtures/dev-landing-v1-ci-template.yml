@@ -1,0 +1,48 @@
+# Shared CI snippet for a merge landing on dev (ai/agent-infra #113, owner
+# decision 2026-11-05: "Secrets scanning and similar very fast checks should
+# happen on merge to dev. Five minutes. Max."). A push to dev, or to primary
+# where a project has no dev, runs only the fast checks: the secret scan, the
+# private-details scan and history checks. The merge request pipeline stays the
+# one full run. Only this push sees the merge commit GitLab writes at merge
+# time (#123). A project adds:
+#
+#   include:
+#     - project: ai/agent-infra
+#       ref: 0123456789abcdef0123456789abcdef01234567  # dev-landing/v1
+#       file: scripts/dev-landing/ci-template.yml
+#
+# with the ref set to the commit that tag dev-landing/v1 names. Then:
+#
+#   1. In workflow:rules, before any existing "no pipeline on push to dev"
+#      rule (the first matching rule wins):
+#        workflow:
+#          rules:
+#            - !reference [.dev-landing, workflow_rules]
+#            - ...the consumer's own rules, unchanged
+#   2. At the top of the rules: of every job that is not a fast check:
+#        some-job:
+#          rules:
+#            - !reference [.dev-landing, job_rule]
+#            - ...the job's own rules, unchanged
+#   3. Each fast-check job extends .dev-landing-check (timeout 5m), or puts
+#      !reference [.dev-landing-check, rules] first in its own rules, so it
+#      runs on the landing push.
+#
+# The rule sets DEV_LANDING "true" only for a push pipeline on exactly dev or
+# primary; on any other pipeline the snippet does nothing. It declares no
+# workflow: and no job of its own.
+.dev-landing:
+  workflow_rules:
+    - if: >-
+        $CI_PIPELINE_SOURCE == "push" &&
+        ($CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "primary")
+      variables:
+        DEV_LANDING: "true"
+  job_rule:
+    - if: $DEV_LANDING == "true"
+      when: never
+
+.dev-landing-check:
+  timeout: 5m
+  rules:
+    - if: $DEV_LANDING == "true"

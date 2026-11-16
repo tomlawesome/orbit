@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
@@ -87,7 +86,7 @@ describe("an attributed message with nothing to collect (#1652)", () => {
     const fixture = await createIntegrationFixture(`terminal-${failureCode}`);
     try {
       const [row] = await getDb().insert(imapIngestionMessages).values({
-        mailbox: "terminal", mailboxUidValidity: "92", mailboxUid: 21, contentSha256: randomUUID().replaceAll("-", ""),
+        mailbox: "terminal", mailboxUidValidity: "92", mailboxUid: 21,
         recipientAliasSha256: "terminal", userId: fixture.users.member.id, attributedBy: "sender", status, failureCode,
         receiptStatus: status === "failed" ? "cancelled" : "pending", expiresAt: new Date(Date.now() + 86_400_000),
       }).returning({ id: imapIngestionMessages.id });

@@ -30,7 +30,6 @@ export const LIBRARIES_FIXTURE = [
   { name: "drizzle-orm", version: "0.45.2", licence: "Apache-2.0", author: "Drizzle Team", source: "https://orm.drizzle.team/" },
   { name: "imapflow", version: "2.0.2", licence: "MIT", author: "Postal Systems OÜ", source: "https://imapflow.com/" },
   { name: "jose", version: "6.2.12", licence: "MIT", author: "Filip Skokan", source: "https://github.com/panva/jose" },
-  { name: "pdfjs-dist", version: "6.3.289", licence: "Apache-2.0", author: "", source: "https://mozilla.github.io/pdf.js/" },
   { name: "postgres", version: "3.4.9", licence: "Unlicense", author: "Rasmus Porsager", source: "https://github.com/porsager/postgres" },
   { name: "web-push", version: "3.6.7", licence: "MPL-2.0", author: "Marco Castelluccio", source: "https://github.com/web-push-libs/web-push#readme" },
   { name: "zod", version: "4.6.5", licence: "MIT", author: "Colin McDonnell", source: "https://zod.dev/" },

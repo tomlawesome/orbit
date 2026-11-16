@@ -15,25 +15,25 @@
    * `stars` false draws the vignette alone, for the pages whose sky is some
    * other backdrop (administration's station) or none (create, mail).
    * `fill` false leaves the tiles empty.
-   * `hidden` renders nothing at all: the phone draws its own sky.
-   * @typedef {{ stars?: boolean, fill?: boolean, hidden?: boolean }} Props
+   * The phone draws its own sky, so both are hidden by CSS under the pocket
+   * query (pocket/media.js), which the server page honours before any script
+   * runs (#1727).
+   * @typedef {{ stars?: boolean, fill?: boolean }} Props
    */
   /** @type {Props} */
-  let { stars = true, fill = true, hidden = false } = $props();
+  let { stars = true, fill = true } = $props();
 
   /** @type {SVGGElement | undefined} */
   let far = $state();
   /** @type {SVGGElement | undefined} */
   let near = $state();
 
-  /* fills once the tiles are bound, and again if `hidden` takes them away and
-     gives them back */
+  /* fills once the tiles are bound */
   $effect(() => {
     if (stars && fill && far && near) fillStarTiles(far, near);
   });
 </script>
 
-{#if !hidden}
 {#if stars}
 <div class="sky" aria-hidden="true">
   <svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
@@ -43,7 +43,6 @@
 </div>
 {/if}
 <div class="vignette" aria-hidden="true"></div>
-{/if}
 
 <style>
   .sky{position:fixed;inset:0;pointer-events:none;opacity:var(--stars);
@@ -56,6 +55,8 @@
             background:var(--vignette-gradient,radial-gradient(ellipse at 50% 34%, transparent 55%, rgba(0,0,0,.28) 100%))}
   /* the light packs have no edge to darken */
   :global([data-theme=clouds]) .vignette,:global([data-theme=dawn]) .vignette{background:none}
+  /* the pocket query of $lib/pocket/media.js, written out as it asks */
+  @media (max-width: 839.98px), (max-height: 479.98px){.sky,.vignette{display:none}}
   @media (prefers-reduced-motion: reduce){
     .sky .far,.sky .near{animation:none!important}
   }

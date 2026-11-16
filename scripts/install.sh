@@ -92,6 +92,11 @@ readonly tika_readiness_probe='fetch("http://orbit-tika:9998/version", { cache: 
 plain_mode=0
 simulate_mode=0
 requested_action=""
+# --remove-old-undo-copies, or ORBIT_REMOVE_OLD_UNDO_COPIES=yes (exactly
+# that value; ./update.sh passes no arguments): an update removes the old
+# undo copies it lists without asking (prune_old_undo_copies, #1834).
+remove_old_undo_copies=0
+[[ "${ORBIT_REMOVE_OLD_UNDO_COPIES:-}" != yes ]] || remove_old_undo_copies=1
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --plain)
@@ -102,9 +107,13 @@ while [[ $# -gt 0 ]]; do
       simulate_mode=1
       shift
       ;;
+    --remove-old-undo-copies)
+      remove_old_undo_copies=1
+      shift
+      ;;
     --install|--update|--repair)
       [[ -z "$requested_action" ]] || {
-        printf 'Usage: %s [--plain] [--install|--update|--repair] | [--plain] --simulate\n' "$0" >&2
+        printf 'Usage: %s [--plain] [--install|--update|--repair] [--remove-old-undo-copies] | [--plain] --simulate\n' "$0" >&2
         exit 2
       }
       requested_action="${1#--}"
@@ -115,17 +124,17 @@ while [[ $# -gt 0 ]]; do
       break
       ;;
     *)
-      printf 'Usage: %s [--plain] [--install|--update|--repair] | [--plain] --simulate\n' "$0" >&2
+      printf 'Usage: %s [--plain] [--install|--update|--repair] [--remove-old-undo-copies] | [--plain] --simulate\n' "$0" >&2
       exit 2
       ;;
   esac
 done
 [[ $# -eq 0 ]] || {
-  printf 'Usage: %s [--plain] [--install|--update|--repair] | [--plain] --simulate\n' "$0" >&2
+  printf 'Usage: %s [--plain] [--install|--update|--repair] [--remove-old-undo-copies] | [--plain] --simulate\n' "$0" >&2
   exit 2
 }
 if [[ "$simulate_mode" == 1 && -n "$requested_action" ]]; then
-  printf 'Usage: %s [--plain] [--install|--update|--repair] | [--plain] --simulate\n' "$0" >&2
+  printf 'Usage: %s [--plain] [--install|--update|--repair] [--remove-old-undo-copies] | [--plain] --simulate\n' "$0" >&2
   printf 'Orbit installer: --simulate cannot be combined with --install, --update or --repair.\n' >&2
   exit 2
 fi
@@ -194,6 +203,7 @@ fi
 
 release_manifest_work_dir=""
 engine_work_dir=""
+update_readiness_work_dir=""
 cosign_usable=0
 compose_project_name=""
 installer_ui_loaded=0
@@ -202,6 +212,8 @@ installer_ui_component=host
 installer_failure_reason=""
 installer_failure_action=""
 selected_profile=""
+# #1170: on unless the engine reports DOCUMENT_SCAN_MODE=disabled (scanner=off).
+selected_scanner=on
 model_pull_requested=0
 target_was_empty=0
 declare -a pending_ui_events=()
@@ -472,8 +484,8 @@ fail_with() {
   fail "$@"
 }
 
-# compose's command line, in compose_argv: for compose() and for the one
-# caller that runs it under `timeout`, which runs programs, not functions.
+# compose's command line, in compose_argv: for compose() and for the
+# callers that run it under `timeout`, which runs programs, not functions.
 compose_command_line() {
   compose_argv=(docker compose --project-name "$compose_project_name" --env-file "$environment_file")
 }
@@ -570,6 +582,9 @@ cleanup() {
   if [[ -n "$engine_work_dir" ]] && ! rm -rf -- "$engine_work_dir"; then
     printf 'Orbit installer: could not remove a temporary directory: %s.\n' "$engine_work_dir" >&2 || true
     exit_status=1
+  fi
+  if [[ -n "$update_readiness_work_dir" ]]; then
+    rm -rf -- "$update_readiness_work_dir" || true
   fi
   if [[ -n "$release_manifest_work_dir" ]] && ! rm -rf -- "$release_manifest_work_dir"; then
     printf 'Orbit installer: could not remove a temporary directory: %s.\n' "$release_manifest_work_dir" >&2 || true
@@ -749,15 +764,28 @@ base64_string() {
 # another folder (#1570). Only gather_host_facts calls it: it shares that
 # function's variables. A label it skips (not absolute, too long, or past the
 # cap) gets no fact, which the engine reads as a folder that exists elsewhere.
+# The folder is gone (exists=false) by repair.sh's rule (#1804 point 6): only
+# when nothing exists at the path and the nearest existing folder above it can
+# be searched. Anything at the path, a file or a folder that cannot be entered
+# included, exists; under an unsearchable parent the label gets no fact.
 note_working_dirs() {
-  local line label physical exists
+  local line label physical exists ancestor
   while IFS= read -r line || [[ -n "$line" ]]; do
     IFS='|' read -r _ _ _ label <<< "$line"
     [[ "$label" == /* && ${#label} -le 4096 && -z "${working_dir_seen[$label]:-}" ]] || continue
     ((${#working_dir_seen[@]} < 1024)) || continue
     working_dir_seen["$label"]=1
     exists=false
-    [[ -d "$label" ]] && exists=true
+    if [[ -e "$label" ]]; then
+      exists=true
+    else
+      ancestor="$label"
+      while [[ "$ancestor" == */ && "$ancestor" != / ]]; do ancestor="${ancestor%/}"; done
+      ancestor="${ancestor%/*}"
+      while [[ -n "$ancestor" && ! -e "$ancestor" ]]; do ancestor="${ancestor%/*}"; done
+      [[ -n "$ancestor" ]] || ancestor=/
+      [[ -d "$ancestor" && -x "$ancestor" ]] || continue
+    fi
     [[ -z "$working_dirs_json" ]] || working_dirs_json+=","
     working_dirs_json+="{\"label\":$(base64_string "$label"),\"exists\":${exists},\"physical\":"
     if physical="$(cd -- "$label" 2>/dev/null && pwd -P)"; then
@@ -935,6 +963,8 @@ run_engine() {
     -e ORBIT_INSTALLER_ELAPSED="$((SECONDS - installer_process_started_at))"
     -e ORBIT_INSTALL_HOST_FACTS
     -e ORBIT_INSTALL_PROFILE
+    -e ORBIT_INSTALL_SCANNER
+    -e ORBIT_INSTALL_FOLDER_MOVED
     -e ORBIT_CONFIGURE_PROMPTS
     -e ORBIT_CONFIGURE_APP_URL
     -e ORBIT_CONFIGURE_OIDC_ISSUER
@@ -978,9 +1008,11 @@ read_engine_outcome() {
     [[ "$line" == *=* ]] || return 1
     case "$key" in
       status) [[ "$value" =~ ^(ok|failed|stopped|repair)$ ]] || return 1 ;;
-      fresh|model-pull) [[ "$value" =~ ^[01]$ ]] || return 1 ;;
+      fresh|model-pull|recreate) [[ "$value" =~ ^[01]$ ]] || return 1 ;;
       profile) [[ "$value" =~ ^(standard|processing|ai|full)$ ]] || return 1 ;;
+      scanner) [[ "$value" =~ ^(on|off)$ ]] || return 1 ;;
       database-volume) [[ -z "$value" || "$value" =~ ^[a-z0-9][a-z0-9_-]*_orbit-db-data$ ]] || return 1 ;;
+      drop-services) [[ "$value" =~ ^((orbit-tika|orbit-ollama)( (orbit-tika|orbit-ollama))?)?$ ]] || return 1 ;;
       phase|component|reason|action) [[ "$value" =~ ^[a-z][a-z-]{0,63}$ ]] || return 1 ;;
       message) [[ "$value" != *[[:cntrl:]]* && ${#value} -le 4096 ]] || return 1 ;;
       *) return 1 ;;
@@ -1939,6 +1971,166 @@ release_rollback_copies() {
   return 0
 }
 
+# name_earlier_originals
+#
+# A run killed hard leaves its originals/ (the operator's own files, copied
+# before the engine ran) in its dated folder. Every later run names each one
+# on stderr and never removes it, as with moved/ (#1834 slice 4).
+name_earlier_originals() {
+  local root="${target_dir}/orbit-install-backups" saved_options path
+  [[ -d "$root" && ! -L "$root" ]] || return 0
+  saved_options="$(shopt -p nullglob)" || true
+  shopt -s nullglob
+  for path in "$root"/*/originals; do
+    [[ -d "$path" && ! -L "$path" && ! -L "$(dirname -- "$path")" ]] || continue
+    printf "Orbit installer: an earlier run's copy of this folder's original files is kept in %s; the installer never removes it. Remove it yourself once you no longer need it.\n" "$(printf '%q' "$path")" >&2 || true
+  done
+  eval "$saved_options"
+}
+
+# The one-time clean-up of old undo copies (#1834 slice 5, owner decision
+# 10a, 2026-11-14). Earlier releases left dated folders in
+# orbit-install-backups holding undo copies, full .env-orbit copies with
+# secrets among them. As apt's `clean` and Homebrew's `cleanup` do, they are
+# removed only on request, never silently: an update lists them, and removes
+# them only on an exact "yes" typed at a terminal, after saying plainly that
+# it CANNOT be undone, or with --remove-old-undo-copies. Unattended, it lists
+# them and removes nothing.
+readonly undo_copy_folder_pattern='^[0-9]{8}T[0-9]{6}Z(-repair)?(-[2-9])?$'
+
+# smtp_copy_tmp_name <name>: <name> is a temporary file repair.sh's mktemp
+# makes in an undo folder, which a killed repair leaves (#1848 FR-S1b).
+smtp_copy_tmp_name() {
+  local LC_ALL=C
+  [[ "$1" =~ ^(\.env-orbit|docker-compose\.mail\.yml)\.smtp-copy\.[A-Za-z0-9]{6}$ ]]
+}
+
+# undo_copy_folder_qualifies <folder>: <folder> is a real dated folder (not a
+# symlink) directly inside a real orbit-install-backups, readable, holding
+# nothing but the names the installer and repair.sh write there, each a
+# regular file: no symlink, no sub-folder, nothing else.
+undo_copy_folder_qualifies() {
+  local folder="$1" root="${target_dir}/orbit-install-backups" entry saved_options status=0
+  [[ "${folder%/*}" == "$root" && "${folder##*/}" =~ $undo_copy_folder_pattern ]] || return 1
+  [[ -d "$root" && ! -L "$root" && -d "$folder" && ! -L "$folder" && -r "$folder" && -x "$folder" ]] || return 1
+  saved_options="$(shopt -p nullglob dotglob)" || true
+  shopt -s nullglob dotglob
+  for entry in "$folder"/*; do
+    case "${entry##*/}" in
+      .env-orbit | "$smtp_overlay_file" | "$smtp_copy_marker" | .env-orbit.smtp-copy.tmp) ;;
+      *) smtp_copy_tmp_name "${entry##*/}" || { status=1; break; } ;;
+    esac
+    is_regular_non_symlink_file "$entry" || { status=1; break; }
+  done
+  eval "$saved_options"
+  return "$status"
+}
+
+# undo_copy_size <folder>: the total size of its files, for a person to read.
+undo_copy_size() {
+  local file bytes total=0 saved_options
+  saved_options="$(shopt -p nullglob dotglob)" || true
+  shopt -s nullglob dotglob
+  for file in "$1"/*; do
+    bytes="$(wc -c < "$file" 2>/dev/null)" || bytes=0
+    total=$((total + ${bytes//[^0-9]/}))
+  done
+  eval "$saved_options"
+  if ((total < 1024)); then
+    printf '%d bytes' "$total"
+  elif ((total < 1048576)); then
+    printf '%d KiB' "$(((total + 1023) / 1024))"
+  else
+    printf '%d MiB' "$(((total + 1048575) / 1048576))"
+  fi
+}
+
+# prune_old_undo_copies: on an update, the candidates are the dated folders
+# directly inside orbit-install-backups, except this run's own folder, the
+# one the step record names, and, while a retirement is due, one its copy
+# marker names. Each is listed with its path, date and size; any other
+# dated folder is listed as not removed, even when none qualifies (then with
+# no prompt and no hint). Nothing to clean up: nothing is printed. Never changes the update's result or exit code.
+prune_old_undo_copies() {
+  local root="${target_dir}/orbit-install-backups" saved_options folder name marker answer="" remove=0 terminal_fd="" saved_terminal=""
+  local -a offered=() kept=()
+  local -A live=()
+  [[ "$target_was_empty" != 1 ]] || return 0
+  [[ -d "$root" && ! -L "$root" ]] || return 0
+  ! stopping || return 0
+  if [[ -n "$backup_dir" ]]; then live["${backup_dir##*/}"]=1; fi
+  smtp_read_record
+  if [[ -n "$smtp_copy_dir" ]]; then live["${smtp_copy_dir##*/}"]=1; fi
+
+  saved_options="$(shopt -p nullglob dotglob)" || true
+  shopt -s nullglob
+  shopt -u dotglob
+  for folder in "$root"/*; do
+    name="${folder##*/}"
+    [[ "$name" =~ $undo_copy_folder_pattern ]] || continue
+    [[ -z "${live[$name]:-}" ]] || continue
+    marker="$folder/$smtp_copy_marker"
+    if [[ -d "$folder" && ! -L "$folder" && -f "$marker" && ! -L "$marker" ]] &&
+      [[ "$(head -c 128 -- "$marker" 2>/dev/null)" == "copy=orbit-install-backups/$name" ]] && smtp_retirement_due; then
+      continue
+    fi
+    if undo_copy_folder_qualifies "$folder"; then offered+=("$folder"); else kept+=("$folder"); fi
+  done
+  eval "$saved_options"
+
+  # A dated folder that does not qualify is always named, even when nothing
+  # can be removed: it may hold an old full .env-orbit, secrets included.
+  {
+    if ((${#offered[@]} > 0)); then
+      printf 'Orbit installer: old undo copies from earlier updates and repairs are kept in %s. They can hold a copy of .env-orbit, secrets included:\n' "$(printf '%q' "$root")"
+      for folder in "${offered[@]}"; do
+        name="${folder##*/}"
+        printf '  %s  %s  %s\n' "$(printf '%q' "$folder")" \
+          "${name:0:4}-${name:4:2}-${name:6:2}T${name:9:2}:${name:11:2}:${name:13:2}Z" "$(undo_copy_size "$folder")"
+      done
+    fi
+    for folder in "${kept[@]}"; do
+      printf '  %s  not removed: it holds something besides undo copies (another file, a sub-folder or a link) and may hold an old copy of .env-orbit. Check it yourself.\n' "$(printf '%q' "$folder")"
+    done
+  } >&2 || true
+  ((${#offered[@]} > 0)) || return 0
+
+  if [[ "$remove_old_undo_copies" == 1 ]]; then
+    printf 'Orbit installer: removing them is permanent. It CANNOT be undone: no other copy is kept.\n' >&2 || true
+    remove=1
+  # Asked only where the question is seen: /dev/tty opens and stderr, where
+  # the list and the CANNOT line go, is a terminal. The answer is read
+  # bounded (installer-ui.sh's reader: at most 16 characters, no controls).
+  elif [[ "${ORBIT_CONFIGURE_PROMPTS:-}" != machine && -t 2 ]] && declare -F installer_ui_read_text >/dev/null &&
+    { exec {terminal_fd}<>/dev/tty; } 2>/dev/null; then
+    # Out of canonical mode before the CANNOT line, so an answer typed as soon
+    # as it shows (end of input included) reaches the reader; put back after.
+    saved_terminal="$(stty -g <&"$terminal_fd" 2>/dev/null)" || saved_terminal=""
+    [[ -z "$saved_terminal" ]] || stty -echo -icanon min 1 time 0 <&"$terminal_fd" 2>/dev/null || true
+    printf 'Orbit installer: removing them is permanent. It CANNOT be undone: no other copy is kept.\n' >&2 || true
+    answer="$(installer_ui_read_text "$terminal_fd" 'Remove them? Only "yes" removes them; anything else keeps them [yes/N]: ' 16)" || answer=""
+    [[ -z "$saved_terminal" ]] || stty "$saved_terminal" <&"$terminal_fd" 2>/dev/null || true
+    exec {terminal_fd}>&-
+    [[ "$answer" != yes ]] || remove=1
+  else
+    printf 'Orbit installer: nothing was deleted. To delete them, run ./update.sh again on a terminal (interactively) and answer yes, or run ORBIT_REMOVE_OLD_UNDO_COPIES=yes ./update.sh.\n' >&2 || true
+  fi
+  [[ "$remove" == 1 ]] || return 0
+  ! stopping || return 0
+
+  for folder in "${offered[@]}"; do
+    # Checked again just before: still a real dated folder, directly inside a
+    # real orbit-install-backups, holding only undo copies.
+    if ! undo_copy_folder_qualifies "$folder"; then
+      printf 'Orbit installer: %s was not removed: it changed since it was listed.\n' "$(printf '%q' "$folder")" >&2 || true
+    elif rm -rf -- "$folder" 2>/dev/null && [[ ! -e "$folder" && ! -L "$folder" ]]; then
+      printf 'Orbit installer: removed %s\n' "$(printf '%q' "$folder")" >&2 || true
+    else
+      printf 'Orbit installer: %s could not be fully removed; what is left of it is still there. Check its permissions and delete it yourself.\n' "$(printf '%q' "$folder")" >&2 || true
+    fi
+  done
+}
+
 prepare_service_images() {
   installer_ui_phase=preparation
   installer_ui_component=database
@@ -1958,11 +2150,17 @@ prepare_service_images() {
   installer_ui_event preparation application completed service-preparation pull
 
   installer_ui_component=clamav
-  installer_ui_event preparation clamav starting service-preparation pull
-  stop_point
-  docker_reporting compose pull orbit-clamav ||
-    fail_with image-registry retry "Could not prepare the private scanner image."
-  installer_ui_event preparation clamav completed service-preparation pull
+  # #1170: with the scanner off by choice the overlay leaves orbit-clamav
+  # out of the stack, so there is nothing to pull.
+  if [[ "$selected_scanner" == off ]]; then
+    installer_ui_event preparation clamav skipped service-preparation skip
+  else
+    installer_ui_event preparation clamav starting service-preparation pull
+    stop_point
+    docker_reporting compose pull orbit-clamav ||
+      fail_with image-registry retry "Could not prepare the private scanner image."
+    installer_ui_event preparation clamav completed service-preparation pull
+  fi
 
   case "$selected_profile" in
     processing|full)
@@ -2005,10 +2203,17 @@ start_services() {
   fi
   installer_ui_event preparation compose starting service-start start
   stop_point
+  # #1576: the engine found the containers were made in a folder that is gone and
+  # the operator chose to make them again from here (never a missing key: an older engine).
+  local -a recreate=()
+  if [[ "$target_was_empty" != 1 && "${engine_outcome[recreate]:-0}" == 1 ]]; then
+    printf 'Orbit installer: the containers were made in another folder; making them again from this folder.\n' || true
+    recreate=(--force-recreate)
+  fi
   compose_started=1
   local -a compose_argv
   compose_command_line
-  if ! docker_reporting_whole "$compose_up_timeout_seconds" "${compose_argv[@]}" up -d --no-build --remove-orphans; then
+  if ! docker_reporting_whole "$compose_up_timeout_seconds" "${compose_argv[@]}" up -d --no-build --remove-orphans "${recreate[@]}"; then
     note_why_not_running orbit-db orbit-app
     # A fresh install is rolled back by fail(), Docker included, and then
     # says retry; an update keeps its deployment and points at Repair.
@@ -2016,6 +2221,57 @@ start_services() {
   fi
   stop_point
   installer_ui_event preparation compose completed service-start start
+}
+
+# stop_disabled_scanner (#1170 design amendment, note 54738)
+#
+# With the scanner off by choice the overlay hides orbit-clamav from Compose,
+# but `up -d --remove-orphans` does not stop a hidden service that is still
+# running from before (nor does `down`); `compose rm -s -f` does. Run on every
+# scanner=off run: with no container it removes nothing and exits 0, so it is
+# idempotent and reports nothing. Bounded by `timeout` like the probes. Named
+# volumes are never removed, so orbit-clamav-data (the signature database)
+# stays and switching back on is cheap. A failure does not fail the run --
+# the scanner left running costs memory, not safety -- and the completion
+# screen names the command to run by hand.
+stop_disabled_scanner() {
+  [[ "$selected_scanner" == off ]] || return 0
+  local -a compose_argv
+  compose_command_line
+  stop_point
+  if ! docker_reporting timeout --signal=TERM --kill-after=10s 60s "${compose_argv[@]}" rm -s -f orbit-clamav </dev/null; then
+    stop_point
+    optional_notes+=("Private scanner: switched off, but orbit-clamav could not be stopped; run: docker compose --env-file ${environment_file} rm -s -f orbit-clamav")
+  fi
+}
+
+# stop_dropped_services (#1542)
+#
+# A profile change (processing -> standard, or the wizard's change away from
+# a local model) leaves the dropped service's container running: Compose
+# does not treat a service behind a now-inactive profile as an orphan, so
+# `up -d --remove-orphans` keeps it (checked with Compose v5.7.0). The
+# engine names every optional service outside the selected profile in its
+# outcome on every run, not only the run that changed it, so an interrupted
+# change is finished by the next run (#1803); each is stopped and then
+# removed by name, which Compose accepts with the profile inactive. Both are
+# no-ops for a missing container. Named volumes are never removed. As with
+# the scanner, a failure costs memory, not safety: it does not fail the run,
+# and the completion screen names the command to run by hand.
+stop_dropped_services() {
+  local service
+  local -a compose_argv dropped=()
+  read -r -a dropped <<<"${engine_outcome[drop-services]:-}"
+  [[ ${#dropped[@]} -gt 0 ]] || return 0
+  compose_command_line
+  for service in "${dropped[@]}"; do
+    stop_point
+    if ! docker_reporting timeout --signal=TERM --kill-after=10s 60s "${compose_argv[@]}" stop "$service" </dev/null ||
+      ! docker_reporting timeout --signal=TERM --kill-after=10s 60s "${compose_argv[@]}" rm -f "$service" </dev/null; then
+      stop_point
+      optional_notes+=("Optional profiles: ${service} is no longer part of the ${selected_profile} profile but could not be stopped; run: docker compose --env-file ${environment_file} stop ${service} && docker compose --env-file ${environment_file} rm -f ${service}")
+    fi
+  done
 }
 
 # --- why a service is not ready (#1456 decision, note 40388) ------------------
@@ -2233,11 +2489,17 @@ wait_for_deployment_readiness() {
 
   installer_ui_phase=optional
   installer_ui_component=clamav
-  [[ "$optional_interrupted" == 1 ]] || installer_ui_event optional clamav starting optional-status health
-  if [[ "$optional_interrupted" == 1 ]] || ! wait_for_component_health optional clamav optional-status probe_clamav_health; then
-    optional_service_not_ready clamav orbit-clamav "Scanner" \
-      "still starting (first signature download); uploads are refused until it is ready." \
-      "The private scanner did not become healthy within the bounded startup window."
+  # #1170: a scanner that is off by choice is not awaited, so an update with
+  # it off can never fail on its health (guarantee #62).
+  if [[ "$selected_scanner" == off ]]; then
+    installer_ui_event optional clamav skipped optional-status skip
+  else
+    [[ "$optional_interrupted" == 1 ]] || installer_ui_event optional clamav starting optional-status health
+    if [[ "$optional_interrupted" == 1 ]] || ! wait_for_component_health optional clamav optional-status probe_clamav_health; then
+      optional_service_not_ready clamav orbit-clamav "Scanner" \
+        "still starting (first signature download); uploads are held until it is ready." \
+        "The private scanner did not become healthy within the bounded startup window."
+    fi
   fi
 
   case "$selected_profile" in
@@ -2331,6 +2593,9 @@ print_completion_screen() {
   printf 'Revision: %s\n' "${revision:0:12}"
   printf 'Image digest: %s\n' "$applied_digest"
   printf 'Optional profiles: %s\n' "$selected_profile"
+  if [[ "$selected_scanner" == off ]]; then
+    printf 'Private scanner: off by choice (DOCUMENT_SCAN_MODE=disabled); documents are not virus-scanned. Turn on: scripts/configure.sh --set-scanner on, then update.\n'
+  fi
   local note
   for note in "${optional_notes[@]}"; do
     printf '%s\n' "$note"
@@ -2448,6 +2713,511 @@ check_update_path() {
   ((index < ${#window[@]})) ||
     fail_with update-path abort "This install is on ${installed}. Update to ${releases[index - ${#window[@]}]} first, then to ${target}."
 }
+
+# Update readiness (#1779, note 58520 B; guarantee 69). Pattern: expand ->
+# backfill -> contract with a check-before-switch preflight gate, in
+# restore.sh's E3a shape: the new image's engine asks the live database, as a
+# compose one-off on the running project's network, whether this release's
+# contract migrations would refuse. It runs after the image is verified and
+# before the engine, so a refusal changes nothing and the old version keeps
+# running (and backfilling). Update only (the applied stamp, as
+# check_update_path reads it). A database that does not answer pg_isready is
+# not asked: the migration's own refusal at boot is the backstop. With it
+# answering, anything but a clean answer refuses (fail closed). The one-off
+# sends only reads.
+
+# read_compose_project_name <compose-manifest>
+#
+# docker-compose.yml's own top-level `name:`, or return 1. Identical text in
+# repair.sh and the other operator scripts (#1842);
+# scripts/compose-project-name-resolution.test.mjs proves that.
+read_compose_project_name() {
+  local compose_manifest="$1" line value
+  [[ -f "$compose_manifest" ]] || return 1
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" =~ ^name:[[:space:]]*(.*)$ ]]; then
+      value="${BASH_REMATCH[1]%%#*}"
+      value="$(printf '%s' "$value" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+      value="${value%\"}"
+      value="${value#\"}"
+      value="${value%\'}"
+      value="${value#\'}"
+      [[ -n "$value" ]] || return 1
+      printf '%s' "$value"
+      return 0
+    fi
+  done < "$compose_manifest"
+  return 1
+}
+
+# The running project's name, with restore.sh's derive_compose_project_name
+# precedence: .env-orbit, the caller's environment, docker-compose.yml's
+# top-level name:, the directory's basename.
+update_readiness_project_name() {
+  local candidate
+  candidate="$(read_environment_value COMPOSE_PROJECT_NAME 2>/dev/null || true)"
+  [[ "$candidate" =~ ^[a-z0-9][a-z0-9_-]*$ ]] || candidate="${COMPOSE_PROJECT_NAME:-}"
+  if [[ ! "$candidate" =~ ^[a-z0-9][a-z0-9_-]*$ && -f docker-compose.yml ]]; then
+    candidate="$(read_compose_project_name docker-compose.yml 2>/dev/null || true)"
+  fi
+  if [[ ! "$candidate" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
+    candidate="$(basename -- "$target_dir" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9_-' '-')"
+    while [[ "$candidate" == [-_]* ]]; do candidate="${candidate:1}"; done
+  fi
+  [[ "$candidate" =~ ^[a-z0-9][a-z0-9_-]*$ ]] || return 1
+  printf '%s' "$candidate"
+}
+
+readonly update_readiness_timeout_seconds=60
+readonly update_readiness_output_cap=16384
+
+# remove_update_readiness_one_off <name>: bounded, failure ignored (a
+# one-off already gone is fine).
+remove_update_readiness_one_off() {
+  timeout --signal=TERM --kill-after=1s 10s docker rm -f "$1" </dev/null >/dev/null 2>&1 || true
+}
+
+# stop_update_readiness_one_off <subshell-pid> <name>: after an interrupt.
+# TERM to timeout, which passes it on to the one-off; a one-off still there
+# after 10 s is killed; then its container is removed. Every step bounded.
+stop_update_readiness_one_off() {
+  local subshell_pid="$1" name="$2" timeout_pid="" tries
+  # The subshell writes timeout's pid first thing; give it a moment.
+  for ((tries = 0; tries < 20; tries++)); do
+    timeout_pid="$(cat -- "$update_readiness_work_dir/timeout.pid" 2>/dev/null || true)"
+    [[ ! "$timeout_pid" =~ ^[0-9]+$ ]] || break
+    kill -0 "$subshell_pid" 2>/dev/null || break
+    sleep 0.1
+  done
+  [[ "$timeout_pid" =~ ^[0-9]+$ ]] || timeout_pid=""
+  [[ -z "$timeout_pid" ]] || kill -TERM "$timeout_pid" 2>/dev/null || true
+  for ((tries = 0; tries < 100; tries++)); do
+    kill -0 "$subshell_pid" 2>/dev/null || break
+    sleep 0.1
+  done
+  if kill -0 "$subshell_pid" 2>/dev/null; then
+    [[ -z "$timeout_pid" ]] || kill -KILL "$timeout_pid" 2>/dev/null || true
+    kill -KILL "$subshell_pid" 2>/dev/null || true
+  fi
+  wait "$subshell_pid" 2>/dev/null || true
+  remove_update_readiness_one_off "$name"
+}
+
+readonly update_readiness_could_not_check="Orbit could not check whether the database is ready for this release; see the lines above."
+
+check_update_readiness() {
+  [[ -n "$(read_environment_value ORBIT_CONFIG_APPLIED_VERSION 2> /dev/null || true)" ||
+    -n "$(read_environment_value ORBIT_CONFIG_APPLIED_DIGEST 2> /dev/null || true)" ]] ||
+    return 0 # a fresh install
+  # Local: compose() and the probe read it; the name install.sh uses after
+  # the engine is still the one the engine commits.
+  local compose_project_name output status=0 line count=0
+  compose_project_name="$(update_readiness_project_name)" ||
+    fail_with update-readiness retry "$update_readiness_could_not_check"
+  if ! probe_database_health; then
+    printf 'Orbit installer: the database is not running, so the update readiness check will run when Orbit starts.\n' >&2 || true
+    return 0
+  fi
+  # As restore.sh's run_engine: Docker will not mount a missing secret file,
+  # so without the key file this one call adds the overlay that points it at
+  # /dev/null, keeping the compose files Compose would use otherwise.
+  local -x ORBIT_IMAGE="$resolved_reference"
+  if [[ ! -e .orbit-secrets/document-kek && ! -L .orbit-secrets/document-kek ]]; then
+    local compose_files="${COMPOSE_FILE:-}" separator="${COMPOSE_PATH_SEPARATOR:-}"
+    [[ -n "$compose_files" ]] || compose_files="$(read_environment_value COMPOSE_FILE 2>/dev/null || true)"
+    [[ -n "$separator" ]] || separator="$(read_environment_value COMPOSE_PATH_SEPARATOR 2>/dev/null || true)"
+    if [[ -z "$compose_files" ]]; then
+      compose_files=docker-compose.yml
+      [[ ! -e docker-compose.override.yml ]] || compose_files+="${separator:-:}docker-compose.override.yml"
+    fi
+    local -x COMPOSE_FILE="${compose_files}${separator:-:}docker-compose.no-document-key.yml"
+  fi
+  # stdout is the engine's answer; its stderr (and Compose's) passes through.
+  # Bounded like the other probes: a database that accepts the connection and
+  # then stalls must not hold the update before the engine with no way out;
+  # the timeout's exit 124 is "could not check", as any other failure.
+  local -a compose_argv
+  compose_command_line
+  # #1842: run in the background and poll, so an interrupt is acted on while
+  # the one-off lives (bash runs a trap only once its foreground command
+  # ends); named, so a one-off the timeout or an interrupt cut off can be
+  # removed; its stdout capped, and the rest drained so the one-off's own
+  # status stands, so output that never stops cannot fill the installer's
+  # memory (the timeout bounds it). A ':' in the folder was refused at the
+  # start, and a ',' means nothing to `compose run -v`.
+  local preflight_name="orbit-update-preflight-$$" preflight_pid interrupted=""
+  update_readiness_work_dir="$(mktemp -d "${TMPDIR:-/tmp}/orbit-update-preflight.XXXXXX")" ||
+    fail_with update-readiness retry "$update_readiness_could_not_check"
+  # Saved to a file, not $(trap -p): the current shell's traps, on any bash.
+  trap -p INT TERM HUP >"$update_readiness_work_dir/traps" ||
+    fail_with update-readiness retry "$update_readiness_could_not_check"
+  # Set before the fork, so no signal finds the old traps with a one-off
+  # already running.
+  trap 'interrupted=130' INT; trap 'interrupted=143' TERM; trap 'interrupted=129' HUP
+  (
+    trap - INT TERM HUP
+    set +e # the one-off's own status, not the reader's
+    # The first element writes its own pid and becomes timeout, so an
+    # interrupt can reach timeout, which passes it on to the one-off.
+    { printf '%s' "$BASHPID" >"$update_readiness_work_dir/timeout.pid"
+      exec timeout --signal=TERM --kill-after=10s "${update_readiness_timeout_seconds}s" \
+        "${compose_argv[@]}" run --rm --no-deps -T --name "$preflight_name" -v "${target_dir}:/orbit-deploy:ro" \
+        --entrypoint node orbit-app /opt/orbit/cli/orbit.js update --preflight --dir /orbit-deploy </dev/null; } |
+      { head -c "$update_readiness_output_cap"; cat >/dev/null; } >"$update_readiness_work_dir/output"
+    exit "${PIPESTATUS[0]}"
+  ) &
+  preflight_pid=$!
+  while [[ -z "$interrupted" ]] && kill -0 "$preflight_pid" 2>/dev/null; do
+    sleep 0.1
+  done
+  if [[ -n "$interrupted" ]]; then
+    stop_update_readiness_one_off "$preflight_pid" "$preflight_name"
+    exit "$interrupted"
+  fi
+  status=0
+  wait "$preflight_pid" || status=$?
+  trap - INT TERM HUP
+  eval "$(<"$update_readiness_work_dir/traps")"
+  # A signal between the loop and the restore: nothing is running now.
+  [[ -z "$interrupted" ]] || exit "$interrupted"
+  output="$(<"$update_readiness_work_dir/output")" || output=""
+  rm -rf -- "$update_readiness_work_dir" || true
+  update_readiness_work_dir=""
+  ((status != 0)) || return 0
+  ((status < 128 && status != 124)) || remove_update_readiness_one_off "$preflight_name"
+  ((status != 124)) ||
+    installer_failure_notes+=("The update readiness check did not finish within ${update_readiness_timeout_seconds} s, so it was stopped.")
+  # The engine's lines, bounded and without control characters, as notes
+  # before the terminal message.
+  while IFS= read -r line && ((count < 20)); do
+    line="${line//[[:cntrl:]]/}"
+    [[ -n "$line" ]] || continue
+    installer_failure_notes+=("${line:0:400}")
+    count=$((count + 1))
+  done <<< "$output"
+  if ((status == 1 && count > 0)) && [[ "${installer_failure_notes[0]}" == "update-preflight: blocked "* ]]; then
+    local last="${installer_failure_notes[count - 1]}"
+    unset 'installer_failure_notes[count - 1]'
+    fail_with update-readiness retry "$last"
+  fi
+  fail_with update-readiness retry "$update_readiness_could_not_check"
+}
+
+# --- retiring the SMTP lines (#1817) ----------------------------------------
+#
+# #1629 moved outgoing mail into Orbit's Mail settings and imports the SMTP_*
+# lines once; an update finishes that migration. The pattern is a one-shot
+# migration completed by the tool that owns the folder, gated on a durable
+# done-marker (`orbit mail-sending-status`, read through `compose exec -T`
+# like the readiness probes), each step idempotent: every file is written to a
+# temporary file beside it and renamed over it, and a step record
+# ($smtp_retirement_record) says how far a retirement got, so a crash between
+# steps resumes on the next run. repair.sh's retire-smtp-lines runs the same
+# steps (it is standalone, so the code is a same-shape copy).
+#
+# Order: copy the lines the rewrite removes or changes into an undo copy (the
+# SMTP_* lines except SMTP_PASSWORD=, and a COMPOSE_FILE line naming the
+# overlay; nothing else of .env-orbit), rewrite it without the SMTP_* keys and
+# without the mail overlay in COMPOSE_FILE, start the stack on it and wait
+# until it is ready, then delete the overlay and .orbit-secrets/smtp-password.
+# Nothing the running stack mounts goes before the stack stops mounting it.
+# The secret is deleted, never copied (owner decision, 2026-11-13). Unsure at
+# any point: leave everything as it is; the next update asks again.
+#
+# The undo copy lasts only until the change is confirmed (#1834, owner
+# decision 10a, 2026-11-14): once the secret is gone, `orbit
+# mail-sending-status` is asked again, and a usable answer removes the copy,
+# its folder when nothing else is in it, and the step record. Otherwise the
+# copy and the record stay, one line names the copy, and the next run asks
+# again and removes them, never making a new copy. The record names the copy's
+# folder (copy=orbit-install-backups/<name>).
+readonly smtp_retirement_record=".orbit-smtp-retirement"
+# Written into the undo copy's folder before the copy, naming that folder, so
+# a run killed before the step record leaves a copy the next run can adopt
+# (#1834 slice 4); a dated folder without it is never taken for one.
+readonly smtp_copy_marker=".orbit-smtp-undo"
+readonly smtp_secret_file=".orbit-secrets/smtp-password"
+readonly smtp_overlay_file="docker-compose.mail.yml"
+readonly mail_sending_status_timeout_seconds=30
+readonly smtp_completion_line="Outgoing mail: SMTP credentials were migrated to Orbit's mail settings. They were removed from .env-orbit and deleted from the secrets folder."
+
+# smtp_env_rewrite <retire|backup> < .env-orbit > copy
+#
+# retire: drops the SMTP_* keys (src/lib/config-contract.ts's list) and the
+# mail overlay's entry in COMPOSE_FILE; commented lines and every other line
+# are copied byte for byte (a CR included). backup: keeps only the lines
+# retire drops or rewrites, as they were (#1834): the SMTP_* lines except
+# SMTP_PASSWORD=, and a COMPOSE_FILE line naming the overlay. Exits 3, writing
+# nothing usable, when a COMPOSE_FILE line naming the overlay is not a plain
+# colon-separated list or would be left empty.
+smtp_env_rewrite() {
+  awk -v mode="$1" '
+    BEGIN { keys["SMTP_HOST"]; keys["SMTP_PORT"]; keys["SMTP_SECURITY"]; keys["SMTP_USER"]
+            keys["SMTP_PASSWORD"]; keys["SMTP_PASSWORD_FILE"]; keys["SMTP_FROM"]; refused = 0 }
+    {
+      key = $0; sub(/=.*/, "", key)
+      if (index($0, "=") == 0) key = ""
+      if (mode == "backup") {
+        if ((key in keys && key != "SMTP_PASSWORD") || (key == "COMPOSE_FILE" && $0 ~ /docker-compose\.mail\.yml/)) print
+        next
+      }
+      if (key in keys) next
+      if (key == "COMPOSE_FILE" && $0 ~ /docker-compose\.mail\.yml/) {
+        cr = ""; value = substr($0, 14)
+        if (value ~ /\r$/) { cr = "\r"; value = substr(value, 1, length(value) - 1) }
+        if (value !~ /^[A-Za-z0-9._\/:-]+$/) { refused = 1; exit 3 }
+        n = split(value, parts, ":"); kept = ""
+        for (i = 1; i <= n; i++) {
+          if (parts[i] == "docker-compose.mail.yml" || parts[i] == "./docker-compose.mail.yml" || parts[i] == "") continue
+          kept = (kept == "" ? parts[i] : kept ":" parts[i])
+        }
+        if (kept == "") { refused = 1; exit 3 }
+        print "COMPOSE_FILE=" kept cr
+        next
+      }
+      print
+    }
+    END { if (refused) exit 3 }
+  '
+}
+
+smtp_lines_present() {
+  grep -qE '^SMTP_(HOST|PORT|SECURITY|USER|PASSWORD|PASSWORD_FILE|FROM)=' "$environment_file" 2>/dev/null
+}
+
+smtp_overlay_listed() {
+  grep -qE '^COMPOSE_FILE=.*docker-compose\.mail\.yml' "$environment_file" 2>/dev/null
+}
+
+# What an update retires. The overlay file alone does not count: it is a
+# deployment asset this update has just laid again, and with nothing naming it
+# it is inert, so a retired deployment's next update changes nothing.
+smtp_retirement_due() {
+  smtp_lines_present || smtp_overlay_listed ||
+    [[ -e "$smtp_secret_file" || -L "$smtp_secret_file" || -e "$smtp_retirement_record" ]]
+}
+
+# The gate: exactly one answer from the closed vocabulary, exit 0, and a
+# source of imported or ui. A missing command (an older image), a stopped
+# container, a timeout or any other answer: the gate does not hold.
+mail_sending_gate_holds() {
+  local answer
+  # At most 257 bytes are read; the sentinel keeps the trailing newlines $(...)
+  # would strip, so an answer over 256 bytes is refused.
+  answer="$(set -o pipefail
+    { timeout --signal=TERM --kill-after=1s "${mail_sending_status_timeout_seconds}s" \
+      docker compose --project-name "$compose_project_name" --env-file "$environment_file" \
+      exec -T orbit-app node /opt/orbit/cli/orbit.js mail-sending-status </dev/null 2>/dev/null; } |
+      head -c 257 && printf x)" || return 1
+  answer="${answer%x}"
+  ((${#answer} <= 256)) || return 1
+  answer="${answer%$'\n'}"
+  [[ "$answer" =~ ^mail-sending\ source=(imported|ui|none)\ imported-from-environment=(true|false)$ ]] || return 1
+  [[ "${BASH_REMATCH[1]}" != none ]]
+}
+
+# The undo copy's folder, relative to the deployment folder, once made or read
+# back from the step record; empty when none is known. The step, as read back.
+smtp_copy_dir=""
+smtp_record_step=""
+
+# smtp_write_record <step>: the step record, written beside its target and
+# renamed; it names the undo copy's folder when one is known.
+smtp_write_record() {
+  ( umask 077 && { printf 'step=%s\n' "$1" && if [[ -n "$smtp_copy_dir" ]]; then printf 'copy=%s\n' "$smtp_copy_dir"; fi; } > "${smtp_retirement_record}.tmp" ) &&
+    mv -f -- "${smtp_retirement_record}.tmp" "$smtp_retirement_record"
+}
+
+# smtp_read_record: sets $smtp_record_step and $smtp_copy_dir from the step
+# record. A copy= line naming anything but a dated folder directly inside
+# orbit-install-backups is ignored, so nothing outside it is ever removed.
+smtp_read_record() {
+  local entry
+  smtp_record_step=""
+  smtp_copy_dir=""
+  if [[ ! -f "$smtp_retirement_record" || -L "$smtp_retirement_record" ]]; then return 0; fi
+  while IFS= read -r entry || [[ -n "$entry" ]]; do
+    if [[ "$entry" == step=* ]]; then
+      smtp_record_step="${entry#step=}"
+    elif [[ "$entry" =~ ^copy=(orbit-install-backups/[0-9]{8}T[0-9]{6}Z(-repair)?(-[2-9])?)$ ]]; then
+      smtp_copy_dir="${BASH_REMATCH[1]}"
+    fi
+  done < "$smtp_retirement_record"
+  return 0
+}
+
+# smtp_discard_copy: the change is confirmed. Removes the files the
+# retirement wrote into the undo copy's folder (.env-orbit's lines and its
+# temporary file, the copy marker and, from repair.sh, the overlay and the
+# temporary files a killed repair left, #1848 FR-S1b), the folder when
+# nothing else is in it, then the step record. Anything else in the folder
+# stays.
+smtp_discard_copy() {
+  local saved_options entry status=0
+  if [[ -n "$smtp_copy_dir" && ! -L orbit-install-backups && -d "$smtp_copy_dir" && ! -L "$smtp_copy_dir" ]]; then
+    rm -f -- "$smtp_copy_dir/.env-orbit" "$smtp_copy_dir/$smtp_overlay_file" "$smtp_copy_dir/$smtp_copy_marker" \
+      "$smtp_copy_dir/.env-orbit.smtp-copy.tmp" || return 1
+    saved_options="$(shopt -p nullglob)" || true
+    shopt -s nullglob
+    for entry in "$smtp_copy_dir"/.env-orbit.smtp-copy.?????? "$smtp_copy_dir/$smtp_overlay_file".smtp-copy.??????; do
+      if smtp_copy_tmp_name "${entry##*/}"; then rm -f -- "$entry" || status=1; fi
+    done
+    eval "$saved_options"
+    [[ "$status" == 0 ]] || return 1
+    rmdir -- "$smtp_copy_dir" 2>/dev/null || true
+  fi
+  rm -f -- "$smtp_retirement_record"
+}
+
+# smtp_find_orphan_copy: with no step record, the newest dated folder in
+# orbit-install-backups whose copy marker is a regular file naming that same
+# folder is a killed run's undo copy; sets $smtp_copy_dir to it. A folder
+# without the marker (a hand-made one included), with a symlinked marker, or
+# whose copy is a link or not a file, is never taken.
+smtp_find_orphan_copy() {
+  local saved_options folder name marker found=""
+  smtp_copy_dir=""
+  [[ -d orbit-install-backups && ! -L orbit-install-backups ]] || return 1
+  saved_options="$(shopt -p nullglob dotglob)" || true
+  shopt -s nullglob
+  shopt -u dotglob
+  for folder in orbit-install-backups/*; do
+    name="${folder#orbit-install-backups/}"
+    [[ "$name" =~ ^[0-9]{8}T[0-9]{6}Z(-repair)?(-[2-9])?$ && -d "$folder" && ! -L "$folder" ]] || continue
+    marker="$folder/$smtp_copy_marker"
+    [[ -f "$marker" && ! -L "$marker" && "$(head -c 128 -- "$marker")" == "copy=$folder" ]] || continue
+    if [[ -L "$folder/.env-orbit" ]] || { [[ -e "$folder/.env-orbit" ]] && [[ ! -f "$folder/.env-orbit" ]]; }; then
+      continue
+    fi
+    found="$folder"
+  done
+  eval "$saved_options"
+  [[ -n "$found" ]] || return 1
+  smtp_copy_dir="$found"
+}
+
+# smtp_write_copy <folder>: the undo copy of the lines the retirement removes
+# from .env-orbit, written to a temporary file in <folder> and renamed over
+# <folder>/.env-orbit, so an existing copy (a hard link included) is
+# replaced, never written through (#1834).
+smtp_write_copy() {
+  local tmp="$1/.env-orbit.smtp-copy.tmp"
+  rm -f -- "$tmp" &&
+    ( umask 077 && smtp_env_rewrite backup < "$environment_file" > "$tmp" ) &&
+    mv -f -- "$tmp" "$1/$environment_file" && return 0
+  rm -f -- "$tmp"
+  return 1
+}
+
+# smtp_confirm_or_keep: after the secret is gone, asks the gate again.
+# Usable: the undo copy and the record go. Otherwise both stay, and one line
+# names the copy; the next update asks again.
+smtp_confirm_or_keep() {
+  local copy="${target_dir}/${smtp_copy_dir}/.env-orbit"
+  if ! stopping && mail_sending_gate_holds; then
+    smtp_discard_copy && return 0
+    printf 'Orbit installer: outgoing mail: the undo copy %s could not be removed; the next update tries again.\n' "$copy" >&2 || true
+    return 0
+  fi
+  if [[ -n "$smtp_copy_dir" && -f "$smtp_copy_dir/.env-orbit" ]]; then
+    printf 'Orbit installer: outgoing mail: the undo copy %s was kept, because mail sending could not be confirmed after the SMTP password file was deleted; the next update removes it once it is.\n' "$copy" >&2 || true
+  fi
+}
+
+# smtp_retirement_note <why>: one line to stderr; nothing was deleted.
+smtp_retirement_note() {
+  printf 'Orbit installer: outgoing mail: %s The SMTP password file was kept; the next update tries again.\n' "$1" >&2 || true
+}
+
+# Waits, quietly and bounded, for the database and the application after the
+# retirement's restart.
+smtp_wait_ready() {
+  local deadline=$((SECONDS + 10#$readiness_timeout_seconds))
+  while :; do
+    ! stopping || return 1
+    probe_database_health && probe_application_health && return 0
+    ((SECONDS < deadline)) || return 1
+    run_interruptibly sleep "$((10#$readiness_poll_seconds))" || return 1
+  done
+}
+
+retire_smtp_lines() {
+  [[ "$target_was_empty" != 1 ]] || return 0
+  smtp_retirement_due || return 0
+  ! stopping || return 0
+  mail_sending_gate_holds || return 0
+  smtp_read_record
+
+  # A retirement that finished but was not confirmed: the gate holds now, so
+  # its undo copy goes; nothing new is copied.
+  if [[ "$smtp_record_step" == retired ]] && ! smtp_lines_present && ! smtp_overlay_listed &&
+    [[ ! -e "$smtp_secret_file" && ! -L "$smtp_secret_file" ]]; then
+    smtp_discard_copy ||
+      printf 'Orbit installer: outgoing mail: the undo copy %s could not be removed; the next update tries again.\n' "${target_dir}/${smtp_copy_dir}/.env-orbit" >&2 || true
+    return 0
+  fi
+
+  # 1. The undo copy, once per retirement: a resumed run keeps the first
+  # copy, the one taken before anything changed. The marker naming the copy
+  # goes first, then the copy, then the step record (#1834 slice 4): a run
+  # killed before the record leaves a marked folder, which the next run
+  # adopts, rewriting the copy while .env-orbit still holds the SMTP lines,
+  # so there is never a second copy.
+  if [[ ! -e "$smtp_retirement_record" ]]; then
+    if smtp_find_orphan_copy; then
+      if { smtp_lines_present || smtp_overlay_listed; } && ! smtp_write_copy "$smtp_copy_dir"; then
+        smtp_retirement_note "the SMTP lines were left in .env-orbit: a backup of it could not be made."
+        return 0
+      fi
+    else
+      [[ -n "$backup_root" ]] || backup_root="${target_dir}/orbit-install-backups"
+      if ! prepare_backup_dir optional 2>/dev/null ||
+        ! ( umask 077 && printf 'copy=%s\n' "${backup_dir#"$target_dir"/}" > "${backup_dir}/${smtp_copy_marker}" ) ||
+        ! smtp_write_copy "$backup_dir"; then
+        smtp_retirement_note "the SMTP lines were left in .env-orbit: a backup of it could not be made."
+        return 0
+      fi
+      smtp_copy_dir="${backup_dir#"$target_dir"/}"
+    fi
+    smtp_write_record backed-up || { smtp_retirement_note "the SMTP lines were left in .env-orbit: the step record could not be written."; return 0; }
+  fi
+  if smtp_lines_present || smtp_overlay_listed; then
+    rm -f -- "${environment_file}.retire-smtp.tmp"
+    if ! ( umask 077 && smtp_env_rewrite retire < "$environment_file" > "${environment_file}.retire-smtp.tmp" ) ||
+      ! chmod 600 -- "${environment_file}.retire-smtp.tmp" ||
+      ! mv -f -- "${environment_file}.retire-smtp.tmp" "$environment_file"; then
+      rm -f -- "${environment_file}.retire-smtp.tmp"
+      smtp_retirement_note "the SMTP lines were left in .env-orbit: its COMPOSE_FILE line could not be rewritten safely; remove docker-compose.mail.yml from it by hand."
+      return 0
+    fi
+  fi
+
+  # 2. Start the stack on the rewritten file; until it is up, the running
+  # containers may still mount the secret.
+  ! stopping || return 0
+  local -a compose_argv
+  compose_command_line
+  if ! docker_reporting_whole "$compose_up_timeout_seconds" "${compose_argv[@]}" up -d --no-build; then
+    note_why_not_running orbit-db orbit-app
+    fail_with docker-host repair "Orbit could not be restarted after the SMTP lines were removed from .env-orbit; the SMTP password file was kept."
+  fi
+  if ! smtp_wait_ready; then
+    stopping && return 0
+    fail_with health-timeout repair "Orbit did not report ready after the SMTP lines were removed from .env-orbit; the SMTP password file was kept."
+  fi
+  smtp_write_record restarted || { smtp_retirement_note "the step record could not be written."; return 0; }
+
+  # 3. Nothing mounts them now. The secret is deleted, never copied.
+  rm -f -- "$smtp_overlay_file" "$smtp_secret_file" || { smtp_retirement_note "the SMTP password file could not be deleted."; return 0; }
+
+  # 4. Done; the undo copy goes once Orbit confirms mail sending without the
+  # secret (#1834).
+  printf '%s\n' "$smtp_completion_line" || true
+  smtp_write_record retired || true
+  smtp_confirm_or_keep
+}
+
+name_earlier_originals
 check_update_path "$release_manifest_path"
 
 resolved_reference="${image_repository}@${manifest_digest}"
@@ -2533,6 +3303,10 @@ fi
   fail "The published image records deployment assets somewhere other than ${deployment_assets_root}."
 readonly bundled_assets_root
 
+# Guarantee #69: before anything in the deployment changes, an update asks
+# the running database whether this release's migrations would refuse.
+check_update_readiness
+
 installer_ui_event identity image running image-identity inspect
 # Captured, then shown: a launcher that went away (a closed stdout) must not
 # turn into a banner the image "could not render".
@@ -2609,6 +3383,7 @@ esac
 # committed files stay.
 target_was_empty="${engine_outcome[fresh]}"
 selected_profile="${engine_outcome[profile]}"
+selected_scanner="${engine_outcome[scanner]:-on}"
 load_installer_ui || fail_with failure retry "The deployment's installer UI helper is unavailable."
 
 compose_project_name="$(read_environment_value COMPOSE_PROJECT_NAME 2>/dev/null)" ||
@@ -2645,7 +3420,11 @@ printf 'Orbit installer: configuration, OIDC discovery, and Docker Compose prefl
 
 prepare_service_images
 start_services
+stop_disabled_scanner
+stop_dropped_services
 wait_for_deployment_readiness
+retire_smtp_lines
+prune_old_undo_copies || true
 
 installer_ui_phase=complete
 installer_ui_component=installer

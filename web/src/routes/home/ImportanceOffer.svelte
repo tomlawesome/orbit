@@ -32,6 +32,7 @@
   import { dismissImportanceOffer } from "$lib/pick.js";
   import { money, plural, tminusOf } from "$lib/format.js";
   import { tourRunning } from "$lib/tour/running.js";
+  import { whatsNewOpen } from "$lib/whats-new/open.js";
   import { inertPage, trapTab } from "$lib/pocket/focus.js";
 
   /** @type {Props} */
@@ -39,7 +40,7 @@
 
   let notNow = $state(false);
   const items = $derived(household?.items ?? []);
-  const offer = $derived(importanceOfferOf(items, { dismissed: dismissed || notNow, touring: $tourRunning }));
+  const offer = $derived(importanceOfferOf(items, { dismissed: dismissed || notNow, touring: $tourRunning || $whatsNewOpen }));
 
   /** The rows as the pass opened, and the picks made on them so far. */
   let open = $state(false);

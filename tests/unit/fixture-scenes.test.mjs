@@ -159,7 +159,7 @@ describe("fixture sections carry a colour", () => {
     keepSave(cookies, replace({ colour: "vehicles" }));
     const sections = harlow(withScenes(WORKSPACE_FIXTURE, cookies))?.sections ?? [];
     expect(sections.find((one) => one.id === "s-home")?.colour).toBe("vehicles");
-    expect(sections.filter((one) => one.id !== "s-home").map((one) => one.colour ?? null)).toEqual([null, null, null, null]);
+    expect(sections.filter((one) => one.id !== "s-home").map((one) => one.colour ?? null)).toEqual([null, null, null]);
   });
 
   it("does not keep a pick the engine would refuse", () => {

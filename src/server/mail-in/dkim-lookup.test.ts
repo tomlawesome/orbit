@@ -316,7 +316,7 @@ describe("selfVerifiedDkimDomains: work bound (A-SEC2)", () => {
     return signed;
   }
 
-  it("does not report a message above the intake limit as verified", async () => {
+  it("does not report a message above the intake limit it is given as verified (#1388)", async () => {
     const raw = await signMessage(sampleMessage({ body: "\r\n".repeat(13 * MIB) + "end\r\n" }), {
       domain: "example.test",
       selector: SELECTOR,
@@ -324,7 +324,7 @@ describe("selfVerifiedDkimDomains: work bound (A-SEC2)", () => {
     });
     expect(raw.length).toBeGreaterThan(IMAP_ATTACHMENT_LIMITS.rawMessageBytes);
     const { resolver } = tableResolver({ [`${SELECTOR}._domainkey.example.test`]: RSA.record });
-    expect(await selfVerifiedDkimDomains(raw, "example.test", resolver)).toEqual([]);
+    expect(await selfVerifiedDkimDomains(raw, "example.test", resolver, undefined, IMAP_ATTACHMENT_LIMITS.rawMessageBytes)).toEqual([]);
   }, 120_000);
 
   it("self-verifies a 6 MiB forwarded PDF-sized message from the relay's own domain", async () => {
@@ -643,5 +643,70 @@ describe("dkimDnsServersMalformed (#1681)", () => {
     "192.0.2.1, ns.example.test:53",
   ])("%j is not malformed", async (setting) => {
     expect(await check(setting)).toBe(false);
+  });
+});
+
+/*
+ * #1727 (A-F4): an entry whose host part (port and one trailing dot removed)
+ * ends in an all-digit or 0x-hex label is an IPv4 attempt (WHATWG URL host
+ * parser "ends in a number"; RFC 3696 s2). If it is not a valid IPv4 it is
+ * malformed, not a host name to resolve.
+ */
+describe("a mistyped IPv4 in MAIL_IN_DKIM_DNS_SERVERS is malformed (#1727)", () => {
+  async function check(setting: string): Promise<boolean> {
+    const module = await import("./dkim-lookup") as unknown as { dkimDnsServersMalformed?: (s: string | undefined) => boolean };
+    expect(module.dkimDnsServersMalformed, "dkimDnsServersMalformed is exported").toBeTypeOf("function");
+    return module.dkimDnsServersMalformed!(setting);
+  }
+
+  const malformed: Array<[string, string]> = [
+    ["a quad with a part over 255", "192.0.2.256"],
+    ["a quad with a part over 255 and a port", "192.0.2.256:53"],
+    ["a three-part dotted number", "192.0.2"],
+    ["a three-part dotted number with a port", "192.0.2:53"],
+    ["a five-part dotted number", "192.0.2.1.5"],
+    ["a five-part dotted number with a port", "192.0.2.1.5:53"],
+    ["a bare number", "999"],
+    ["a valid quad with a trailing dot", "192.0.2.1."],
+    ["a hex form", "0x7f.1"],
+  ];
+
+  it.each(malformed)("%s (%j) is malformed", async (_case, setting) => {
+    expect(await check(setting)).toBe(true);
+  });
+
+  it.each(malformed)("%s (%j) among valid entries is malformed", async (_case, setting) => {
+    expect(await check(`198.51.100.5, ${setting}`)).toBe(true);
+  });
+
+  it.each([
+    ["a valid quad", "192.0.2.1"],
+    ["a valid quad with a port", "192.0.2.1:53"],
+    ["a bracketed IPv6 with a port", "[2001:db8::1]:53"],
+    ["a host name", "dns.example"],
+    ["a host name with a port", "resolver-1.local:5353"],
+    ["a host name with a trailing dot", "ns1.example."],
+    ["a digit-only label that is not the last", "1.example"],
+  ])("%s (%j) is not malformed", async (_case, setting) => {
+    expect(await check(setting)).toBe(false);
+  });
+
+  describe("the resolver", () => {
+
+    it.each([
+      ["192.0.2.256"], ["192.0.2.256:53"], ["192.0.2"], ["192.0.2.1.5:53"], ["999"], ["192.0.2.1."], ["0x7f.1"],
+    ])("%j: every lookup is DkimTemporaryFailure and the entry is never resolved as a host name", async (setting) => {
+      const actual = await vi.importActual<typeof import("node:dns/promises")>("node:dns/promises");
+      dns.setServers.mockImplementation((servers: string[]) => new actual.Resolver().setServers(servers));
+      dns.lookup.mockImplementation(async () => ({ address: "198.51.100.7", family: 4 }));
+      dns.resolverTxt.mockResolvedValue([]);
+
+      const resolver = await dkimKeyResolverFor(setting);
+      const outcome = await resolver(SELECTOR, "example.test").then((record) => ({ record }), (error: unknown) => error);
+
+      expect(outcome).toBeInstanceOf(DkimTemporaryFailure);
+      expect(dns.lookup, "not looked up as a host name").not.toHaveBeenCalled();
+      expect(dns.resolveTxt, "never falls back to the default path").not.toHaveBeenCalled();
+    });
   });
 });

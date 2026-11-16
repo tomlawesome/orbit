@@ -4,8 +4,9 @@ import { mkdirSync, mkdtempSync, readdirSync, lstatSync, rmSync, watch, type FSW
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { AppError } from "@/lib/app-error";
-import { decryptPortableArchive, encryptPortableArchive, PortableArchiveSealer } from "@/server/portable-archive";
-import { MAX_ARCHIVE_CIPHERTEXT_CHARACTERS } from "@/server/portable-archive-limits";
+import { decryptPortableArchive, type EncryptedPortableArchive } from "@/server/portable-archive";
+import { PortableArchiveSealer, sealedArchive } from "../../tests/support/sealed-archive";
+import { V1_MAX_ARCHIVE_CIPHERTEXT_CHARACTERS } from "@/server/portable-archive-limits";
 import { MAX_PAYLOAD_OTHER_BYTES, MAX_PAYLOAD_VALUES, PayloadScratch } from "@/server/portable-archive-payload";
 import { KDF_TEST_TIMEOUT_MS } from "../../scripts/process-budget.mjs";
 import { archiveForm, archiveStream, chunkedStream, encodeForm } from "../../tests/integration/support/portable-archive-upload";
@@ -99,12 +100,15 @@ vi.mock("@/db", async () => {
       },
     }),
     transaction: async (fn: (tx: unknown) => unknown) => fn(fakeDb),
+    // The household owner lock a rollback takes itself (#1605 RANGE-R2/1).
+    execute: async () => [],
   };
 
   return { getDb: () => fakeDb };
 });
 
 vi.mock("@/server/documents/config", () => ({
+  DOCUMENT_MAX_BYTES_CEILING: 100 * 1_048_576,
   getDocumentConfig: () => ({ storageRoot: sandbox.docs, quarantineRoot: sandbox.quarantine }),
 }));
 
@@ -201,11 +205,17 @@ function expectPrivateAndGone(result: ReturnType<ReturnType<typeof observe>["sto
 const DOCUMENT_COUNT = 8;
 const DOCUMENT_BYTES = 4 * MIB;
 
-interface Built { archive: ReturnType<typeof encryptPortableArchive>; contents: Buffer[]; documentIds: string[] }
+interface Built { archive: EncryptedPortableArchive; contents: Buffer[]; documentIds: string[] }
 
 let built: Built;
 
-function buildArchive(): Built {
+/** An archive object with its fields in the order the whole-buffer encryption wrote them (authTag before ciphertext, before #1506). */
+async function legacyArchive(plaintext: Buffer, secret: string): Promise<EncryptedPortableArchive> {
+  const { authTag, ciphertext, ...rest } = await sealedArchive(plaintext, secret);
+  return { ...rest, authTag, ciphertext };
+}
+
+async function buildArchive(): Promise<Built> {
   const contents = Array.from({ length: DOCUMENT_COUNT }, (_, index) => randomBytes(index === 0 ? 3 * 65_536 + 1 : DOCUMENT_BYTES - index));
   const documentIds = contents.map(() => randomUUID());
   const payload = {
@@ -217,7 +227,7 @@ function buildArchive(): Built {
     documents: documentIds.map((id, index) => ({ id, itemId, displayName: `policy-${index}.pdf`, mediaType: "application/pdf", lifecycle: "available" })),
     documentBytes: documentIds.map((id, index) => ({ id, contentBase64: contents[index].toString("base64") })),
   };
-  return { archive: encryptPortableArchive(Buffer.from(JSON.stringify(payload)), passphrase), contents, documentIds };
+  return { archive: await legacyArchive(Buffer.from(JSON.stringify(payload)), passphrase), contents, documentIds };
 }
 
 function withCiphertextCharChanged(archive: Built["archive"], position: number): Built["archive"] {
@@ -272,7 +282,7 @@ const run = (action: () => Promise<unknown>) => action().then(() => undefined, (
 
 // #1566: preview and import take the archive file as a stream. Every case in
 // this file is moved to that interface here, in one place; the archive object
-// is serialised as `encryptPortableArchive` returns it (authTag before
+// is serialised as `legacyArchive` returns it (authTag before
 // ciphertext, the order written before #1506).
 const previewOf = (archive: Built["archive"] | Buffer | string, secret = passphrase) =>
   previewPortableImport(userId, householdId, archiveStream(archive), secret);
@@ -281,7 +291,7 @@ const importOf = (archive: Built["archive"] | Buffer | string, secret = passphra
 
 let savedTmpdir: string | undefined;
 
-beforeAll(() => {
+beforeAll(async () => {
   savedTmpdir = process.env.TMPDIR;
   sandbox.base = mkdtempSync(join(tmpdir(), "orbit-1521-"));
   sandbox.tmp = join(sandbox.base, "tmp");
@@ -289,7 +299,7 @@ beforeAll(() => {
   sandbox.quarantine = join(sandbox.base, "quarantine");
   for (const directory of [sandbox.tmp, sandbox.docs, sandbox.quarantine]) mkdirSync(directory, { recursive: true, mode: 0o700 });
   process.env.TMPDIR = sandbox.tmp;
-  built = buildArchive();
+  built = await buildArchive();
 });
 
 afterAll(() => {
@@ -307,7 +317,8 @@ beforeEach(() => {
   mocks.uploadItemDocument.mockReset();
   mocks.uploadItemDocument.mockImplementation(async (input) => {
     restored.push({ filename: input.filename, itemId: input.itemId, bytes: await drain((input as { body?: unknown }).body) });
-    return { id: "uploaded" };
+    // A staged upload the scanner passed: the import refuses anything else (#1390, #1605 RANGE-R2/2).
+    return { id: "uploaded", lifecycle: "available", scanStatus: "clean" };
   });
   mocks.deleteCiphertext.mockClear();
   mocks.requireMetadataWriter.mockReset();
@@ -348,7 +359,8 @@ describe("a good archive is opened through a private temporary file that is remo
       expect(document!.itemId).not.toBe(itemId);
       expect(document!.bytes.equals(content), `policy-${index}.pdf has the exported bytes`).toBe(true);
     }
-    const completed = mocks.updateCalls.find((call) => call.table === "portable_archive_imports");
+    // The update that closes the row; the heartbeats before it only renew the lease (#1390).
+    const completed = mocks.updateCalls.find((call) => call.table === "portable_archive_imports" && "outcome" in (call.values as object));
     expect((completed?.values as { outcome: string }).outcome).toBe("completed");
     expect(result.files.length, "the decrypted payload goes to a temporary file, and one was seen").toBeGreaterThanOrEqual(1);
     expectPrivateAndGone(result);
@@ -405,7 +417,7 @@ describe("nothing decrypted is used until the tag verifies (#1521)", () => {
 
   it("refuses an authentic payload that is not an Orbit archive, as before, and leaves no file", async () => {
     seedEmptyHousehold();
-    const notOrbit = encryptPortableArchive(Buffer.from(JSON.stringify({ format: "something-else", version: 1, padding: "x".repeat(2 * MIB) })), passphrase);
+    const notOrbit = await legacyArchive(Buffer.from(JSON.stringify({ format: "something-else", version: 1, padding: "x".repeat(2 * MIB) })), passphrase);
     const watcher = observe();
     const error = await run(() => importOf(notOrbit));
     const result = watcher.stop();
@@ -423,7 +435,7 @@ describe("the temporary file is removed when the import fails part-way (#1521)",
     mocks.uploadItemDocument
       .mockImplementationOnce(async (input) => {
         restored.push({ filename: input.filename, itemId: input.itemId, bytes: await drain((input as { body?: unknown }).body) });
-        return { id: "uploaded" };
+        return { id: "uploaded", lifecycle: "available", scanStatus: "clean" };
       })
       .mockImplementationOnce(async (input) => {
         await drain((input as { body?: unknown }).body);
@@ -501,9 +513,9 @@ describe("both field orders Orbit has written open from the stream (#1566)", () 
     expect(restored[0].bytes.equals(content)).toBe(true);
   });
 
-  it("opens an archive written by encryptPortableArchive (authTag before ciphertext)", async () => {
+  it("opens an archive written with the earlier field order (authTag before ciphertext)", async () => {
     // Catches: a reader that sets the tag only when it follows the ciphertext.
-    const archive = encryptPortableArchive(Buffer.from(JSON.stringify(smallPayload(randomBytes(70_001)))), passphrase);
+    const archive = await legacyArchive(Buffer.from(JSON.stringify(smallPayload(randomBytes(70_001)))), passphrase);
     const file = JSON.stringify(archive);
     expect(file.indexOf('"authTag"'), "fixture: authTag comes first").toBeLessThan(file.indexOf('"ciphertext"'));
 
@@ -513,7 +525,7 @@ describe("both field orders Orbit has written open from the stream (#1566)", () 
 
   it("opens a ciphertext in the standard base64 alphabet as well as base64url", async () => {
     // Catches: an alphabet check that accepts only base64url, which today's decode does not require.
-    const archive = encryptPortableArchive(Buffer.from(JSON.stringify(smallPayload(randomBytes(70_001)))), passphrase);
+    const archive = await legacyArchive(Buffer.from(JSON.stringify(smallPayload(randomBytes(70_001)))), passphrase);
     const standard = { ...archive, ciphertext: archive.ciphertext.replaceAll("-", "+").replaceAll("_", "/") };
     expect(standard.ciphertext, "fixture: the standard alphabet's own characters are present").toMatch(/[+/]/u);
 
@@ -523,7 +535,7 @@ describe("both field orders Orbit has written open from the stream (#1566)", () 
 
   it.each(["salt", "iv"] as const)("refuses an archive whose %s follows the ciphertext as archive_invalid, writing nothing", async (moved) => {
     // Catches: a reader that buffers the ciphertext until the key material arrives (holding the archive whole).
-    const archive = encryptPortableArchive(Buffer.from(JSON.stringify(smallPayload(randomBytes(70_001)))), passphrase);
+    const archive = await legacyArchive(Buffer.from(JSON.stringify(smallPayload(randomBytes(70_001)))), passphrase);
     const { [moved]: value, ...rest } = archive;
     const file = JSON.stringify({ ...rest, [moved]: value });
     expect(file.indexOf(`"${moved}"`), `fixture: ${moved} follows the ciphertext`).toBeGreaterThan(file.indexOf('"ciphertext"'));
@@ -574,12 +586,12 @@ describe("an oversized ciphertext is refused the moment it passes the limit (#15
         controller.enqueue(new Uint8Array(chunk));
       },
     }, { highWaterMark: 0 });
-    return { stream, stats, limitOffset: head.length + MAX_ARCHIVE_CIPHERTEXT_CHARACTERS };
+    return { stream, stats, limitOffset: head.length + V1_MAX_ARCHIVE_CIPHERTEXT_CHARACTERS };
   }
 
-  it("refuses a ciphertext one character longer than MAX_ARCHIVE_CIPHERTEXT_CHARACTERS with 413 archive_too_large", async () => {
+  it("refuses a ciphertext one character longer than V1_MAX_ARCHIVE_CIPHERTEXT_CHARACTERS with 413 archive_too_large", async () => {
     // Catches: no running count (the garbage would decrypt to the end and fail its tag as 422 instead), or an off-by-one count.
-    const { stream } = oversizedEnvelope(MAX_ARCHIVE_CIPHERTEXT_CHARACTERS + 1);
+    const { stream } = oversizedEnvelope(V1_MAX_ARCHIVE_CIPHERTEXT_CHARACTERS + 1);
     seedEmptyHousehold();
     await expect(previewPortableImport(userId, householdId, stream, passphrase))
       .rejects.toMatchObject({ code: "archive_too_large", status: 413 });
@@ -587,7 +599,7 @@ describe("an oversized ciphertext is refused the moment it passes the limit (#15
 
   it("stops reading the file at that character, not at the end of the file", async () => {
     // Catches: a count checked only once the whole ciphertext has been read and decrypted.
-    const { stream, stats, limitOffset } = oversizedEnvelope(MAX_ARCHIVE_CIPHERTEXT_CHARACTERS + 64 * MIB);
+    const { stream, stats, limitOffset } = oversizedEnvelope(V1_MAX_ARCHIVE_CIPHERTEXT_CHARACTERS + 64 * MIB);
     seedEmptyHousehold();
     await expect(previewPortableImport(userId, householdId, stream, passphrase))
       .rejects.toMatchObject({ code: "archive_too_large", status: 413 });
@@ -619,7 +631,7 @@ describe("the upload decrypts to the same bytes however it is split (#1566)", ()
   it("splits of the file itself, at every offset of a base64 group and a JSON token", async () => {
     // Catches: a decode that loses the carry between 4-character groups, or a tokenizer that drops a split token.
     const file = await sealedFile(smallPayload(randomBytes(5_000)), 1_000);
-    const expected = decryptPortableArchive(JSON.parse(file.toString("utf8")), passphrase);
+    const expected = await decryptPortableArchive(JSON.parse(file.toString("utf8")), passphrase);
     for (const sizes of chunkRuns()) {
       mocks.selectQueues.clear();
       seedEmptyHousehold();
@@ -642,7 +654,7 @@ describe("the upload decrypts to the same bytes however it is split (#1566)", ()
       };
     };
     const file = await sealedFile(smallPayload(randomBytes(5_000)), 1_000);
-    const expected = decryptPortableArchive(JSON.parse(file.toString("utf8")), passphrase);
+    const expected = await decryptPortableArchive(JSON.parse(file.toString("utf8")), passphrase);
     const upload = await encodeForm(archiveForm({ householdId, passphrase }, file));
     for (const sizes of chunkRuns()) {
       mocks.selectQueues.clear();
@@ -663,7 +675,7 @@ describe("the upload decrypts to the same bytes however it is split (#1566)", ()
 });
 
 describe("everything outside the ciphertext is capped, so a stuffed envelope is refused unread (#1566)", () => {
-  // The cap is MAX_ARCHIVE_FILE_BYTES - MAX_ARCHIVE_CIPHERTEXT_CHARACTERS (64 KiB): the envelope Orbit writes is well under a KiB.
+  // The cap is V1_MAX_ARCHIVE_FILE_BYTES - V1_MAX_ARCHIVE_CIPHERTEXT_CHARACTERS (64 KiB): the envelope Orbit writes is well under a KiB.
   const STUFFING_BYTES = 64 * MIB;
 
   /**
@@ -671,9 +683,9 @@ describe("everything outside the ciphertext is capped, so a stuffed envelope is 
    * held) put between `before` and `after`, with how many bytes of the file
    * the reader pulled. `offset` is where the stuffing begins.
    */
-  function stuffedFile(shape: (envelope: { head: string; ciphertext: string; tail: string }) => { before: string; after: string }, fill: string) {
+  async function stuffedFile(shape: (envelope: { head: string; ciphertext: string; tail: string }) => { before: string; after: string }, fill: string) {
     const block = Buffer.alloc(65_536, fill);
-    const archive = encryptPortableArchive(Buffer.from(JSON.stringify(smallPayload(randomBytes(5_000)))), passphrase);
+    const archive = await legacyArchive(Buffer.from(JSON.stringify(smallPayload(randomBytes(5_000)))), passphrase);
     const { before, after } = shape({
       head: `{"version":1,"algorithm":"aes-256-gcm","kdf":"scrypt","salt":"${archive.salt}","iv":"${archive.iv}",`,
       ciphertext: `"ciphertext":"${archive.ciphertext}"`,
@@ -708,7 +720,7 @@ describe("everything outside the ciphertext is capped, so a stuffed envelope is 
 
   it.each(shapes)("refuses %s as archive_invalid, long before the end of the file, leaving no file", async (_label, shape, fill) => {
     // Catches: an envelope read with no cap on what is not ciphertext (the process would hold the stuffing, a string at a time, to the end of the file).
-    const stuffed = stuffedFile(shape, fill);
+    const stuffed = await stuffedFile(shape, fill);
     seedEmptyHousehold();
     const watcher = observe();
 

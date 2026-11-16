@@ -10,6 +10,7 @@ import { discardImapReviewItem, purgeExpiredImapStaging } from "@/server/mail-in
 import { cleanupIntegrationEnvironment, createIntegrationFixture, type IntegrationFixture } from "./support/fixtures";
 import { callRoute, callRouteForSession, loadRoute } from "./support/request-event";
 import { syntheticPdf } from "../support/synthetic-documents";
+import { sealedHash } from "./support/imap-attachment-seed";
 
 /**
  * The staged-attachment preview route's authorization boundary (#1155):
@@ -55,7 +56,6 @@ async function seedStagedReceipt(fixture: IntegrationFixture, options: {
     mailbox: "private",
     mailboxUidValidity: `staged-preview-${receiptId.slice(0, 8)}`,
     mailboxUid: 900,
-    contentSha256: randomUUID().replaceAll("-", ""),
     recipientAliasSha256: `staged-preview-alias-${receiptId.slice(0, 8)}`,
     userId: recipientUserId,
     householdId: options.householdId === undefined ? fixture.household.id : options.householdId,
@@ -69,7 +69,7 @@ async function seedStagedReceipt(fixture: IntegrationFixture, options: {
     displayName: held.displayName,
     mediaType: held.mediaType,
     sizeBytes: held.sizeBytes,
-    contentSha256: held.contentSha256,
+    ...await sealedHash(receiptId, held.id, held.contentSha256),
     storageKey: held.storageKey,
     ciphertextSize: held.ciphertextSize,
     ...held.envelope,
@@ -111,15 +111,15 @@ describe("the staged attachment preview route", () => {
     });
 
     expect(response.status).toBe(200);
-    expect(response.headers.get("content-type")).toBe("image/png");
+    expect(response.headers.get("content-type")).toBe("image/jpeg");
     expect(response.headers.get("cache-control")).toBe("private, no-store");
     expect(response.headers.get("content-disposition")).toBe("inline");
     expect(response.headers.get("content-security-policy")).toBe("default-src 'none'; sandbox");
     expect(response.headers.get("x-content-type-options")).toBe("nosniff");
     const body = Buffer.from(await response.arrayBuffer());
     expect(response.headers.get("content-length")).toBe(String(body.length));
-    // PNG magic bytes: a real render, not a stub standing in for one.
-    expect(body.subarray(0, 4)).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    // JPEG magic bytes: a real pdftoppm draw (#1436), not a stub standing in for one.
+    expect(body.subarray(0, 3)).toEqual(Buffer.from([0xff, 0xd8, 0xff]));
 
     const after = await getDb().select({ id: documents.id }).from(documents);
     expect(after.length).toBe(before.length);

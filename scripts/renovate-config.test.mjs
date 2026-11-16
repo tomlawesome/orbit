@@ -36,3 +36,38 @@ describe("renovate.json stays valid for Renovate's RE2 (#1218)", () => {
     expect(line).not.toMatch(cached);
   });
 });
+
+/*
+ * #1791: the private-details check refuses a real email address in a commit's
+ * author or committer, and Renovate's commits failed it. renovate.json must set
+ * gitAuthor to `Name <local@domain>` with a domain under `.invalid` (RFC 6761),
+ * which can never receive mail. The shared check's rules live outside this
+ * repository (ai/agent-infra#32), so whether it accepts `.invalid` is not tested here.
+ */
+describe("renovate.json commits under an .invalid address (#1791)", () => {
+  const author = config.gitAuthor;
+  const shape = /^([^<>@]+?)\s*<([^<>\s@]+)@([^<>\s@]+)>$/;
+
+  it("sets gitAuthor", () => {
+    expect(typeof author, "renovate.json has no gitAuthor").toBe("string");
+  });
+
+  it("is one name followed by exactly one address in angle brackets", () => {
+    const m = typeof author === "string" ? author.match(shape) : null;
+    expect(m, `gitAuthor ${JSON.stringify(author)} is not "Name <local@domain>"`).not.toBeNull();
+    expect(m?.[1].trim()).not.toBe("");
+  });
+
+  it("has an address whose domain ends in .invalid", () => {
+    const domain = typeof author === "string" ? author.match(shape)?.[3] : undefined;
+    expect(domain, "no address domain found").toBeDefined();
+    expect(domain).toMatch(/[^.]\.invalid$/i);
+  });
+
+  it("has no second address anywhere in the field", () => {
+    const s = typeof author === "string" ? author : "";
+    expect(s.split("@").length - 1, "gitAuthor must hold exactly one address").toBe(1);
+    expect(s.split("<").length - 1).toBe(1);
+    expect(s.split(">").length - 1).toBe(1);
+  });
+});

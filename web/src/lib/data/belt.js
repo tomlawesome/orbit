@@ -65,7 +65,7 @@ export function documentRowOf(doc) {
        thing Orbit can honestly hand over until the preview endpoint lands. */
     href: `/api/documents/${encodeURIComponent(doc.id)}/download`,
     /* GET /api/documents/{id}/preview (#476) — page one, whole, in its own
-       proportions. Always page one: Orbit records no page count (#1088). */
+       proportions; later pages by ?page= (#1300). */
     previewHref: `/api/documents/${encodeURIComponent(doc.id)}/preview`,
     /* #1088: what the preview card (create-v3's readcard) needs beyond the
        item-card's honest display above — the raw lifecycle state, so the
@@ -73,7 +73,10 @@ export function documentRowOf(doc) {
        unsupported, and the retention date a removed file's line names. */
     lifecycle: doc.lifecycle ?? null,
     mediaType: doc.mediaType ?? null,
+    pageCount: typeof doc.pageCount === "number" ? doc.pageCount : null,
     ready: Boolean(doc.ready),
+    /* #1419: held while the virus scanner is down, apart from `ready`. */
+    scanHeld: Boolean(doc.scanHeld),
     deleteAfter: doc.deleteAfter ? longDate(doc.deleteAfter) : null,
   };
 }
@@ -84,10 +87,11 @@ export function documentRowOf(doc) {
  * four states the focus block holds still for. Never a guess: `removed` and
  * `refused` are the server's own lifecycle, `scanning` is simply "not ready
  * yet", and `undrawable` is everything ready and clean that is still not one
- * of the three kinds the renderer understands.
+ * of the three kinds the renderer understands. `held` (#1419) is a paper not
+ * ready because the virus scanner could not be reached: waiting, not scanning.
  *
  * @param   {BeltDocumentRow} doc
- * @returns {"available" | "scanning" | "removed" | "refused" | "undrawable" | "staged"}
+ * @returns {"available" | "scanning" | "held" | "removed" | "refused" | "undrawable" | "staged"}
  */
 export function documentPreviewStateOf(doc) {
   /* #1155: a suggestion's paper is staged with the mail, not stored -- there
@@ -104,6 +108,7 @@ export function documentPreviewStateOf(doc) {
   }
   if (doc.lifecycle === "pending_deletion") return "removed";
   if (doc.lifecycle === "rejected") return "refused";
+  if (!doc.ready && doc.scanHeld) return "held";
   if (!doc.ready) return "scanning";
   if (!doc.mediaType || !PREVIEW_SUPPORTED_MEDIA_TYPES.has(doc.mediaType)) return "undrawable";
   return "available";
@@ -125,7 +130,9 @@ export function documentPreviewStateOf(doc) {
  * @property {string} previewHref
  * @property {?string} lifecycle
  * @property {?string} mediaType
+ * @property {?number} [pageCount]  pages, when the server knows them (#1436)
  * @property {boolean} ready
+ * @property {boolean} [scanHeld]  held while the virus scanner is down (#1419)
  * @property {?string} deleteAfter  "9 September 2026", when the file is on the clock
  * @property {boolean} [staged]  a suggestion's paper (#1145): it rides with the
  *   mail and is attached only on acceptance -- no `documents` row, and no
@@ -160,17 +167,20 @@ export const plateOfName = (name) => {
  */
 function stagedDocsOf(suggestion) {
   const arrived = suggestion.receivedAt ? longDate(suggestion.receivedAt) : "unknown";
-  const named = suggestion.attachments?.map((a) => ({
+  /* #1398: a file the scanner flagged is never offered to open or attach. */
+  const named = suggestion.attachments?.filter((a) => a.scanState !== "flagged").map((a) => ({
     name: a.displayName ?? "forwarded document",
     size: sizeWords(a.sizeBytes),
     clean: a.scanState === "clean",
+    /* #1398: a file the scanner flagged is never drawn: it has no preview route. */
+    flagged: a.scanState === "flagged",
     attachmentId: a.id ?? null,
     mediaType: a.mediaType ?? null,
   }));
   const count = suggestion.attachmentCount ?? 0;
   const papers = named ?? Array.from({ length: count }, (_, j) => ({
     name: count === 1 ? "forwarded document" : `forwarded document ${j + 1}`, size: "unknown size", clean: false,
-    attachmentId: null, mediaType: null,
+    flagged: false, attachmentId: null, mediaType: null,
   }));
   return papers.map((paper, j) => ({
     id: `${suggestion.id}-paper-${j + 1}`,
@@ -185,7 +195,7 @@ function stagedDocsOf(suggestion) {
     // receiptId and id are the same value on a ReceiptSuggestion (used for
     // clarity); the fallback only matters to the type checker; ItemView
     // widens receiptId to optional through Partial<ReceiptSuggestion>.
-    previewHref: paper.attachmentId && paper.mediaType === "application/pdf"
+    previewHref: paper.attachmentId && paper.mediaType === "application/pdf" && !paper.flagged
       ? stagedPreviewHref(suggestion.receiptId ?? suggestion.id, paper.attachmentId) : "",
     lifecycle: null,
     mediaType: paper.mediaType,

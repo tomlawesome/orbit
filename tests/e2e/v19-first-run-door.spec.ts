@@ -179,8 +179,11 @@ test("a fresh sign-in returned to /home meets the arrival, not the item form", a
      the button is armed by a name, not that it repeats one. */
   await expect(page.locator("#gobtn")).toHaveText("Create");
   await expect(page.locator("#gobtn")).toBeEnabled();
-  const zone = await page.locator("#tz").inputValue();
-  const money = await page.locator("#cur").inputValue();
+  /* #1468: the pickers are buttons now; #tz shows the zone as zoneLabel does (underscores as spaces), #cur the code. */
+  const zone = ((await page.locator("#tz").textContent()) ?? "").trim().replaceAll(" ", "_");
+  const money = ((await page.locator("#cur").textContent()) ?? "").trim();
+  expect(zone, "the zone the drawer shows").not.toBe("");
+  expect(money, "the currency the drawer shows").toMatch(/^[A-Z]{3}$/u);
   await page.locator("#gobtn").click();
 
   /* THE LANDING: the browser actually reaches /home --

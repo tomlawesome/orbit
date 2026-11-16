@@ -28,7 +28,7 @@ fail() {
 }
 
 usage() {
-  printf 'Usage: %s [--check|--check-rollback|--init|--set-oidc-secret|--set-deployment-profile PRESET [MODEL]|--preflight [--file F]|--migrate [--transaction] [--file F] ...]\n' "$0" >&2
+  printf 'Usage: %s [--check|--check-rollback|--init|--set-oidc-secret|--set-deployment-profile PRESET [MODEL]|--set-scanner on|off|--preflight [--file F]|--migrate [--transaction] [--file F] ...]\n' "$0" >&2
 }
 
 is_valid_orbit_image() {
@@ -197,7 +197,7 @@ run_configuration_contract() {
 
 flow="${1:-}"
 case "$flow" in
-  "" | --init | --set-oidc-secret | --set-deployment-profile | --check | --check-rollback | --preflight | --migrate) ;;
+  "" | --init | --set-oidc-secret | --set-deployment-profile | --set-scanner | --check | --check-rollback | --preflight | --migrate) ;;
   *)
     usage
     exit 2
@@ -216,6 +216,14 @@ case "$flow" in
       exit 2
     fi
     ;;
+  # ClamAV on or off (#1170): DOCUMENT_SCAN_MODE and the scanner-off Compose
+  # overlay, written together by the engine; the next update applies it.
+  --set-scanner)
+    if [[ $# -ne 2 || ( "$2" != on && "$2" != off ) ]]; then
+      usage
+      exit 2
+    fi
+    ;;
 esac
 
 resolve_engine_image
@@ -226,6 +234,7 @@ case "$flow" in
   --init) run_engine "$repo_dir" rw "$(init_input)" configure --init ;;
   --set-oidc-secret) run_engine "$repo_dir" rw "$(secret_input)" configure --set-oidc-secret ;;
   --set-deployment-profile) run_engine "$repo_dir" rw none configure "$@" ;;
+  --set-scanner) run_engine "$repo_dir" rw none configure "$@" ;;
   --check) run_engine "$repo_dir" ro none check ;;
   --check-rollback) run_engine "$repo_dir" ro none check --rollback ;;
   --preflight | --migrate) run_configuration_contract "$@" ;;

@@ -271,6 +271,8 @@ function parseRules(lines) {
   return items.flatMap((item) => {
     // #1698: the shared back-merge skip's rule; its variable is unset in every context here.
     if (/^\s*!reference \[\.backmerge-skip, job_rule\]\s*$/u.test(item[0])) return [{ if: '$BACKMERGE_EMPTY == "true"', when: "never" }];
+    // #1737: the dev-landing job rule; DEV_LANDING is set only by a dev push's landing pipeline, which runs gitleaks and private-details alone, so it is unset here.
+    if (/^\s*!reference \[\.dev-landing, job_rule\]\s*$/u.test(item[0])) return [{ if: '$DEV_LANDING == "true"', when: "never" }];
     const alias = /^\s*\*(\S+)\s*$/u.exec(item[0]);
     if (!alias) return [mappingToRule(item)];
     expect(byAnchor.has(alias[1]), `*${alias[1]} has no anchor in .gitlab-ci.yml`).toBe(true);

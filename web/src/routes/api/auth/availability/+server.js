@@ -92,7 +92,7 @@ export async function GET() {
   }
   let emailSecondFactor = false;
   try {
-    emailSecondFactor = secondFactorConfigured();
+    emailSecondFactor = await secondFactorConfigured();
   } catch {
     emailSecondFactor = false;
   }

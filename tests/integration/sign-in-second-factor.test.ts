@@ -35,11 +35,25 @@ import { ORIGIN } from "./support/auth";
 import { cleanupIntegrationEnvironment } from "./support/fixtures";
 import { callRoute, loadRoute } from "./support/request-event";
 import { readSetCookie } from "./support/set-cookie";
+import { clearSending, setUpSending } from "./support/mail-sending-1629";
 
 /* Mail is captured at the transport library, as the relay tests do. */
 const mail = vi.hoisted(() => ({
   sent: [] as Array<{ from: string; to: string; subject: string; text: string }>,
 }));
+
+/* S-data3-1: the factor's door reads the sending row; this seam lets a case
+   make that read fail. Until a case says otherwise the real answer is used. */
+const seam = vi.hoisted(() => ({
+  sendingConfigured: vi.fn<() => Promise<boolean>>(),
+  real: (async () => false) as () => Promise<boolean>,
+}));
+vi.mock("@/server/mail-in/sending-settings", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/server/mail-in/sending-settings")>();
+  seam.real = original.sendingConfigured;
+  seam.sendingConfigured.mockImplementation(seam.real);
+  return { ...original, sendingConfigured: seam.sendingConfigured };
+});
 
 vi.mock("nodemailer", () => {
   const createTransport = () => ({
@@ -69,8 +83,6 @@ const { GET: providerCallback } = await loadRoute("auth/callback");
 
 const ISSUER = "https://oidc.invalid.example";
 const PASSWORD = "a-correct-local-password";
-const SMTP_NAMES = ["SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASSWORD", "SMTP_FROM"] as const;
-const savedSmtp: Record<string, string | undefined> = {};
 const created: string[] = [];
 
 const METADATA: OidcMetadata = {
@@ -81,24 +93,22 @@ const METADATA: OidcMetadata = {
   code_challenge_methods_supported: ["S256"],
 };
 
-beforeEach(() => {
+beforeEach(async () => {
   mail.sent.length = 0;
-  for (const name of SMTP_NAMES) savedSmtp[name] = process.env[name];
-  /* A relay is configured: that, and only that, is what turns the factor on (ADR-0027 §2). */
-  process.env.SMTP_HOST = "smtp.example.test";
-  process.env.SMTP_PORT = "587";
-  process.env.SMTP_USER = "orbit-test";
-  process.env.SMTP_PASSWORD = "fake-smtp-password";
-  process.env.SMTP_FROM = "Orbit <orbit@example.test>";
+  /* A relay is configured: that, and only that, is what turns the factor on
+     (ADR-0027 §2). Since #1629 that is the sending row an administrator sets
+     on the Mail card, not SMTP_*. */
+  const administrator = await seedAccount("sending-admin");
+  await getDb().update(users).set({ isInstanceAdmin: true }).where(eq(users.id, administrator.id));
+  await setUpSending(administrator.id);
   vi.spyOn(oidc, "discoverProvider").mockResolvedValue(METADATA);
 });
 
 afterEach(async () => {
   vi.restoreAllMocks();
-  for (const name of SMTP_NAMES) {
-    if (savedSmtp[name] === undefined) delete process.env[name];
-    else process.env[name] = savedSmtp[name];
-  }
+  seam.sendingConfigured.mockReset();
+  seam.sendingConfigured.mockImplementation(seam.real);
+  await clearSending();
   const db = getDb();
   await db.delete(signInApprovals);
   await db.delete(instanceAuthority);
@@ -371,7 +381,7 @@ describe("a provider sign-in is never challenged (ADR-0027 §3)", () => {
 
 describe("with no mail relay the factor is off, as a whole (ADR-0027 §2)", () => {
   it("lets the password alone sign in, as the route did before the factor", async () => {
-    for (const name of ["SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD"]) delete process.env[name];
+    await clearSending();
     const account = await seedAccount("no-relay");
 
     const typed = await typePassword(account.email);
@@ -382,5 +392,36 @@ describe("with no mail relay the factor is off, as a whole (ADR-0027 §2)", () =
     expect(await sessionUserId(token!)).toBe(account.id);
     expect(mail.sent).toEqual([]);
     expect(await approvalRows(account.id)).toEqual([]);
+  });
+});
+
+describe("the factor fails closed when its setting cannot be read (ADR-0027 §2)", () => {
+  it("refuses the sign-in with a temporary 503, signs nobody in, and proceeds normally on the next attempt", async () => {
+    const account = await seedAccount("read-fails");
+    seam.sendingConfigured.mockRejectedValueOnce(new Error("connection reset"));
+
+    const refused = await typePassword(account.email);
+
+    expect(refused.status).toBe(503);
+    expect(refused.headers.get("cache-control")).toBe("no-store");
+    const body = (await refused.json()) as { error?: { code?: string; message?: string } };
+    expect(body.error?.code).toBe("sign_in_unavailable");
+    // It must not say which subsystem failed.
+    for (const word of ["mail", "sending", "database", "postgres"]) {
+      expect((body.error?.message ?? "").toLowerCase()).not.toContain(word);
+    }
+    expect(sessionCookieOf(refused)).toBeUndefined();
+    expect(readSetCookie(refused, pendingSignInCookieName(getAuthConfig()))).toBeUndefined();
+    expect(await approvalRows(account.id)).toEqual([]);
+    expect(mail.sent).toEqual([]);
+
+    // Temporary: with the read working again the ordinary pending answer follows.
+    const retried = await typePassword(account.email);
+    expect(retried.status).toBe(200);
+    const next = (await retried.json()) as { authenticated: boolean; pending?: unknown };
+    expect(next.authenticated).toBe(false);
+    expect(next.pending).toBeDefined();
+    expect(mail.sent).toHaveLength(1);
+    expect(await approvalRows(account.id)).toHaveLength(1);
   });
 });

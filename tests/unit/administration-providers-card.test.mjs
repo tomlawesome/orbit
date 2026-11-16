@@ -120,7 +120,7 @@ describe("the Sign-in providers card (#1676, round 3)", () => {
   it("refuses with one problem line and opens nothing when outgoing mail isn't set up", () => {
     expect(flat).toMatch(
       new RegExp(
-        `not started (?:—|&mdash;) outgoing mail isn${tick}t set up, and .{0,40}need a setup link\\. Set it up under .{0,80}Mail machinery.{0,20} first\\.`,
+        `not started (?:—|&mdash;) outgoing mail isn${tick}t set up, and .{0,40}need a setup link\\. Set it up under .{0,80}Mail<.{0,20} first\\.`,
         "u",
       ),
     );

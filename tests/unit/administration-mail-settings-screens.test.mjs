@@ -127,12 +127,17 @@ function stub(spec) {
   return out;
 }
 
+/* Compiling the whole administration page is CPU work with no event to wait
+   for: a few seconds on a quiet host, over 10 s (vitest's hook default) on the
+   shared host at load 30-50 (#1851). A busy machine says nothing about the
+   page, so the bound only has to catch a real hang. */
+const PAGE_COMPILE_TIMEOUT_MS = 60_000;
 beforeAll(async () => {
   dir = mkdtempSync(path.join(tmpdir(), "orbit-admin-card-"));
   mkdirSync(dir, { recursive: true });
   ({ mount, unmount, flushSync } = await nativeImport(CLIENT()));
   Page = (await nativeImport(url(load(path.join(SRC, "routes/administration/+page.svelte"))))).default;
-});
+}, PAGE_COMPILE_TIMEOUT_MS);
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
 /** @type {Array<() => void>} */
@@ -267,7 +272,7 @@ describe.each(LAYOUTS)("administration %s: no trusted authserv-id any more (#168
     expect(textOf(layout)).not.toContain("mx.provider.test");
   });
 
-  it.each(["mailcow", "other", "gmail", "outlook"])("shows no DKIM-only warning for the %s profile with nothing set", async (providerProfile) => {
+  it.each(["mailcow", "other", "gmail"])("shows no DKIM-only warning for the %s profile with nothing set", async (providerProfile) => {
     await mountWith(screen({ providerProfile, trustedAuthservId: "", effectiveAuthservId: "" }));
     expect(textOf(layout)).not.toMatch(/only forwards with a valid DKIM signature/iu);
     expect(textOf(layout)).not.toMatch(/no mail will be matched/iu);

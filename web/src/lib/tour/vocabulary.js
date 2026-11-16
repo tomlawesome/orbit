@@ -1243,10 +1243,10 @@ export function createFilmContext({
    *  @type {string | null | undefined} */
   let wornOver;
 
-  /** A swatch's title is the product's pack name with its spaces and hyphens
-   *  dropped — `packOf` in web/src/routes/home/swatches.js, the one line the
-   *  product's own click handler uses. Repeated rather than imported: the
-   *  tour is a lib and does not reach into a route's module.
+  /** A swatch's title is the product's pack id with a space or hyphen added
+   *  ("after dark", "star-chart"; the roster is THEME_TABLE in $lib/theme.js),
+   *  so dropping them gives the id back. Repeated rather than imported: the
+   *  tour keeps its own copy of the rule.
    *  @param {string} pack */
   const packName = (pack) => pack.replace(/[\s-]/gu, "");
 

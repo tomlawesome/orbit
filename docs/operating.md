@@ -70,6 +70,24 @@ background, and `stop` stops it without removing anything. Keep using
 On start, Orbit waits for its database, applies any pending database updates
 (migrations), starts its reminder scheduler, then opens for visitors.
 
+### Moving or renaming the deployment folder
+
+Stop Orbit, move or rename the folder, then run Update from the new folder.
+Update sees the containers were made in a folder that is gone. At a terminal
+it asks: run from this folder (the containers are made again, your data is
+kept), or put the folder back at its old path first. Without a terminal, or
+with `--plain`, it refuses and names the old path; run it again with
+`ORBIT_INSTALL_FOLDER_MOVED=recreate` to make the containers again from this
+folder, or put the folder back and update from there. Orbit never moves the
+folder for you. To do it by hand instead, run this from the new folder:
+
+```sh
+docker compose --env-file .env-orbit up -d --force-recreate
+```
+
+Plain `up -d` is not enough after a move: it restarts the old containers,
+which still point at the old folder's files. Your data is kept either way.
+
 ## Change the settings
 
 Every setting lives in `.env-orbit` and is listed in
@@ -183,3 +201,9 @@ has the detail, including machines with no internet access.
    machine.
 5. Read [Encryption at rest](encryption-at-rest.md) and decide whether the
    machine's disk needs encrypting. Orbit does not decide this for you.
+6. Leave room on the document disk for page pictures. Orbit draws every page
+   of every document once and keeps the picture, encrypted, so turning a page
+   is quick (#1433). Allow about 200 KB a page: about 600 MB for 1,000
+   three-page documents, at most about 20 MB for one 100-page document. The
+   pictures do not count against any quota. After an upgrade, existing
+   documents are drawn slowly in the background, at low priority.

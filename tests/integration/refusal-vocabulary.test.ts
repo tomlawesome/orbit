@@ -621,7 +621,12 @@ const pastTheTokenExchange: Record<string, string> = {
  * and is better placed than a copy here would be — not a way to excuse a code
  * nothing covers. The gate checks the pointer still leads somewhere.
  */
-const coveredElsewhere: Record<string, { file: string; why: string }> = {};
+const coveredElsewhere: Record<string, { file: string; why: string }> = {
+  sign_in_unavailable: {
+    file: "tests/integration/sign-in-second-factor.test.ts",
+    why: "the sending-row read has to fail under the right password, which only that suite's mocked sending seam can make happen",
+  },
+};
 
 /** The members of the `AuthErrorCode` union, read out of the source. */
 function authErrorCodes(): string[] {

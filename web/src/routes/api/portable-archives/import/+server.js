@@ -2,11 +2,12 @@ import { json } from "@sveltejs/kit";
 import { z } from "zod";
 
 import { requireRecentAuthentication } from "orbit/lib/auth/recent-auth";
-import { importPortableArchive, requirePortableArchiveAccess } from "orbit/server/portable-archive-repository";
+import { importPortableArchive, inspectPortableArchiveUpload, requirePortableArchiveAccess } from "orbit/server/portable-archive-repository";
 import { ARCHIVE_PASSPHRASE_MAX, ARCHIVE_PASSPHRASE_MIN } from "orbit/server/portable-archive-limits";
 
 import { write } from "$lib/server/api.js";
-import { jsonField, readArchiveUpload } from "$lib/server/archive-upload.js";
+import { awaitArchiveSlot } from "$lib/server/archive-slot.js";
+import { jsonField, readArchiveUpload, spoolThenProcess } from "$lib/server/archive-upload.js";
 
 const fieldsSchema = z.object({
   householdId: z.uuid(),
@@ -30,7 +31,12 @@ const fieldsSchema = z.object({
  * Bringing an archive in writes into the household, so it re-challenges the
  * person in front of the screen every time (#1132, ADR-0023 §5), after the
  * membership check so an outsider is told only that the household is not
- * available. Both checks run before a byte of the archive file is read.
+ * available. Both checks run before a byte of the archive file is read; only
+ * then is the account's upload lane taken and the file spooled whole. The one
+ * archive slot is taken once the archive's manifest is on disk, mid-upload,
+ * for the early check of what has arrived (#1797), and at the latest once the
+ * file is whole (#1316; #1390 review, ruling 4; #1792): someone refused never
+ * holds either, and a second upload from the same account is a 429.
  */
 export const POST = write(async (event, session) => readArchiveUpload(
   event.request,
@@ -38,8 +44,14 @@ export const POST = write(async (event, session) => readArchiveUpload(
     const { currentPassword, ...body } = fieldsSchema.parse({ ...fields, conflictItemIds: jsonField(fields.conflictItemIds) });
     await requirePortableArchiveAccess(session.user.id, body.householdId, "import");
     await requireRecentAuthentication(event, session, { currentPassword }, "archive_import");
-    return json(await importPortableArchive({ userId: session.user.id, ...body, archive: await archiveFile() }), {
-      headers: { "Cache-Control": "no-store" },
-    });
+    return spoolThenProcess(event.request, session.user.id, archiveFile, async (archive) => json(
+      await importPortableArchive({ userId: session.user.id, ...body, archive }),
+      { headers: { "Cache-Control": "no-store" } },
+    ), (spool, until) => inspectPortableArchiveUpload(
+      spool,
+      { userId: session.user.id, ...body },
+      until,
+      (waitUntil) => awaitArchiveSlot(undefined, { until: waitUntil }),
+    ));
   },
 ));

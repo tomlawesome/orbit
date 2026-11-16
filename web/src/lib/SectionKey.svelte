@@ -2,8 +2,8 @@
   /*
    * The key under the sky (#1466, round 6 M, m-colour-by-mark.html `.key`):
    * one dot and name for each colour a visible section wears, in the four
-   * colours' order, each named for the first visible section (by position)
-   * that wears it (chart.js `sectionKeyOf`). The desk centres it near the
+   * colours' order, each named for every visible section (by position)
+   * that wears it, joined with " · " (chart.js `sectionKeyOf`). The desk centres it near the
    * sky's foot; the phone sets it under the sky, wrapping.
    */
   import { sectionKeyOf } from "$lib/data/chart.js";

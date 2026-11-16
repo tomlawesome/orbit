@@ -72,6 +72,7 @@ export type ConfigureEngineRefusalCode =
   | "secret-file-invalid"
   | "orbit-image-invalid"
   | "deployment-profile-invalid"
+  | "scanner-mode-invalid"
   | "guided-configuration-invalid"
   | "oidc-secret-invalid"
   | "oidc-secret-placeholder-invalid"
@@ -815,6 +816,150 @@ export function setDeploymentProfile(deployDir: string, preset: string, model: s
   ]);
 
   return withCreatedLine(created, `Orbit deployment profile saved: ${preset}.`);
+}
+
+// --- private scanner (ClamAV) on or off (#1170) ---------------------------
+
+/** The Compose overlay that leaves orbit-clamav out (a profile nothing activates). */
+export const SCANNER_OFF_OVERLAY = "docker-compose.scanner-off.yml";
+
+export type ScannerMode = "on" | "off";
+
+/**
+ * A raw `.env-orbit` value read the way Compose's env-file parser reads it,
+ * as repair.sh's read_environment_value does (#1170 review): leading blanks
+ * go; for a quoted value the comment is looked for only after the closing
+ * quote; a trailing comment (blanks, then "#") and trailing blanks come off;
+ * then one pair of matching quotes. `"disabled"`, `'disabled'` and
+ * ` disabled  # note` all read as `disabled`.
+ */
+export function composeEnvValue(raw: string): string {
+  let value = raw.replace(/\r$/u, "").replace(/^[ \t]+/u, "");
+  let head = "";
+  let tail = value;
+  const quote = value[0];
+  if ((quote === '"' || quote === "'") && value.indexOf(quote, 1) > 0) {
+    const close = value.indexOf(quote, 1);
+    head = value.slice(0, close + 1);
+    tail = value.slice(close + 1);
+  }
+  tail = tail.replace(/[ \t]#.*$/u, "").replace(/[ \t]+$/u, "");
+  value = head + tail;
+  if (value.length >= 2 && (value[0] === '"' || value[0] === "'") && value.endsWith(value[0])) value = value.slice(1, -1);
+  return value;
+}
+
+/** The last active assignment of `key`, as Compose reads it (later lines win). */
+function readAssignedValue(content: string, key: string): string | undefined {
+  let value: string | undefined;
+  for (const line of content.split("\n")) {
+    if (line.startsWith(`${key}=`)) value = composeEnvValue(line.slice(key.length + 1));
+  }
+  return value;
+}
+
+/** The overlay entry, written plainly or as `./docker-compose.scanner-off.yml`. */
+function isScannerOverlayEntry(file: string): boolean {
+  return file === SCANNER_OFF_OVERLAY || file === `./${SCANNER_OFF_OVERLAY}`;
+}
+
+/**
+ * The deployment's current scanner choice (#1170): `off` only when
+ * DOCUMENT_SCAN_MODE reads `disabled`; unset, a missing file and `required`
+ * are all `on`.
+ */
+export function readScannerMode(deployDir: string): ScannerMode {
+  let content: string;
+  try {
+    content = readFileSync(join(deployDir, ENVIRONMENT_FILE_NAME), "utf8");
+  } catch {
+    return "on";
+  }
+  return readAssignedValue(content, "DOCUMENT_SCAN_MODE") === "disabled" ? "off" : "on";
+}
+
+/**
+ * The managed-key writes that bring COMPOSE_FILE in step with
+ * DOCUMENT_SCAN_MODE (decision 2 of the #1170 design): `disabled` lists the
+ * overlay once, after every other file; `required` or unset lists it not at
+ * all. An unset COMPOSE_FILE stands for what Compose loads by default
+ * (docker-compose.yml, plus docker-compose.override.yml when present), the
+ * same reading backup.sh makes before it adds its own overlay. Empty when the
+ * two already agree, so an install that never chose writes nothing.
+ */
+function scannerOverlayPairs(deployDir: string, content: string, mode: string | undefined): Array<[string, string]> {
+  const separator = readAssignedValue(content, "COMPOSE_PATH_SEPARATOR") || ":";
+  const listed = readAssignedValue(content, "COMPOSE_FILE");
+  const files = (listed ?? "").split(separator).filter((file) => file !== "");
+  const others = files.filter((file) => !isScannerOverlayEntry(file));
+  if (mode === "disabled") {
+    if (files.length - others.length === 1 && isScannerOverlayEntry(files[files.length - 1])) return [];
+    if (others.length === 0) {
+      others.push("docker-compose.yml");
+      if (pathInfo(join(deployDir, "docker-compose.override.yml")).existsFollowing) others.push("docker-compose.override.yml");
+    }
+    return [["COMPOSE_FILE", [...others, SCANNER_OFF_OVERLAY].join(separator)]];
+  }
+  if (others.length === files.length) return [];
+  return [["COMPOSE_FILE", (others.length > 0 ? others : ["docker-compose.yml"]).join(separator)]];
+}
+
+function readEnvironmentContent(deployDir: string): string {
+  try {
+    return readFileSync(join(deployDir, ENVIRONMENT_FILE_NAME), "utf8");
+  } catch {
+    refuse(`Could not read ${ENVIRONMENT_FILE_NAME}.`, "environment-file-invalid");
+  }
+}
+
+/**
+ * syncScannerOverlay: derive the COMPOSE_FILE overlay entry from
+ * DOCUMENT_SCAN_MODE, the one source of truth (#1170). Idempotent. When the
+ * two disagree the mode wins, so `required` (or unset) with the overlay
+ * listed loses the overlay: when in doubt, scan. Never writes
+ * DOCUMENT_SCAN_MODE. Run by every install and update.
+ */
+export function syncScannerOverlay(deployDir: string): void {
+  const releaseLock = acquireDeployLock(deployDir, "orbit configure");
+  try {
+    const content = readEnvironmentContent(deployDir);
+    const pairs = scannerOverlayPairs(deployDir, content, readAssignedValue(content, "DOCUMENT_SCAN_MODE"));
+    if (pairs.length > 0) updateManagedKeysLocked(deployDir, pairs);
+  } finally {
+    releaseLock();
+  }
+}
+
+/**
+ * `configure --set-scanner on|off` (#1170): writes DOCUMENT_SCAN_MODE
+ * (`required` or `disabled`) and the matching COMPOSE_FILE entry in one
+ * atomic write. Repeating it changes nothing. Any other value is a usage
+ * refusal (exit 2 from the CLI), with nothing written.
+ */
+export function setScannerMode(deployDir: string, mode: ScannerMode): string {
+  if (mode !== "on" && mode !== "off") refuse("The scanner setting must be on or off.", "scanner-mode-invalid");
+  const created = ensureEnvironmentFile(deployDir);
+  const scanMode = mode === "on" ? "required" : "disabled";
+  const releaseLock = acquireDeployLock(deployDir, "orbit configure");
+  try {
+    const content = readEnvironmentContent(deployDir);
+    const pairs: Array<[string, string]> = [];
+    const current = readAssignedValue(content, "DOCUMENT_SCAN_MODE");
+    // "on" writes required only to undo disabled: unset already means
+    // required, so a default file stays byte-identical (#1170 design note).
+    const writeMode = mode === "off" ? current !== "disabled" : current === "disabled";
+    if (writeMode) pairs.push(["DOCUMENT_SCAN_MODE", scanMode]);
+    pairs.push(...scannerOverlayPairs(deployDir, content, scanMode));
+    if (pairs.length > 0) updateManagedKeysLocked(deployDir, pairs);
+  } finally {
+    releaseLock();
+  }
+  return withCreatedLine(
+    created,
+    mode === "on"
+      ? "Orbit private scanner saved: on (DOCUMENT_SCAN_MODE=required). Update the deployment to start orbit-clamav."
+      : "Orbit private scanner saved: off (DOCUMENT_SCAN_MODE=disabled); uploaded and mailed documents are not virus-scanned. Update the deployment to stop orbit-clamav.",
+  );
 }
 
 // --- configuration preflight (configuration.sh --preflight handoff) --------

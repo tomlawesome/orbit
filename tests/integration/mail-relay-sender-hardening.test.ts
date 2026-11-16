@@ -17,6 +17,7 @@ import { readRelaySettings } from "@/server/mail-in/relay-settings";
 import { hasVerifiedSenderAddress, listSenderAddresses, seedSenderAddress, userForVerifiedSender } from "@/server/mail-in/sender-addresses";
 import { cleanupIntegrationEnvironment, createIntegrationFixture, damageEnvelope, senderAddressColumns, type IntegrationFixture, type IntegrationSession } from "./support/fixtures";
 import { callRoute, callRouteForSession, loadRoute } from "./support/request-event";
+import { clearSending, setUpSending } from "./support/mail-sending-1629";
 
 /*
  * Issue #1403, the review of the decision 7c code. One failing case per
@@ -85,13 +86,10 @@ const savedEnvironment: Record<string, string | undefined> = {};
 beforeEach(async () => {
   mail.sent.length = 0;
   mail.failing = false;
-  for (const name of ["SMTP_PORT", "SMTP_FROM", "SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD", "APP_URL"]) savedEnvironment[name] = process.env[name];
-  delete process.env.SMTP_HOST;
-  delete process.env.SMTP_USER;
-  delete process.env.SMTP_PASSWORD;
-  process.env.SMTP_HOST = "smtp.example.test"; process.env.SMTP_PORT = "587"; process.env.SMTP_USER = "orbit-test"; process.env.SMTP_PASSWORD = "fake-smtp-password";
-  process.env.SMTP_FROM = "Orbit <orbit@example.test>";
+  for (const name of ["APP_URL"]) savedEnvironment[name] = process.env[name];
   fixture = await createIntegrationFixture("sender-hardening");
+  /* Outgoing mail is the sending row since #1629, not SMTP_* (ADR-0017 amendment). */
+  await setUpSending(fixture.users.admin.id);
 });
 
 afterEach(async () => {
@@ -105,6 +103,7 @@ afterEach(async () => {
   await db.delete(mailInRelays);
   await db.update(mailInMailbox).set({ passwordSecretId: null, aliasKeySecretId: null });
   await db.delete(mailInMailbox);
+  await clearSending();
   await db.delete(mailInSecrets);
   await db.delete(auditLog);
   await fixture.cleanup();
@@ -213,7 +212,9 @@ describe("finding 1: a damaged stored address is replaced, unverified", () => {
   });
 
   /* Three rows for one member: the registered address, another readable
-     address, and a damaged one. Only the registered address stays. */
+     address, and a damaged one. Since #1650 (54553) a manual row is a valid
+     extra address, and since #1810 item 4 a damaged one is never deleted on
+     read either: all three stay, the damaged one listed unreadable. */
   async function threeRows() {
     const userId = fixture.users.member.id;
     await seedSenderAddress(userId);
@@ -225,36 +226,42 @@ describe("finding 1: a damaged stored address is replaced, unverified", () => {
       ...await senderAddressColumns(otherId, "harlow-someone-else@example.test"),
       source: "manual",
     }).returning({ id: mailInSenderAddresses.id });
+    const unreadableId = randomUUID();
+    const damagedColumns = await senderAddressColumns(unreadableId, "harlow-damaged-extra@example.test");
     const [unreadable] = await getDb().insert(mailInSenderAddresses).values({
+      id: unreadableId,
       userId,
-      addressEnc: registered.addressEnc ? damageEnvelope(registered.addressEnc) : "damaged",
+      ...damagedColumns,
+      addressEnc: damageEnvelope(damagedColumns.addressEnc!),
       source: "manual",
     }).returning({ id: mailInSenderAddresses.id });
     return { registered: registered.id, other: other.id, unreadable: unreadable.id };
   }
 
-  it("with several rows, a relay read keeps only the registered address", async () => {
+  async function expectThreeKept(ids: { registered: string; other: string; unreadable: string }) {
+    const kept = (await rowsOf(fixture.users.member.id)).map((row) => row.id).sort();
+    expect(kept).toEqual([ids.registered, ids.other, ids.unreadable].sort());
+    const damaged = (await listSenderAddresses(fixture.users.member.id)).find((view) => view.id === ids.unreadable);
+    expect(damaged?.address).toBeNull();
+    expect(damaged?.metadataStatus?.address).toBe("metadata_integrity_failed");
+  }
+
+  it("with several rows, a relay read keeps all three, the damaged extra listed unreadable and never deleted", async () => {
     await turnMailInOn();
     const ids = await threeRows();
 
     await readRelaySettings(memberActor());
 
-    const kept = (await rowsOf(fixture.users.member.id)).map((row) => row.id);
-    expect(kept).toEqual([ids.registered]);
-    expect(kept).not.toContain(ids.unreadable);
-    expect(kept).not.toContain(ids.other);
+    await expectThreeKept(ids);
   });
 
-  it("with several rows, a send attempt keeps only the registered address", async () => {
+  it("with several rows, a send attempt keeps all three, the damaged extra listed unreadable and never deleted", async () => {
     const ids = await threeRows();
     const session = await fixture.session("member");
 
     await send(session);
 
-    const kept = (await rowsOf(fixture.users.member.id)).map((row) => row.id);
-    expect(kept).toEqual([ids.registered]);
-    expect(kept).not.toContain(ids.unreadable);
-    expect(kept).not.toContain(ids.other);
+    await expectThreeKept(ids);
   });
 });
 
@@ -291,8 +298,8 @@ describe("finding 2: the registered address changes outside the settings screen"
   });
 });
 
-describe("finding 6: no sending address but the registered one attributes", () => {
-  it("does not attribute mail to a member from a verified stored address that is not their registered one", async () => {
+describe("finding 6: only a member's own verified address attributes (#1650: extra addresses are valid again)", () => {
+  it("attributes a verified extra address to its own member and to nobody else", async () => {
     const userId = fixture.users.member.id;
     const stranger = "harlow-not-registered@example.test";
     expect(stranger).not.toBe(fixture.users.member.email);
@@ -301,27 +308,31 @@ describe("finding 6: no sending address but the registered one attributes", () =
       id: strangerId, userId, ...await senderAddressColumns(strangerId, stranger), source: "manual", verifiedAt: new Date(),
     });
 
-    expect(await userForVerifiedSender(stranger)).toBeUndefined();
-    expect(await hasVerifiedSenderAddress(userId)).toBe(false);
+    expect(await userForVerifiedSender(stranger)).toBe(userId);
+    expect(await userForVerifiedSender(stranger)).not.toBe(fixture.users.owner.id);
+    expect(await hasVerifiedSenderAddress(userId)).toBe(true);
+    expect(await userForVerifiedSender(fixture.users.member.email)).toBeUndefined();
   });
 });
 
 describe("finding 3: the mailer fails", () => {
-  /* The attempt still counts (the limit counts attempts), but no link was
-     sent, so none is reported as outstanding (release audit, #1316, M-R8). */
-  it("reports no pending link after the failed send, in the relay read and the list", async () => {
+  /* The attempt still counts (the limit counts attempts). Since #1810 R2 the
+     press answers before the mailer is called and a refusal is the
+     administrator's, so the press's link is not rolled back: the member sees
+     "check sent" and can press again after a minute. */
+  it("answers 202 and keeps the press's link after the failed send, in the relay read and the list", async () => {
     await turnMailInOn();
     const session = await fixture.session("member");
     mail.failing = true;
 
     const response = await send(session);
 
-    expect(response.status).not.toBe(202);
+    expect(response.status).toBe(202);
     expect(mail.sent).toEqual([]);
     const reading = (await readRelaySettings(memberActor())).sender;
-    expect(reading).toMatchObject({ verified: false, verificationPending: false });
+    expect(reading).toMatchObject({ verified: false, verificationPending: true });
     const [view] = await listSenderAddresses(fixture.users.member.id);
-    expect(view.verificationPending).toBe(false);
+    expect(view.verificationPending).toBe(true);
   });
 });
 
