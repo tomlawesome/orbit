@@ -27,6 +27,7 @@ import { callRouteForSession, loadRoute } from "./support/request-event";
 import { seedStoredDocuments } from "./support/stored-documents";
 import { syntheticPdf } from "../support/synthetic-documents";
 import { openV2, readV2Header } from "../support/portable-archive-v2";
+import { sealedHash } from "./support/imap-attachment-seed";
 
 /* #1771: `documents.content_sha256` moves under the household key.
    Specification: the issue, and build note 55084 (expand -> backfill ->
@@ -248,13 +249,13 @@ describe("every path that creates a document row seals the hash and leaves the p
       recipientUserId: fixture.users.member.id, receiptId,
     });
     await getDb().insert(imapIngestionMessages).values({
-      id: receiptId, mailbox: "private", mailboxUidValidity: `sealed-${receiptId.slice(0, 8)}`, mailboxUid: 1, contentSha256: randomUUID().replaceAll("-", ""),
+      id: receiptId, mailbox: "private", mailboxUidValidity: `sealed-${receiptId.slice(0, 8)}`, mailboxUid: 1,
       recipientAliasSha256: `sealed-${receiptId.slice(0, 8)}`, userId: fixture.users.member.id, householdId: fixture.household.id,
       status: "pending_review", expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "pending",
     });
     await getDb().insert(imapIngestionAttachments).values({
       id: held.id, messageId: receiptId, displayName: held.displayName, mediaType: held.mediaType, sizeBytes: held.sizeBytes,
-      contentSha256: held.contentSha256, storageKey: held.storageKey, ciphertextSize: held.ciphertextSize, ...held.envelope, status: "stored",
+      ...await sealedHash(receiptId, held.id, held.contentSha256), storageKey: held.storageKey, ciphertextSize: held.ciphertextSize, ...held.envelope, status: "stored",
     });
     const result = await approveReviewedIntake(fixture.users.member.id, {
       operationId: randomUUID(),

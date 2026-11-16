@@ -77,7 +77,7 @@ const DESK = /** @type {Record<string, string[]>} */ ({
   /* item.png is the MOT's drawer on home since the belt retired (#1319) */
   home: ["home.png", "mobile.png", "item.png"], create: ["create.png"],
   inbox: ["inbox.png"], "household-hh-harlow-1": ["household.png"], "household-hh-seaside-4551": ["household.png"],
-  settings: ["settings.png"], "settings-mail": ["relay.png"], administration: ["administration.png"],
+  settings: ["settings.png"], administration: ["administration.png"],
   door: ["newcomer-drawer.png", "newcomer-drawer-error.png", "newcomer.png"],
   login: ["login.png", "door-mixed.png", "door-local.png", "door-identity.png", "door-claim.png"],
   setup: ["setup.png"], logout: ["logout.png"], 404: ["notfound.png"], 500: ["stumble.png"],

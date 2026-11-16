@@ -40,11 +40,44 @@ function declared(licence) {
   return trimmed;
 }
 
+/** The npm purl of a package; the document builder takes any other via `pkg.purl`. */
+const npmPurl = (pkg) => `pkg:npm/${pkg.name.replace(/^@/, "%40")}@${pkg.version}`;
+
+/** One SPDX package entry (SPDXID aside, which the document numbers). */
+export function spdxPackageOf(pkg) {
+  return {
+    SPDXID: "",
+    name: pkg.name,
+    versionInfo: pkg.version,
+    supplier: pkg.author ? `Person: ${pkg.author}` : "NOASSERTION",
+    downloadLocation: "NOASSERTION",
+    homepage: pkg.homepage || "NOASSERTION",
+    filesAnalyzed: false,
+    licenseConcluded: "NOASSERTION",
+    licenseDeclared: declared(pkg.licence),
+    copyrightText: "NOASSERTION",
+    externalRefs: [{
+      referenceCategory: "PACKAGE-MANAGER",
+      referenceType: "purl",
+      referenceLocator: pkg.purl ?? npmPurl(pkg),
+    }],
+  };
+}
+
+/** The document namespace: a hash of the sorted `name@version` list. */
+export function documentNamespaceOf(sorted) {
+  const identity = createHash("sha256")
+    .update(sorted.map((pkg) => `${pkg.name}@${pkg.version}`).join("\n"))
+    .digest("hex");
+  return `https://spdx.org/spdxdocs/orbit-shipped-packages-${identity}`;
+}
+
 /**
  * The document, from discoverInstalledPackages's `details` entries already
- * filtered to what ships.
+ * filtered to what ships. A package may carry its own `purl` (the apk ones,
+ * #1781); without one it is an npm package.
  *
- * @param {{ name: string, version: string, licence: string, author?: string, homepage?: string }[]} packages
+ * @param {{ name: string, version: string, licence: string, author?: string, homepage?: string, purl?: string }[]} packages
  * @param {{ created?: string }} [options]
  */
 export function spdxDocumentOf(packages, { created = "1970-01-01T00:00:00Z" } = {}) {
@@ -52,33 +85,14 @@ export function spdxDocumentOf(packages, { created = "1970-01-01T00:00:00Z" } = 
   for (const pkg of packages) unique.set(`${pkg.name}@${pkg.version}`, pkg);
   const sorted = [...unique.values()].sort((a, b) =>
     a.name.localeCompare(b.name, "en") || a.version.localeCompare(b.version, "en"));
-  const identity = createHash("sha256")
-    .update(sorted.map((pkg) => `${pkg.name}@${pkg.version}`).join("\n"))
-    .digest("hex");
   return {
     spdxVersion: "SPDX-2.3",
     dataLicense: "CC0-1.0",
     SPDXID: "SPDXRef-DOCUMENT",
     name: "orbit-shipped-packages",
-    documentNamespace: `https://spdx.org/spdxdocs/orbit-shipped-packages-${identity}`,
+    documentNamespace: documentNamespaceOf(sorted),
     creationInfo: { created, creators: ["Tool: orbit-about-sbom"] },
-    packages: sorted.map((pkg, index) => ({
-      SPDXID: `SPDXRef-Package-${index + 1}`,
-      name: pkg.name,
-      versionInfo: pkg.version,
-      supplier: pkg.author ? `Person: ${pkg.author}` : "NOASSERTION",
-      downloadLocation: "NOASSERTION",
-      homepage: pkg.homepage || "NOASSERTION",
-      filesAnalyzed: false,
-      licenseConcluded: "NOASSERTION",
-      licenseDeclared: declared(pkg.licence),
-      copyrightText: "NOASSERTION",
-      externalRefs: [{
-        referenceCategory: "PACKAGE-MANAGER",
-        referenceType: "purl",
-        referenceLocator: `pkg:npm/${pkg.name.replace(/^@/, "%40")}@${pkg.version}`,
-      }],
-    })),
+    packages: sorted.map((pkg, index) => ({ ...spdxPackageOf(pkg), SPDXID: `SPDXRef-Package-${index + 1}` })),
   };
 }
 

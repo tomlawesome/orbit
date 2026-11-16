@@ -60,7 +60,7 @@ test("a member opens About from the menu and sees the three cards", async ({ pag
 
   /* Card 2's index and the pictures it must credit; card 3 lists each licence once. */
   const index = screen.getByRole("navigation", { name: "Credits index" });
-  await expect(index.getByRole("link")).toHaveText([new RegExp(`^Pictures · ${CREDITS.length}$`), /^Fonts · 3$/, /^Libraries · (\d+|—)$/, /^Sidecar images · 4$/]);
+  await expect(index.getByRole("link")).toHaveText([new RegExp(`^Pictures · ${CREDITS.length}$`), /^Fonts · 3$/, /^Libraries · (\d+|—)$/, /^System packages · (\d+|—)$/, /^Sidecar images · 4$/]);
   const licences = await screen.locator("section.licences .kv b").allTextContents();
   expect(new Set(licences).size).toBe(licences.length);
 

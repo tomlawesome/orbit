@@ -17,7 +17,7 @@
   import ChooserCard from "$lib/editing/ChooserCard.svelte";
   import {
     ALIAS_GRACE_DAYS, JOB_KINDS, JOB_STATES, SETUP_LINK_DAYS, blankMailDraft, providerAsk, probeWords, fetchNowRefusal, fetchNowWords, daysLeft, expired, failedHalvesOf,
-    exportsKeptShort, freshInvite, gigabytes, jobCountsOf, jobMetaOf, jobsOf, lapses, mailDraftOf, megabytes, documentsOwed, namesOf,
+    exportsKeptShort, freshInvite, gigabytes, jobCountsOf, jobMetaOf, jobsOf, lapses, mailDraftOf, megabytes, documentsOwed, storeSize, namesOf,
     notMailedWords, openFor, plainly, providerHost,
     sendWords, setupWords, stamp, systemDotsOf, tellsOf, testMetaOf, testVerdict,
     SENDING_HOW_HREF, SENDING_NOT_SET, blankSendDraft, importSkippedWords, mailboxSubmissionHost, sendDraftOf, sendingOutcomeWords, sendingRowsOf,
@@ -51,8 +51,7 @@
    *
    * The living station backdrop (#472/#475, §14) is $lib/backdrops/station.js,
    * ported from design/v19/administration-iss.html — this file only mounts
-   * it and tears it down, the same shape as create/+page.svelte and
-   * settings/mail/+page.svelte. Its households come through the same seam
+   * it and tears it down, the same shape as create/+page.svelte. Its households come through the same seam
    * home and create draw their own skies from (galaxyOf), and its caption's
    * real facts (collection domain, systems aboard, crew) come off this
    * screen's own data rather than the sheet's hard-coded literals.
@@ -496,7 +495,7 @@
     busy: /** @type {string | null} */ (null),
     problem: /** @type {string | null} */ (null),
     outcome: /** @type {string | null} */ (null),
-    fetched: /** @type {{ messagesRead: number, receiptsRecorded: number, reasons: Record<string, number>, reason?: string | null } | null} */ (null),
+    fetched: /** @type {{ reason?: string | null } | null} */ (null),
   });
   let editing = $state(false);
   /* #1468: the provider profile is a pressed value that stands the chooser card's tiles */
@@ -1312,7 +1311,7 @@
         {/each}
         <!-- #1433 D20 (note 55173): the kept page previews, Orbit's own data outside every quota. -->
         {#if view.previews}
-          <div class="kv"><span>page previews kept</span><b>{megabytes(view.previews.bytes)}</b></div>
+          <div class="kv"><span>page previews kept</span><b>{storeSize(view.previews.bytes)}</b></div>
           <div class="kv"><span>not yet drawn</span><b>{documentsOwed(view.previews.pending)}</b></div>
         {/if}
         {#if !view.failed.operations}<div class="jobfoot">the 25 most recently touched jobs are kept; older ones are not</div>{/if}

@@ -9,7 +9,7 @@
  */
 
 /**
- * @typedef {{ name: string, version: string, licence: string, author: string, source: string }} Library
+ * @typedef {{ name: string, version: string, licence: string, author: string, source: string, kind: "npm" | "apk" }} Library
  * @typedef {{ text: string, key?: string }} LicencePart  a licence id (with its key) or the words between
  * @typedef {{
  *   id: string, name: string, version?: string, author: string,
@@ -102,17 +102,39 @@ function supplierName(/** @type {unknown} */ supplier) {
  * @returns {Library[] | null}
  */
 export function librariesOf(document) {
+  /** The package's own purl: `pkg:apk/alpine/<name>@…?arch=<arch>&distro=alpine-<x.y.z>` or `pkg:npm/…`. */
+  const purlOf = (/** @type {any} */ one) => {
+    const ref = Array.isArray(one.externalRefs)
+      ? one.externalRefs.find((/** @type {any} */ r) => r?.referenceType === "purl")
+      : null;
+    return typeof ref?.referenceLocator === "string" ? ref.referenceLocator : "";
+  };
+  /** An apk package's page on pkgs.alpinelinux.org, from its purl's arch and release. */
+  const apkPage = (/** @type {any} */ one, /** @type {string} */ purl) => {
+    const arch = /[?&]arch=([^&]+)/.exec(purl)?.[1];
+    const release = /[?&]distro=alpine-(\d+\.\d+)/.exec(purl)?.[1];
+    const name = encodeURIComponent(one.name);
+    // noarch packages are listed under no single architecture; x86_64 is the one the image ships.
+    const where = release ? `v${release}` : "edge";
+    return `https://pkgs.alpinelinux.org/package/${where}/main/${!arch || arch === "noarch" ? "x86_64" : arch}/${name}`;
+  };
   const packages = /** @type {{ packages?: unknown }} */ (document)?.packages;
   if (!Array.isArray(packages)) return null;
   return packages
     .filter((one) => one && typeof one.name === "string" && typeof one.versionInfo === "string")
-    .map((one) => ({
+    .map((one) => {
+      const purl = purlOf(one);
+      const kind = purl.startsWith("pkg:apk/") ? "apk" : "npm";
+      return {
       name: one.name,
       version: one.versionInfo,
       licence: typeof one.licenseDeclared === "string" ? one.licenseDeclared : "",
       author: supplierName(one.supplier),
-      source: webAddress(one.homepage) || `https://www.npmjs.com/package/${one.name}`,
-    }));
+      source: webAddress(one.homepage)
+        || (kind === "apk" ? apkPage(one, purl) : `https://www.npmjs.com/package/${one.name}`),
+      kind,
+      };
+    });
 }
 
 /**
@@ -181,9 +203,9 @@ export function creditsView({ pictures, fonts, sidecars, libraries }) {
     sourceUrl: credit.sourceUrl,
     sourceHost: hostOf(credit.sourceUrl),
   }));
-  /** @type {Entry[] | null} */
-  const libraryEntries = libraries
-    ? [...libraries].sort(byName).map((library) => ({
+  /** @param {Library[]} list @returns {Entry[]} */
+  const packageEntries = (list) =>
+    [...list].sort(byName).map((library) => ({
         id: uniqueId(`${library.name}-${library.version}`),
         name: library.name,
         version: library.version,
@@ -191,8 +213,12 @@ export function creditsView({ pictures, fonts, sidecars, libraries }) {
         licence: use(licencePartsOf(library.licence), (key) => ({ name: key, href: spdxUrl(key) })),
         sourceUrl: library.source,
         sourceHost: hostOf(library.source),
-      }))
-    : null;
+      }));
+  // #1781 (owner answer 24a): Alpine packages are their own group, not mixed into the npm libraries.
+  /** @type {Entry[] | null} */
+  const libraryEntries = libraries ? packageEntries(libraries.filter((library) => library.kind !== "apk")) : null;
+  /** @type {Entry[] | null} */
+  const systemEntries = libraries ? packageEntries(libraries.filter((library) => library.kind === "apk")) : null;
   /** @type {Entry[]} */
   const sidecarEntries = [...sidecars].sort(byName).map((credit) => ({
     id: uniqueId(credit.name),
@@ -215,6 +241,7 @@ export function creditsView({ pictures, fonts, sidecars, libraries }) {
       { id: "credits-pictures", title: "Pictures", count: pictureEntries.length, entries: pictureEntries },
       { id: "credits-fonts", title: "Fonts", count: fontEntries.length, entries: fontEntries },
       { id: "credits-libraries", title: "Libraries", count: libraryEntries ? libraryEntries.length : null, entries: libraryEntries },
+      { id: "credits-system-packages", title: "System packages", count: systemEntries ? systemEntries.length : null, entries: systemEntries },
       { id: "credits-sidecars", title: "Sidecar images", count: sidecarEntries.length, entries: sidecarEntries },
     ],
     letters,

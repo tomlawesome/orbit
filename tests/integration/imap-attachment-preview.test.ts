@@ -10,6 +10,7 @@ import { discardImapReviewItem, purgeExpiredImapStaging } from "@/server/mail-in
 import { cleanupIntegrationEnvironment, createIntegrationFixture, type IntegrationFixture } from "./support/fixtures";
 import { callRoute, callRouteForSession, loadRoute } from "./support/request-event";
 import { syntheticPdf } from "../support/synthetic-documents";
+import { sealedHash } from "./support/imap-attachment-seed";
 
 /**
  * The staged-attachment preview route's authorization boundary (#1155):
@@ -55,7 +56,6 @@ async function seedStagedReceipt(fixture: IntegrationFixture, options: {
     mailbox: "private",
     mailboxUidValidity: `staged-preview-${receiptId.slice(0, 8)}`,
     mailboxUid: 900,
-    contentSha256: randomUUID().replaceAll("-", ""),
     recipientAliasSha256: `staged-preview-alias-${receiptId.slice(0, 8)}`,
     userId: recipientUserId,
     householdId: options.householdId === undefined ? fixture.household.id : options.householdId,
@@ -69,7 +69,7 @@ async function seedStagedReceipt(fixture: IntegrationFixture, options: {
     displayName: held.displayName,
     mediaType: held.mediaType,
     sizeBytes: held.sizeBytes,
-    contentSha256: held.contentSha256,
+    ...await sealedHash(receiptId, held.id, held.contentSha256),
     storageKey: held.storageKey,
     ciphertextSize: held.ciphertextSize,
     ...held.envelope,

@@ -149,7 +149,9 @@ const web = (rel) => readFileSync(new URL(`../../web/${rel}`, import.meta.url), 
 const CHOOSER = web("src/lib/editing/ChooserCard.svelte");
 const TILES = web("src/lib/editing/Tiles.svelte");
 const REPEAT_BAND = web("src/lib/editing/RepeatBand.svelte");
-const MAIL_POCKET = web("src/routes/settings/mail/pocket.svelte");
+/* #1509: the relay's copy hint lives on Settings' Mail card now, desk and phone. */
+const SETTINGS_POCKET = web("src/routes/settings/pocket.svelte");
+const RELAY_CSS = web("src/routes/settings/relay.css");
 const cssRule = (src, selector) => {
   const at = src.indexOf(`${selector}{`);
   if (at < 0) throw new Error(`no rule ${selector}`);
@@ -190,10 +192,23 @@ describe("#1686: --ink-quiet on the relay tile and the calendar clears 4.5:1", (
     ["ChooserCard .kb", CHOOSER, ".kb"],
     ["Tiles small", TILES, ".tile>small"],
     ["RepeatBand small", REPEAT_BAND, ".cell>small"],
-    ["mail relay .rl-copy", MAIL_POCKET, ".rl-copy"],
   ])("%s is --ink-quiet, not --ink-faint, with no opacity", (_name, src, selector) => {
     const rule = cssRule(src, selector);
     expect(rule).toMatch(/color:var\(--ink-quiet\)/);
+    expect(rule).not.toMatch(/ink-faint/);
+    expect(rule).not.toMatch(/opacity/);
+  });
+
+  /* The old relay page's `.rl-copy` row, retargeted with the move (#1509):
+     the hint on the address tile of the Mail card's `your relay` tab. The
+     phone's is --ink-mid since #1137 (quiet read 4.49:1 there), which is
+     only darker; never faint, never dimmed by opacity. */
+  it.each([
+    ["mail relay tab, phone .st-copy", SETTINGS_POCKET, ".st-copy"],
+    ["mail relay tab, desk hint", RELAY_CSS, ".mailcard button.alias small"],
+  ])("%s is --ink-mid or --ink-quiet, not --ink-faint, with no opacity", (_name, src, selector) => {
+    const rule = cssRule(src, selector);
+    expect(rule).toMatch(/color:var\(--ink-(?:mid|quiet)\)/);
     expect(rule).not.toMatch(/ink-faint/);
     expect(rule).not.toMatch(/opacity/);
   });

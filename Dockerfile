@@ -14,7 +14,7 @@
 # Default is GHCR so anyone can build from source with no credentials; CI passes
 # this GitLab's own registry (same digest, #1101). The digest pins the content.
 ARG BASE_IMAGE_REGISTRY=ghcr.io/tomlawesome
-FROM ${BASE_IMAGE_REGISTRY}/orbit-base-image:latest@sha256:f97d6fb91474a7af01514c7a8301356b8eeba657a3e6f6d091168c05d229481d AS base
+FROM ${BASE_IMAGE_REGISTRY}/orbit-base-image:latest@sha256:acdeefd6b9b06c774524485ba1692a4dd4e01700e01aeda0250896c5d2606cb1 AS base
 
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
@@ -51,7 +51,7 @@ RUN node scripts/about-sbom.mjs web/static/about/sbom.spdx.json \
 
 # The front end's production node_modules, pruned by pnpm to what actually
 # runs (#735). The engine's own code is bundled by the stage above, but its
-# eight runtime dependencies stay external and must be present on disk:
+# nine runtime dependencies stay external and must be present on disk:
 # `@napi-rs/canvas` is native, and the rest are listed in web/package.json
 # `dependencies` precisely so the adapter externalises them.
 #
@@ -84,7 +84,7 @@ RUN pnpm run build:cli
 
 # The runtime stage starts from the base image again rather than from `base`,
 # so it pins the same digest for the same reasons (see the base stage).
-FROM ${BASE_IMAGE_REGISTRY}/orbit-base-image:latest@sha256:f97d6fb91474a7af01514c7a8301356b8eeba657a3e6f6d091168c05d229481d AS runner
+FROM ${BASE_IMAGE_REGISTRY}/orbit-base-image:latest@sha256:acdeefd6b9b06c774524485ba1692a4dd4e01700e01aeda0250896c5d2606cb1 AS runner
 
 # The three release-metadata patterns, copied in early because this layer's
 # content never varies between builds; the values themselves are declared,
@@ -188,7 +188,7 @@ COPY --chown=orbit:orbit drizzle ./drizzle
 # dispatches (ADR-0018, 2026-10-31 amendment; #1411).
 COPY --from=web-builder --chown=orbit:orbit /opt/orbit/web/build ./web
 COPY --chown=orbit:orbit scripts/web-server.mjs ./web/server.mjs
-# The eight engine runtime dependencies, pruned to production. Node resolves
+# The nine engine runtime dependencies, pruned to production. Node resolves
 # them by walking up from the importing file, so they must sit here, beside
 # the output that imports them, and nowhere else.
 COPY --from=web-deps --chown=orbit:orbit /opt/deploy-web/node_modules ./web/node_modules
@@ -199,6 +199,23 @@ COPY --from=web-deps --chown=orbit:orbit /opt/deploy-web/node_modules ./web/node
 RUN printf '{"type":"module"}\n' > ./web/package.json \
   && chown root:root ./web/package.json \
   && chmod 0444 ./web/package.json
+# The Alpine packages join the About page's bill of materials, and their
+# licences are checked, in the same step (#1781). They exist only in this
+# stage, so the web-builder stage's about-sbom.mjs cannot list them: this reads
+# /lib/apk/db/installed and merges them into the shipped sbom.spdx.json and
+# libraries.json, failing the build on a licence supply-chain/licence-policy.yml
+# (`allow-licenses-apk`) does not allow. Deterministic: sorted, same epoch.
+# Dependency-free, so it runs without node_modules; the scripts it imports
+# are copied in, run and removed, like the check below.
+COPY scripts/about-sbom-apk.mjs scripts/about-sbom.mjs ./scripts/
+COPY scripts/ci/licence-policy.mjs ./scripts/ci/licence-policy.mjs
+COPY web/src/lib/about/group.js ./web/src/lib/about/group.js
+COPY supply-chain/licence-policy.yml ./supply-chain/licence-policy.yml
+RUN node scripts/about-sbom-apk.mjs --sbom web/client/about/sbom.spdx.json \
+  && rm -f scripts/about-sbom-apk.mjs scripts/about-sbom.mjs \
+    scripts/ci/licence-policy.mjs web/src/lib/about/group.js \
+    supply-chain/licence-policy.yml \
+  && rmdir scripts/ci web/src/lib/about web/src/lib web/src supply-chain
 # Proves previews can actually be drawn by what this image ships, against the
 # finished layout (#476, #493, #1436): pdfinfo and pdftoppm run through the
 # server's own /bin/sh ulimit wrapper on a Helvetica text page, the JPEG is

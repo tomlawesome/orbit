@@ -427,3 +427,58 @@ image-identity, staging-evidence or retained-volume finding (8a) plans
 `manual` instead, naming the first of them. Diagnosis remains read-only:
 `--check` and `--plan` never start anything; the start runs only under
 `--execute`. Full contract in `docs/engine-events.md`, Repair stream.
+
+**2026-11-10 — repair does not start Orbit on an unfinished restore (issues
+#1804 and #1798).** A restore that stops partway leaves its journal and keeps
+Orbit stopped; starting Orbit then puts writes on data the rollback will throw
+away. The journal is the restore's lease on Orbit: repair checks it when
+planning and again just before acting, and fails closed when it cannot read it.
+A new finding, `restore-unfinished` (`target=restore`, `warn`), is raised when
+anything is at `<backups>/.orbit-restore/restore.journal` (a symlink too,
+never followed, read or removed) or that folder cannot be searched;
+`<backups>` is `${ORBIT_BACKUP_DIR:-<deployment folder>/backups}`, the rule
+`backup.sh` and `restore.sh` use, so repair must run with the same
+`ORBIT_BACKUP_DIR` as restore. It joins the `start-services` preconditions, and
+`recreate-services` is now held to the same list, so `services-not-running`
+and `folder-moved` are planned `manual` with restore's `--finish`/`--recover`
+guidance; repair's other actions are planned as usual. At execution both
+actions check the journal again and, when `flock` is available, refuse while
+`backup.sh` or `restore.sh` holds `.orbit-backup-restore.lock` (result
+`failed`, exit 4, nothing changed). Not covered: the seconds between
+`backup.sh` stopping Orbit and its engine taking the lock. Two more
+preconditions: `service-restarting` (`target=container`, `fail`, manual: read
+the container's logs; not counted as not running) and
+`database-volume-missing` (`target=database`, `fail`: no database container
+and no database volume, so a start would make a new, empty database). An
+undecided folder check (#1798) blocks `start-services` too, and
+`do_start_services` re-reads the `working_dir` labels before it acts. A failed
+`recreate-services` now gives Docker's words on stderr, and its Compose call is
+bounded with `--kill-after` like `start-services`'. install.sh's folder facts
+follow repair.sh's rule for a gone folder. Review fixes (#1804): a backups
+folder repair cannot search counts as `restore-unfinished` and refuses at
+execution; the lock is held by backup, restore and a recovery-bundle export,
+and one that is not a regular readable file is refused unopened; a failed
+restarting probe leaves the service unknown; a failed volume list keeps
+`database-volume-missing` with guidance saying the list failed; and
+`--execute` prints each manual entry's guidance, declined or skipped. Full
+contract in `docs/engine-events.md`, Repair stream.
+
+*Addendum 2026-11-13 (#1823):* the journal's folder follows `ORBIT_BACKUP_DIR`,
+which repair may not have, so `restore.sh` also writes a write-ahead marker,
+`<deployment folder>/.orbit-restore-pending`, holding the journal's absolute
+path, before it stops Orbit, and removes it only with the journal. Repair
+raises `restore-unfinished` for anything at that path (fail closed) and names
+the journal from it. `start-services` and `recreate-services` hold the
+backup/restore lock across their Compose call (acquire, act, release) instead
+of only probing it. The manual guidance names the start command,
+`docker compose up -d`.
+
+*Addendum 2026-11-12 (audit v0.3.9-b O-R1, #1820):* the lock probe tells
+"held" from "cannot be taken". `flock -n` exits 1 silently only when another
+process holds the lock; any other failure (for example NFSv4 refusing an
+exclusive lock on a read-only descriptor) is reported as such, with flock's
+words, and repair still refuses to act, since it cannot establish that
+starting Orbit is safe. The lock stays opened read-only and is never created.
+Not taken, left to the owner: probing with a write-opened descriptor, as the
+engine does, which would make the check work on NFSv4 but would have repair
+create or change a file in the backups folder.

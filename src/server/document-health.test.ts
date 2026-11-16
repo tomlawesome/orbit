@@ -89,4 +89,21 @@ describe("administrator document-health redaction", () => {
       damagedReceipts: 0,
     });
   });
+
+  it("passes null preview figures through, and still projects an absent figure to 0 (#1803)", () => {
+    const base = {
+      overall: "degraded",
+      encryption: { status: "unavailable" },
+      storage: { status: "unavailable" },
+      scanner: { status: "unavailable", mode: "unknown" },
+      quota: { usedBytes: 0, limitBytes: 0 },
+      worker: { started: false, running: false, lastSuccessAt: null, lastErrorAt: null, lastErrorCode: null, lastReconciliationAt: null },
+    };
+    const unknown = toPublicDocumentHealth({ ...base, previewBytes: null, previewsPending: null } as unknown as DocumentHealth);
+    expect(unknown.previewBytes).toBeNull();
+    expect(unknown.previewsPending).toBeNull();
+    const absent = toPublicDocumentHealth(base as unknown as DocumentHealth);
+    expect(absent.previewBytes).toBe(0);
+    expect(absent.previewsPending).toBe(0);
+  });
 });

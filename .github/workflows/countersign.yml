@@ -32,11 +32,11 @@ name: Countersign a stable release
 # default branch, `main`, so this becomes available with the first stable
 # release that contains it.
 #
-# Secrets: GITLAB_READ_TOKEN_NAME and GITLAB_READ_TOKEN, the read-only GitLab
-# token publish-from-gitlab.yml already uses, for reading the attestation from
-# registry.tomlawson.io. Signing needs no secret: `id-token: write` gives the
-# keyless identity, and the built-in token writes the signature to our own
-# package.
+# GitLab's attestation is read from GHCR, where publish-from-gitlab.yml copied
+# it with the image after verifying it (#1824); nothing here connects to
+# GitLab. Secrets: none. Signing needs no secret: `id-token: write` gives the
+# keyless identity, and the built-in token reads the attestation and writes the
+# signature to our own package.
 #
 # ADR-0031 #4/#10: after countersigning the image, this also countersigns the
 # release's signed manifest, keyless, the same way -- the second custody
@@ -64,7 +64,6 @@ permissions:
 
 env:
   GHCR_IMAGE: ghcr.io/tomlawesome/orbit
-  GITLAB_REGISTRY: registry.tomlawson.io
   # Read in every run: step through this variable, never inline as
   # ${{ inputs.release }}, which would paste the input into the shell as code.
   RELEASE: ${{ inputs.release }}
@@ -98,13 +97,10 @@ jobs:
           crane_dir="$(bash scripts/ci/ensure-crane.sh)"
           echo "${crane_dir}" >> "$GITHUB_PATH"
 
-      - name: Log in to both registries
+      - name: Log in to GHCR
         env:
-          GITLAB_READ_TOKEN_NAME: ${{ secrets.GITLAB_READ_TOKEN_NAME }}
-          GITLAB_READ_TOKEN: ${{ secrets.GITLAB_READ_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          printf '%s' "${GITLAB_READ_TOKEN}" | crane auth login "${GITLAB_REGISTRY}" --username "${GITLAB_READ_TOKEN_NAME}" --password-stdin
           printf '%s' "${GITHUB_TOKEN}" | crane auth login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
 
       - name: Resolve the release's digest and commit
@@ -153,12 +149,12 @@ jobs:
           printf 'ORBIT_MAX_EVIDENCE_AGE_DAYS=%s\n' "${window}" >> "${GITHUB_ENV}"
 
       # The four refusals -- mismatch, missing, ambiguous, expired -- are the
-      # shared verifier's, not a second copy of them. Against the GitLab
-      # registry, because that is where sign_evidence attaches the
-      # attestation; GHCR never receives it.
+      # shared verifier's, not a second copy of them. Against GHCR, where
+      # publish-from-gitlab.yml copied GitLab's attestation with the image
+      # (#1824): the same attestation, under the same committed key.
       - name: Verify GitLab's key-based evidence
         env:
-          ORBIT_IMAGE: ${{ env.GITLAB_REGISTRY }}/ai/orbit
+          ORBIT_IMAGE: ${{ env.GHCR_IMAGE }}
           ORBIT_DIGEST: ${{ steps.release.outputs.digest }}
           ORBIT_COMMIT: ${{ steps.release.outputs.commit }}
         run: bash scripts/ci/verify-validation-evidence.sh

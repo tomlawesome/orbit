@@ -108,9 +108,12 @@ describe("release-on-tag workflow", () => {
     expect(checkout).toContain("fetch-tags: true");
   });
 
-  it("fetches the launcher, manifest and .sig from the resolved branch's pipeline", () => {
-    const evidence = step("Fetch the tested launcher, manifest and .sig from GitLab");
-    expect(evidence).toContain("run: bash scripts/ci/gitlab-await-tested-image.sh");
+  it("fetches the launcher, manifest and .sig from GitLab's handoff for the resolved branch (#1824)", () => {
+    const evidence = step("Fetch the tested launcher, manifest and .sig from GitLab's handoff");
+    expect(evidence).toContain("run: bash scripts/ci/github-await-handoff.sh");
+    expect(evidence).toContain("GH_TOKEN: ${{ github.token }}");
+    // The separate public handoff repository, of the repository's own owner.
+    expect(evidence).toContain("GITHUB_HANDOFF_REPO: ${{ github.repository_owner }}/orbit-handoff");
     expect(evidence).toContain('ORBIT_FETCH_LAUNCHER_ASSETS: "1"');
     expect(evidence).toContain("ORBIT_COMMIT: ${{ github.sha }}");
     expect(evidence).toContain("ORBIT_REF: ${{ steps.source.outputs.ref }}");
@@ -144,6 +147,24 @@ describe("release-on-tag workflow", () => {
     );
   });
 
+  // A stale launcher: the handoff is found by commit, but the signed manifest
+  // inside it must also be for this tag's commit and version.
+  it("refuses a manifest whose commit is not the tag's commit or whose version is not the tag name (#1824)", () => {
+    const start = stepStart("Verify the release manifest's signature");
+    const attach = stepStart("Attach the launcher and manifest to the release");
+    const between = workflow.slice(start, attach);
+    const checkSteps = between.split(/\n(?=      - name:)/u).filter((text) => /\.commit\b|\bcommit\b/u.test(text) && /\.version\b|\bversion\b/u.test(text) && text.includes("release_manifest"));
+    // A step after the signature check and before anything is attached.
+    expect(checkSteps.length, "a step comparing the manifest's commit and version").toBeGreaterThan(0);
+    const text = checkSteps.join("\n");
+    expect(text).toContain("github.sha");
+    expect(text).toContain("github.ref_name");
+    expect(text).not.toContain("continue-on-error");
+    // It reads the manifest that was just signature-checked.
+    expect(text).toContain("steps.evidence.outputs.release_manifest");
+    expect(start).toBeLessThan(attach);
+  });
+
   it("attaches the verified launcher, manifest, .sig and get-orbit.sh to the tagged release", () => {
     const attach = step("Attach the launcher and manifest to the release");
     expect(attach).toContain("gh release upload");
@@ -157,12 +178,23 @@ describe("release-on-tag workflow", () => {
     expect(attach).toContain("scripts/get-orbit.sh");
   });
 
-  it("holds least privilege and only a read token for GitLab", () => {
+  it("holds least privilege and no secrets: the handoff is read with the built-in token (#1824)", () => {
     expect(workflow).toMatch(/\npermissions:\n {2}contents: write\n/);
     expect(workflow).not.toContain("packages: write");
     expect(workflow).not.toContain("id-token: write");
     const secrets = [...workflow.matchAll(/secrets\.([A-Z_]+)/gu)].map((match) => match[1]);
-    expect(new Set(secrets)).toEqual(new Set(["GITLAB_READ_TOKEN"]));
+    expect(secrets).toEqual([]);
+  });
+
+  it("never writes to the handoff repository: the launcher is only read from it (#1824)", () => {
+    const evidence = step("Fetch the tested launcher, manifest and .sig from GitLab's handoff");
+    expect(evidence).not.toMatch(/gh\s+(?:release|api)\b/u);
+    expect(workflow).not.toContain("github-prune-handoffs");
+    expect(workflow).not.toContain("github-upload-handoff");
+    // Every release write names this repository, not the handoff one.
+    for (const line of workflow.split("\n").filter((l) => /gh release (?:create|upload)/u.test(l) || l.includes("--repo"))) {
+      expect(line).not.toMatch(/orbit-handoff|HANDOFF_REPO/u);
+    }
   });
 
   it("pins every third-party action to an immutable commit", () => {

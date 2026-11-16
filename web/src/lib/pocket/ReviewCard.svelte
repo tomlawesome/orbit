@@ -27,9 +27,10 @@
    *   burnsIn?: number | null,
    *   readings?: Reading[],
    *   papers?: { id: string | null, name: string, drawable: boolean,
-   *     held?: import('$lib/data/workspace.js').AlreadyHeld, renewal?: number | null }[],
+   *     held?: import('$lib/data/workspace.js').AlreadyHeld, renewal?: number | null, flagged?: true }[],
    *   unreadable?: string | null,
    *   locked?: boolean,
+   *   held?: string | null,
    *   busy?: "approve" | "dismiss" | null,
    *   problem?: string | null,
    *   heading?: 1 | 2 | 3,
@@ -45,9 +46,14 @@
   /** @type {Props} */
   let {
     title, caught, burnsIn = null, readings = [], papers = [], unreadable = null, locked = false,
-    busy = null, problem = null, heading = 3, index = 0, onapprove, ondismiss, onamend, onpaper = undefined,
+    held = null, busy = null, problem = null, heading = 3, index = 0, onapprove, ondismiss, onamend, onpaper = undefined,
     onheld = undefined, after = undefined,
   } = $props();
+
+  /* #1398 (placement note 56231): a file the scanner flagged turns the card's
+     one decision into Add without it / Discard everything. */
+  const flagged = $derived(papers.filter((paper) => paper.flagged).length);
+  const without = $derived(flagged > 1 ? "Add without them" : "Add without it");
 </script>
 
 <article class="p-card proposed p-review" style:--i={index} aria-labelledby="{uid}-title">
@@ -71,11 +77,17 @@
   {/if}
 
   {#each papers as paper, at (at)}
-    <button type="button" class="rv-paper" disabled={!paper.id} onclick={() => onpaper?.(paper)}>
-      <span class="p-paper" aria-hidden="true">◆</span><span class="rv-pname">{paper.name}</span><span class="clean">scanned clean</span>
-      {#if paper.id}<span class="rv-chev" aria-hidden="true">›</span>{/if}
+    <button type="button" class="rv-paper" disabled={!paper.id || paper.flagged} onclick={() => onpaper?.(paper)}>
+      <span class="p-paper" aria-hidden="true">◆</span><span class="rv-pname">{paper.name}</span>{#if !paper.flagged}<span class="clean">scanned clean</span>{/if}
+      {#if paper.id && !paper.flagged}<span class="rv-chev" aria-hidden="true">›</span>{/if}
     </button>
-    {#if paper.held}
+    {#if paper.flagged}
+      <!-- #1398: under the paper it is about, in the #1437 line's grammar; a virus is the card's one red. -->
+      <div class="rv-dup flag" role="alert"><span class="rv-bead" aria-hidden="true"></span>
+        <p><b>The scanner flagged a virus or malware inside attachment: "{paper.name}"</b></p>
+        <p>{without} adds the mail and its other attachments; Discard everything drops the mail and all its attachments. {flagged > 1 ? "The flagged files are never added." : "The flagged file is never added."}</p>
+      </div>
+    {:else if paper.held}
       {@const held = paper.held}
       <!-- #1437 (design/v19/duplicate-alert/round-1, A): under the paper it
            is about. No new button: Add to orbit keeps it (owner 5a). -->
@@ -93,28 +105,40 @@
   {/each}
 
   {#if unreadable}<p class="p-prose rv-unread">{unreadable}</p>{/if}
+  <!-- #1650: held until the sending address is checked; `held` is the line. -->
+  {#if held}<p class="p-prose rv-unread">{held}</p>{/if}
 
   <div class="rv-acts">
     {#if busy}
       <button class="p-pill filled wide" disabled aria-busy={busy === "approve"}>
-        {#if busy === "approve"}<span class="p-body breathing rv-busy" aria-hidden="true"></span>adding…{:else}Add to orbit{/if}
+        {#if busy === "approve"}<span class="p-body breathing rv-busy" aria-hidden="true"></span>adding…{:else}{flagged ? without : "Add to orbit"}{/if}
       </button>
       <button class="p-pill wide" disabled aria-busy={busy === "dismiss"}>
-        {#if busy === "dismiss"}<span class="p-body breathing rv-busy" aria-hidden="true"></span>dismissing…{:else}Dismiss{/if}
+        {#if busy === "dismiss"}<span class="p-body breathing rv-busy" aria-hidden="true"></span>{flagged ? "discarding…" : "dismissing…"}{:else}{flagged ? "Discard everything" : "Dismiss"}{/if}
       </button>
+    {:else if flagged}
+      {#if locked}
+        <button class="p-pill filled wide" disabled>{without}</button>
+      {:else}
+        <ArmButton label={without} armedLabel="tap again to add" danger={false} wide class="filled rv-yes"
+                   name="{without}: {title}" disabled={Boolean(held)} onfire={onapprove} />
+      {/if}
+      <ArmButton label="Discard everything" armedLabel="tap again to discard" wide class="rv-no"
+                 name="Discard everything: {title}" onfire={ondismiss} />
     {:else}
       {#if locked}
         <button class="p-pill filled wide" disabled>Add to orbit</button>
       {:else}
+        <!-- #1650: held for a sender check, the same control, shaded. -->
         <ArmButton label="Add to orbit" armedLabel="tap again to add" danger={false} wide class="filled rv-yes"
-                   name="Add {title} to your orbit" onfire={onapprove} />
+                   name="Add {title} to your orbit" disabled={Boolean(held)} onfire={onapprove} />
       {/if}
       <ArmButton label="Dismiss" armedLabel="tap again to dismiss" wide class="rv-no"
                  name="Dismiss {title}" onfire={ondismiss} />
     {/if}
   </div>
   {#if problem}<p class="p-error" role="alert">{problem}</p>{/if}
-  {#if !locked}
+  {#if !locked && !held}
     <button class="rv-amend" disabled={Boolean(busy)} onclick={onamend}>review &amp; amend →</button>
   {/if}
   {@render after?.()}
@@ -163,6 +187,8 @@
     border:1px solid color-mix(in srgb, var(--warm) 35%, var(--line-soft));border-radius:12px}
   .rv-bead{display:inline-block;width:10px;height:10px;border-radius:50%;margin-top:6px;background:var(--warm);
     box-shadow:inset -2px 2px 0 rgba(255,255,255,.28)}
+  .rv-dup.flag .rv-bead{background:var(--overdue)}
+  .rv-dup.flag p + p{grid-column:2}
   .rv-dup p{margin:0;font:var(--p-type-meta)/1.5 var(--ui);color:var(--ink-mid)}
   .rv-dup p b{color:var(--ink);font-weight:500}
   .rv-dup p.renew{grid-column:2;color:var(--warm-text)}

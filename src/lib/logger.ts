@@ -75,6 +75,7 @@ export const operationalReasons = [
   "crypto_metadata_missing",
   "storage_object_invalid",
   "storage_object_missing",
+  "storage_object_damaged",
   "key_unavailable",
   "purge_failed",
   "stage_purge_failed",

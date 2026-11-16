@@ -44,6 +44,18 @@
 # --prepare always looks for that pair (a 404 means the predecessor has none);
 # the digest call fails if a rebuild finds none.
 #
+# The launcher archives (#1556). Beside each staged pair go that build's
+# orbit-launcher_linux_amd64.tar.gz and _arm64.tar.gz, so orbit-launcher's
+# update leg never depends on build_launcher's 90-day artifacts. A predecessor's
+# come from the newest successful build_launcher job of its pipeline (found in
+# the same listing as sign_evidence); a carried pair's (fetched only when its
+# verdict is ok) and a never-signed job's stand-in pair's from that
+# record_image job's own previous/. Each is kept only if its sha256 equals the
+# pair's manifest .files entry, both or neither. Leaving them out never fails:
+# one "not carrying the launcher archives" line on stderr names the cause, and
+# orbit-launcher checks the sha256 itself and falls back to build_launcher. An
+# API error, the 64 MiB cap or a missing sha256sum still fails.
+#
 # The carried pair is judged at the point of use (#1607 note 48805, item 1).
 # --prepare verifies it but records the verdict in $stage/carried-verdict ("ok",
 # or the failure text: a half pair, a malformed digest, an empty signature and a
@@ -182,6 +194,11 @@ max_listing_size="16M"
 # no length header (chunked) is also cut off after limit + 1 bytes.
 max_artifact_bytes=$((1024 * 1024))
 max_listing_bytes=$((16 * 1024 * 1024))
+# The two launcher archives (#1556) are a few MB each; 64 MiB is far above any
+# real one.
+max_archive_size="64M"
+max_archive_bytes=$((64 * 1024 * 1024))
+archive_names=(orbit-launcher_linux_amd64.tar.gz orbit-launcher_linux_arm64.tar.gz)
 # A sign_evidence job still in flight is polled at most 20 times (listings of
 # the pipeline's jobs), ORBIT_CARRY_POLL_SECONDS apart.
 max_evidence_polls=20
@@ -343,7 +360,9 @@ api_get() {
     [ "$attempt" -lt "$max_attempts" ] || fail "GET $1 ${why} after ${max_attempts} attempts"
     sleep "$retry_seconds"
   done
-  head -c $((size - 3)) "$raw" > "$2"
+  # Checked, not left to set -e: callers run this under `if !`, where a failed
+  # write (a full disk) would otherwise return a truncated file as fetched.
+  head -c $((size - 3)) "$raw" > "$2" || fail "GET $1 could not be saved (writing ${2} failed)"
   rm -f -- "$raw"
 }
 
@@ -417,17 +436,27 @@ find_job() {
   done
 }
 
-# find_newest_job <list url> <job name>: sets found_job to the job of that name
-# with the highest id, whatever its status, or to "" when no page has one. The
-# order of a pipeline's job list is not relied on, so every page is read.
+# find_newest_job <list url> <job name> [<second job name>]: sets found_job to
+# the job of that name with the highest id, whatever its status, or to "" when
+# no page has one. With a second name it also sets found_also to the successful
+# job of that name with the highest id (or ""), from the same pages, so the
+# listing is read once (#1556). The order of a pipeline's job list is not relied
+# on, so every page is read.
 find_newest_job() {
   local page=1 here
   found_job=""
+  found_also=""
   while :; do
     list_page "$1" "$page"
     here="$(jq -c --arg name "$2" '[.[] | select(.name == $name)] | max_by(.id) // empty' "$stage/page.json")"
     if [ -n "$here" ]; then
       found_job="$(jq -cn --argjson a "${found_job:-null}" --argjson b "$here" '[$a, $b] | map(select(. != null)) | max_by(.id)')"
+    fi
+    if [ -n "${3:-}" ]; then
+      here="$(jq -c --arg name "$3" '[.[] | select(.name == $name and .status == "success")] | max_by(.id) // empty' "$stage/page.json")"
+      if [ -n "$here" ]; then
+        found_also="$(jq -cn --argjson a "${found_also:-null}" --argjson b "$here" '[$a, $b] | map(select(. != null)) | max_by(.id)')"
+      fi
     fi
     [ -n "$next_page" ] || return 0
     [ "$page" -lt "$max_listing_pages" ] ||
@@ -439,8 +468,14 @@ find_newest_job() {
 # fetch_artifact <job id> <path under .orbit-supply-chain> <output file>:
 # returns 0 once fetched and 1 when the file is absent (404); any other answer fails.
 fetch_artifact() {
-  local url="${api}/jobs/$1/artifacts/.orbit-supply-chain/$2"
-  api_get "$url" "$3" "$stage/artifact.headers" "$max_artifact_size" "$max_artifact_bytes"
+  fetch_file "$1" ".orbit-supply-chain/$2" "$3" "$max_artifact_size" "$max_artifact_bytes"
+}
+
+# fetch_file <job id> <path in the job's artifacts> <output file> <size limit>
+# <limit in bytes>: as fetch_artifact, for any path and size cap.
+fetch_file() {
+  local url="${api}/jobs/$1/artifacts/$2"
+  api_get "$url" "$3" "$stage/artifact.headers" "$4" "$5"
   case "$api_status" in
     200) return 0 ;;
     404)
@@ -631,6 +666,63 @@ WRAPPER
   carried_pair_verdict="$what_failed"
 }
 
+# not_carrying <cause>: the launcher archives are left out, and the job goes on
+# (#1556). orbit-launcher checks each archive's sha256 itself and falls back to
+# build_launcher, so previous/ without them is safe; the manifest pair keeps its
+# own fail-loud rules.
+not_carrying() {
+  echo "carry-previous-release: not carrying the launcher archives of record_image job ${rec_job}: $1; previous/ keeps the manifest and signature, and orbit-launcher falls back to build_launcher" >&2
+}
+
+# carry_archives <job id> <artifact dir> <manifest file> <stage subdir> <what>
+# [<note>]: the note ends the "carrying" line, saying which pair they go with.
+# fetches both launcher archives from that job's artifact dir and stages them
+# beside the pair in $stage/<subdir> only if each one's sha256 equals the
+# manifest's .files entry for it: both or neither (#1556). The manifest has been
+# verified already, so a match is enough. A 404, a mismatch or a missing entry
+# leaves both out with one not_carrying line; any other answer fails, as every
+# call does. The archives are fetched into a scratch dir first, so one that
+# fails the check is never left in the stage.
+carry_archives() {
+  local job="$1" dir="$2" manifest="$3" into="$4" what="$5" note="${6:-}" name want got why="" tmp="$stage/archives.tmp"
+  command -v sha256sum > /dev/null 2>&1 ||
+    fail "tooling failure, not a verdict: sha256sum is not installed, so the launcher archives cannot be checked against the manifest; install it and run this job again"
+  rm -rf -- "$tmp"
+  mkdir -p -- "$tmp"
+  for name in "${archive_names[@]}"; do
+    want="$(jq -r --arg name "$name" '.files | if type == "object" then .[$name] else null end | if type == "string" then . else "" end' "$manifest" 2> /dev/null)" || want=""
+    if [ -z "$want" ]; then
+      why="${what} manifest has no files entry for ${name}"
+      break
+    fi
+    if ! [[ "$want" =~ ^${ORBIT_DIGEST_TOKEN_PATTERN}$ ]]; then
+      why="${what} manifest's files entry for ${name} is not a sha256 digest"
+      break
+    fi
+    if ! fetch_file "$job" "${dir}/${name}" "$tmp/$name" "$max_archive_size" "$max_archive_bytes"; then
+      why="${what} ${name} is absent (HTTP 404 at ${api}/jobs/${job}/artifacts/${dir}/${name})"
+      break
+    fi
+    got="$(sha256sum -- "$tmp/$name")" ||
+      fail "tooling failure, not a verdict: sha256sum failed on ${name}; fix that and run this job again"
+    got="sha256:${got%% *}"
+    if [ "$got" != "$want" ]; then
+      why="${what} ${name} does not match the manifest (its bytes are ${got}, the manifest names ${want})"
+      break
+    fi
+  done
+  if [ -n "$why" ]; then
+    rm -rf -- "$tmp"
+    not_carrying "$why"
+    return 0
+  fi
+  for name in "${archive_names[@]}"; do
+    mv -- "$tmp/$name" "$stage/$into/$name"
+  done
+  rm -rf -- "$tmp"
+  echo "carry-previous-release: carrying the launcher archives of record_image job ${rec_job} (sha256 matches the manifest)${note}"
+}
+
 load_gap_file
 
 find_job "${api}/jobs?scope%5B%5D=success&ref=${ref}" record_image "$CI_COMMIT_REF_NAME" "$CI_JOB_ID"
@@ -659,7 +751,7 @@ carried_pair_verdict=""
 never_signed=""
 polls=0
 while :; do
-  find_newest_job "${api}/pipelines/${rec_pipeline}/jobs" sign_evidence
+  find_newest_job "${api}/pipelines/${rec_pipeline}/jobs" sign_evidence build_launcher
   polls=$((polls + 1))
   where="pipeline ${rec_pipeline} (record_image job ${rec_job}, the build before this one on ${CI_COMMIT_REF_NAME})"
   [ -n "$found_job" ] ||
@@ -712,6 +804,9 @@ if [ -n "$never_signed" ]; then
   digest_of "$stage/predecessor/$manifest_name" > /dev/null ||
     fail "the previous/ manifest of the never-signed job ${rec_job} has no readable image digest"
   verify_pair predecessor "build before the never-signed one's" excusable
+  # Its archives are the ones job N carried beside that pair, never job N's own
+  # pipeline's build_launcher (that is the unsigned build's launcher).
+  carry_archives "$rec_job" ".orbit-supply-chain/previous" "$stage/predecessor/$manifest_name" predecessor "the stand-in pair's"
 else
   sign_job="$(printf '%s' "$found_job" | jq -r '.id')"
   sign_expires="$(printf '%s' "$found_job" | jq -r '.artifacts_expire_at // empty')"
@@ -724,6 +819,16 @@ else
   fetch_artifact "$sign_job" "$sig_name" "$stage/predecessor/$sig_name" ||
     absent_artifact sign_evidence "$sign_job" "$sig_name" "$sign_expires"
   verify_pair predecessor "previous build's" excusable
+  # The predecessor's launcher archives, from its own pipeline's newest
+  # successful build_launcher job (found in the listing read above).
+  launcher_job=""
+  [ -z "$found_also" ] || launcher_job="$(printf '%s' "$found_also" | jq -r '.id')"
+  if [ -z "$launcher_job" ]; then
+    not_carrying "pipeline ${rec_pipeline} has no successful build_launcher job"
+  else
+    [[ "$launcher_job" =~ ^[0-9]+$ ]] || fail "the build_launcher job found in pipeline ${rec_pipeline} has no readable job id"
+    carry_archives "$launcher_job" ".orbit-launcher-artifacts" "$stage/predecessor/$manifest_name" predecessor "the previous build's"
+  fi
 
   # The predecessor's own carried pair, for a rebuild. Absent (404) means it has
   # none. It is judged here but never failed on (#1607 note 48805, item 1): the
@@ -743,6 +848,11 @@ else
     else
       carried_pair_verdict="the carried manifest has no readable image digest"
     fi
+  fi
+  # The carried pair's archives, for a rebuild, only when that pair is ok: a bad
+  # one already decides any rebuild that would pick it.
+  if [ -n "$have_manifest" ] && [ -n "$have_sig" ] && [ "$carried_pair_verdict" = "ok" ]; then
+    carry_archives "$rec_job" ".orbit-supply-chain/previous" "$stage/carried/$manifest_name" carried "for a rebuild, the carried pair's" ", beside the carried pair, used only if this is a rebuild"
   fi
   if [ -n "$have_manifest$have_sig" ]; then
     printf '%s\n' "$carried_pair_verdict" > "$stage/carried-verdict"

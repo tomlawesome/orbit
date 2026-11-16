@@ -395,7 +395,7 @@ test("household page: the back link works by keyboard", async ({ page }) => {
 test("settings: reached via the account panel, and fully reachable", async ({ page }) => {
   await arriveAtHome(page);
   await openSettingsFromHome(page);
-  /* #1003: the Reminders card's tabs (owner-decisions §22) are one Tab stop with
+  /* #1003: the Mail card's tabs (once Reminders') (owner-decisions §22) are one Tab stop with
      ← → between them, so the unchosen tab is proved by arrow key below, not by
      Tab -- as the pocket file does.
      #1180: the Text size radio group is likewise one Tab stop (WAI-ARIA radio
@@ -403,7 +403,8 @@ test("settings: reached via the account panel, and fully reachable", async ({ pa
   await auditTabOrder(page, "settings", {
     exclude: `[role="tab"][aria-selected="false"], ${uncheckedRadiosOf("Text size")}`,
   });
-  const reminders = page.getByRole("tablist", { name: "Reminders" });
+  /* #1509: the card is Mail, with `your relay` first; → from reminders is still "sent". */
+  const reminders = page.getByRole("tablist", { name: "Mail" });
   await tabTo(page, { selector: "#rem-tab-reminders" }, { screen: "settings reminders" });
   await page.keyboard.press("ArrowRight");
   await expect(reminders.getByRole("tab", { name: "sent to you lately" })).toBeFocused();

@@ -452,10 +452,10 @@
       "id": "CVE-2026-109518",
       "package": "apt",
       "owner": "Orbit maintainers",
-      "expiresOn": "2026-11-12",
+      "expiresOn": "2026-11-20",
       "trackingIssue": 1729,
       "installedVersion": "2.8.3",
-      "rationale": "Debian/Ubuntu package manager in ollama/ollama:0.40.15; Orbit never runs apt in this container (no entrypoint or command calls it), so the flaw is not reachable. Fixed in 2.8.4ubuntu0.1, but no published image ships it yet (checked 2026-11-09 on 0.40.15). Owner granted 7 days and a re-check, 2026-11-05 (#1729)."
+      "rationale": "Debian/Ubuntu package manager in ollama/ollama:0.40.15; Orbit never runs apt in this container (no entrypoint or command calls it), so the flaw is not reachable. Fixed in 2.8.4ubuntu0.1, but no published image ships it yet (checked 2026-11-13 on 0.40.16, the newest release). Owner granted 7 days and a re-check, 2026-11-05, and 7 more, 2026-11-13 (#1729)."
     },
     {
       "kind": "vulnerability",
@@ -463,10 +463,10 @@
       "id": "CVE-2026-109518",
       "package": "libapt-pkg6.0t64",
       "owner": "Orbit maintainers",
-      "expiresOn": "2026-11-12",
+      "expiresOn": "2026-11-20",
       "trackingIssue": 1729,
       "installedVersion": "2.8.3",
-      "rationale": "Debian/Ubuntu package manager in ollama/ollama:0.40.15; Orbit never runs apt in this container (no entrypoint or command calls it), so the flaw is not reachable. Fixed in 2.8.4ubuntu0.1, but no published image ships it yet (checked 2026-11-09 on 0.40.15). Owner granted 7 days and a re-check, 2026-11-05 (#1729)."
+      "rationale": "Debian/Ubuntu package manager in ollama/ollama:0.40.15; Orbit never runs apt in this container (no entrypoint or command calls it), so the flaw is not reachable. Fixed in 2.8.4ubuntu0.1, but no published image ships it yet (checked 2026-11-13 on 0.40.16, the newest release). Owner granted 7 days and a re-check, 2026-11-05, and 7 more, 2026-11-13 (#1729)."
     },
     {
       "kind": "vulnerability",
@@ -474,10 +474,10 @@
       "id": "CVE-2026-109518",
       "package": "apt",
       "owner": "Orbit maintainers",
-      "expiresOn": "2026-11-12",
+      "expiresOn": "2026-11-20",
       "trackingIssue": 1729,
       "installedVersion": "3.2.0",
-      "rationale": "Debian/Ubuntu package manager in apache/tika:4.2.0-full; Orbit never runs apt in this container (no entrypoint or command calls it), so the flaw is not reachable. Fixed in 3.2.1ubuntu0.1, but no published image ships it yet (checked 2026-11-05). Owner granted 7 days and a re-check, 2026-11-05 (#1729)."
+      "rationale": "Debian/Ubuntu package manager in apache/tika:4.2.0-full; Orbit never runs apt in this container (no entrypoint or command calls it), so the flaw is not reachable. Fixed in 3.2.1ubuntu0.1, but no published image ships it yet (checked 2026-11-13: no newer release). Owner granted 7 days and a re-check, 2026-11-05, and 7 more, 2026-11-13 (#1729)."
     },
     {
       "kind": "vulnerability",
@@ -485,10 +485,10 @@
       "id": "CVE-2026-109518",
       "package": "libapt-pkg7.0",
       "owner": "Orbit maintainers",
-      "expiresOn": "2026-11-12",
+      "expiresOn": "2026-11-20",
       "trackingIssue": 1729,
       "installedVersion": "3.2.0",
-      "rationale": "Debian/Ubuntu package manager in apache/tika:4.2.0-full; Orbit never runs apt in this container (no entrypoint or command calls it), so the flaw is not reachable. Fixed in 3.2.1ubuntu0.1, but no published image ships it yet (checked 2026-11-05). Owner granted 7 days and a re-check, 2026-11-05 (#1729)."
+      "rationale": "Debian/Ubuntu package manager in apache/tika:4.2.0-full; Orbit never runs apt in this container (no entrypoint or command calls it), so the flaw is not reachable. Fixed in 3.2.1ubuntu0.1, but no published image ships it yet (checked 2026-11-13: no newer release). Owner granted 7 days and a re-check, 2026-11-05, and 7 more, 2026-11-13 (#1729)."
     },
     {
       "kind": "vulnerability",
@@ -698,14 +698,25 @@
       "trackingIssue": 794,
       "installedVersion": "1.1.43-r3",
       "rationale": "Alpine package libxslt 1.1.43-r3 in postgres:18-alpine (fixed in 1.1.43-r4); the newest 18-alpine build (amd64 300ebd02, tag unmoved since 2026-11-06) has not been rebuilt with it. The database publishes no ports and is reached only on Orbit's own compose network. Clears when upstream rebuilds; the sidecar re-pin then retires it. Checked 2026-11-11; owner granted on that condition, 2026-11-11 (question 54a)."
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-125350",
+      "package": "libxslt",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-12-04",
+      "trackingIssue": 1825,
+      "installedVersion": "1.1.43-r3",
+      "rationale": "Alpine package libxslt 1.1.43-r3 in postgres:18-alpine (fixed in 1.1.43-r4, already in Alpine 3.24 main); the newest 18-alpine build (amd64 300ebd02) has not been rebuilt with it. Only the optional xml2 extension (pgxml.so) links it, and Orbit never installs that extension. The database publishes no ports and is reached only on Orbit's own compose network. Clears when upstream rebuilds; the sidecar re-pin then retires it. Checked 2026-11-12; owner granted on that condition, 2026-11-12 (question 12a)."
     }
   ],
   "containerImages": [
     {
       "name": "Orbit base image (Alpine plus Node from official signed source)",
       "tag": "ghcr.io/tomlawesome/orbit-base-image:latest",
-      "reference": "ghcr.io/tomlawesome/orbit-base-image:latest@sha256:f97d6fb91474a7af01514c7a8301356b8eeba657a3e6f6d091168c05d229481d",
-      "indexDigest": "sha256:f97d6fb91474a7af01514c7a8301356b8eeba657a3e6f6d091168c05d229481d",
+      "reference": "ghcr.io/tomlawesome/orbit-base-image:latest@sha256:acdeefd6b9b06c774524485ba1692a4dd4e01700e01aeda0250896c5d2606cb1",
+      "indexDigest": "sha256:acdeefd6b9b06c774524485ba1692a4dd4e01700e01aeda0250896c5d2606cb1",
       "platform": "linux/amd64",
       "locations": [
         "Dockerfile"
@@ -715,7 +726,7 @@
       "license": "MIT",
       "licenseSource": "https://github.com/nodejs/node/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-11-11",
+      "resolvedOn": "2026-11-16",
       "reviewBy": "2026-11-30"
     },
     {

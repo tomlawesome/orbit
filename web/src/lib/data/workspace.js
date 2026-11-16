@@ -115,9 +115,11 @@
  *   `metadata_locked` while the instance holds no usable encryption key.
  * @property {{ id: string, ordinal: number, displayName: string,
  *              mediaType: "application/pdf" | "application/octet-stream",
- *              sizeBytes: number, scanState: "clean" | "unknown", alreadyHeld?: AlreadyHeld }[]} [attachments]
+ *              sizeBytes: number, scanState: "clean" | "flagged" | "unknown", alreadyHeld?: AlreadyHeld }[]} [attachments]
  * @property {string} reason
  * @property {string} [failureCode] stable code of a terminal failure (#1670 G-W3)
+ * @property {boolean} [needsSenderCheck] held until the address it came from is checked (#1650); not addable
+ * @property {?number} [senderDaysLeft] whole days before that unchecked address, and this mail, is removed (#1650)
  */
 
 /**
@@ -152,7 +154,7 @@
  * @property {string} sourceDocument
  * @property {?{ id: string, ordinal: number, displayName: string,
  *              mediaType: "application/pdf" | "application/octet-stream",
- *              sizeBytes: number, scanState: "clean" | "unknown", alreadyHeld?: AlreadyHeld }[]} [attachments]  named papers (#467)
+ *              sizeBytes: number, scanState: "clean" | "flagged" | "unknown", alreadyHeld?: AlreadyHeld }[]} [attachments]  named papers (#467)
  * @property {number} [draftVersion]
  * @property {?string} [renewsOn]
  * @property {?string} [scheduleKind]   renewal / service / expiry (#1005)
@@ -244,6 +246,8 @@
  * @property {string} [lifecycle]
  * @property {string} [scanStatus]
  * @property {boolean} [ready]
+ * @property {boolean} [scanHeld]  held while the virus scanner is down (#1419):
+ *   still `scanning`, and the last attempt found the scanner unreachable
  * @property {?string} [deleteAfter]
  * @property {?string} [failureCode]
  * @property {boolean} [recoverable]
@@ -338,6 +342,8 @@
  * @property {string} ingest
  * @property {boolean} [adminPaused]  the administrator has paused ingest; the address is still the member's (#1654)
  * @property {RelaySender | null} [sender]  the address the member sends from, and whether it is checked (#1410); null for an administrator or when mail-in is off
+ * @property {RelaySenderRow[]} [senders]  every sending address of the member's own, the sign-in row first (#1650); empty when there is none
+ * @property {boolean} [unavailable]  true only on UNAVAILABLE_RELAY: the read failed, so nothing here is the relay's (#1810 W-R1)
  *
  * @typedef {object} RelaySender
  * @property {string} address
@@ -345,6 +351,12 @@
  * @property {boolean} verificationPending  a check email has gone and its link has not been used
  * @property {string | null} expiresAt      when that link lapses
  * @property {boolean | null} [lastForwardSigned]  false while the member's last forward was unsigned, so not kept; null when nothing has been checked yet (#1681)
+ *
+ * @typedef {RelaySender & { id: string, source: "account" | "sso" | "manual", daysLeft: number | null, heldMail?: number, metadataStatus?: { address?: string } }} RelaySenderRow
+ *   one row of `senders` (#1650): `manual` is an extra address the member added; `daysLeft` is
+ *   the whole days before an unchecked extra row is removed, null otherwise; `metadataStatus.address`
+ *   says why the address cannot be read (#1810 item 4: such a row is kept and listed); `heldMail` counts the
+ *   member's arrivals held for this address, lost if it is removed (#1810 W-S3)
  */
 
 /** Thrown with the server's own error code so screens can react to specifics. */
@@ -842,7 +854,7 @@ import { NO_ADDRESS } from "$lib/relay-address.js";
 import { adminFixture } from "./fixtures/admin.js";
 import { ago, bandOf, dayMonth, sizeLabel } from "$lib/format.js";
 import { daysUntil, galaxyOf, labelledSkyOf } from "./chart.js";
-import { approvalItemOf, receiptFailuresOf, receiptSuggestionsOf } from "./inbox.js";
+import { approvalItemOf, heldForSenderCheck, receiptFailuresOf, receiptSuggestionsOf } from "./inbox.js";
 import { engineNumbersOf } from "./engine-limits.js";
 import { themeOrDefault } from "$lib/theme.js";
 import { textSizeOrDefault } from "$lib/text-size.js";
@@ -854,10 +866,10 @@ import { STAGED_PAGE_TIMEOUT_MS } from "./staged-page.js";
  * A mutating fetch with the session's CSRF token, like applyCommand's.
  *
  * @param {string} path
- * @param {{ method?: string, body?: unknown }} [options]
+ * @param {{ method?: string, body?: unknown, signal?: AbortSignal }} [options]
  * @returns {Promise<Response>}
  */
-async function csrfFetch(path, { method = "POST", body } = {}) {
+async function csrfFetch(path, { method = "POST", body, signal } = {}) {
   const { csrfToken } = await readSession();
   /* A FormData goes as it is (#1566): the browser streams it, a File part
      straight from disk, and sets the multipart type with its boundary. */
@@ -870,6 +882,7 @@ async function csrfFetch(path, { method = "POST", body } = {}) {
       "x-csrf-token": csrfToken,
     },
     ...(body !== undefined ? { body: form ? body : JSON.stringify(body) } : {}),
+    ...(signal ? { signal } : {}),
   });
 }
 
@@ -1431,12 +1444,18 @@ export async function readInboxScreen() {
     relay,
     retention: engineNumbersOf(session).retention,
     lastCaught: caught,
-    review: receipts.filter((receipt) => receipt.canApprove),
+    /* #1650: mail held for a sender check sits with the addable mail, shaded. */
+    review: receipts.filter(awaitsReview),
     reading: receipts.filter((receipt) => !receipt.canApprove && receipt.classification === "waiting"),
     failed: receiptFailuresOf(receipts),
     suggestions: receiptSuggestionsOf(receipts),
   };
 }
+
+/** Whether a receipt waits in the review lane: addable, or held for a sender
+ *  check (#1650). The inbox and Settings' waiting count use this one rule.
+ *  @param {{ canApprove?: boolean, needsSenderCheck?: boolean, classification?: string }} receipt */
+const awaitsReview = (receipt) => receipt.canApprove === true || heldForSenderCheck(receipt);
 
 /**
  * Everything the helm renders (#464): who you are, your systems and roles,
@@ -1470,7 +1489,11 @@ export async function readSettingsScreen() {
       primary: household.id === primary,
     })),
     relay,
-    waiting: (inbox.receipts ?? []).filter((receipt) => receipt.canApprove).length,
+    /* #1810 W-F6: the same count as the inbox's review lane, held mail included. */
+    waiting: (inbox.receipts ?? []).filter(awaitsReview).length,
+    /* #1509: the relay is the Mail card's tab now, and mail that arrived but
+       could not be read is shown there (#434), as the old relay page did. */
+    failures: receiptFailuresOf(inbox.receipts ?? []),
     reminders,
   };
 }
@@ -1926,7 +1949,7 @@ export async function readAdminScreen() {
        nothing wrong renders nothing at all. */
     settle(adminRead("/api/admin/documents/health", tally).then((response) => json(response))
       .then(
-        (/** @type {{ health?: { metadata?: MetadataHealth, previewBytes?: number, previewsPending?: number } }} */ body) =>
+        (/** @type {{ health?: { metadata?: MetadataHealth, previewBytes?: ?number, previewsPending?: ?number } }} */ body) =>
           body.health ?? null,
       ),
     ),
@@ -2051,9 +2074,11 @@ export async function readAdminScreen() {
     metadata: metadata.answer?.metadata ?? null,
     /* The kept page previews (#1433 D20), from the same health answer:
        Orbit's own derived data, outside every quota, so the administrator
-       sees what it costs and how much is still being drawn. */
-    previews: metadata.answer && typeof metadata.answer.previewBytes === "number"
-      ? { bytes: metadata.answer.previewBytes, pending: metadata.answer.previewsPending ?? 0 }
+       sees what it costs and how much is still being drawn. Null figures are
+       a health read that could not reach the database: the rows say unknown;
+       an absent field is an older server: no rows. */
+    previews: metadata.answer && metadata.answer.previewBytes !== undefined
+      ? { bytes: metadata.answer.previewBytes ?? null, pending: metadata.answer.previewsPending ?? null }
       : null,
     recoveryBundle: recoveryBundle.answer,
     owners,
@@ -2067,7 +2092,7 @@ export async function readAdminScreen() {
  *
  * @typedef {object} AdminDocumentJob
  * @property {string} id
- * @property {"scan" | "encrypt" | "purge" | "reconcile" | "rewrap"} kind
+ * @property {"scan" | "encrypt" | "purge" | "reconcile" | "rewrap" | "preview"} kind
  * @property {"pending" | "processing" | "retry" | "completed" | "failed" | "cancelled"} status
  * @property {number} attempts
  * @property {?string} lastErrorCode
@@ -2321,6 +2346,12 @@ export async function readAbout() {
 }
 
 /**
+ * #1419 (design/v19/held-paper/round-1, P): a held paper's row word, last in
+ * its meta; the rows draw it in the warm tone.
+ */
+export const HELD_WORD = "waiting";
+
+/**
  * The word a paper's row adds when it cannot simply be read (#1319): the
  * preview card's own honest states (belt.js documentPreviewStateOf), said
  * in the drawer's meta so the row tells you before you press it.
@@ -2330,9 +2361,19 @@ export async function readAbout() {
 const stateWordOf = (doc) => {
   if (doc.lifecycle === "pending_deletion") return "removed";
   if (doc.lifecycle === "rejected") return "refused";
+  /* #1419: held while the scanner is down is its own state, not a long scan. */
+  if (!doc.ready && doc.scanHeld) return HELD_WORD;
   if (!doc.ready) return "scanning";
   return null;
 };
+
+/**
+ * "added 12 Jun", or nothing for a paper not yet available (scanning or held,
+ * #1419): the server sends no date then, and the drawer leaves out a part it
+ * lacks rather than inventing one ("01 Jan" was the epoch).
+ * @param {DocumentSummary} doc
+ */
+const addedWords = (doc) => (doc.availableAt ? `added ${dayMonth(doc.availableAt)}` : null);
 
 /**
  * One paper as the desk's item drawer lists it (#1319, design/v19/
@@ -2344,7 +2385,7 @@ const stateWordOf = (doc) => {
 export function drawerDocumentOf(doc) {
   return {
     ...documentRowOf(doc),
-    meta: [`added ${dayMonth(doc.availableAt)}`, sizeLabel(doc.sizeBytes), stateWordOf(doc)]
+    meta: [addedWords(doc), sizeLabel(doc.sizeBytes), stateWordOf(doc)]
       .filter(Boolean).join(" · "),
   };
 }
@@ -2436,7 +2477,7 @@ export async function readItemDocuments(householdId, itemId) {
     name: doc.displayName,
     meta: [
       sizeLabel(doc.sizeBytes),
-      `added ${dayMonth(doc.availableAt)}`,
+      addedWords(doc),
       stateWordOf(doc),
     ].filter(Boolean).join(" · "),
   }));
@@ -2690,12 +2731,13 @@ export async function inspectPickedDocument(householdId, file, { signal } = {}) 
  * The address is capability-bearing — anyone holding it can post into this
  * user's review queue — so it is never cached here, only rendered.
  *
+ * @param {{ signal?: AbortSignal }} [options]
  * @returns {Promise<Relay>}
  */
-export async function readRelay() {
-  /** @type {{ relay?: { address?: string, listening?: string, lastReceivedLabel?: string, lastReceived?: string, ingest?: string, adminPaused?: boolean, sender?: RelaySender | null } }} */
+export async function readRelay({ signal } = {}) {
+  /** @type {{ relay?: { address?: string, listening?: string, lastReceivedLabel?: string, lastReceived?: string, ingest?: string, adminPaused?: boolean, sender?: RelaySender | null, senders?: RelaySenderRow[] } }} */
   const body = await json(
-    await fetch("/api/settings/mail-relay", { credentials: "same-origin" }),
+    await fetch("/api/settings/mail-relay", { credentials: "same-origin", ...(signal ? { signal } : {}) }),
   );
   const relay = body.relay ?? {};
   return {
@@ -2708,6 +2750,7 @@ export async function readRelay() {
     ingest: relay.ingest ?? UNAVAILABLE_RELAY.ingest,
     adminPaused: relay.adminPaused === true,
     sender: relay.sender ?? null,
+    senders: relay.senders ?? [],
   };
 }
 
@@ -2732,8 +2775,8 @@ export async function readRelay() {
  * @returns {Promise<Relay>}
  */
 export async function rotateRelay(action) {
-  /** @type {{ relay?: { address?: string, listening?: string, lastReceived?: string, ingest?: string, adminPaused?: boolean, sender?: RelaySender | null } }} */
-  const body = await json(await csrfFetch("/api/settings/mail-relay", { method: "PUT", body: { action } }));
+  /** @type {{ relay?: { address?: string, listening?: string, lastReceived?: string, ingest?: string, adminPaused?: boolean, sender?: RelaySender | null, senders?: RelaySenderRow[] } }} */
+  const body = await json(await csrfFetch("/api/settings/mail-relay", { method: "PUT", body: { action }, ...(action === "rotate" ? { signal: AbortSignal.timeout(STAGED_PAGE_TIMEOUT_MS) } : {}) }));
   const relay = body.relay ?? {};
   return {
     address: relay.address ?? NO_ADDRESS,
@@ -2742,8 +2785,43 @@ export async function rotateRelay(action) {
     ingest: relay.ingest ?? UNAVAILABLE_RELAY.ingest,
     adminPaused: relay.adminPaused === true,
     sender: relay.sender ?? null,
+    senders: relay.senders ?? [],
   };
 }
+
+/**
+ * Rotates the relay address, and when the outcome is unknown, finds it out
+ * (#1810 W-R2). Standard pattern: re-read after an unknown-outcome write. A
+ * refusal (4xx) is the server's answer and is thrown as it is; anything else
+ * (no answer at all, a 5xx, a lost response) may have applied, so the relay
+ * is read again and its address compared with the one held before. Answers
+ * the relay to show and whether it rotated; `relay` is null when even the
+ * re-read could not answer, or answered with no address, and nothing is known.
+ *
+ * @param {string} before the address shown before the rotate
+ * @returns {Promise<{ relay: Relay | null, rotated: boolean | null }>}
+ */
+export async function rotateRelayReconciled(before) {
+  try {
+    return { relay: await rotateRelay("rotate"), rotated: true };
+  } catch (error) {
+    const status = error instanceof WorkspaceError ? error.status : undefined;
+    if (status !== undefined && status >= 400 && status < 500) throw error;
+  }
+  try {
+    const relay = await readRelay({ signal: AbortSignal.timeout(STAGED_PAGE_TIMEOUT_MS) });
+    /* A re-read naming no address confirms nothing: it is not a new one. */
+    if (relay.address === NO_ADDRESS) return { relay: null, rotated: null };
+    return { relay, rotated: relay.address !== before };
+  } catch {
+    return { relay: null, rotated: null };
+  }
+}
+
+/** What a rotate says when the server refused it, or the re-read shows the old address (#1151 W2-R6). */
+export const ROTATE_UNCHANGED = "not rotated — your address is unchanged. try again";
+/** What a rotate says when neither it nor the re-read after it answered. */
+export const ROTATE_UNKNOWN = "rotate not confirmed — Orbit could not reach your relay. reload to see your address";
 
 /**
  * Sends the check email to the signed-in member's registered address (#1410,
@@ -2757,10 +2835,14 @@ export async function rotateRelay(action) {
  * the screen shows as they arrive. A refusal the engine did not word (a proxy
  * page, a bare string) carries an empty message.
  *
+ * An extra address (#1650) is named by its row's `id`, never by the address:
+ * the server only sends to a row of the session's own member.
+ *
+ * @param {string} [id]  one of the member's own rows; absent, the sign-in row
  * @returns {Promise<{ address: string, expiresAt: string }>}
  */
-export async function sendSenderCheck() {
-  const response = await csrfFetch("/api/settings/mail-relay/verification");
+export async function sendSenderCheck(id) {
+  const response = await csrfFetch("/api/settings/mail-relay/verification", id === undefined ? {} : { body: { id } });
   /* Whether the engine actually worded the refusal: `json` fills in a "could
      not be reached" sentence of its own when it did not, and that is not the
      engine's to show as if it were. */
@@ -2778,12 +2860,44 @@ export async function sendSenderCheck() {
 }
 
 /**
+ * Adds another address the signed-in member sends from (#1650). The body
+ * carries the address and nothing else: the session names the member. The
+ * add sends no check mail; the row arrives unchecked. Answers the member's
+ * whole list, the sign-in row first. A refusal (not an address, five already,
+ * an address that cannot be added) reaches the caller as a WorkspaceError
+ * carrying the server's own words.
+ *
+ * @param {string} address
+ * @returns {Promise<RelaySenderRow[]>}
+ */
+export async function addSender(address) {
+  /** @type {{ senders?: RelaySenderRow[] }} */
+  const body = await json(await csrfFetch("/api/settings/mail-relay/senders", { body: { address } }));
+  return body.senders ?? [];
+}
+
+/**
+ * Removes one of the member's extra sending addresses by its row's id
+ * (#1650); the sign-in row is never removable, and the server refuses it.
+ * Answers the member's whole list.
+ *
+ * @param {string} id
+ * @returns {Promise<RelaySenderRow[]>}
+ */
+export async function removeSender(id) {
+  /** @type {{ senders?: RelaySenderRow[] }} */
+  const body = await json(await csrfFetch(`/api/settings/mail-relay/senders/${encodeURIComponent(id)}`, { method: "DELETE" }));
+  return body.senders ?? [];
+}
+
+/**
  * What the relay's CHROME says when the endpoint cannot be reached. The relay
  * screen itself lets the failure surface — its whole subject is the relay —
  * but the inbox's relaybar and the helm's card are summaries, and an
  * unreachable summary must not sink the screen around it (the readInbox
  * precedent). It says it does not know, which is deliberately not the same
- * word as "not listening".
+ * word as "not listening". `unavailable` lets the relay tab say the read
+ * failed instead of drawing "no address yet" (#1810 W-R1).
  */
 /** @type {Relay} */
 const UNAVAILABLE_RELAY = {
@@ -2791,6 +2905,7 @@ const UNAVAILABLE_RELAY = {
   status: "relay unavailable",
   lastReceived: "unknown",
   ingest: "unknown",
+  unavailable: true,
 };
 
 /**

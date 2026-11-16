@@ -26,6 +26,30 @@ allow-licenses:
   - MIT-0
   - MPL-2.0
   - Unlicense
+# Extra licences for the image's Alpine (apk) packages only (#1781); never
+# applied to npm packages. OS packages are separate programs: Orbit runs them
+# as child processes and links none of them, so copyleft is acceptable there
+# and not in the npm tree above. Bare space-separated ids in an Alpine licence
+# string mean AND. Checked in the runner stage by scripts/about-sbom-apk.mjs.
+allow-licenses-apk:
+  - Apache-2.0
+  - BSD-2-Clause
+  - BSD-3-Clause
+  - GPL-2.0-only
+  - GPL-2.0-or-later
+  - GPL-3.0-or-later
+  - IJG
+  - LGPL-2.1-or-later
+  - Libpng
+  - MIT
+  - MPL-2.0
+  - OFL-1.1
+  - PostgreSQL
+  - X11
+  - Zlib
+  - blessing
+  - bzip2-1.0.6
+  - libtiff
 allow-dependencies-licenses:
   # Version-bound OFL-1.1 exception for the three self-hosted typefaces. This
   # does NOT allow OFL-1.1 generally: a blanket entry would silently admit any
@@ -38,3 +62,7 @@ allow-dependencies-licenses:
   - pkg:npm/@fontsource/space-grotesk@5.3.0
   - pkg:npm/@fontsource-variable/inter@5.3.0
   - pkg:npm/@fontsource-variable/jetbrains-mono@5.3.0
+  # Alpine exceptions (#1781) are version-free and apk-only. libmd's licence
+  # string lists "Public Domain", which is not an SPDX id; it is a BSD/ISC-style
+  # permissive set plus Beerware and public-domain files.
+  - pkg:apk/alpine/libmd

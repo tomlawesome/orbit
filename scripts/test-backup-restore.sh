@@ -683,21 +683,20 @@ insert_document_fixture() {
         '\''dGVzdC13cmFwLXRhZw'\'', '\''backup-test-key'\''
       );
       insert into imap_ingestion_messages (
-        id, mailbox, mailbox_uid_validity, mailbox_uid, content_sha256,
+        id, mailbox, mailbox_uid_validity, mailbox_uid,
         recipient_alias_sha256, household_id, status
       ) values (
         '\''$5'\'', '\''backup-test-mailbox'\'', '\''1'\'', 1,
-        '\''dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd'\'',
         '\''eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'\'',
         '\''$1'\'', '\''pending_review'\''
       );
       insert into imap_ingestion_attachments (
-        message_id, display_name, media_type, size_bytes, content_sha256,
+        message_id, display_name, media_type, size_bytes,
         storage_key, ciphertext_size, envelope_version, content_iv,
         content_auth_tag, wrapped_dek, wrap_iv, wrap_auth_tag, key_id, status
       ) values (
         '\''$5'\'', '\''backup-held-attachment.bin'\'', '\''application/octet-stream'\'', 27,
-        '\''$7'\'', '\''$6'\'', 27, 1,
+        '\''$6'\'', 27, 1,
         '\''dGVzdC1hdHRhY2htZW50LWl2'\'', '\''dGVzdC1hdHRhY2htZW50LXRhZw'\'',
         '\''dGVzdC1hdHRhY2htZW50LWRlaw'\'', '\''dGVzdC1hdHRhY2htZW50LXdpdg'\'',
         '\''dGVzdC1hdHRhY2htZW50LWF1dGg'\'', '\''imap-test-key'\'', '\''stored'\''

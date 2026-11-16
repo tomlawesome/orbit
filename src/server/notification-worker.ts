@@ -30,6 +30,7 @@ import {
 import { readRuntimeSecret } from "@/lib/runtime-secret";
 import { openInstanceMetadataReader, openMetadataReaders } from "@/server/metadata/fields";
 import { appHost, formatInvitationDate, householdLine, renderMail } from "@/server/invitations/mail";
+import { deliverApprovalNotices } from "@/server/mail-in/approval-notice";
 
 // Re-exported so every existing import of these from this module (the
 // dispatch worker) keeps working: the pure logic itself lives in
@@ -1414,6 +1415,8 @@ export async function runNotificationCycle(
     /* Only the real wire counts as "last sent"; a supplied provider is a test's. */
     dependencies.providers === undefined,
   );
+  /* #1398: a mail approval Orbit could not add is told once, by mail and push. */
+  await deliverApprovalNotices(db, config, now, providers, retryDelay);
 }
 
 const workerState = globalThis as typeof globalThis & {

@@ -272,9 +272,21 @@ recoverable state.
   generic `scanner` errors fail closed without a durable stage.
 - Recovery uses `scanning` plus `scan_status=error`, a PostgreSQL `scan` job,
   ten-minute lease/token/generation fencing, five automatic attempts, fixed
-  60-second/2-minute/4-minute/8-minute/15-minute delays, and immutable 24-hour
-  retention. Manual retry does not extend retention. Terminal purge failure
-  leaves an inaccessible `purge_pending` backlog and never claims success.
+  60-second/2-minute/4-minute/8-minute/15-minute delays, and 24-hour
+  retention. Manual retry does not extend retention. The retention counts only
+  while the scanner answers (#1419): a maintenance cycle that finds the scanner
+  unreachable gives every pending stage at least a full window from then and
+  rejects none for age, except an operator discard; a retry that finds the
+  scanner unavailable, confirmed by a ping, uses up no attempt and never fails
+  the job. Only a clean scan makes a
+  held document available; a malware verdict, or a scan the scanner reports as
+  failed, still rejects; a timeout or protocol error while the scanner answers
+  is retried and uses up an attempt. Terminal purge failure leaves an inaccessible
+  `purge_pending` backlog and never claims success.
+- While the scanner is unreachable, administrators get one
+  `scanner_unavailable` alert a day (#1419), from the five-minute health check
+  or a held upload. The alert carries no household, filename or document
+  content.
 - The scan precedes every parser (see "Parsing, OCR, and indirect prompt
   injection"). Scanner-unavailable behaviour is unchanged: the upload is held
   for recovery, and inspection, preview and mail-in are refused.
@@ -479,7 +491,11 @@ tiers #365 names.
 `imap_ingestion_messages.proposal`,
 `imap_ingestion_messages.field_evidence` and, since #1396, the approval
 request a mailbox approval accepted, `imap_ingestion_messages.approval_request`
-(ADR-0005 amendment), under the same key as the receipt's draft.
+(ADR-0005 amendment), under the same key as the receipt's draft, and, since
+#1398, the title in a queued "could not add" notice, `audit_log.approval_notice`
+(the row's `changes.titleEnc`), under the household's key and cleared once the
+notice is sent or ends. While the key is locked, administrator health counts
+these rows with the locked receipts.
 
 **Tier 2** is `items.title`, `items.provider` (a provider *name*), the cost
 `items.cost_minor`, the invited member address `household_invitations.email`,
@@ -522,8 +538,9 @@ surface may describe it as more than this.
 - Each value is one AES-256-GCM envelope, `mdv1.<iv>.<tag>.<ciphertext>`,
   bound to its table, column and row: a value moved to another row or column
   fails authentication instead of decrypting.
-- Three columns carry a blind index, and only three: `items.reference`,
-  `household_invitations.email` and `documents.content_sha256`. Nothing else
+- Four columns carry a blind index, and only four: `items.reference`,
+  `household_invitations.email`, `documents.content_sha256` and
+  `imap_ingestion_attachments.content_sha256`. Nothing else
   does, because nothing else is looked up by exact match — titles, provider
   names and costs are compared by readers that already read every row of the
   household, so an index would serve no query while leaking equality for
@@ -539,8 +556,16 @@ surface may describe it as more than this.
   (#1771, ADR-0024 amendment), so a database dump cannot confirm a known file
   or match equal files across households. Rows stored before #1771, or uploaded while
   the household key was locked, keep a plain `documents.content_sha256` only
-  until the maintenance backfill reaches them; the column is dropped in a later release (#1779). The mail-in tables
-  still hold plain attachment hashes (#1778).
+  until the maintenance backfill reaches them; the column is dropped in a later release (#1779). A mail-in
+  attachment's hash is sealed the same way, under the receipt's key (the
+  instance key until the receipt has a household, then the household's), and
+  its blind index, `imap_ingestion_attachments.content_index`, is under the
+  instance key over the message id and the hash, for one rule only: a mail
+  that carries the same file twice keeps one copy. It reveals that two
+  attachments of one mail are equal, nothing across mails or recipients. A
+  received mail's own hash is no longer stored (#1778). Attachments held
+  before #1778 keep a plain hash until the backfill reaches them; that column
+  is dropped in a later release (#1835).
 - The blind index is HMAC-SHA-256 over the
   normalised value, keyed by a key derived from the household's own data key
   and never stored, and derived separately per column so two columns never
@@ -641,7 +666,8 @@ the supported runtime. It must not introduce a custom cipher construction.
 - same-identity content/scope idempotency and `409` mismatch;
 - unavailable/timeout/protocol versus generic scanner-error classification;
 - staging privacy and purpose-bound AAD, duplicate workers, lease expiry,
-  restart recovery, five-attempt exhaustion, immutable retention expiry,
+  restart recovery, five-attempt exhaustion, retention expiry that never runs
+  out while the scanner is unreachable (#1419),
   terminal stage-purge failure, reviewed pending attachment, and admin
   redaction/authorization;
 - encryption round trips, AAD mismatch, corrupt ciphertext/tag/wrapped key,

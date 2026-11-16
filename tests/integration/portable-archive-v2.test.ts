@@ -491,7 +491,11 @@ describe("§4 line 27: an archive over the household's remaining quota is refuse
     const response = await postUpload(importRoute, { path: "/api/portable-archives/import", session: owner, body: tracked.body, contentType: upload.contentType, cookie: await proofCookie(owner, "archive_import") });
 
     expect(response.status).toBe(413);
-    expect((await errorOf(response)).code).toBe("archive_over_quota");
+    const refusal = await errorOf(response);
+    expect(refusal.code).toBe("archive_over_quota");
+    // #1799: the refusal names the way out (the wording beyond this is not pinned).
+    expect(refusal.message).toMatch(/raise/iu);
+    expect(refusal.message).toMatch(/storage limit/iu);
     expect(readdirSync(join(getDocumentConfig().storageRoot, "portable-archives")).filter((n) => n.endsWith(".upload.tmp"))).toEqual([]);
     expect(await stagedRows(target.household.id)).toEqual([]);
     expect(await getDb().select({ id: portableArchiveImports.id }).from(portableArchiveImports).where(eq(portableArchiveImports.householdId, target.household.id))).toEqual([]);

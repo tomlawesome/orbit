@@ -5,6 +5,15 @@ import { validUuid } from "@/lib/uuid";
 
 export interface StoredPortableArchive { storageKey: string; modifiedAt: Date }
 export interface OpenedPortableArchive { handle: FileHandle; sizeBytes: number }
+export interface SpoolInFlight {
+  /** Resolves with the byte count once `bytes` are on disk, or earlier with what there is if the source ends first. */
+  whenWritten(bytes: number): Promise<number>;
+  /** The first `bytes` of the spool file as a stream (at most what is written); readable while the spool continues. */
+  prefix(bytes: number): ReadableStream<Uint8Array>;
+  /** Stops the spool: cancels the source, removes the file, rejects `done` with `reason`. Idempotent. */
+  abort(reason: unknown): void;
+  done: Promise<SpooledUpload>;
+}
 /**
  * An uploaded archive taken in whole to a file (#1792): its length, a
  * reading of it (once), and the removal the caller owes however it ends.
@@ -64,54 +73,108 @@ export class PortableArchiveStorage {
   }
 
   /**
-   * Takes an uploaded archive in whole before anything processes it (#1792):
-   * each chunk is written to `<root>/<uuid>.upload.tmp` as it arrives, never
-   * held whole, and the promise resolves once the source ends. The `.tmp`
-   * suffix keeps a file left by a killed process under
-   * `sweepTemporaryFiles`; a live spool's mtime moves with every write, so it
-   * is never swept while bytes arrive. `list()` never names it. On any
-   * failure (the source erroring, a full disk) the file is removed and the
-   * error rethrown; otherwise the caller calls `dispose()` (idempotent).
+   * Starts taking an uploaded archive to a file and returns at once (#1792,
+   * #1797): each chunk is written to `<root>/<uuid>.upload.tmp` as it
+   * arrives, never held whole. `done` resolves once the source ends. The
+   * first bytes can be read back while the rest arrives (`whenWritten`,
+   * `prefix`), and `abort` stops the spool. The `.tmp` suffix keeps a file
+   * left by a killed process under `sweepTemporaryFiles`; a live spool's
+   * mtime moves with every write, so it is never swept while bytes arrive.
+   * `list()` never names it. On any failure (the source erroring, a full
+   * disk, an abort) the file is removed and `done` rejects; otherwise the
+   * caller calls `dispose()` on the result (idempotent).
    */
-  async spool(source: ReadableStream<Uint8Array>): Promise<SpooledUpload> {
-    await mkdir(this.root, { recursive: true, mode: 0o700 });
+  async spool(source: ReadableStream<Uint8Array>): Promise<SpoolInFlight> {
+    try {
+      await mkdir(this.root, { recursive: true, mode: 0o700 });
+    } catch (error) {
+      await source.cancel(error).catch(() => undefined);
+      throw error;
+    }
     const path = join(this.root, `${randomUUID()}.upload.tmp`);
     let disposal: Promise<void> | null = null;
     const dispose = () => (disposal ??= rm(path, { force: true }).then(() => undefined));
     const reader = source.getReader();
-    let sizeBytes = 0;
-    try {
-      const handle = await open(path, "wx", 0o600);
-      try {
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          let offset = 0;
-          while (offset < value.length) {
-            const { bytesWritten } = await handle.write(value, offset, value.length - offset);
-            offset += bytesWritten;
-          }
-          sizeBytes += value.length;
-        }
-      } finally {
-        await handle.close();
+    let written = 0;
+    let ended = false;
+    let aborted = false;
+    let abortReason: unknown;
+    let waiters: Array<{ bytes: number; resolve: (count: number) => void }> = [];
+    const settleWaiters = () => {
+      const remaining: typeof waiters = [];
+      for (const waiter of waiters) {
+        if (ended || written >= waiter.bytes) waiter.resolve(written);
+        else remaining.push(waiter);
       }
+      waiters = remaining;
+    };
+    let handle: FileHandle | null = null;
+    try {
+      handle = await open(path, "wx", 0o600);
     } catch (error) {
-      await reader.cancel().catch(() => undefined);
-      await dispose().catch(() => undefined);
-      throw error;
-    } finally {
+      await reader.cancel(error).catch(() => undefined);
       reader.releaseLock();
+      throw error;
     }
-    let streamed = false;
+    const opened = handle;
+    const run = async (): Promise<SpooledUpload> => {
+      try {
+        try {
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (aborted) throw abortReason;
+            if (done) break;
+            let offset = 0;
+            while (offset < value.length) {
+              const { bytesWritten } = await opened.write(value, offset, value.length - offset);
+              offset += bytesWritten;
+            }
+            written += value.length;
+            settleWaiters();
+          }
+        } finally {
+          await opened.close();
+        }
+      } catch (error) {
+        await reader.cancel(aborted ? abortReason : error).catch(() => undefined);
+        await dispose().catch(() => undefined);
+        throw aborted ? abortReason : error;
+      } finally {
+        ended = true;
+        settleWaiters();
+        reader.releaseLock();
+      }
+      if (aborted) {
+        await dispose().catch(() => undefined);
+        throw abortReason;
+      }
+      let streamed = false;
+      return {
+        sizeBytes: written,
+        stream: () => {
+          if (streamed) throw new Error("The spooled upload has already been read");
+          streamed = true;
+          return spoolReader(path);
+        },
+        dispose,
+      };
+    };
+    const done = run();
+    done.catch(() => undefined);
     return {
-      sizeBytes,
-      stream: () => {
-        if (streamed) throw new Error("The spooled upload has already been read");
-        streamed = true;
-        return spoolReader(path);
+      whenWritten: (bytes) => new Promise<number>((resolve) => {
+        if (ended || written >= bytes) resolve(written);
+        else waiters.push({ bytes, resolve });
+      }),
+      prefix: (bytes) => spoolReader(path, Math.min(bytes, written)),
+      abort: (reason) => {
+        if (aborted || ended) return;
+        aborted = true;
+        abortReason = reason;
+        // A read parked on a slow source is woken by the cancel; the loop then throws the reason.
+        void reader.cancel(reason).catch(() => undefined);
       },
-      dispose,
+      done,
     };
   }
 
@@ -183,7 +246,8 @@ export class PortableArchiveStorage {
 const SPOOL_READ_BYTES = 64 * 1024;
 
 /** The spool file as a stream, read a piece at a time; the handle closes however the reading ends. */
-function spoolReader(path: string): ReadableStream<Uint8Array> {
+function spoolReader(path: string, limit = Infinity): ReadableStream<Uint8Array> {
+  let remaining = limit;
   let handle: FileHandle | null = null;
   const close = async () => {
     const open_ = handle;
@@ -194,8 +258,9 @@ function spoolReader(path: string): ReadableStream<Uint8Array> {
     async pull(controller) {
       try {
         handle ??= await open(path, "r");
-        const buffer = Buffer.alloc(SPOOL_READ_BYTES);
-        const { bytesRead } = await handle.read(buffer, 0, buffer.length, null);
+        const buffer = Buffer.alloc(Math.min(SPOOL_READ_BYTES, remaining));
+        const { bytesRead } = remaining > 0 ? await handle.read(buffer, 0, buffer.length, null) : { bytesRead: 0 };
+        remaining -= bytesRead;
         if (bytesRead === 0) {
           await close();
           controller.close();

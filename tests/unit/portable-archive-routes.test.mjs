@@ -46,7 +46,9 @@ vi.mock("orbit/server/portable-archive-repository", () => ({
   // #1792: the routes take the file in whole before processing it. An in-memory stand-in: this file tests the step-up contract, not the spool.
   spoolPortableArchiveUpload: async (file) => {
     const bytes = new Uint8Array(await new Response(file).arrayBuffer());
-    return { sizeBytes: bytes.length, stream: () => new Blob([bytes]).stream(), dispose: async () => {} };
+    const spooled = { sizeBytes: bytes.length, stream: () => new Blob([bytes]).stream(), dispose: async () => {} };
+    // #1797: the spool in flight; `done` is the file taken in whole. The early check is not under test here.
+    return { done: Promise.resolve(spooled), whenWritten: async () => bytes.length, prefix: () => new Blob([]).stream(), abort: () => {} };
   },
 }));
 

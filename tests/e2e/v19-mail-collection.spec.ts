@@ -292,7 +292,7 @@ test("a spoofed PDF travels the real pipe: SMTP → IMAP → suggestion → item
   await establishInstanceAdmin(browser);
   await signInAsMember(page);
   // #958: seed the household BEFORE verifying the sender address. Success
-  // there follows a real one-use link, whose 303 lands on /settings/mail --
+  // there follows a real one-use link, whose 303 lands on /settings --
   // a plain page route, not /api/*, so hooks.server.js's first-run door (#840)
   // applies to it. A member with zero households fails hasOnwardHousehold and
   // is bounced to "/" instead, which is indistinguishable here from a failed
@@ -400,7 +400,7 @@ test("a message with no readable document lands in a bounded state on the relay"
   expect(receipt.message.length).toBeGreaterThan(0);
   expect(receipt.classification).not.toBe("waiting");
   if (!receipt.canApprove) {
-    await page.goto("/settings/mail");
+    await page.goto("/settings#mail");
     await expect(page.locator(".failures")).toContainText("arrived, but could not be read");
   }
 });

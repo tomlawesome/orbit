@@ -12,8 +12,8 @@ import { describe, expect, it } from "vitest";
  *
  * Words chosen here for the three refusals (the builder keeps them):
  * "a check is already running", "ingest is paused", "no mailbox is set up yet".
- * The outcome line says "messages read" and "receipts recorded", then the
- * reasons: sender unverified, unattributed, held, provider unavailable.
+ * The success line says only "checked" and points to the mail inbox (#1799
+ * L3); the counts and reasons stay in the imap.ingestion log event.
  */
 const dir = new URL("../../web/src/routes/administration/", import.meta.url);
 const page = readFileSync(new URL("+page.svelte", dir), "utf8");
@@ -75,11 +75,12 @@ describe("the fetch now button (#1651)", () => {
     }
   });
 
-  it("reports messages read and receipts recorded, then the four reasons the log event carries", () => {
-    expect(flat).toMatch(/messages? read/u);
-    expect(flat).toMatch(/receipts? recorded/u);
-    for (const reason of ["sender unverified", "unattributed", "held", "provider unavailable"]) {
-      expect(flat, reason).toContain(reason);
+  it("says only that the check ran and points to the mail inbox: no counts, no reason labels (#1799 L3)", () => {
+    expect(flat).toMatch(/checked · anything new is in the mail inbox/u);
+    expect(flat).not.toMatch(/messages? read/u);
+    expect(flat).not.toMatch(/receipts? recorded/u);
+    for (const reason of ["sender unverified", "unattributed"]) {
+      expect(flat, reason).not.toContain(reason);
     }
   });
 

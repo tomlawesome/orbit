@@ -269,6 +269,16 @@ describe("POST /api/settings/mail-relay/verification (decision 7c)", () => {
     expect(await hasVerifiedSenderAddress(fixture.users.member.id)).toBe(true);
   });
 
+  it("lands the reader on Settings, where the relay now lives (#1509): /settings?sender=verified and ?sender=unverified", async () => {
+    const member = await fixture.session("member");
+    const owner = await fixture.session("owner");
+    expect((await send(member)).status).toBe(202);
+    const token = tokenIn(mail.sent[0].text);
+
+    expect((await openLink(owner, token)).headers.get("location")).toBe("/settings?sender=unverified");
+    expect((await openLink(member, token)).headers.get("location")).toBe("/settings?sender=verified");
+  });
+
   it("verifies through the emailed link, only for the member who is signed in, and then refuses a second send", async () => {
     const member = await fixture.session("member");
     const owner = await fixture.session("owner");
@@ -405,6 +415,8 @@ describe("a registered address that moves to a claimed address and back (#1316)"
 
     await changeRegisteredAddress(other.id, claimed);
     await readRelaySettings(other);
+    /* Since 54553 only a VERIFIED row claims an address: N has proved Y. */
+    await getDb().update(mailInSenderAddresses).set({ verifiedAt: new Date() }).where(eq(mailInSenderAddresses.userId, other.id));
     await changeRegisteredAddress(other.id, parked);
 
     await changeRegisteredAddress(member.id, claimed);

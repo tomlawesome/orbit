@@ -66,7 +66,7 @@
    *   onkeep?: () => void,
    *   onopenheld?: () => void,
    *   readings?: Reading[],
-   *   papers?: { id?: string | null, name: string, meta: string, drawable?: boolean }[],
+   *   papers?: { id?: string | null, name: string, meta: string, drawable?: boolean, flagged?: true }[],
    *   receiptId?: string | null,
    * }} Props
    */
@@ -410,14 +410,14 @@
     <section class="p-card proposed pc-card pc-reading" style:--i="2" aria-labelledby="{uid}-reading">
       <h2 class="p-caps" id="{uid}-reading">what the relay read</h2>
       {#each papers as paper (paper.name)}
-        <button type="button" class="pc-paper" disabled={!paper.id}
+        <button type="button" class="pc-paper" disabled={!paper.id || paper.flagged}
                 aria-expanded={openPaperName === paper.name}
                 onclick={() => { openPaperName = openPaperName === paper.name ? null : paper.name; }}>
           <span class="p-paper pc-doc-mark" aria-hidden="true">◆</span>
           <span class="pc-paper-words"><b>{paper.name}</b><span>{paper.meta}</span></span>
-          {#if paper.id}<span class="pc-chev" aria-hidden="true">{openPaperName === paper.name ? "⌄" : "›"}</span>{/if}
+          {#if paper.id && !paper.flagged}<span class="pc-chev" aria-hidden="true">{openPaperName === paper.name ? "⌄" : "›"}</span>{/if}
         </button>
-        {#if openPaperName === paper.name && paper.id}
+        {#if openPaperName === paper.name && paper.id && !paper.flagged}
           <StagedPage href={receiptId ? stagedPreviewHref(receiptId, paper.id) : ""} name={paper.name}
                       drawable={Boolean(paper.drawable)} reader={false} />
         {/if}

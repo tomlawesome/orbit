@@ -132,13 +132,14 @@ const SANDBOX_SHELL = "/bin/sh";
  * The CPU limit, the address-space limit and the command follow as positional
  * parameters, so no value is ever part of the shell text. A limit the shell
  * refuses must not run unlimited: the wrapper exits 126 instead, which the
- * server reads as a crash. `PWD` and `SHLVL` are unset because dash and
+ * server reads as the renderer unavailable (not remembered against the file). `PWD` and `SHLVL` are unset because dash and
  * BusyBox ash export them to what they exec even from an empty environment.
  */
 const POPPLER_WRAPPER = 'ulimit -t "$1" || exit 126; ulimit -v "$2" || exit 126; shift 2; unset PWD SHLVL; exec "$@"';
 /**
  * The image child's wrapper: `ulimit -t` and `ulimit -d` (RLIMIT_DATA; empty
- * leaves it alone, for tests only), then node.
+ * leaves it alone, for tests only), then node. A refused limit exits 126, which
+ * the server reads as the image child unavailable (not remembered against the file).
  */
 const NODE_WRAPPER = 'ulimit -t "$1" || exit 126; if [ -n "$2" ]; then ulimit -d "$2" || exit 126; fi; shift 2; unset PWD SHLVL; exec "$@"';
 
@@ -531,10 +532,13 @@ function readPdfInfo(outcome: PopplerOutcome): PdfInfo {
   if ("stop" in outcome) return outcome;
   if (outcome.overflow) return { firstPage: false, password: false, ok: false };
   const text = outcome.stdout.toString("latin1");
-  const pages = /^Pages:\s+(\d{1,9})\s*$/m.exec(text);
+  /* pdfinfo prints the file's own metadata (Title, Author...) first, and a
+     title can hold a line break, so a crafted one can add a fake line. Each
+     answer is believed only when its line appears exactly once (#1803). */
+  const pages = [...text.matchAll(/^Pages:\s+(\d{1,9})\s*$/gm)];
   return {
-    pages: pages ? Number(pages[1]) : undefined,
-    firstPage: /^Page\s+1 size:/m.test(text),
+    pages: pages.length === 1 ? Number(pages[0]![1]) : undefined,
+    firstPage: [...text.matchAll(/^Page\s+1 size:/gm)].length === 1,
     password: outcome.exitCode === 1 && outcome.stderrTail.includes(PASSWORD_MESSAGE),
     ok: outcome.exitCode === 0,
   };

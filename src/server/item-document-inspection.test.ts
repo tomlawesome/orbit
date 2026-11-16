@@ -206,7 +206,7 @@ describe("item document inspection", () => {
 
   it.each([
     ["unavailable", { status: "error", reason: "unavailable" }, "scanner_unavailable", "document_scanner_unreachable"],
-    ["timed out", { status: "error", reason: "timeout" }, "scanner_timeout", "document_scanner_unreachable"],
+    ["timed out", { status: "error", reason: "timeout" }, "scanner_timeout", "document_scanner_timeout"],
     ["protocol error", { status: "error", reason: "protocol" }, "scanner_protocol", "document_scanner_failed"],
     ["scanner-reported error", { status: "error", reason: "scanner" }, "scanner_failed", "document_scanner_failed"],
     ["error with no reason", { status: "error" }, "scanner_failed", "document_scanner_failed"],

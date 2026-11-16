@@ -89,6 +89,8 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .inbox-page .receipt .actions button{font-size:0.78125rem;border-radius:9px;padding:7px 15px;cursor:pointer;
                          border:1px solid var(--line);background:none;color:var(--ink-mid);font-family:var(--ui)}
 .inbox-page .receipt .actions button.yes{border-color:var(--accent);color:var(--accent-text)}
+/* #1398: each decision is one line, like Dismiss, whatever its label. */
+.inbox-page .receipt .actions button{white-space:nowrap}
 .inbox-page .receipt .actions a{font:0.6875rem var(--mono);color:var(--ink-mid);text-decoration:none;margin-left:auto}
 .inbox-page .receipt .actions a:hover{color:var(--accent-text)}
 .inbox-page .twotap{font:0.65625rem var(--mono);color:var(--ink-quiet)}
@@ -138,3 +140,6 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .inbox-page .receipt .dupline .row{grid-column:2;display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:2px}
 .inbox-page .receipt .dupline .row a{font:.6875rem var(--mono);color:var(--accent-text);text-decoration:none}
 .inbox-page .receipt .dupline .row span{font:.65625rem var(--mono);color:var(--ink-quiet)}
+/* #1398: a flagged file is the card's one red register (placement note 56231). */
+.inbox-page .receipt .dupline.flag .bead{background:var(--overdue)}
+.inbox-page .receipt .dupline.flag p+p{grid-column:2}

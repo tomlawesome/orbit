@@ -1,5 +1,4 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
-import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { auditLog, imapIngestionMessages, imapRecipientAliases, mailInMailbox, mailInRelays, mailInSecrets, mailInSenderAddresses } from "@/db/schema";
@@ -119,7 +118,7 @@ describe("GET /api/settings/mail-relay while the administrator has paused ingest
     await setRelayIngest(member, true);
     await setRelayIngest(sibling, true);
     const heldRow = (userId: string, uid: number) => ({
-      mailbox: "INBOX", mailboxUidValidity: "1670", mailboxUid: uid, contentSha256: randomUUID().replaceAll("-", ""),
+      mailbox: "INBOX", mailboxUidValidity: "1670", mailboxUid: uid,
       recipientAliasSha256: "w-r1", userId, attributedBy: "sender" as const, status: "held" as const,
       receiptStatus: "cancelled" as const, expiresAt: new Date(Date.now() + 86_400_000),
     });

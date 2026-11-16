@@ -150,14 +150,13 @@ export function sendsAsOf(senderName: string, senderAddress: string): string {
 
 /**
  * Where "the mailbox account" submits, from the mailbox's provider profile:
- * the provider's own submission server for Gmail and Outlook, the mailbox's
- * own host otherwise (mailcow and most self-run servers take submission on
- * the IMAP host). Always port 587 with STARTTLS, signed in as the mailbox.
+ * Gmail's own submission server for Gmail, the mailbox's own host otherwise,
+ * an old `outlook` row included (#1780); mailcow and most self-run servers
+ * take submission on the IMAP host. Always port 587 with STARTTLS, signed in as the mailbox.
  */
 export function mailboxSubmissionServer(mailbox: { host: string; providerProfile: string }): { host: string; port: number; security: SendingSecurity } {
   const host = mailbox.providerProfile === "gmail" ? "smtp.gmail.com"
-    : mailbox.providerProfile === "outlook" ? "smtp.office365.com"
-      : mailbox.host;
+    : mailbox.host;
   return { host, port: 587, security: "starttls" };
 }
 
@@ -262,10 +261,19 @@ export async function sendingConfigured(): Promise<boolean> {
   return Boolean(mailbox?.host && mailbox.accountUser && mailbox.passwordSecretId);
 }
 
-/** Where the operations snapshot reads `mailSending.source` (the launcher's signal to retire `SMTP_*`). */
-export async function sendingSource(): Promise<"ui" | "imported" | null> {
+/**
+ * Where the operations snapshot reads `mailSending.source` (the launcher's
+ * signal to retire `SMTP_*`): the row's source. With `usable`, as `orbit
+ * mail-sending-status` asks it (#1817), null too unless Orbit can open the
+ * stored password: a row whose key is missing or whose decrypt fails is not a
+ * usable copy, and retiring the lines then would destroy the last one.
+ */
+export async function sendingSource(options: { usable?: boolean } = {}): Promise<"ui" | "imported" | null> {
   const row = await readRow();
-  return row?.source ?? null;
+  if (!row) return null;
+  if (!options.usable) return row.source;
+  const account = await resolveSendingAccount();
+  return account.state === "ready" ? row.source : null;
 }
 
 /**

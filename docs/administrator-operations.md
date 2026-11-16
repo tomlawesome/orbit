@@ -186,8 +186,9 @@ missing, has moved on, was already acted on, is being processed, or the update
 touches no row for any other reason, you get the bounded conflict result and
 no misleading success is written to the audit trail.
 
-- A failed scanner recovery job can be retried from attempt zero. Its recovery
-  expiry does not change. A failed final stage purge can be retried as a
+- A failed scanner recovery job can be retried from attempt zero. Retrying
+  does not change its recovery expiry; the expiry only counts down while the
+  scanner answers (see "When the scanner is down"). A failed final stage purge can be retried as a
   deletion only; it never goes back into scanning.
 - A staged upload wrapped under a key this instance does not hold is never
   deleted for that reason: its job retries as `key_unavailable` until you put
@@ -442,8 +443,8 @@ key-encryption key" is the master key that protects each document's own key.
 | `DOCUMENT_HOUSEHOLD_QUOTA_BYTES` | Orbit | Most document storage one household may keep. | `5368709120` |
 | `DOCUMENT_INSTANCE_QUOTA_BYTES` | Orbit | Most document storage the whole instance may keep. | `21474836480` |
 | `DOCUMENT_RETENTION_DAYS` | Orbit | Days a deleted document can still be restored before it is purged for good. | `30` |
-| `DOCUMENT_SCAN_RECOVERY_RETENTION_HOURS` | Orbit | Hours an upload is kept, encrypted, waiting for the malware scanner to come back before it is discarded. | `24` |
-| `DOCUMENT_SCAN_MODE` | Orbit | `required` refuses uploads when ClamAV is unavailable; `disabled` skips scanning and shows a permanent warning. Set it with `scripts/configure.sh --set-scanner on` or `off`, which also keeps `docker-compose.scanner-off.yml` in `COMPOSE_FILE` in step; see "The private virus scanner". | `required` |
+| `DOCUMENT_SCAN_RECOVERY_RETENTION_HOURS` | Orbit | Hours a held upload is kept, encrypted, once the malware scanner answers again, before it is discarded unscanned. It never runs out while the scanner cannot be reached. | `24` |
+| `DOCUMENT_SCAN_MODE` | Orbit | `required` holds new uploads, unscanned and unavailable, while ClamAV cannot be reached and scans them when it is back; `disabled` skips scanning and shows a permanent warning. Set it with `scripts/configure.sh --set-scanner on` or `off`, which also keeps `docker-compose.scanner-off.yml` in `COMPOSE_FILE` in step; see "The private virus scanner". | `required` |
 | `CLAMAV_HOST` | Orbit | Private Compose hostname of the ClamAV daemon. | `orbit-clamav` |
 | `CLAMAV_PORT` | Orbit | Private ClamAV daemon port; do not publish it on the host. | `3310` |
 | `CLAMAV_TIMEOUT_MS` | Orbit | Longest a malware scan may take per upload. | `30000` |
@@ -474,7 +475,7 @@ key-encryption key" is the master key that protects each document's own key.
 | `OIDC_EMAIL_VERIFIED_CLAIM` | Orbit | Which field says whether the email is verified. | `email_verified` |
 | `OIDC_NAME_CLAIM` | Orbit | Which field becomes the person's display name. | `name` |
 | `OIDC_AVATAR_CLAIM` | Orbit | Optional field holding the avatar URL. | `picture` |
-| `SMTP_HOST` / `SMTP_PORT` / `SMTP_SECURITY` / `SMTP_USER` / `SMTP_PASSWORD_FILE` / `SMTP_FROM` | Orbit | **Deprecated, still accepted.** Outgoing mail is set on the Mail card now (see [Outgoing mail](#outgoing-mail)). A complete set is copied into it once, on the first start that can read the encryption key, and ignored from then on; the lines can then go. | none |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_SECURITY` / `SMTP_USER` / `SMTP_PASSWORD_FILE` / `SMTP_FROM` | Orbit | **Deprecated, still accepted.** Outgoing mail is set on the Mail card now (see [Outgoing mail](#outgoing-mail)). A complete set is copied into it once, on the first start that can read the encryption key, and ignored from then on; Update or Repair then removes them (see [Moving off the SMTP lines](#moving-off-the-smtp-lines)). | none |
 | `OPERATOR_ALERT_ADDRESS` | Orbit | Where Orbit writes about its encryption key. Not a secret. While the key is missing Orbit cannot mail at all (see "Restoring the document key-encryption key"), so this address hears once the key is back. Needs sending set up; unset, Orbit only logs. Set it at install time. | `you@example.com` |
 | `MAIL_IN_DKIM_DNS_SERVERS` | Orbit | Optional DNS server(s) asked only for the DKIM keys that prove who sent inbound mail, comma-separated `host[:port]` or `ip[:port]`. Unset, Orbit uses the system resolver. Set it when that resolver cannot answer TXT queries faithfully (split-horizon, filtering). The server named here is trusted for attribution: whoever answers its TXT lookups decides whose forwards are accepted, so point it only at a resolver you control. A malformed value stops mail collection (mail waits in the mailbox, nothing is deleted) and is logged as `configuration_invalid` until fixed. | `192.0.2.53:53` |
 | `VAPID_SUBJECT` | Orbit | Contact address sent with browser push notifications. VAPID is the standard for browser and PWA push; it is not Pushover. | `mailto:admin@example.com` |
@@ -521,14 +522,17 @@ checks. How it sends is set in one place: **Administration → Mail**, the
 set up.", reminders wait in the queue without using up their attempts, and
 they go out on the first cycle after sending is set.
 
+Outlook.com, Hotmail and Microsoft 365 mailboxes are not supported for the
+relay: Microsoft refuses password sign-in for IMAP and SMTP, and Orbit does not
+offer the OAuth2 app registration that would replace it.
+
 Choose **set up sending…** (later **change sending…**) and pick what Orbit
 sends through:
 
 - **the mailbox account**: the same account and password as the mailbox
   above, so there is no second password. Orbit submits on port 587 with
-  STARTTLS: to the mailbox's own host, or to `smtp.gmail.com` or
-  `smtp.office365.com` for the Gmail and Outlook profiles. Set up the mailbox
-  first.
+  STARTTLS: to the mailbox's own host, or to `smtp.gmail.com` for the Gmail
+  profile. Set up the mailbox first.
 - **another account**: a separate provider. Enter its host, port, security
   (STARTTLS, usually port 587, or TLS, usually port 465; plain text is not
   supported), user and password.
@@ -555,16 +559,35 @@ read the encryption key, Orbit copies a complete set of those lines into the
 Sending half, password encrypted, once. It never copies over sending set on
 the screen, and from then on it does not read the lines at all. The card then
 says "copied from .env-orbit on <date> · the SMTP lines there can go now".
-To retire them:
 
-1. Check that the Sending half shows the account you expect, and run **test
-   outgoing mail**.
-2. Delete the `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURITY`, `SMTP_USER`,
-   `SMTP_PASSWORD_FILE` and `SMTP_FROM` lines from `.env-orbit`.
-3. Remove `docker-compose.mail.yml` from `COMPOSE_FILE` in `.env-orbit` (keep
-   the rest of the list), and delete `.orbit-secrets/smtp-password` with your
-   usual secure-delete tool.
-4. Restart: `docker compose --env-file .env-orbit up -d`.
+Update or Repair does this. Check that the Sending half shows the account you
+expect and run **test outgoing mail**; then the next `./update.sh` retires
+them, or `bash scripts/repair.sh --execute --safe-only` does when you choose
+its safe batch (the plan lists it as `retire-smtp-lines`, for the finding
+`smtp-lines-retirable`). Either one first asks Orbit, inside its container,
+whether outgoing mail is in its own Mail settings, and acts only when it is:
+
+1. It backs up `.env-orbit` in a dated folder only you can read, which stays
+   (Update: `orbit-install-backups/<date>/`; Repair:
+   `orbit-install-backups/<date>-repair/`, with the overlay, named when it
+   runs), leaving any `SMTP_PASSWORD=` line out of the copy, then rewrites
+   it without the `SMTP_*` lines and without `docker-compose.mail.yml` in
+   `COMPOSE_FILE`. Commented lines and every
+   other line stay as they were.
+2. It restarts Orbit on the rewritten file (`up -d --no-build`) and waits until
+   it is ready.
+3. It deletes `docker-compose.mail.yml` and `.orbit-secrets/smtp-password`. The
+   password file is deleted, never copied, so it cannot be restored from any
+   backup: Orbit keeps the password, encrypted, in its Mail settings.
+
+Update then prints: "Outgoing mail: SMTP credentials were migrated to Orbit's
+mail settings. They were removed from .env-orbit and deleted from the secrets
+folder." If a step is interrupted, the next run picks up where it stopped (the
+file `.orbit-smtp-retirement` records how far it got), and the password file
+stays until Orbit has restarted without it. When Orbit holds no outgoing mail
+settings yet, runs an older image, or cannot be asked, nothing is changed and
+nothing is printed. A later update lays `docker-compose.mail.yml` again with
+the other deployment files; with nothing naming it, it is unused.
 
 Any set the old version could send with is copied as it was, `SMTP_FROM`
 included (with no `SMTP_FROM`, Orbit sends as `Orbit <orbit@localhost>`, as
@@ -653,9 +676,26 @@ verified sending address, it is filed in that member's inbox as "not kept",
 with nothing of its content, the message is deleted, and the member is told
 through the ordinary inbox notification, at most once a day (anyone can forge
 an address). While they have paused collection they are told nothing and no
-inbox entry appears; the message is still deleted. Either way their relay page
-shows that their last forward was unsigned. Any other unsigned message is
+inbox entry appears; the message is still deleted. Either way the **your relay** tab
+of their Settings shows that their last forward was unsigned. Any other unsigned message is
 matched to nobody.
+
+A member may list up to five sending addresses. A signed forward from an extra
+address they have not checked yet is held in their inbox: it can be read but
+not added ("Please verify sending address"), and the check email goes to that
+address again unless one sent in the last 24 hours is still good. Checking the
+address makes the mail addable; removing the address, or the 14-day sweep of
+an address never checked, lets the held mail expire. The sweep removes an
+unchecked address once 14 days have passed and no check link is still good (a
+link sent in the last day defers removal until it lapses, at most 24 hours; it
+never restarts the 14 days). No check can be sent once the 14 days have passed,
+so an unchecked address is gone at the latest 15 days after it was added. An
+address another member has already checked can be listed like any other; its
+check is counted but never sent, so nobody learns which addresses are in use.
+An unchecked address
+listed by two or more members holds mail for nobody. A member gets at most one
+check email a minute and five a day, however they add, remove or re-add
+addresses.
 
 Gmail, Outlook and every mainstream mail server DKIM-sign their users' mail by
 default, including a member's forward from the same server that hosts the
@@ -688,7 +728,8 @@ What you see of any of this is a count. The operations view reports how many
 receipts sit in each state, including held and unattributed, and never whose
 they are or what address they came to.
 
-Members rotate their own relay address from their relay page, and one member
+Members rotate their own relay address from the **your relay** tab in
+Settings, and one member
 rotating changes nothing for anybody else. The one exception is an emergency:
 you can replace the alias key for the whole instance, which changes every
 member's address at once. Choose how long the old addresses keep collecting,
@@ -996,13 +1037,6 @@ password and alias key (`mail_in_secrets`, ADR-0017). Rotating it is always
 your decision (#932). Nothing in Orbit rotates it automatically or on a
 schedule.
 
-> [!IMPORTANT]
-> **Do not start a rotation on an installed Orbit yet.** Step 3 needs the
-> rewrap worker, and an installed Orbit has no command that runs it (issue
-> #1635). You can open a rotation (steps 1 and 2) but not finish or undo it,
-> and while it is open Orbit refuses backups, updates and restores. The steps
-> below say where step 3 cannot be run today.
-
 Nothing is ever locked during a rotation. For as long as it runs, the
 application holds **both** the current key and the next one
 (`DOCUMENT_KEK_NEXT`, #954, ADR-0024 decision 4). Every row records which key
@@ -1061,12 +1095,15 @@ rotation is undone).
 
    ![The "Document key rotation in progress" card, with how long the rotation has been open](images/admin-key-rotation-in-progress.png)
 
-3. Run the rewrap worker. **An installed Orbit has no command for this step
-   today** (issue #1635). The worker is run with `pnpm` from a source
-   checkout of Orbit. An installed deployment has no `package.json`, and the
-   Orbit image carries no copy of the worker or a command for it, so do not
-   carry on to step 4. Once there is a command, this
-   is what the worker does. It reads the current key exactly as the running
+3. Run the rewrap worker inside the running application container:
+   ```sh
+   docker compose --env-file .env-orbit \
+     -f docker-compose.yml -f docker-compose.kek-rotation.yml \
+     exec orbit-app node /opt/orbit/cli/orbit.js rewrap-kek \
+     --next-key-file /run/orbit-secrets/orbit-document-kek-next
+   ```
+   Add any extra overlay with its own `-f`, as in step 2.
+   The worker reads the current key exactly as the running
    application does, and takes the next key only from a file you give it. It
    reports progress and keeps going until every row in all six places
    that hold a wrapped key is under the next key: `document_crypto` (stored
@@ -1116,8 +1153,7 @@ rotation is undone).
 
 The exposed key stays live, and stays able to read everything, until step 4.
 The exposure ends there, not at step 1. So run the steps together rather than
-leaving a rotation part-done overnight. An installed Orbit cannot reach step 4
-today (issue #1635), so for now this exposure cannot be closed by rotating.
+leaving a rotation part-done overnight.
 
 Rotation also does not un-read anything already copied. It stops the exposed
 key being useful against this instance from step 4 onward; it does not undo a
@@ -1138,8 +1174,7 @@ mv .orbit-secrets/document-kek-next  .orbit-secrets/document-kek
 mv .orbit-secrets/document-kek-abandoning .orbit-secrets/document-kek-next
 ```
 
-Then repeat steps 2, 3 and 4. Step 3 has the same limit as above: an
-installed Orbit cannot run it today (issue #1635). Nothing is unreadable at any point: the instance
+Then repeat steps 2, 3 and 4. Nothing is unreadable at any point: the instance
 holds the same two keys throughout, and every row reads under whichever of
 them protects it. Step 4 finishes by overwriting the abandoned key, which is
 what you want. A spare key left lying in `.orbit-secrets/` is one a later
@@ -1283,10 +1318,33 @@ docker compose --env-file .env-orbit rm -s -f orbit-clamav
 Change the scanner only with `--set-scanner`. If `DOCUMENT_SCAN_MODE` and
 `COMPOSE_FILE` disagree, `bash scripts/repair.sh` reports
 `scanner-configuration-mismatch`: a failure when the overlay is listed but
-scanning is still required (no scanner runs, so uploads are refused), and
+scanning is still required (no scanner runs, so every upload is held), and
 information only when scanning is disabled but the overlay is missing (the
 idle scanner still runs). Run `--set-scanner on` or `off` to match what you
 meant, then update.
+
+### When the scanner is down
+
+With scanning required, an upload that arrives while ClamAV cannot be
+reached is held: kept encrypted, unavailable, and scanned once ClamAV
+answers again. Nothing held is ever made available without a clean scan. A
+held upload is not discarded while the scanner stays unreachable: its
+recovery window (`DOCUMENT_SCAN_RECOVERY_RETENTION_HOURS`) counts only while
+the scanner answers. A retry that finds the scanner not answering does not use
+up one of the five automatic attempts; retries back off to one every 15
+minutes. A malware verdict, or a scan the scanner reports as failed, still
+rejects the upload. A scan that times out or gets a broken reply while the
+scanner answers is retried, and that retry uses up one of the five attempts.
+
+Every five minutes Orbit checks the scanner. If it does not answer, or an
+upload is held because it cannot be reached, every administrator is mailed
+"Orbit needs you: the virus scanner is down", with the time it stopped
+answering and how many new documents are held. Orbit sends it at most once
+in 24 hours for the same outage, and a repeat gives the time the outage began.
+Nothing is sent when it comes back, but the outage ends there: if the scanner
+stops answering again later, that is a new outage and is mailed again, at
+most once an hour. Held documents are scanned by the next retries. Fix the scanner (`docker compose --env-file .env-orbit logs
+orbit-clamav`), or turn scanning off as above if you mean to run without it.
 
 ## Hostile document processor operation
 

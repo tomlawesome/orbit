@@ -2,14 +2,17 @@ import { randomUUID } from "node:crypto";
 import { and, asc, desc, eq, inArray, isNotNull, isNull, lte, lt, or, sql } from "drizzle-orm";
 import { AppError } from "@/lib/app-error";
 import { getDb } from "@/db";
-import { households, imapIngestionAttachments, imapIngestionMessages, imapIngestionStagingObjects, items, memberships, metadataKeyOutages, sections, users } from "@/db/schema";
+import { households, imapIngestionAttachments, imapIngestionMessages, imapIngestionStagingObjects, items, mailInSenderAddresses, memberships, metadataKeyOutages, sections, users } from "@/db/schema";
 import { clearMetadataDamageForColumn } from "@/server/metadata/damage-sightings";
 import { metadataCryptoAvailable } from "@/server/metadata/keys";
-import { flagStagingPurgeFailed, purgeHeldImapAttachment } from "./imap-attachment-holding";
+import { flagStagingPurgeFailed, flaggedAttachment, purgeFlaggedCopies, purgeHeldImapAttachment } from "./imap-attachment-holding";
 import { findHeldDuplicates, requestDocumentDeletion, type AlreadyHeld } from "@/server/document-repository";
 import { clearedReviewDraftMetadata, reclaimAbandonedMailboxApproval, sanitizeReviewDraftMetadata } from "@/server/reviewed-intake";
 import { openMetadataReader, openMetadataReaders, openReceiptMetadataReaders, requireReceiptMetadataWriter, type MetadataCipher, type MetadataExecutor, type MetadataFieldState } from "@/server/metadata/fields";
 import { validUuid } from "@/lib/uuid";
+import { ATTACHMENT_CONTENT_HASH_COLUMN, openContentHash, sealContentHash } from "@/server/documents/content-hash";
+import { SENDER_ADDRESS_WORDS, senderDaysLeft, sweepUncheckedSenderAddresses } from "./sender-addresses";
+import { endApprovalNotices } from "./approval-notice";
 import {
   reviewInboxState,
   failureReasonOf,
@@ -91,6 +94,38 @@ async function rekeyReceiptDraft(
   return changes;
 }
 
+/**
+ * #1778: re-seals the receipt's held attachment hashes under the new scope's
+ * DEK, bound to each attachment id, in the transaction that moves the receipt
+ * -- the same rule as `rekeyReceiptDraft`. A value that will not open under
+ * the source key is left exactly as it is (it stays "cannot verify", never a
+ * match), and a row with only a plain hash is the backfill's to convert. The
+ * dedupe index (`content_index`) is under the instance key and does not move.
+ * A locked target refuses the move (`requireReceiptMetadataWriter`, 503).
+ */
+async function rekeyReceiptAttachmentHashes(
+  current: { id: string; householdId: string | null },
+  nextHouseholdId: string,
+  executor: MetadataExecutor,
+): Promise<void> {
+  if (current.householdId === nextHouseholdId) return;
+  const sealedRows = await executor.select({ id: imapIngestionAttachments.id, sealed: imapIngestionAttachments.contentSha256Sealed })
+    .from(imapIngestionAttachments)
+    .where(and(eq(imapIngestionAttachments.messageId, current.id), isNotNull(imapIngestionAttachments.contentSha256Sealed)))
+    .for("update");
+  if (sealedRows.length === 0) return;
+  const source = await openMetadataReader(current.householdId, executor);
+  const target = await requireReceiptMetadataWriter(nextHouseholdId, executor);
+  for (const row of sealedRows) {
+    const opened = openContentHash(source, row.id, { plain: null, sealed: row.sealed }, ATTACHMENT_CONTENT_HASH_COLUMN);
+    if (!opened.ok) continue;
+    await executor.update(imapIngestionAttachments)
+      .set({ contentSha256Sealed: sealContentHash(target, row.id, opened.sha256, ATTACHMENT_CONTENT_HASH_COLUMN), updatedAt: new Date() })
+      .where(and(eq(imapIngestionAttachments.id, row.id), eq(imapIngestionAttachments.contentSha256Sealed, row.sealed!)));
+    await clearMetadataDamageForColumn(ATTACHMENT_CONTENT_HASH_COLUMN, row.id, executor);
+  }
+}
+
 const IMAP_STAGING_PURGE_RETRY_DELAY_MS = 60_000;
 /** Bounds every read on this endpoint: 50 receipts and 50 filed items, each
  * carrying at most IMAP_ATTACHMENT_LIMITS.attachmentCount (10) attachments. */
@@ -107,7 +142,8 @@ export type ReviewInboxAttachment = {
   displayName: string;
   mediaType: ReviewAttachmentMediaType;
   sizeBytes: number;
-  scanState: "clean" | "unknown";
+  /** #1398: "flagged" when the scanner flagged it while the member added the mail. */
+  scanState: "clean" | "flagged" | "unknown";
   /** #1437: the household the receipt is for already holds these bytes. Absent when it does not. */
   alreadyHeld?: AlreadyHeld;
 };
@@ -124,7 +160,7 @@ export type MailFiledItem = {
 };
 
 function orderedAttachments(
-  rows: Array<{ id: string; displayName: string; mediaType: string; sizeBytes: number; status: string }>,
+  rows: Array<{ id: string; displayName: string; mediaType: string; sizeBytes: number; status: string; purgeFailureCode?: string | null }>,
   held: ReadonlyMap<string, AlreadyHeld> = new Map(),
 ): ReviewInboxAttachment[] {
   return rows.map((row, index) => {
@@ -135,7 +171,7 @@ function orderedAttachments(
       displayName: reviewAttachmentDisplayName(row.displayName, row.mediaType),
       mediaType: reviewAttachmentMediaType(row.mediaType),
       sizeBytes: row.sizeBytes,
-      scanState: reviewAttachmentScanState(row.status),
+      scanState: reviewAttachmentScanState(row.status, row.purgeFailureCode),
       ...(alreadyHeld ? { alreadyHeld } : {}),
     };
   });
@@ -147,17 +183,29 @@ function orderedAttachments(
  * receipt (`findHeldDuplicates`). Only attachments still waiting (`stored`)
  * are asked about; one already filed is the household's copy. The digest
  * never leaves the server.
+ *
+ * #1778: the hash is the sealed one, opened under the receipt's household
+ * key (a row the backfill has not reached falls back to its plain hash). One
+ * that will not open is "cannot verify", never a match, and is not asked
+ * about. Matches map back by row id, not by hash.
  */
 async function heldAttachmentsOf(
   householdId: string,
-  rows: Array<{ id: string; status: string; contentSha256: string }>,
+  rows: Array<{ id: string; status: string; contentSha256: string | null; contentSha256Sealed: string | null }>,
   metadata?: MetadataCipher,
 ): Promise<Map<string, AlreadyHeld>> {
-  const waiting = rows.filter((row) => row.status === "stored");
-  const bySha = await findHeldDuplicates(householdId, waiting.map((row) => row.contentSha256), null, metadata);
   const held = new Map<string, AlreadyHeld>();
+  const waiting = rows.filter((row) => row.status === "stored");
+  if (waiting.length === 0) return held;
+  const cipher = metadata ?? await openMetadataReader(householdId);
+  const opened: Array<{ id: string; sha256: string }> = [];
   for (const row of waiting) {
-    const match = bySha.get(row.contentSha256);
+    const hash = openContentHash(cipher, row.id, { plain: row.contentSha256, sealed: row.contentSha256Sealed }, ATTACHMENT_CONTENT_HASH_COLUMN);
+    if (hash.ok) opened.push({ id: row.id, sha256: hash.sha256 });
+  }
+  const bySha = await findHeldDuplicates(householdId, opened.map((row) => row.sha256), null, cipher);
+  for (const row of opened) {
+    const match = bySha.get(row.sha256);
     if (match) held.set(row.id, match);
   }
   return held;
@@ -215,11 +263,20 @@ export async function listImapInbox(userId: string) {
       hasApprovalOperation: isNotNull(imapIngestionMessages.approvalOperationId),
       hasApprovedItem: isNotNull(imapIngestionMessages.approvedItemId),
       hasApprovalRequest: isNotNull(imapIngestionMessages.approvalRequestEnc),
+      heldSenderAddressId: imapIngestionMessages.heldSenderAddressId,
+      heldSenderSource: mailInSenderAddresses.source,
+      heldSenderVerifiedAt: mailInSenderAddresses.verifiedAt,
+      heldSenderCreatedAt: mailInSenderAddresses.createdAt,
+      heldSenderExpiresAt: mailInSenderAddresses.verificationExpiresAt,
       attachmentCount: sql<number>`count(${imapIngestionAttachments.id})::int`,
     }).from(imapIngestionMessages)
       .leftJoin(imapIngestionAttachments, eq(imapIngestionAttachments.messageId, imapIngestionMessages.id))
-      .where(and(eq(imapIngestionMessages.userId, userId), inArray(imapIngestionMessages.status, [...reviewLaneStatuses])))
-      .groupBy(imapIngestionMessages.id)
+      .leftJoin(mailInSenderAddresses, and(
+        eq(mailInSenderAddresses.id, imapIngestionMessages.heldSenderAddressId),
+        eq(mailInSenderAddresses.userId, userId),
+      ))
+      .where(and(eq(imapIngestionMessages.userId, userId), or(inArray(imapIngestionMessages.status, [...reviewLaneStatuses]), heldForSenderOnly)))
+      .groupBy(imapIngestionMessages.id, mailInSenderAddresses.id)
       .orderBy(desc(imapIngestionMessages.receivedAt))
       .limit(REVIEW_INBOX_PAGE),
     getDb().select({ id: households.id, name: households.name, currency: households.defaultCurrency })
@@ -234,13 +291,19 @@ export async function listImapInbox(userId: string) {
       mediaType: imapIngestionAttachments.mediaType,
       sizeBytes: imapIngestionAttachments.sizeBytes,
       status: imapIngestionAttachments.status,
+      purgeFailureCode: imapIngestionAttachments.purgeFailureCode,
       contentSha256: imapIngestionAttachments.contentSha256,
+      contentSha256Sealed: imapIngestionAttachments.contentSha256Sealed,
     }).from(imapIngestionAttachments)
       .innerJoin(imapIngestionMessages, eq(imapIngestionMessages.id, imapIngestionAttachments.messageId))
       .where(and(
         eq(imapIngestionMessages.userId, userId),
-        or(inArray(imapIngestionMessages.status, [...reviewLaneStatuses]), isNotNull(imapIngestionMessages.approvedItemId)),
-        inArray(imapIngestionAttachments.status, ["stored", "assigned"]),
+        or(inArray(imapIngestionMessages.status, [...reviewLaneStatuses]), heldForSenderOnly, isNotNull(imapIngestionMessages.approvedItemId)),
+        or(
+          inArray(imapIngestionAttachments.status, ["stored", "assigned"]),
+          // #1398: a flagged file is named on its card only while the mail is in review.
+          and(flaggedAttachment, inArray(imapIngestionMessages.status, [...reviewLaneStatuses])),
+        ),
       ))
       // Newest first so that if a very long-lived mailbox ever reaches the
       // bound it is the oldest names that fall off — the same end the
@@ -279,14 +342,20 @@ export async function listImapInbox(userId: string) {
   // instance key, which is the whole reason that scope exists.
   const metadataReaders = await openReceiptMetadataReaders(receipts.map((receipt) => receipt.householdId));
   const filedReaders = await openMetadataReaders(filedRows.map((row) => row.householdId));
+  const now = new Date();
   const visibleReceipts = receipts.filter((receipt) => !receipt.householdId || visibleHouseholdIds.has(receipt.householdId)).map((receipt) => ({
     receipt,
-    state: reviewInboxState(receipt.status, receipt.failureCode, {
+    state: heldForSenderCheck(reviewInboxState(inboxStatusOf(receipt), receipt.failureCode, {
       hasApprovalOperation: Boolean(receipt.hasApprovalOperation),
       hasApprovedItem: Boolean(receipt.hasApprovedItem),
       hasApprovalRequest: Boolean(receipt.hasApprovalRequest),
       expiresAt: receipt.expiresAt,
-    }),
+    }), receipt.heldSenderAddressId !== null),
+    /* #1650: days before the unchecked address, and the mail held under it,
+       goes; null for the sign-in row, which time never removes. */
+    senderDaysLeft: receipt.heldSenderAddressId !== null && receipt.heldSenderSource && receipt.heldSenderCreatedAt
+      ? senderDaysLeft({ source: receipt.heldSenderSource, verifiedAt: receipt.heldSenderVerifiedAt, createdAt: receipt.heldSenderCreatedAt, verificationExpiresAt: receipt.heldSenderExpiresAt }, now)
+      : null,
   }));
   /* #1437: the inbox draws the review card from this read, so the mark rides
      here as well as on the review read -- only for a receipt the reader can
@@ -299,7 +368,7 @@ export async function listImapInbox(userId: string) {
     ));
   }
   return {
-    receipts: visibleReceipts.map(({ receipt, state }) => {
+    receipts: visibleReceipts.map(({ receipt, state, senderDaysLeft: daysLeft }) => {
       const decrypted = readReceiptDraft(metadataReaders.get(receipt.householdId)!, receipt);
       const metadata = state.classification === "ready" || state.classification === "retry"
         ? { ...sanitizeReviewDraftMetadata(decrypted), metadataStatus: decrypted.metadataStatus }
@@ -315,6 +384,8 @@ export async function listImapInbox(userId: string) {
         attachments: orderedAttachments(attachmentsByMessage.get(receipt.id) ?? [], heldByReceipt.get(receipt.id)),
         ...state,
         ...metadata,
+        needsSenderCheck: receipt.heldSenderAddressId !== null,
+        senderDaysLeft: daysLeft,
       };
     }),
     households: choices,
@@ -341,6 +412,27 @@ export async function listImapInbox(userId: string) {
   };
 }
 
+/**
+ * Mail held for an unchecked sending address (#1650, owner decision 51) sits
+ * where addable mail sits, but cannot be added: its state keeps its lane and
+ * loses `canApprove` until the address is checked.
+ */
+function heldForSenderCheck<T extends { canApprove: boolean }>(state: T, held: boolean): T {
+  return held ? { ...state, canApprove: false } : state;
+}
+
+/**
+ * Mail held for an unchecked address is an envelope-only hold (#1810 item 1,
+ * owner answer 22a): filed `held` like a paused member's, nothing fetched. Its
+ * card is still the held card where addable mail sits (#1650), so the inbox
+ * reads it in that lane, with no draft and no attachments because none exist.
+ */
+const heldForSenderOnly = and(eq(imapIngestionMessages.status, "held"), isNotNull(imapIngestionMessages.heldSenderAddressId));
+
+function inboxStatusOf(receipt: { status: string; heldSenderAddressId: string | null }): string {
+  return receipt.status === "held" && receipt.heldSenderAddressId !== null ? "pending_review" : receipt.status;
+}
+
 /** Reads one owned draft only after the selected household has been authorized. */
 export async function getImapReview(userId: string, receiptId: string, householdId: string) {
   await privateMailboxUser(userId);
@@ -362,6 +454,7 @@ export async function getImapReview(userId: string, receiptId: string, household
     approvalRequestEnc: imapIngestionMessages.approvalRequestEnc,
     approvalStartedAt: imapIngestionMessages.approvalStartedAt,
     hasApprovedItem: isNotNull(imapIngestionMessages.approvedItemId),
+    heldSenderAddressId: imapIngestionMessages.heldSenderAddressId,
   }).from(imapIngestionMessages).where(and(
     eq(imapIngestionMessages.id, receiptId),
     eq(imapIngestionMessages.userId, userId),
@@ -376,12 +469,12 @@ export async function getImapReview(userId: string, receiptId: string, household
     receipt = await readOwned();
     if (!receipt) throw new AppError("inbox_receipt_not_found", "That incoming document is not available", 404);
   }
-  const state = reviewInboxState(receipt.status, receipt.failureCode, {
+  const state = heldForSenderCheck(reviewInboxState(inboxStatusOf(receipt), receipt.failureCode, {
     hasApprovalOperation: Boolean(receipt.approvalOperationId),
     hasApprovedItem: Boolean(receipt.hasApprovedItem),
     hasApprovalRequest: receipt.approvalRequestEnc !== null,
     expiresAt: receipt.expiresAt,
-  });
+  }), receipt.heldSenderAddressId !== null);
   const reader = await openMetadataReader(receipt.householdId);
   const decrypted = readReceiptDraft(reader, receipt);
   const metadata = state.classification === "ready" || state.classification === "retry"
@@ -406,9 +499,11 @@ export async function getImapReview(userId: string, receiptId: string, household
       mediaType: imapIngestionAttachments.mediaType,
       sizeBytes: imapIngestionAttachments.sizeBytes,
       status: imapIngestionAttachments.status,
+      purgeFailureCode: imapIngestionAttachments.purgeFailureCode,
       contentSha256: imapIngestionAttachments.contentSha256,
+      contentSha256Sealed: imapIngestionAttachments.contentSha256Sealed,
     })
-      .from(imapIngestionAttachments).where(and(eq(imapIngestionAttachments.messageId, receiptId), inArray(imapIngestionAttachments.status, ["stored", "assigned"])))
+      .from(imapIngestionAttachments).where(and(eq(imapIngestionAttachments.messageId, receiptId), or(inArray(imapIngestionAttachments.status, ["stored", "assigned"]), flaggedAttachment)))
       .orderBy(asc(imapIngestionAttachments.createdAt), asc(imapIngestionAttachments.id)),
   ]);
   // Candidate matching stays an application-side comparison over decrypted
@@ -458,6 +553,10 @@ function pendingApprovalOf(
 
 /** Discards a private draft and purges unassigned holding ciphertext idempotently. */
 export async function discardImapReviewItem(userId: string, receiptId: string): Promise<void> {
+  return discardOnce(userId, receiptId, false);
+}
+
+async function discardOnce(userId: string, receiptId: string, reread: boolean): Promise<void> {
   await privateMailboxUser(userId);
   // A malformed id must fail the same bounded way an unknown one does,
   // rather than reach the uuid column as text and 500 (#383).
@@ -473,6 +572,25 @@ export async function discardImapReviewItem(userId: string, receiptId: string): 
      ingestion cycle keeps deleting its message from the mailbox until the
      delete lands, and the once-a-day notice shared by sender_unsigned and
      sender_too_large still counts the notice it sent for it. */
+  /* #1810 item 1: mail held for an unchecked address holds no staged bytes,
+     only the envelope; dismissing it retires the row, and proving the address
+     afterwards releases nothing. A verify (or verify and resume) may release
+     it between the read above and this write: then nothing matches, and the
+     row is read once more and handled as it now stands, rather than answered
+     as dismissed while it comes back addable a cycle later.
+     #1810 L-new-1: a verify while the member is paused leaves the same
+     envelope-only hold, held for the pause instead (ADR-0017 decision 2), so
+     the dismiss is honoured on any of this member's `held` rows, marker or
+     not; only a verify that released it to `processing` reaches the reread. */
+  if (receipt.status === "held") {
+    const dismissed = await getDb().update(imapIngestionMessages)
+      .set({ status: "discarded", receiptStatus: "cancelled", discardedAt: new Date(), updatedAt: new Date(), ...clearedReviewDraftMetadata })
+      .where(and(eq(imapIngestionMessages.id, receipt.id), eq(imapIngestionMessages.userId, userId), eq(imapIngestionMessages.status, "held")))
+      .returning({ id: imapIngestionMessages.id });
+    if (dismissed.length > 0) return;
+    if (reread) throw new AppError("staging_cleanup_busy", "The incoming document is already being cleaned up; retry discard", 409);
+    return discardOnce(userId, receiptId, true);
+  }
   if (isRemovableTerminalFailure(receipt.status, receipt.failureCode)) {
     const keptCode = receipt.failureCode === "sender_unsigned" || receipt.failureCode === "sender_too_large" || receipt.failureCode === "sender_dkim_unavailable" ? receipt.failureCode : null;
     await getDb().update(imapIngestionMessages)
@@ -507,7 +625,11 @@ export async function discardImapReviewItem(userId: string, receiptId: string): 
     throw new AppError("staging_cleanup_busy", "The incoming document is already being cleaned up; retry discard", 409);
   }
 
-  const assigned = await getDb().select({ documentId: imapIngestionAttachments.assignedDocumentId }).from(imapIngestionAttachments).where(and(
+  // #1398: a flagged file's copy goes as the mail leaves review; if this
+  // fails, storage reconciliation's orphan sweep takes it (the row is rejected).
+  await purgeFlaggedCopies(getDb(), receipt.id).catch(() => undefined);
+
+  const assigned =await getDb().select({ documentId: imapIngestionAttachments.assignedDocumentId }).from(imapIngestionAttachments).where(and(
     eq(imapIngestionAttachments.messageId, receipt.id),
     eq(imapIngestionAttachments.status, "assigned"),
   ));
@@ -553,11 +675,13 @@ export async function discardImapReviewItem(userId: string, receiptId: string): 
   }
   if (fenced) return;
   const completed = await getDb().transaction(async (transaction) => {
-    const [current] = await transaction.select({ id: imapIngestionMessages.id }).from(imapIngestionMessages)
+    const [current] = await transaction.select({ id: imapIngestionMessages.id, householdId: imapIngestionMessages.householdId }).from(imapIngestionMessages)
       .where(and(eq(imapIngestionMessages.id, receipt.id), eq(imapIngestionMessages.status, "recoverable"), eq(imapIngestionMessages.attachmentProcessingLeaseToken, cleanupToken))).for("update").limit(1);
     if (!current) return false;
     await transaction.update(imapIngestionMessages).set({ status: "discarded", receiptStatus: "cancelled", failureCode: null, discardedAt: now, attachmentProcessingLockedAt: null, attachmentProcessingLeaseToken: null, updatedAt: now, ...clearedReviewDraftMetadata })
       .where(and(eq(imapIngestionMessages.id, receipt.id), eq(imapIngestionMessages.attachmentProcessingLeaseToken, cleanupToken)));
+    // #1398: the review ended here, so its "could not add" notice ends with it.
+    await endApprovalNotices(transaction, current);
     return true;
   });
   if (!completed) throw new AppError("staging_cleanup_busy", "The incoming document changed while it was being discarded; retry discard", 409);
@@ -625,6 +749,17 @@ async function syncMetadataKeyOutageWindow(now: Date): Promise<boolean> {
       inArray(imapIngestionMessages.status, RETENTION_LIVE_STATUSES),
       lt(imapIngestionMessages.receivedAt, endedAt),
     ));
+    /* #1823 A-S2: an unchecked extra sending address's 14 days (and its 15-day
+       cap) run from `created_at`, so the same credit moves that column
+       forward by the slice of the outage the row existed for. */
+    await transaction.update(mailInSenderAddresses).set({
+      createdAt: sql`${mailInSenderAddresses.createdAt} + (${endedAtIso}::timestamptz - GREATEST(${outageStartedAtIso}::timestamptz, ${mailInSenderAddresses.createdAt}))`,
+      updatedAt: now,
+    }).where(and(
+      eq(mailInSenderAddresses.source, "manual"),
+      isNull(mailInSenderAddresses.verifiedAt),
+      lt(mailInSenderAddresses.createdAt, endedAt),
+    ));
   });
   return true;
 }
@@ -633,6 +768,10 @@ async function syncMetadataKeyOutageWindow(now: Date): Promise<boolean> {
 export async function purgeExpiredImapStaging(now = new Date(), limit = 25): Promise<void> {
   if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error("IMAP staging purge limit is invalid");
   const metadataKeyAvailable = await syncMetadataKeyOutageWindow(now);
+  /* Unchecked extra sending addresses past their 14 days go first (#1650,
+     owner decision 51), so the mail held under them is purged in this pass.
+     Not while the metadata key is away: the clock stops then (#964, #1823 A-S2). */
+  if (metadataKeyAvailable) await sweepUncheckedSenderAddresses(now);
   for (let processed = 0; processed < limit; processed += 1) {
     const claim = await getDb().transaction(async (transaction) => {
       const [candidate] = await transaction.select({
@@ -685,6 +824,8 @@ export async function purgeExpiredImapStaging(now = new Date(), limit = 25): Pro
       return { id: claimed.id, token: claimed.token, terminalFailure: candidate.failureCode === "attachment_processing_exhausted", disabled: Boolean(candidate.disabledAt) };
     });
     if (!claim) break;
+    // #1398: a flagged file's copy goes as the mail leaves review; the orphan sweep takes any this misses.
+    await purgeFlaggedCopies(getDb(), claim.id).catch(() => undefined);
     const attachments = await getDb().select({ id: imapIngestionAttachments.id, storageKey: imapIngestionAttachments.storageKey, status: imapIngestionAttachments.status })
       .from(imapIngestionAttachments).where(and(
         eq(imapIngestionAttachments.messageId, claim.id),
@@ -753,20 +894,25 @@ export async function purgeExpiredImapStaging(now = new Date(), limit = 25): Pro
       }
     }
     if (fenced) continue;
-    await getDb().update(imapIngestionMessages).set({
-      status: failed ? "recoverable" : claim.terminalFailure ? "failed" : "expired",
-      receiptStatus: failed ? "pending" : claim.terminalFailure || claim.disabled ? "cancelled" : "pending",
-      expiredAt: failed ? null : now,
-      failureCode: failed ? (claim.terminalFailure ? "attachment_processing_exhausted" : "staging_purge_failed") : claim.terminalFailure ? "attachment_processing_exhausted" : claim.disabled ? "account_disabled" : null,
-      attachmentProcessingLockedAt: null,
-      attachmentProcessingLeaseToken: null,
-      attachmentProcessingNextAttemptAt: failed ? new Date(now.getTime() + IMAP_STAGING_PURGE_RETRY_DELAY_MS) : null,
-      updatedAt: now,
-      // This attempt at purging is itself still retryable when `failed`: the
-      // review has not actually ended yet, so its draft stays put. Reaching
-      // "expired" or the terminal "failed" state is the review ending.
-      ...(failed ? {} : clearedReviewDraftMetadata),
-    }).where(and(eq(imapIngestionMessages.id, claim.id), eq(imapIngestionMessages.attachmentProcessingLeaseToken, claim.token)));
+    await getDb().transaction(async (transaction) => {
+      const [ended] = await transaction.update(imapIngestionMessages).set({
+        status: failed ? "recoverable" : claim.terminalFailure ? "failed" : "expired",
+        receiptStatus: failed ? "pending" : claim.terminalFailure || claim.disabled ? "cancelled" : "pending",
+        expiredAt: failed ? null : now,
+        failureCode: failed ? (claim.terminalFailure ? "attachment_processing_exhausted" : "staging_purge_failed") : claim.terminalFailure ? "attachment_processing_exhausted" : claim.disabled ? "account_disabled" : null,
+        attachmentProcessingLockedAt: null,
+        attachmentProcessingLeaseToken: null,
+        attachmentProcessingNextAttemptAt: failed ? new Date(now.getTime() + IMAP_STAGING_PURGE_RETRY_DELAY_MS) : null,
+        updatedAt: now,
+        // This attempt at purging is itself still retryable when `failed`: the
+        // review has not actually ended yet, so its draft stays put. Reaching
+        // "expired" or the terminal "failed" state is the review ending.
+        ...(failed ? {} : clearedReviewDraftMetadata),
+      }).where(and(eq(imapIngestionMessages.id, claim.id), eq(imapIngestionMessages.attachmentProcessingLeaseToken, claim.token)))
+        .returning({ id: imapIngestionMessages.id, householdId: imapIngestionMessages.householdId });
+      // #1398: expiry ends the review, so its "could not add" notice ends with it.
+      if (ended && !failed) await endApprovalNotices(transaction, ended);
+    });
   }
 }
 
@@ -779,17 +925,26 @@ export async function assignImapReceiptHousehold(userId: string, receiptId: stri
     const [membership] = await transaction.select({ householdId: memberships.householdId }).from(memberships).innerJoin(households, eq(households.id, memberships.householdId))
       .where(and(eq(memberships.userId, userId), eq(memberships.householdId, householdId), isNull(households.deletionRequestedAt))).limit(1);
     if (!membership) throw new AppError("household_not_found", "That household is not available", 404);
+    /* Held for an unchecked sending address (#1650): nothing is added to
+       Orbit until the address is checked, whatever state the receipt is in. */
+    const [held] = await transaction.select({ id: imapIngestionMessages.id }).from(imapIngestionMessages).where(and(
+      eq(imapIngestionMessages.id, receiptId),
+      eq(imapIngestionMessages.userId, userId),
+      isNotNull(imapIngestionMessages.heldSenderAddressId),
+    )).limit(1);
+    if (held) throw new AppError("sender_unchecked", SENDER_ADDRESS_WORDS.unchecked, 409);
     const owned = and(
       eq(imapIngestionMessages.id, receiptId),
       eq(imapIngestionMessages.userId, userId),
       eq(imapIngestionMessages.status, "pending_review"),
+      isNull(imapIngestionMessages.heldSenderAddressId),
     );
     const [current] = await transaction.select({
       id: imapIngestionMessages.id,
       householdId: imapIngestionMessages.householdId,
       proposalEnc: imapIngestionMessages.proposalEnc,
       fieldEvidenceEnc: imapIngestionMessages.fieldEvidenceEnc,
-    }).from(imapIngestionMessages).where(owned).limit(1);
+    }).from(imapIngestionMessages).where(owned).for("update").limit(1);
     if (!current) return undefined;
     /* Tier 1 (ADR-0024 decision 1): which DEK encrypted a receipt's draft is
        decided by its household, and this statement is what changes that
@@ -797,12 +952,19 @@ export async function assignImapReceiptHousehold(userId: string, receiptId: stri
        instance DEK, or from a previous household's — or they would become
        unreadable the instant the column changed. A field that will not
        decrypt is left exactly as it is: rewriting it would erase the evidence
-       of damage and put an empty draft in its place. */
+       of damage and put an empty draft in its place. The held attachments'
+       sealed hashes move with it (#1778). The row lock above orders this
+       against the attachment-hash backfill, which seals under the household
+       it reads. */
+    await rekeyReceiptAttachmentHashes(current, householdId, transaction);
     const [row] = await transaction.update(imapIngestionMessages).set({
       householdId,
       ...await rekeyReceiptDraft(current, householdId, transaction),
       updatedAt: new Date(),
     }).where(owned).returning({ id: imapIngestionMessages.id });
+    /* #1398: a notice is keyed and filed under the household it was queued in;
+       moving the receipt ends it (the member has the receipt open in review). */
+    if (row && current.householdId !== householdId) await endApprovalNotices(transaction, current);
     return row;
   });
   if (!changed) throw new AppError("inbox_receipt_not_found", "That incoming document is not available", 404);

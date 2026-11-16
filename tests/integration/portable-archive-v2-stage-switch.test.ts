@@ -272,7 +272,7 @@ describe("§4 line 24: a failure after the switch committed is not a failed impo
 });
 
 describe("§4 line 25: a failed restore whose undo also fails (AR2-1)", () => {
-  it("answers 422 archive_import_failed naming the document, the reason and 'up to an hour'; the worker's next reconcile rolls the row back and reopens the household", async () => {
+  it("answers 422 archive_import_failed naming the document, the reason and 'about an hour'; the worker's next reconcile rolls the row back and reopens the household", async () => {
     // Catches the double failure reported as the restore failure alone, or left for a restart that the reconcile should do.
     const { target, file } = await archiveWith("arch1390-undo-fails", 2);
     hooks.afterUpload = async (index) => {
@@ -292,7 +292,7 @@ describe("§4 line 25: a failed restore whose undo also fails (AR2-1)", () => {
     expect(error.code).toBe("archive_import_failed");
     expect(error.message).toMatch(/stored-1\.pdf/);
     expect(error.message).toMatch(/the file is not a readable PDF/);
-    expect(error.message).toMatch(/up to an hour/);
+    expect(error.message).toMatch(/about an hour/);
 
     const [open] = await importRows(target.household.id);
     expect(open.finishedAt, "the undo failed, so the row is still open").toBeNull();
