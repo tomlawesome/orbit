@@ -29,14 +29,23 @@
 #                        the committed public key over this digest -- or the
 #                        digest itself does not resolve. Unsigned JSON,
 #                        attestations under another key, and a digest nobody
-#                        attested all land here.
+#                        attested all land here. With ORBIT_SBOM_OUT: no
+#                        verified SBOM attestation, an undecodable one, or
+#                        one whose SPDX creationInfo.created is missing or
+#                        not an RFC 3339 date-time; or a cosign SBOM output
+#                        larger than 64 MiB, refused before it is parsed.
 #   ambiguous (exit 12)  Verified attestations disagree about what was
 #                        validated. Two records that are identical except
 #                        recordedAt are one item of evidence (a retried
 #                        attesting job), newest governing expiry; any
 #                        disagreement on (imageDigest, commit, ref,
 #                        pipelineId, policyVersion) is a conflict this
-#                        script refuses to pick a winner from.
+#                        script refuses to pick a winner from. With
+#                        ORBIT_SBOM_OUT: two different SBOM documents
+#                        created at the same newest instant.
+#
+# With ORBIT_SBOM_OUT, an SBOM attestation whose in-toto subject is another
+# digest is a mismatch (exit 10), naming both digests.
 #   expired   (exit 13)  The newest evidence is older than seven days (the
 #                        window #661 grants a validated digest before it
 #                        must revalidate), or is stamped in the future
@@ -62,15 +71,19 @@
 #   COSIGN_PUBLIC_KEY      Optional; path to the committed public key,
 #                          default cosign.pub in the repository root.
 #   ORBIT_MAX_EVIDENCE_AGE_DAYS  Optional; default 7.
-#   ORBIT_SBOM_FILE        Optional; the SBOM the caller is about to attest
-#                          or publish (image.spdx.json, #1824). When set, the
-#                          signed predicate must carry its sha256 as
-#                          sbomSha256: a different one is a mismatch (exit
-#                          10), none or a malformed one is missing (exit 11).
-#                          A record without sbomSha256 beside one with it (an
-#                          attestation minted before the binding) is
-#                          tolerated; at least one must carry it and every one
-#                          that does must match.
+#   ORBIT_SBOM_OUT         Optional; a path to write the image's SBOM to,
+#                          for publishing (D-S6 43a, #1848). Only when set does
+#                          this script verify the SBOM attestations too (a
+#                          second cosign call, --type spdxjson, same key and
+#                          flags) and write the chosen SPDX document there --
+#                          and nothing at all on any refusal. The chosen one is
+#                          the newest by its signed SPDX creationInfo.created,
+#                          an RFC 3339 date-time compared as an instant: the
+#                          signing key has no transparency log, so there is no
+#                          trusted signing time, and a retried sign_evidence
+#                          leaves several. Identical documents at the newest
+#                          instant are one; different ones are ambiguous.
+#                          Countersign and stable promotion leave it unset.
 #   ORBIT_COSIGN           Optional; the cosign command to run, overridable
 #                          only so tests can stub it. Real use resolves the
 #                          pinned binary via scripts/ci/ensure-cosign.sh.
@@ -92,6 +105,10 @@ source "${repo_root}/scripts/release-metadata-patterns.sh"
 
 # Must match scripts/ci/attest-tested-image.sh; a test asserts they agree.
 readonly PREDICATE_TYPE="https://tomlawson.io/attestations/orbit-validation/v1"
+# Bounded reads (43a): cosign stderr echoed on a refusal is cut to its first
+# STDERR_ECHO_BYTES; the SBOM output is refused unread above MAX_SBOM_BYTES.
+readonly STDERR_ECHO_BYTES=4096
+readonly MAX_SBOM_BYTES=$((64 * 1024 * 1024))
 
 fail() { printf 'verify-validation-evidence: %s\n' "$1" >&2; exit 2; }
 refuse() { # $1 ground, $2 exit code, $3 message
@@ -119,11 +136,10 @@ public_key="${COSIGN_PUBLIC_KEY:-${repo_root}/cosign.pub}"
 [[ -f "$public_key" ]] ||
   fail "the validation public key is not at ${public_key}; the owner commits cosign.pub at the repository root (docs/releasing.md), and without it nothing can be verified"
 
-sbom_sha256=""
-if [[ -n "${ORBIT_SBOM_FILE:-}" ]]; then
-  [[ -f "$ORBIT_SBOM_FILE" && -r "$ORBIT_SBOM_FILE" ]] ||
-    fail "ORBIT_SBOM_FILE is not a readable file: ${ORBIT_SBOM_FILE}"
-  sbom_sha256="$(sha256sum < "$ORBIT_SBOM_FILE" | cut -d' ' -f1)"
+sbom_out="${ORBIT_SBOM_OUT:-}"
+if [[ -n "$sbom_out" ]]; then
+  [[ -d "$(dirname -- "$sbom_out")" && ! -d "$sbom_out" ]] ||
+    fail "ORBIT_SBOM_OUT is not a file path in an existing directory: ${sbom_out}"
 fi
 
 policy_version="${ORBIT_POLICY_VERSION:-$(bash scripts/ci/policy-version.sh)}"
@@ -138,7 +154,10 @@ fi
 subject="${ORBIT_IMAGE}@${ORBIT_DIGEST}"
 verified="$(mktemp)"
 cosign_err="$(mktemp)"
-trap 'rm -f "$verified" "$cosign_err"' EXIT
+sbom_verified="$(mktemp)"
+sbom_err="$(mktemp)"
+sbom_err_cut="$(mktemp)"
+trap 'rm -f "$verified" "$cosign_err" "$sbom_verified" "$sbom_err" "$sbom_err_cut"' EXIT
 
 # --insecure-ignore-tlog because the attestations are minted without a
 # transparency log: key-based trust, no Rekor to consult (cosign v3 renamed
@@ -152,8 +171,22 @@ if ! "$cosign_cmd" verify-attestation \
   --type "$PREDICATE_TYPE" \
   --insecure-ignore-tlog=true \
   "$subject" > "$verified" 2> "$cosign_err"; then
-  sed 's/^/verify-validation-evidence: cosign: /' "$cosign_err" >&2
+  head -c "$STDERR_ECHO_BYTES" -- "$cosign_err" | sed 's/^/verify-validation-evidence: cosign: /' >&2
   refuse missing 11 "no verifiable validation attestation of type ${PREDICATE_TYPE} for ${subject}; validation has not attested this digest under the committed key"
+fi
+
+# The SBOM attestations, only when the caller wants the SBOM. Their judgement
+# waits until the validation records have passed (node, below), so a refusal
+# of the validation record is reported as that, never as an SBOM refusal.
+sbom_status=""
+if [[ -n "$sbom_out" ]]; then
+  sbom_status=0
+  "$cosign_cmd" verify-attestation \
+    --key "$public_key" \
+    --type spdxjson \
+    --insecure-ignore-tlog=true \
+    "$subject" > "$sbom_verified" 2> "$sbom_err" || sbom_status=$?
+  head -c "$STDERR_ECHO_BYTES" -- "$sbom_err" > "$sbom_err_cut"
 fi
 
 # cosign has proven the signatures; node judges what the verified statements
@@ -164,11 +197,13 @@ ORBIT_PREDICATE_TYPE="$PREDICATE_TYPE" \
 ORBIT_POLICY_VERSION_RESOLVED="$policy_version" \
 ORBIT_DIGEST_SOURCE="$ORBIT_DIGEST_PATTERN" \
 ORBIT_MAX_AGE_DAYS="$max_age_days" \
-ORBIT_SBOM_SHA256="$sbom_sha256" \
+ORBIT_SBOM_STATUS="$sbom_status" \
+ORBIT_MAX_SBOM_BYTES="$MAX_SBOM_BYTES" \
 node -e '
   const fs = require("node:fs");
 
-  const [verifiedPath] = process.argv.slice(1);
+  const [verifiedPath, sbomVerifiedPath, sbomErrPath] = process.argv.slice(1);
+  const crypto = require("node:crypto");
   // The shared digest pattern (scripts/release-metadata-patterns.sh), handed over as text.
   if (!process.env.ORBIT_DIGEST_SOURCE) {
     process.stderr.write("verify-validation-evidence: ORBIT_DIGEST_SOURCE is empty; refusing to match digests against an empty pattern\n");
@@ -182,8 +217,9 @@ node -e '
     policyVersion: process.env.ORBIT_POLICY_VERSION_RESOLVED,
     predicateType: process.env.ORBIT_PREDICATE_TYPE,
     maxAgeDays: Number(process.env.ORBIT_MAX_AGE_DAYS),
-    sbomSha256: process.env.ORBIT_SBOM_SHA256 || null,
+    sbomOut: process.env.ORBIT_SBOM_OUT || null,
   };
+  const SPDX_TYPE = "https://spdx.dev/Document";
 
   function refuse(ground, code, message) {
     process.stderr.write(`verify-validation-evidence: refused (${ground}): ${message}\n`);
@@ -193,28 +229,39 @@ node -e '
   // Every line cosign printed is a DSSE envelope whose signature it already
   // verified; a line that does not decode to the expected in-toto shape is
   // not usable evidence, which is the "missing" ground, named precisely.
-  const statements = [];
-  const lines = fs.readFileSync(verifiedPath, "utf8").split("\n").filter((line) => line.trim());
-  for (const line of lines) {
-    let statement;
-    try {
-      const envelope = JSON.parse(line);
-      statement = JSON.parse(Buffer.from(envelope.payload, "base64").toString("utf8"));
-    } catch {
-      refuse("missing", 11, "a verified attestation payload is not decodable in-toto JSON; unusable as evidence");
-    }
-    if (statement.predicateType !== expected.predicateType) continue;
-    statements.push(statement);
+  function decode(path, what) {
+    const lines = fs.readFileSync(path, "utf8").split("\n").filter((line) => line.trim());
+    return lines.map((line) => {
+      try {
+        const envelope = JSON.parse(line);
+        const statement = JSON.parse(Buffer.from(envelope.payload, "base64").toString("utf8"));
+        if (statement === null || typeof statement !== "object") throw new Error("not an object");
+        return statement;
+      } catch {
+        refuse("missing", 11, `a verified ${what} payload is not decodable in-toto JSON; unusable as evidence`);
+      }
+    });
+  }
+  const subjectDigestsOf = (statement) =>
+    (Array.isArray(statement.subject) ? statement.subject : []).map((s) => `sha256:${s?.digest?.sha256}`);
+
+  // Only the records of the validation type are judged; anything else cosign
+  // printed is counted and left alone (43a).
+  const decoded = decode(verifiedPath, "attestation");
+  const statements = decoded.filter((statement) => statement.predicateType === expected.predicateType);
+  const ignored = decoded.length - statements.length;
+  if (ignored > 0) {
+    process.stdout.write(
+      `verify-validation-evidence: ignored ${ignored} verified attestation(s) not of predicate type ${expected.predicateType}\n`);
   }
   if (statements.length === 0) {
     refuse("missing", 11,
-      `cosign verified ${lines.length} attestation(s) for the digest, but none carries predicate type ${expected.predicateType}`);
+      `cosign verified ${decoded.length} attestation(s) for the digest, but none carries predicate type ${expected.predicateType}`);
   }
 
   const items = [];
   for (const statement of statements) {
-    const subjects = Array.isArray(statement.subject) ? statement.subject : [];
-    const subjectDigests = subjects.map((s) => `sha256:${s?.digest?.sha256}`);
+    const subjectDigests = subjectDigestsOf(statement);
     const p = statement.predicate ?? {};
     for (const [field, pattern] of [
       ["commit", /^[0-9a-f]{40}$/u],
@@ -275,24 +322,6 @@ node -e '
       `the policy changed since validation: evidence was judged under policy ${claim.policyVersion}, this checkout carries ${expected.policyVersion}; re-validate the digest`);
   }
 
-  // The SBOM is not signed itself; the predicate carries its sha256 (#1824).
-  if (expected.sbomSha256 !== null) {
-    const bound = records.filter((r) => r.sbomSha256 !== undefined);
-    if (bound.length === 0) {
-      refuse("missing", 11,
-        "the SBOM is to be attested, but no verified attestation carries an sbomSha256; the SBOM is not bound to GitLab\u0027s signature");
-    }
-    for (const r of bound) {
-      if (typeof r.sbomSha256 !== "string" || !/^[0-9a-f]{64}$/u.test(r.sbomSha256)) {
-        refuse("missing", 11, "a verified attestation predicate has a malformed sbomSha256; unusable as evidence");
-      }
-      if (r.sbomSha256 !== expected.sbomSha256) {
-        refuse("mismatch", 10,
-          `the SBOM has sha256 ${expected.sbomSha256}, but GitLab signed sbomSha256 ${r.sbomSha256}; it is not the SBOM GitLab produced`);
-      }
-    }
-  }
-
   const newest = records.map((r) => r.recordedAt).sort().at(-1);
   const newestMs = Date.parse(newest);
   const ageMs = Date.now() - newestMs;
@@ -306,6 +335,86 @@ node -e '
   }
 
   const summary = records.find((r) => r.recordedAt === newest);
+
+  // The SBOM (43a): the newest verified SPDX document by its signed
+  // creationInfo.created, an RFC 3339 date-time compared as an instant.
+  // Every SBOM attestation must carry a valid one; none is assumed oldest.
+  function instantOf(created) {
+    const m = typeof created === "string" && /^(\d{4})-(\d{2})-(\d{2})[Tt](\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(?:([Zz])|([+-])(\d{2}):(\d{2}))$/u.exec(created);
+    if (!m) return null;
+    const [y, mo, d, h, mi, sec] = m.slice(1, 7).map(Number);
+    const day = new Date(Date.UTC(y, mo - 1, d));
+    if (day.getUTCFullYear() !== y || day.getUTCMonth() !== mo - 1 || day.getUTCDate() !== d) return null;
+    if (h > 23 || mi > 59 || sec > 60) return null;
+    let offsetMinutes = 0;
+    if (!m[8]) {
+      const [oh, om] = [Number(m[10]), Number(m[11])];
+      if (oh > 23 || om > 59) return null;
+      offsetMinutes = (m[9] === "-" ? -1 : 1) * (oh * 60 + om);
+    }
+    const seconds = BigInt(Date.UTC(y, mo - 1, d, h, mi, sec) / 1000 - offsetMinutes * 60);
+    const nanos = BigInt((m[7] ?? "").slice(0, 9).padEnd(9, "0"));
+    return seconds * 1000000000n + nanos;
+  }
+
+  let sbom = null;
+  if (expected.sbomOut !== null) {
+    if (process.env.ORBIT_SBOM_STATUS !== "0") {
+      for (const line of fs.readFileSync(sbomErrPath, "utf8").split("\n").filter((l) => l.trim())) {
+        process.stderr.write(`verify-validation-evidence: cosign: ${line}\n`);
+      }
+      refuse("missing", 11,
+        `no verifiable SBOM (spdxjson) attestation for ${expected.digest} under the committed key; there is no signed SBOM to publish`);
+    }
+    // Bounded read: the size is checked before a byte is read or parsed.
+    const maxSbomBytes = Number(process.env.ORBIT_MAX_SBOM_BYTES);
+    const sbomBytes = fs.statSync(sbomVerifiedPath).size;
+    if (!(sbomBytes <= maxSbomBytes)) {
+      refuse("missing", 11,
+        `the verified SBOM output for ${expected.digest} is ${sbomBytes} bytes, larger than the ${maxSbomBytes / 1048576} MiB limit; refusing to read it`);
+    }
+    const sboms = decode(sbomVerifiedPath, "SBOM attestation")
+      .filter((statement) => statement.predicateType === SPDX_TYPE);
+    if (sboms.length === 0) {
+      refuse("missing", 11,
+        `no verified SBOM attestation of predicate type ${SPDX_TYPE} for ${expected.digest}; there is no signed SBOM to publish`);
+    }
+    const candidates = sboms.map((statement) => {
+      const subjectDigests = subjectDigestsOf(statement);
+      if (!subjectDigests.includes(expected.digest)) {
+        refuse("mismatch", 10,
+          `a verified SBOM attestation is attached to subject ${subjectDigests.join(", ") || "<none>"}, not the digest being published (${expected.digest})`);
+      }
+      const doc = statement.predicate;
+      if (doc === null || typeof doc !== "object" || Array.isArray(doc)) {
+        refuse("missing", 11, "a verified SBOM attestation carries no SPDX document; unusable as evidence");
+      }
+      const instant = instantOf(doc.creationInfo?.created);
+      if (instant === null) {
+        refuse("missing", 11,
+          "a verified SBOM attestation has no RFC 3339 date-time in its SPDX creationInfo.created; cannot tell which SBOM is newest");
+      }
+      const text = `${JSON.stringify(doc)}\n`; // exactly the bytes written below
+      return { doc, text, instant, sha256: crypto.createHash("sha256").update(text).digest("hex") };
+    });
+    const newestInstant = candidates.reduce((a, c) => (c.instant > a ? c.instant : a), candidates[0].instant);
+    const atNewest = candidates.filter((c) => c.instant === newestInstant);
+    const digests = [...new Set(atNewest.map((c) => c.sha256))];
+    if (digests.length > 1) {
+      refuse("ambiguous", 12,
+        `${digests.length} different SBOM documents were created at the same newest instant (${atNewest[0].doc.creationInfo.created}): sha256 ${digests.join(", sha256 ")}; refusing to choose between them`);
+    }
+    sbom = atNewest[0];
+  }
+
+  // Every check has passed: only now is anything written.
+  if (sbom !== null) {
+    const partial = `${expected.sbomOut}.partial`;
+    fs.writeFileSync(partial, sbom.text);
+    fs.renameSync(partial, expected.sbomOut);
+    process.stdout.write(
+      `verify-validation-evidence: SBOM sha256 ${sbom.sha256}, created ${sbom.doc.creationInfo.created}, written to ${expected.sbomOut}\n`);
+  }
   process.stdout.write(
     `verify-validation-evidence: accepted ${expected.digest}: validated at commit ${summary.commit}`
     + ` on ${summary.ref} by pipeline ${summary.pipelineId} under policy ${summary.policyVersion},`
@@ -314,4 +423,4 @@ node -e '
     fs.appendFileSync(process.env.GITHUB_OUTPUT,
       `recorded_at=${newest}\npipeline_url=${summary.pipelineUrl ?? ""}\npolicy_version=${summary.policyVersion}\n`);
   }
-' -- "$verified"
+' -- "$verified" "$sbom_verified" "$sbom_err_cut"
