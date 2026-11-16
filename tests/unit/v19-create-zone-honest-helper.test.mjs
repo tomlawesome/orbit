@@ -11,7 +11,7 @@ import { createPageLoader } from "../support/svelte-page.mjs";
  * is NOT on the list, detection fell back to Europe/London and GBP, and the
  * helper must say so instead of claiming the browser supplied them:
  *
- *   your browser's zone isn't on this short list — change it in settings
+ *   your browser's zone isn't one of these — pick yours here
  *
  * It is true: the household screen's time zone and currency fields change
  * both afterwards (household.update).
@@ -23,7 +23,7 @@ import { createPageLoader } from "../support/svelte-page.mjs";
  * for a reader whose browser answer it has not overridden.
  */
 
-const OFF_LIST_NOTE = "your browser's zone isn't on this short list — change it in settings";
+const OFF_LIST_NOTE = "your browser's zone isn't one of these — pick yours here";
 
 const loader = createPageLoader("create-zone-helper");
 beforeAll(() => loader.setup("lib/arrival/CreateSystem.svelte"));

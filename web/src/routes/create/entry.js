@@ -20,7 +20,7 @@ import { every } from "$lib/format.js";
 /** #1463: the three levels, low to high. */
 export const IMPORTANCE_LEVELS = /** @type {const} */ (["low", "normal", "high"]);
 /** What holds Add until a level is picked (round 6 P's note). */
-export const CHOOSE_IMPORTANCE = "choose an importance";
+export const CHOOSE_IMPORTANCE = "not yet — choose an importance";
 
 /** @typedef {"renewal" | "service" | "expiry"} ScheduleKind */
 
