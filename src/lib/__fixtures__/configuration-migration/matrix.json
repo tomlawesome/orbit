@@ -1753,15 +1753,93 @@
         ]
       },
       "bash": {
-        "status": 1,
-        "stdout": "",
-        "stderr": "configuration_migration\n",
-        "file": "ORBIT_IMAGE=\n# ORBIT_IMAGE=\nAPP_URL=x\n",
+        "status": 0,
+        "stdout": "Orbit configuration: migrated from schema v0 version none digest none to schema v1 version v1.2.0 digest sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+        "stderr": "",
+        "file": "ORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nAPP_URL=x\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nCOMPOSE_PROJECT_NAME=orbit-test\n",
         "fileMode": 384,
-        "rollback": {
-          "content": "ORBIT_IMAGE=\n# ORBIT_IMAGE=\nAPP_URL=x\n",
-          "mode": 384
-        },
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "migrate: duplicate managed keys placeholder first",
+      "input": {
+        "content": "# ORBIT_IMAGE=\nAPP_URL=x\nORBIT_IMAGE=\n",
+        "args": [
+          "--migrate",
+          "--orbit-image",
+          "registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--applied-version",
+          "v1.2.0",
+          "--applied-digest",
+          "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--compose-project-name",
+          "orbit-test"
+        ]
+      },
+      "bash": {
+        "status": 0,
+        "stdout": "Orbit configuration: migrated from schema v0 version none digest none to schema v1 version v1.2.0 digest sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+        "stderr": "",
+        "file": "ORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nAPP_URL=x\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nCOMPOSE_PROJECT_NAME=orbit-test\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "migrate: duplicate managed keys two placeholders no live line",
+      "input": {
+        "content": "APP_URL=x\n# ORBIT_IMAGE=\n# ORBIT_IMAGE=\n",
+        "args": [
+          "--migrate",
+          "--orbit-image",
+          "registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--applied-version",
+          "v1.2.0",
+          "--applied-digest",
+          "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--compose-project-name",
+          "orbit-test"
+        ]
+      },
+      "bash": {
+        "status": 0,
+        "stdout": "Orbit configuration: migrated from schema v0 version none digest none to schema v1 version v1.2.0 digest sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+        "stderr": "",
+        "file": "APP_URL=x\nORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nCOMPOSE_PROJECT_NAME=orbit-test\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "migrate: commented managed value kept beside live key",
+      "input": {
+        "content": "ORBIT_IMAGE=\n# ORBIT_IMAGE=registry.example/x\nAPP_URL=x\n",
+        "args": [
+          "--migrate",
+          "--orbit-image",
+          "registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--applied-version",
+          "v1.2.0",
+          "--applied-digest",
+          "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--compose-project-name",
+          "orbit-test"
+        ]
+      },
+      "bash": {
+        "status": 0,
+        "stdout": "Orbit configuration: migrated from schema v0 version none digest none to schema v1 version v1.2.0 digest sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+        "stderr": "",
+        "file": "ORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n# ORBIT_IMAGE=registry.example/x\nAPP_URL=x\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nCOMPOSE_PROJECT_NAME=orbit-test\n",
+        "fileMode": 384,
+        "rollback": null,
         "lock": null,
         "migratingLeftovers": 0
       }
