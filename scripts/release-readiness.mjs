@@ -21,9 +21,9 @@
 // sign-off bound to the guide's content. docs/releases/vX.Y.Z.md carries
 // `version:`, `guide-blob:` (git blob id of docs/releasing.md), `guide-commit:`
 // (for people; not verified), one `step N:` line per numbered step of the
-// guide's "What you do, in short", and a `Signed-off-by: Name <email>` line
-// that must equal the author and a Signed-off-by trailer of the last commit
-// touching the record. Template: docs/releases/TEMPLATE.md.
+// guide's "What you do, in short", and a `Signed-off-by: <name>` line, a name
+// only (the private-details hook refuses an email), that must equal the author
+// name and a Signed-off-by trailer of the last commit touching the record. Template: docs/releases/TEMPLATE.md.
 //
 // No variable's value is ever printed: variables are checked by name only.
 import { spawnSync } from "node:child_process";
@@ -183,13 +183,13 @@ function checkReleaseRecord(version, record, guideBlob, guideSteps) {
   if (!record || record.exists !== true) {
     return {
       ok: false,
-      message: `${path} is missing: read docs/releasing.md, copy docs/releases/TEMPLATE.md, fill one line per step and commit it with git commit -s`,
+      message: `${path} is missing: read docs/releasing.md, copy docs/releases/TEMPLATE.md, fill one line per step and commit it with git commit --trailer "Signed-off-by: <your name>"`,
     };
   }
   const problems = [...(Array.isArray(record.problems) ? record.problems : [])];
   if (record.signed !== true) {
     problems.push(
-      "it is not signed: its Signed-off-by line must equal the author and the Signed-off-by trailer of the last commit touching it (git commit -s)",
+      'it is not signed: its Signed-off-by line (a name, no email) must equal the author name and the Signed-off-by trailer of the last commit touching it (git commit --trailer "Signed-off-by: <your name>")',
     );
   }
   if (record.guideCommit !== guideBlob) problems.push(GUIDE_CHANGED);
@@ -574,9 +574,11 @@ export function realLookups({ repoDir, target, remote: requestedRemote }) {
       let signed = false;
       if (record.signoffs.length !== 1) {
         record.problems.push(`it has ${record.signoffs.length} Signed-off-by lines, not one`);
+      } else if (/[@<>]/u.test(record.signoffs[0])) {
+        record.problems.push("its Signed-off-by line must be a name only, with no email");
       } else {
         const [author, trailers] = git(repoDir, [
-          "log", "-1", "--format=%an <%ae>%x00%(trailers:key=Signed-off-by,valueonly,separator=%x01)", "HEAD", "--", path,
+          "log", "-1", "--format=%an%x00%(trailers:key=Signed-off-by,valueonly,separator=%x01)", "HEAD", "--", path,
         ]).split("\0");
         const signoff = record.signoffs[0];
         signed = author === signoff && (trailers ?? "").split("\x01").map((t) => t.trim()).includes(signoff);

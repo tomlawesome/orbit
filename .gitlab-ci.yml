@@ -1167,9 +1167,10 @@ variables:
 # Release readiness (#1860, owner 2026-11-16): first on every promotion merge
 # request, and everything else waits for it: `classify`, which has no `needs:`,
 # waits for it by stage, every job rooted at `classify` waits through it, and
-# the other jobs with no `needs:` wait by stage too. Not yet waiting: the three
-# `needs: []` static checks (gitleaks, private-details, flake_check), which
-# existing tests hold at `needs: []` (#1860 hand-back). It runs every check scripts/release-readiness.mjs knows in one go and
+# the other jobs with no `needs:` wait by stage too. The three cheap static
+# checks (gitleaks, private-details, flake_check) keep `needs: []` and start
+# beside it (decided on #1860: under a minute each). Anything else that would
+# start beside it fails scripts/ci/release-readiness-ci.test.mjs. It runs every check scripts/release-readiness.mjs knows in one go and
 # ends with the list of every failure, so nothing long runs on a promotion that
 # was never ready (v0.3.9 lost two days to checks that only ran at the end).
 # The same script runs locally before the promotion is opened

@@ -2,7 +2,8 @@
 
 Copy this file to `docs/releases/vX.Y.Z.md` before step 1 of
 [docs/releasing.md](../releasing.md), replace every `<...>`, and commit it on
-`dev` with `git commit -s`. See "The signed release record" in the guide
+`dev` with `git commit --trailer "Signed-off-by: <your name>"` (a name only, no
+email; `git commit -s` would add one). See "The signed release record" in the guide
 for what each line must say, and keep one `step N:` line per numbered step of
 "What you do, in short", in the guide's order. A step says one of:
 
@@ -25,4 +26,4 @@ step 4: after-merge
 step 5: after-merge
 step 6: after-merge
 
-Signed-off-by: <Name> <<email>>
+Signed-off-by: <your name, as git config user.name>

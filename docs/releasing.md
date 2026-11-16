@@ -39,7 +39,7 @@ Then, still before step 1 (#1860):
 
 - Read this whole guide, write the release record `docs/releases/vX.Y.Z.md`
   from [the template](releases/TEMPLATE.md), and commit it on `dev` signed
-  off (`git commit -s`). See [Release readiness](#release-readiness-and-the-signed-release-record).
+  off by name (`git commit --trailer "Signed-off-by: <your name>"`). See [Release readiness](#release-readiness-and-the-signed-release-record).
 - Fetch (`git fetch --tags <remote> dev preview main`), then run
   `node scripts/release-readiness.mjs --target preview` on `dev` (and
   `--target main` on `preview` before step 4). Open the promotion merge
@@ -167,11 +167,14 @@ the release signs a record for the version: a pre-flight checklist sign-off
 - One `step N:` line for every numbered step of "What you do, in short", in
   order: `done: <link or job id>`, `not-needed: <the owner decision that says
   so>`, or `after-merge` for a step that comes after the promotion.
-- `Signed-off-by: Name <email>`, equal to the commit's author. Commit it with
-  `git commit -s`, which adds the same trailer.
+- `Signed-off-by: <name>`: a name only, no email (the private-details check
+  refuses an email in a file or a commit message), equal to the commit's
+  author name. Commit it with
+  `git commit --trailer "Signed-off-by: <name>"`, which adds the same trailer
+  (`git commit -s` would add the email).
 
 The `release-record` check fails when the record is missing; when its
-`Signed-off-by` line is not the author and a `Signed-off-by` trailer of the
+`Signed-off-by` line is not the author name and a `Signed-off-by` trailer of the
 last commit that touched it; when `guide-blob` is not this guide's blob id in
 the tree being promoted ("guide changed; re-read docs/releasing.md and
 regenerate the record": any edit to this guide needs a new record); or when it
