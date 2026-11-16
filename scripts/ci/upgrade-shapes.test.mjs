@@ -30,8 +30,14 @@ import { afterEach, describe, expect, it } from "vitest";
  *    names. FAKE_DOCKER_DOWN=1 makes it behave as if nothing is running.
  *  - oidc drift is edited into .env-orbit, which also breaks env-file-intact;
  *    the test accepts either id because the snapshot layout is unspecified.
- *  - overlay-composed drift is "nothing running" (the mail overlay adds no
- *    service of its own, only orbit-app environment and a secret).
+ *  - overlay-retired drift includes "nothing running" (the mail overlay adds
+ *    no service of its own, only orbit-app environment and a secret).
+ *  - #1817: the update retires the mail shape's SMTP_* lines, the overlay
+ *    and the password file once Orbit reports the mail settings imported.
+ *    retire() below plays that update (scripts/install.sh retire_smtp_lines);
+ *    the fake answers `compose ... exec -T orbit-app ... mail-sending-status`
+ *    with FAKE_MAIL_STATUS (default the imported line), exit
+ *    FAKE_MAIL_STATUS_EXIT (default 0).
  */
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const shapesDir = join(repoRoot, "scripts/ci/upgrade-shapes");
@@ -62,6 +68,10 @@ printf '%s\\n' "$*" >> "\${FAKE_DOCKER_LOG:?}"
 if [ "\${1:-}" = compose ]; then
   case " $* " in
     *" ps "*) [ "\${FAKE_DOCKER_DOWN:-0}" = 1 ] || printf 'orbit-app\\norbit-db\\n' ;;
+    *" exec "*mail-sending-status*)
+      [ "\${FAKE_DOCKER_DOWN:-0}" = 1 ] && exit 1
+      printf '%s\\n' "\${FAKE_MAIL_STATUS-mail-sending source=imported imported-from-environment=true}"
+      exit "\${FAKE_MAIL_STATUS_EXIT:-0}" ;;
   esac
   exit 0
 fi
@@ -136,7 +146,7 @@ function writeContainerEnv(world) {
   ]);
   const dotenv = parseEnv(readFileSync(join(world.target, ".env-orbit"), "utf8"));
   for (const k of Object.keys(dotenv)) if (k.endsWith("_FILE")) names.add(k);
-  if (world.shape === "mail") names.add("SMTP_PASSWORD_FILE");
+  if (world.shape === "mail" && !world.retired) names.add("SMTP_PASSWORD_FILE");
   const lines = [...names].map((n) => `${n}=/run/orbit-secrets/${n.toLowerCase()}`);
   lines.push(`ORBIT_UNRELATED_TOKEN=${CONTAINER_ENV_SECRET}`);
   writeFileSync(world.envFile, `${lines.join("\n")}\n`);
@@ -175,6 +185,31 @@ function installed(shape) {
   const a = run(world, "after_install");
   expect(a.status, a.stdout + a.stderr).toBe(0);
   if (shape === "mail") writeContainerEnv(world); // COMPOSE_FILE line is now in .env-orbit
+  return world;
+}
+
+// What the update does to the mail shape once the settings are imported (#1817,
+// scripts/install.sh retire_smtp_lines): the SMTP_* keys and the overlay's
+// COMPOSE_FILE entry leave .env-orbit, the overlay and the password file are
+// deleted (the secrets directory stays), and orbit-app runs without the overlay.
+const SMTP_KEYS = /^SMTP_(HOST|PORT|SECURITY|USER|PASSWORD|PASSWORD_FILE|FROM)=/;
+function retire(world) {
+  const p = join(world.target, ".env-orbit");
+  const kept = readFileSync(p, "utf8")
+    .split("\n")
+    .filter((l) => !SMTP_KEYS.test(l))
+    .map((l) => (l === "COMPOSE_FILE=docker-compose.yml:docker-compose.mail.yml" ? "COMPOSE_FILE=docker-compose.yml" : l));
+  writeFileSync(p, kept.join("\n"));
+  rmSync(join(world.target, "docker-compose.mail.yml"));
+  rmSync(join(world.target, ".orbit-secrets/smtp-password"));
+  world.retired = true;
+  writeContainerEnv(world);
+}
+
+// Installed, then updated: the mail shape's update retires the SMTP lines.
+function updated(shape) {
+  const world = installed(shape);
+  if (shape === "mail") retire(world);
   return world;
 }
 
@@ -447,7 +482,7 @@ describe.each(SHAPES)("%s shape: assert", (shape) => {
   };
 
   it("passes silently on a matching snapshot, whatever ORBIT_IMAGE became", () => {
-    const world = installed(shape);
+    const world = updated(shape);
     bumpImage(world);
     const r = run(world, "assert");
     expect(r.status, r.stdout + r.stderr).toBe(0);
@@ -455,7 +490,7 @@ describe.each(SHAPES)("%s shape: assert", (shape) => {
   });
 
   it("allows exactly the four update-managed keys to change", () => {
-    const world = installed(shape);
+    const world = updated(shape);
     const p = join(world.target, ".env-orbit");
     appendFileSync(
       p,
@@ -468,7 +503,7 @@ describe.each(SHAPES)("%s shape: assert", (shape) => {
   });
 
   it("reports env-file-intact when .env-orbit gained a line", () => {
-    const world = installed(shape);
+    const world = updated(shape);
     appendFileSync(join(world.target, ".env-orbit"), "ORBIT_LOG_LEVEL=debug\n");
     const r = run(world, "assert");
     expect(r.status).toBe(1);
@@ -477,7 +512,7 @@ describe.each(SHAPES)("%s shape: assert", (shape) => {
   });
 
   it("reports env-file-intact when a value changed, without printing either value", () => {
-    const world = installed(shape);
+    const world = updated(shape);
     const p = join(world.target, ".env-orbit");
     const changed = readFileSync(p, "utf8").replace(/^ORBIT_PORT=.*$/m, "ORBIT_PORT=4999-fake-drift-value");
     writeFileSync(p, changed);
@@ -489,7 +524,7 @@ describe.each(SHAPES)("%s shape: assert", (shape) => {
   });
 
   it("does not print a secret that drifted into .env-orbit", () => {
-    const world = installed(shape);
+    const world = updated(shape);
     const drifted = "fake-drifted-secret-value-9f8e7d6c";
     appendFileSync(join(world.target, ".env-orbit"), `SESSION_SECRET=${drifted}\n`);
     const r = run(world, "assert");
@@ -500,7 +535,7 @@ describe.each(SHAPES)("%s shape: assert", (shape) => {
 
   if (SECRET_FILE_SHAPES.includes(shape)) {
     it("reports secret-file-referenced when a referenced file is gone", () => {
-      const world = installed(shape);
+      const world = updated(shape);
       rmSync(join(world.target, ".orbit-secrets/session-secret"), { force: true });
       const r = run(world, "assert");
       expect(r.status).toBe(1);
@@ -509,7 +544,7 @@ describe.each(SHAPES)("%s shape: assert", (shape) => {
     });
 
     it("reports secret-file-referenced when a *_FILE variable left the container env", () => {
-      const world = installed(shape);
+      const world = updated(shape);
       const kept = readFileSync(world.envFile, "utf8")
         .split("\n")
         .filter((l) => !l.startsWith("DOCUMENT_KEK_FILE="))
@@ -523,31 +558,142 @@ describe.each(SHAPES)("%s shape: assert", (shape) => {
   }
 
   if (shape === "mail") {
-    it("reports overlay-composed when nothing of the stack is running", () => {
+    const expectAssertion = (r, id) => {
+      expect(r.status, r.stdout + r.stderr).toBe(1);
+      expect(r.stdout).toMatch(new RegExp(`^assertion=${id} detail="[^"\\n]*"\\n?$`));
+    };
+
+    it("reports smtp-lines-retired on the pre-#1817 state: the update left the SMTP lines and overlay", () => {
       const world = installed(shape);
-      const r = run(world, "assert", { FAKE_DOCKER_DOWN: "1" });
+      const r = run(world, "assert");
+      expectAssertion(r, "smtp-lines-retired");
+      expectNoSecrets(world);
+    });
+
+    it.each(["SMTP_HOST", "SMTP_PORT", "SMTP_SECURITY", "SMTP_FROM", "SMTP_USER", "SMTP_PASSWORD_FILE", "SMTP_PASSWORD"])(
+      "reports smtp-lines-retired when %s is still in .env-orbit",
+      (key) => {
+        const world = updated(shape);
+        appendFileSync(join(world.target, ".env-orbit"), `${key}=fake-left-behind-value\n`);
+        const r = run(world, "assert");
+        expectAssertion(r, "smtp-lines-retired");
+        expect(r.stdout).not.toContain("fake-left-behind-value");
+      },
+    );
+
+    it("reports smtp-lines-retired when COMPOSE_FILE still lists the mail overlay", () => {
+      const world = updated(shape);
+      const p = join(world.target, ".env-orbit");
+      writeFileSync(p, readFileSync(p, "utf8").replace(/^COMPOSE_FILE=.*$/m, "COMPOSE_FILE=docker-compose.yml:docker-compose.mail.yml"));
+      expectAssertion(run(world, "assert"), "smtp-lines-retired");
+    });
+
+    it("reports env-file-intact when COMPOSE_FILE lost more than the overlay", () => {
+      const world = updated(shape);
+      const p = join(world.target, ".env-orbit");
+      writeFileSync(p, readFileSync(p, "utf8").replace(/^COMPOSE_FILE=.*\n/m, ""));
+      expectAssertion(run(world, "assert"), "env-file-intact");
+    });
+
+    it("reports env-file-intact when COMPOSE_FILE gained another file", () => {
+      const world = updated(shape);
+      const p = join(world.target, ".env-orbit");
+      writeFileSync(p, readFileSync(p, "utf8").replace(/^COMPOSE_FILE=.*$/m, "COMPOSE_FILE=docker-compose.yml:docker-compose.extra.yml"));
+      expectAssertion(run(world, "assert"), "env-file-intact");
+    });
+
+    it("reports env-file-intact when a non-SMTP key went missing with the SMTP lines", () => {
+      const world = updated(shape);
+      const p = join(world.target, ".env-orbit");
+      writeFileSync(p, readFileSync(p, "utf8").replace(/^ORBIT_PORT=.*\n/m, ""));
+      expectAssertion(run(world, "assert"), "env-file-intact");
+    });
+
+    it("reports overlay-retired when docker-compose.mail.yml is still in the folder", () => {
+      const world = updated(shape);
+      copyFileSync(join(repoRoot, "docker-compose.mail.yml"), join(world.target, "docker-compose.mail.yml"));
+      expectAssertion(run(world, "assert"), "overlay-retired");
+    });
+
+    it("reports overlay-retired when the SMTP password file is still in the secrets folder", () => {
+      const world = updated(shape);
+      writeFileSync(join(world.target, ".orbit-secrets/smtp-password"), `${"a".repeat(64)}\n`, { mode: 0o600 });
+      const r = run(world, "assert");
+      expectAssertion(r, "overlay-retired");
+      expect(r.stdout).not.toContain("a".repeat(64));
+    });
+
+    it("reports overlay-retired when the secrets folder itself was removed", () => {
+      const world = updated(shape);
+      rmSync(join(world.target, ".orbit-secrets"), { recursive: true, force: true });
+      const r = run(world, "assert");
       expect(r.status).toBe(1);
-      expect(r.stdout).toMatch(/^assertion=overlay-composed detail="[^"\n]*"\n?$/);
+      expect(r.stdout).toMatch(/^assertion=(overlay-retired|secret-file-referenced) /);
+    });
+
+    it("reports overlay-retired when the retirement's step record is left behind", () => {
+      const world = updated(shape);
+      writeFileSync(join(world.target, ".orbit-smtp-retirement"), "step=restarted\n", { mode: 0o600 });
+      expectAssertion(run(world, "assert"), "overlay-retired");
+    });
+
+    it("reports overlay-retired when nothing of the stack is running", () => {
+      const world = updated(shape);
+      expectAssertion(run(world, "assert", { FAKE_DOCKER_DOWN: "1" }), "overlay-retired");
+    });
+
+    it("reports overlay-retired when orbit-app still runs with the overlay's SMTP_PASSWORD_FILE (#1665, #1817)", () => {
+      const world = updated(shape);
+      appendFileSync(world.envFile, "SMTP_PASSWORD_FILE=/run/orbit-secrets/orbit-smtp-password\n");
+      expectAssertion(run(world, "assert"), "overlay-retired");
+    });
+
+    it("does not need SMTP_PASSWORD_FILE in the container to pass secret-file-referenced once retired", () => {
+      const world = updated(shape);
+      expect(readFileSync(world.envFile, "utf8")).not.toMatch(/^SMTP_PASSWORD_FILE=/m);
+      const r = run(world, "assert");
+      expect(r.status, r.stdout + r.stderr).toBe(0);
+    });
+
+    it("asks orbit-app for mail-sending-status through compose exec -T", () => {
+      const world = updated(shape);
+      run(world, "assert");
+      expect(readFileSync(world.log, "utf8")).toMatch(
+        /compose .*--env-file \.env-orbit .*exec -T orbit-app node \/opt\/orbit\/cli\/orbit\.js mail-sending-status/,
+      );
+    });
+
+    it.each([
+      ["source=none", "mail-sending source=none imported-from-environment=false"],
+      ["source=ui", "mail-sending source=ui imported-from-environment=false"],
+      ["imported but not from the environment", "mail-sending source=imported imported-from-environment=false"],
+      ["no answer (an older image)", ""],
+      ["an answer outside the vocabulary", "mail-sending source=imported imported-from-environment=true extra"],
+    ])("reports mail-settings-imported on %s", (_label, line) => {
+      const world = updated(shape);
+      expectAssertion(run(world, "assert", { FAKE_MAIL_STATUS: line }), "mail-settings-imported");
+    });
+
+    it("reports mail-settings-imported when the status command exits non-zero", () => {
+      const world = updated(shape);
+      expectAssertion(run(world, "assert", { FAKE_MAIL_STATUS_EXIT: "1" }), "mail-settings-imported");
     });
   }
 
-  if (shape === "mail") {
-    it("reports overlay-composed when orbit-app runs without the overlay's SMTP_PASSWORD_FILE (#1665)", () => {
-      const world = installed(shape);
-      const kept = readFileSync(world.envFile, "utf8")
-        .split("\n")
-        .filter((l) => !l.startsWith("SMTP_PASSWORD_FILE="))
-        .join("\n");
-      writeFileSync(world.envFile, kept);
+  if (shape === "all-keys") {
+    it("still reports env-file-intact when an SMTP line disappears: only mail expects retirement (#1817)", () => {
+      const world = updated(shape);
+      const p = join(world.target, ".env-orbit");
+      writeFileSync(p, readFileSync(p, "utf8").replace(/^SMTP_PORT=.*\n/m, ""));
       const r = run(world, "assert");
       expect(r.status).toBe(1);
-      expect(r.stdout).toMatch(/^assertion=overlay-composed detail="[^"\n]*"\n?$/);
+      expect(r.stdout).toMatch(/^assertion=env-file-intact /);
     });
   }
 
   if (shape === "oidc") {
     it("reports oidc-intact (or env-file-intact, which sees the same edit) when an OIDC key changes", () => {
-      const world = installed(shape);
+      const world = updated(shape);
       const p = join(world.target, ".env-orbit");
       writeFileSync(
         p,
@@ -561,7 +707,7 @@ describe.each(SHAPES)("%s shape: assert", (shape) => {
 
   if (shape === "plain") {
     it("checks only env-file-intact: a missing container does not fail it", () => {
-      const world = installed(shape);
+      const world = updated(shape);
       const r = run(world, "assert", { FAKE_DOCKER_DOWN: "1" });
       expect(r.status, r.stdout + r.stderr).toBe(0);
     });
