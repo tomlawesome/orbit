@@ -3125,11 +3125,74 @@ smtp_wait_ready() {
   done
 }
 
+# #1855: the retirement holds the backup/restore lock that backup.sh,
+# restore.sh, the engine's export and repair.sh take (the shared flock
+# pattern), taken as repair.sh's acquire_backup_restore_lock takes it, in the
+# backups folder worked out as they work it out. Held from before the first
+# change until the confirmation and the step-record removal are done.
+smtp_lock_fd=""
+smtp_backup_restore_lock_path() {
+  local dir="${ORBIT_BACKUP_DIR:-$target_dir/backups}"
+  [[ "$dir" == /* ]] || dir="$target_dir/$dir"
+  printf '%s/.orbit-backup-restore.lock' "$dir"
+}
+
+# smtp_take_backup_restore_lock: 0 with the lock on $smtp_lock_fd (or with no
+# flock on PATH, said once); 1 with one stdout line when the retirement must
+# wait: the lock is held, or its file is unusable (never opened, followed or
+# replaced: a missing one is created only with O_EXCL, noclobber).
+smtp_take_backup_restore_lock() {
+  local lock fd status=0
+  lock="$(smtp_backup_restore_lock_path)"
+  if ! command -v flock >/dev/null 2>&1; then
+    printf 'Orbit installer: flock is not installed, so the old mail settings are being retired without the backup/restore lock; make sure no backup, restore or Repair run is going on.\n' || true
+    return 0
+  fi
+  local unusable="Orbit installer: the backup/restore lock at ${lock} can't be used (a link, not a regular file, unreadable, or it can't be created), so the old mail settings were left in place; the next update or Repair run will retire them."
+  if [[ ! -e "$lock" && ! -L "$lock" ]]; then
+    ( umask 077 && mkdir -p -- "${lock%/*}" && set -C && : > "$lock" ) 2>/dev/null || true
+  fi
+  if [[ -L "$lock" || ! -f "$lock" || ! -r "$lock" ]] || ! { exec {fd}<"$lock"; } 2>/dev/null; then
+    printf '%s\n' "$unusable" || true
+    return 1
+  fi
+  # Swapped for a link between the test and the open: let it go untouched.
+  if [[ -L "$lock" || ! "/dev/fd/$fd" -ef "$lock" ]]; then
+    exec {fd}<&-
+    printf '%s\n' "$unusable" || true
+    return 1
+  fi
+  flock -n -x "$fd" >/dev/null 2>&1 || status=$?
+  if [[ "$status" == 0 ]]; then
+    smtp_lock_fd="$fd"
+    return 0
+  fi
+  exec {fd}<&-
+  if [[ "$status" == 1 ]]; then
+    printf 'Orbit installer: a backup, restore or Repair run is using the backups folder, so the old mail settings were left in place; the next update or Repair run will retire them.\n' || true
+  else
+    printf 'Orbit installer: the backup/restore lock at %s could not be tested (flock exit status %s), so the old mail settings were left in place; the next update or Repair run will retire them.\n' "$lock" "$status" || true
+  fi
+  return 1
+}
+
+smtp_release_backup_restore_lock() {
+  [[ -z "$smtp_lock_fd" ]] || exec {smtp_lock_fd}<&-
+  smtp_lock_fd=""
+}
+
 retire_smtp_lines() {
   [[ "$target_was_empty" != 1 ]] || return 0
   smtp_retirement_due || return 0
   ! stopping || return 0
   mail_sending_gate_holds || return 0
+  smtp_take_backup_restore_lock || return 0
+  retire_smtp_steps
+  smtp_release_backup_restore_lock
+}
+
+# The retirement itself, under the lock retire_smtp_lines took.
+retire_smtp_steps() {
   smtp_read_record
 
   # A retirement that finished but was not confirmed: the gate holds now, so
