@@ -338,6 +338,15 @@ describe("§4 line 16: a preview of the whole file gives the same answer and rea
     await seedStoredDocuments(source, [pdfOfSize(3 * S + 5, "whole a"), pdfOfSize(2 * S, "whole b")]);
     const { file } = await exportFile(source);
 
+    /* The whole-file upload below is streamed with no Content-Length, so the
+       spool's free-space check assumes the largest archive the household
+       quota allows (#1840): about 5.8 GB of temp space at the default quota.
+       The smallest quota the configuration accepts (25 MiB, well over this
+       ~5 MiB archive) brings that to about 350 MiB. Set for both previews, so
+       they answer under the same settings; afterEach restores it. */
+    process.env.DOCUMENT_HOUSEHOLD_QUOTA_BYTES = String(25 * MIB);
+    resetDocumentConfigForTests();
+
     const headAnswer = await previewUpload(target, file.subarray(0, v2HeadSliceBytes(file)));
     expect(headAnswer.status).toBe(200);
 
