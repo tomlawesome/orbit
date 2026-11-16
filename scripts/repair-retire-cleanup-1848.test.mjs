@@ -16,9 +16,11 @@ import { composeUpCalls, makeFixture, runRepair, scratchDir } from "./repair-tes
 //    deployment-folder names (exactly 6 characters of [A-Za-z0-9] after the fixed part) before writing anything.
 //
 // Root is simulated, as in repair-retire-smtp-1817.test.mjs: an `id` shim prints 0 for `id -u` and a `chown` shim fails
-// on request or runs the real chown (a no-op for the test user, since --reference=. names its own owner). Each link of
-// the chain is failed with a shim on PATH: mkdir (dated folder; a directory squatting on the marker name), chown
-// (marker, dated folder, root), mktemp (copy, overlay, record). SIGTERM is sent by an `mv` shim at the moment the
+// on request or runs the real chown (a no-op for the test user, since --reference=. names its own owner). Since FIX-S1 a
+// root run does not chown at all: it writes as the folder's owner through setpriv, so the shim logs every chown call
+// (none is expected) and a `setpriv` shim logs and, on request, fails the owner's step. Each link of the chain is failed
+// with a shim on PATH: mkdir (dated folder; a directory squatting on the marker name), setpriv (marker write, dated
+// folder mkdir, root mkdir), mktemp (copy, overlay, record). SIGTERM is sent by an `mv` shim at the moment the
 // temporary file is about to be renamed, so the timing is exact and not a race.
 
 vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
@@ -78,8 +80,17 @@ function shims({ root = false, fail = null, intrude = false, signal = null } = {
   const intruder = intrude ? `: > "${ROOT}/intruder" 2>/dev/null || true; ` : "";
   const failNow = `${intruder}exit 1`;
   if (root) sh("id", `if [[ $# -eq 1 && "$1" == -u ]]; then echo 0; exit 0; fi\nexec '${realTool("id")}' "$@"`);
-  const chownFail = { marker: "*/.orbit-smtp-undo", dated: `${ROOT}/*-repair*`, backupsRoot: ROOT }[fail];
-  sh("chown", `last="\${@: -1}"; last="\${last#./}"; last="\${last%/}"\ncase "$last" in ${chownFail ?? "__never__"}) ${failNow};; esac\nexec '${realTool("chown")}' "$@"`);
+  // #1848 FIX-S1: a root run writes through setpriv. This one logs its argv, fails the owner's step named by `fail`
+  // (the marker write, the dated folder's mkdir, the root's mkdir; after the intruder, if asked) and otherwise runs the
+  // command after `--` as the test user.
+  const setprivFail = { marker: '*" .orbit-smtp-undo.XXXXXX 600"', dated: `*" mkdir -m 700 -- ${ROOT}/"*`, backupsRoot: `*" mkdir -m 700 -- ${ROOT}"` }[fail];
+  const setprivLog = join(dir, "setpriv.log");
+  const chownLog = join(dir, "chown.log");
+  if (root) {
+    sh("setpriv", `printf '%s\\n' "$*" >> '${setprivLog}'\ncase "$*" in ${setprivFail ?? "__never__"}) ${failNow};; esac\nwhile [[ $# -gt 0 && "$1" != -- ]]; do shift; done\nshift\nexec "$@"`);
+  }
+  // A root run no longer chowns: the shim only records a call, then runs the real chown.
+  sh("chown", `printf '%s\\n' "$*" >> '${chownLog}'\nexec '${realTool("chown")}' "$@"`);
   const mktempFail = { copy: "*/.env-orbit.smtp-copy.*", overlay: "*/docker-compose.mail.yml.smtp-copy.*", record: "./.orbit-smtp-retirement.*" }[fail];
   sh("mktemp", `case "\${@: -1}" in ${mktempFail ?? "__never__"}) ${failNow};; esac\nexec '${realTool("mktemp")}' "$@"`);
   // datedMkdir: the dated folder cannot be made. markerSquat: it is made, but a directory already sits at the marker's name.
@@ -104,7 +115,8 @@ case "$src" in ${pattern})
 esac
 exec '${realTool("mv")}' "$@"`,
   );
-  return { dir, env: { ORBIT_REPAIR_PROMPTS: "machine", PATH: `${dir}:${process.env.PATH}` }, signalled: () => (existsSync(log) ? readFileSync(log, "utf8").split("\n").filter(Boolean) : []) };
+  const lines = (path) => (existsSync(path) ? readFileSync(path, "utf8").split("\n").filter(Boolean) : []);
+  return { dir, env: { ORBIT_REPAIR_PROMPTS: "machine", PATH: `${dir}:${process.env.PATH}` }, setprivCalls: () => lines(setprivLog), chownCalls: () => lines(chownLog), signalled: () => (existsSync(log) ? readFileSync(log, "utf8").split("\n").filter(Boolean) : []) };
 }
 
 const run = (targetDir, s, extra = {}) => runRepair(targetDir, ["--execute", "--safe-only"], { ...IMPORTED, ...extra, env: s.env, input: "y\n" });
@@ -113,11 +125,11 @@ const run = (targetDir, s, extra = {}) => runRepair(targetDir, ["--execute", "--
 const LINKS = [
   ["the dated folder cannot be made (mkdir)", { fail: "datedMkdir" }],
   ["the marker cannot be written", { fail: "markerSquat" }],
-  ["the marker cannot be given the folder's owner (chown)", { fail: "marker", root: true }],
+  ["the marker cannot be written as the folder's owner (setpriv)", { fail: "marker", root: true }],
   ["the copy cannot be written", { fail: "copy" }],
   ["the overlay copy cannot be made", { fail: "overlay" }],
-  ["the dated folder cannot be given the folder's owner (chown)", { fail: "dated", root: true }],
-  ["orbit-install-backups itself cannot be given the folder's owner (chown)", { fail: "backupsRoot", root: true }],
+  ["the dated folder cannot be made as the folder's owner (setpriv mkdir)", { fail: "dated", root: true }],
+  ["orbit-install-backups itself cannot be made as the folder's owner (setpriv mkdir)", { fail: "backupsRoot", root: true }],
 ];
 
 describe("FR-O5a (#1848): a failed backup chain removes the orbit-install-backups this run made", () => {
@@ -147,7 +159,9 @@ describe("FR-O5a (#1848): a failed backup chain removes the orbit-install-backup
         });
       }
 
-      it("keeps the root and a file someone put there meanwhile (rmdir only)", () => {
+      // Not for the root's own mkdir: when it fails the root was never made, so nothing can be put in it (that step
+      // used to be a chown of an existing root; the root now has the owner from creation).
+      if (options.fail !== "backupsRoot") it("keeps the root and a file someone put there meanwhile (rmdir only)", () => {
         const targetDir = withMail();
         const result = run(targetDir, shims({ ...options, intrude: true }));
         expect(result.stderr).toContain(BACKUP_REFUSED);
@@ -165,11 +179,14 @@ describe("FR-O5a (#1848): a failed backup chain removes the orbit-install-backup
     });
   }
 
-  it("the same cleanup applies to a run that is not root (no id shim): nothing is left, nothing is chowned", () => {
+  it("the same cleanup applies to a run that is not root (no id shim): nothing is left, nothing is chowned, setpriv is not run", () => {
     const targetDir = withMail();
-    const result = run(targetDir, shims({ fail: "copy" }));
+    const s = shims({ fail: "copy" });
+    const result = run(targetDir, s);
     expect(result.status).toBe(4);
     expect(exists(join(targetDir, ROOT))).toBe(false);
+    expect(s.chownCalls()).toEqual([]);
+    expect(s.setprivCalls()).toEqual([]);
   });
 
   it("a failure after the chain succeeded (the step record) keeps today's behaviour: the root and the dated folder stay", () => {
@@ -184,7 +201,7 @@ describe("FR-O5a (#1848): a failed backup chain removes the orbit-install-backup
     expect(dated[0]).toMatch(/-repair/u);
   });
 
-  it("a successful run is unchanged: the root and the dated folder exist (mode 700), chowned to the folder's owner", () => {
+  it("a successful run is unchanged: the root and the dated folder exist (mode 700), made as the folder's owner (setpriv, no chown)", () => {
     const targetDir = withMail();
     const s = shims({ root: true });
     const result = run(targetDir, s, GATE_FAILS_AFTER);
@@ -192,6 +209,11 @@ describe("FR-O5a (#1848): a failed backup chain removes the orbit-install-backup
     expect(readdirSync(join(targetDir, ROOT))).toHaveLength(1);
     expect((lstatSync(join(targetDir, ROOT)).mode & 0o777).toString(8)).toBe("700");
     expect(composeUpCalls(result).length).toBeGreaterThan(0);
+    expect(s.chownCalls(), "chown was run by a root retirement").toEqual([]);
+    const calls = s.setprivCalls();
+    expect(calls.some((call) => call.endsWith(`mkdir -m 700 -- ${ROOT}`)), calls.join("\n")).toBe(true);
+    expect(calls.some((call) => call.includes(`mkdir -m 700 -- ${ROOT}/`)), calls.join("\n")).toBe(true);
+    for (const call of calls) expect(call).toMatch(new RegExp(`^--reuid=${process.getuid()} --regid=${process.getgid()} --init-groups --no-new-privs -- `, "u"));
   });
 });
 
