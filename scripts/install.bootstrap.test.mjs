@@ -269,7 +269,7 @@ describe("install.sh: the engine run", () => {
     expect(result.stdout).toContain("Channel: latest");
     expect(result.stdout).toContain("Status: docker compose --env-file .env-orbit ps");
     expect(result.stdout).toContain("Logs: docker compose --env-file .env-orbit logs --tail 200");
-    expect(result.stdout).toContain('Claim this instance: run "docker compose --env-file .env-orbit logs orbit-app"');
+    expect(result.stdout).toContain('Claim this instance: run "docker compose --env-file .env-orbit logs orbit-app | grep -i claim"');
     // The image's own banner, from the digest reference, before the engine.
     expect(result.stdout).toContain("ORBIT FAKE BANNER");
     expect(result.calls).toContain(`docker run --rm --entrypoint /opt/orbit/scripts/container-entrypoint.sh ${resolvedReference} --banner`);

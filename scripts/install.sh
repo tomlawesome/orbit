@@ -215,6 +215,9 @@ selected_profile=""
 # #1170: on unless the engine reports DOCUMENT_SCAN_MODE=disabled (scanner=off).
 selected_scanner=on
 model_pull_requested=0
+model_pull_deferred=0
+model_pull_ok=0
+ollama_was_ready=1
 target_was_empty=0
 declare -a pending_ui_events=()
 installer_failure_detail=""
@@ -239,6 +242,7 @@ rollback_snapshot_taken=0
 rollback_keep_originals=0
 rollback_armed=0
 compose_started=0
+rollback_copy_release_failed=0
 declare -a rollback_original_entries=()
 # The relative paths the engine journals, before its first write, as ones it
 # may create (read_engine_journal): with the staging directory, the lock and
@@ -303,6 +307,7 @@ interruptible_pid=""
 # pulls), and fail() ends the run as that step's failure.
 rolling_forward=0
 stop_status=""
+failure_outlived_stop=0
 container_restarts=""
 declare -A restarts_before=()
 
@@ -387,11 +392,17 @@ fail() {
   # it stopped in, whatever that step then said: nothing is undone, and the
   # next step is a retry while the running services are unchanged (the image
   # pulls), Repair once Compose has begun starting them. Docker's words from
-  # a stopped command are not the cause, so they are not shown.
+  # a stopped command are not the cause, so they are not shown. A step that
+  # ran to its end through the stop (`compose up`) and failed for its own
+  # reason keeps that reason and its message (O-S3).
   if [[ -n "$stop_status" ]]; then
     reason=failure
-    installer_failure_detail=""
-    installer_failure_notes=()
+    if [[ "$failure_outlived_stop" == 1 ]]; then
+      installer_failure_notes+=("$*")
+    else
+      installer_failure_detail=""
+      installer_failure_notes=()
+    fi
     if [[ "$compose_started" == 1 ]]; then
       action=repair
       set -- "The update was stopped after its files were committed, while Orbit's services were being started or checked; nothing was undone. Run Repair."
@@ -433,8 +444,8 @@ fail() {
   case "$rollback_outcome" in
     complete)
       print_rollback_report
-      printf 'Orbit installer: This install was rolled back: the folder is as it was before%s,%s and the containers and volumes it created are removed. Fix the cause, then install again.\n' \
-        "$(rollback_unit_clause)" "$(rollback_moved_clause)" >&2 || true
+      printf 'Orbit installer: This install was rolled back: the folder is as it was before%s%s. Fix the cause, then install again.\n' \
+        "$(rollback_unit_clause)" "$(rollback_docker_clause)" >&2 || true
       ;;
     incomplete) print_rollback_obstacles ;;
     *)
@@ -564,8 +575,8 @@ cleanup() {
     if rollback_fresh_install; then
       emit_terminal_failure "${installer_ui_phase:-host}" "${installer_ui_component:-host}" failure retry
       print_rollback_report
-      printf 'Orbit installer: The install stopped before it finished (%s), and was rolled back: the folder is as it was before%s,%s and the containers and volumes it created are removed. You can install again.\n' \
-        "${exit_status_name:-exit status ${exit_status}}" "$(rollback_unit_clause)" "$(rollback_moved_clause)" >&2 || true
+      printf 'Orbit installer: The install stopped before it finished (%s), and was rolled back: the folder is as it was before%s%s. You can install again.\n' \
+        "${exit_status_name:-exit status ${exit_status}}" "$(rollback_unit_clause)" "$(rollback_docker_clause)" >&2 || true
     else
       emit_terminal_failure "${installer_ui_phase:-host}" "${installer_ui_component:-host}" failure "$rollback_action"
       printf 'Orbit installer: The install stopped before it finished (%s).\n' "${exit_status_name:-exit status ${exit_status}}" >&2 || true
@@ -576,8 +587,13 @@ cleanup() {
   # copy of their original files; print_rollback_obstacles named it.
   # Otherwise the copy goes, with the emptied folders (any exit: a success,
   # a refusal, an engine that rolled itself back).
+  # O-S2: after a success the copy is only scratch; one that cannot be
+  # removed is named (release_rollback_copies says where) but does not fail
+  # a finished install.
   if [[ "$rollback_keep_originals" != 1 ]]; then
-    release_rollback_copies || exit_status=1
+    if ! release_rollback_copies && [[ "$exit_status" == 0 ]]; then
+      printf 'Orbit installer: Orbit is installed; remove that copy yourself once you no longer need it.\n' >&2 || true
+    fi
   fi
   if [[ -n "$engine_work_dir" ]] && ! rm -rf -- "$engine_work_dir"; then
     printf 'Orbit installer: could not remove a temporary directory: %s.\n' "$engine_work_dir" >&2 || true
@@ -769,15 +785,22 @@ base64_string() {
 # be searched. Anything at the path, a file or a folder that cannot be entered
 # included, exists; under an unsearchable parent the label gets no fact.
 note_working_dirs() {
-  local line label physical exists ancestor
+  local line label physical exists ancestor probe
   while IFS= read -r line || [[ -n "$line" ]]; do
     IFS='|' read -r _ _ _ label <<< "$line"
     [[ "$label" == /* && ${#label} -le 4096 && -z "${working_dir_seen[$label]:-}" ]] || continue
     ((${#working_dir_seen[@]} < 1024)) || continue
     working_dir_seen["$label"]=1
     exists=false
-    if [[ -e "$label" ]]; then
+    # b2 O-R2: a label on a dead network mount can hang a plain test or cd
+    # for good, so both run under timeout; a probe that does not answer
+    # gives the label no fact, as an unsearchable parent does.
+    probe=0
+    timeout --signal=KILL 5s test -e "$label" </dev/null 2>/dev/null || probe=$?
+    if ((probe == 0)); then
       exists=true
+    elif ((probe != 1)); then
+      continue
     else
       ancestor="$label"
       while [[ "$ancestor" == */ && "$ancestor" != / ]]; do ancestor="${ancestor%/}"; done
@@ -788,7 +811,9 @@ note_working_dirs() {
     fi
     [[ -z "$working_dirs_json" ]] || working_dirs_json+=","
     working_dirs_json+="{\"label\":$(base64_string "$label"),\"exists\":${exists},\"physical\":"
-    if physical="$(cd -- "$label" 2>/dev/null && pwd -P)"; then
+    # The label is absolute (checked above), so sh's cd cannot read it as an option.
+    # shellcheck disable=SC2016 # expanded by the inner sh
+    if physical="$(timeout --signal=KILL 5s sh -c 'cd "$1" && pwd -P' sh "$label" </dev/null 2>/dev/null)"; then
       working_dirs_json+="$(base64_string "$physical")}"
     else
       working_dirs_json+="null}"
@@ -1202,6 +1227,8 @@ docker_reporting_whole() {
     status=$?
   fi
   installer_failure_detail="$(printf '%s' "$output" | docker_output_excerpt)"
+  # O-S3: this step is never cut short by a stop, so its failure is its own.
+  failure_outlived_stop=1
   if ((status == 124 || status == 137)); then
     installer_failure_notes+=("Docker Compose did not finish within ${bound} s, so it was stopped; ORBIT_INSTALLER_COMPOSE_UP_TIMEOUT_SECONDS sets this bound (1-${compose_up_timeout_ceiling}).")
   fi
@@ -1393,6 +1420,36 @@ snapshot_fresh_target() {
   rollback_armed=1
 }
 
+# target_unchanged_since_snapshot
+#
+# O-F5: whether the fresh folder is exactly as snapshot_fresh_target found
+# it: the same entries (besides orbit-install-backups) and each original
+# identical to its copy. Anything it cannot show (a new entry, a difference,
+# no diff) counts as changed, so the rollback still runs.
+target_unchanged_since_snapshot() {
+  local saved_options name known original
+  local -a entries=()
+  [[ "$rollback_snapshot_taken" == 1 ]] || return 1
+  command -v diff >/dev/null 2>&1 || return 1
+  saved_options="$(shopt -p nullglob dotglob)" || true
+  shopt -s nullglob dotglob
+  entries=(*)
+  eval "$saved_options"
+  for name in "${entries[@]}"; do
+    [[ "$name" != orbit-install-backups ]] || continue
+    known=0
+    for original in "${rollback_original_entries[@]}"; do
+      [[ "$name" != "$original" ]] || known=1
+    done
+    [[ "$known" == 1 ]] || return 1
+  done
+  for name in "${rollback_original_entries[@]}"; do
+    [[ -e "$name" || -L "$name" ]] || return 1
+    diff -r --no-dereference -q -- "${backup_dir}/originals/${name}" "$name" >/dev/null 2>&1 || return 1
+  done
+  return 0
+}
+
 # list_deployment_volumes <array-name>
 #
 # This project's own volumes that exist now, by exact name; returns 1 when
@@ -1571,6 +1628,16 @@ rollback_moved_clause() {
   [[ "$rollback_moved" != 1 ]] || printf ' apart from the files moved out and named above,'
 }
 
+# O-F3: the end of the closing line, by what existed. Containers and volumes
+# exist only once Compose has begun starting them.
+rollback_docker_clause() {
+  if [[ "$compose_started" == 1 ]]; then
+    printf ',%s and the containers and volumes it created are removed' "$(rollback_moved_clause)"
+  else
+    rollback_moved_phrase
+  fi
+}
+
 # The same, inside a sentence that goes on after it.
 rollback_moved_phrase() {
   [[ "$rollback_moved" != 1 ]] || printf ', apart from the files moved out and named above'
@@ -1716,22 +1783,36 @@ rollback_walk_folder() {
 # where the stop command needs it), then `cp -a` from the copy, then verified
 # with `diff -r`. A put-back that fails keeps the copy and names it.
 restore_originals() {
-  local name path copy="${backup_dir}/originals"
+  local name path staged copy="${backup_dir}/originals"
   for name in "${rollback_original_entries[@]}"; do
     path="${target_dir}/${name}"
+    # O-R4: stage then switch. The copy is made and checked beside the path
+    # first, so a copy that fails leaves what is there untouched; only then
+    # is the current entry removed (one that cannot be is an obstacle, as
+    # before) and the staged copy renamed into place.
+    staged="${target_dir}/.${name}.orbit-restore.$$"
+    rm -rf -- "$staged" 2>/dev/null || true
+    if ! cp -a -- "${copy}/${name}" "$staged" ||
+      ! diff -r --no-dereference -- "${copy}/${name}" "$staged" >/dev/null 2>&1; then
+      rm -rf -- "$staged" 2>/dev/null || true
+      rollback_restore_failed "$path"
+      continue
+    fi
     if [[ -e "$path" || -L "$path" ]]; then
       if [[ "$rollback_down_failed" == 1 ]]; then
         rollback_move "$name" engine || {
+          rm -rf -- "$staged" 2>/dev/null || true
           rollback_restore_failed "$path"
           continue
         }
       elif ! rm -rf -- "$path"; then
+        rm -rf -- "$staged" 2>/dev/null || true
         rollback_restore_failed "$path"
         continue
       fi
     fi
-    if ! cp -a -- "${copy}/${name}" "$path" ||
-      ! diff -r --no-dereference -- "${copy}/${name}" "$path" >/dev/null 2>&1; then
+    if ! mv -- "$staged" "$path"; then
+      rm -rf -- "$staged" 2>/dev/null || true
       rollback_restore_failed "$path"
     fi
   done
@@ -1961,7 +2042,10 @@ print_rollback_obstacles() {
 # that still holds moved/, engine/ or an earlier run's folder.
 release_rollback_copies() {
   [[ -n "$backup_dir" ]] || return 0
-  if ! rm -rf -- "${backup_dir}/originals"; then
+  # Said once: a later call (the exit's) only repeats the answer.
+  [[ "$rollback_copy_release_failed" != 1 ]] || return 1
+  if ! rm -rf -- "${backup_dir}/originals" 2>/dev/null; then
+    rollback_copy_release_failed=1
     printf "Orbit installer: could not remove the copy of this folder's original files: %s.\n" "$(printf '%q' "${backup_dir}/originals")" >&2 || true
     return 1
   fi
@@ -2453,7 +2537,9 @@ wait_for_deployment_readiness() {
   if ! wait_for_component_health database database database-health probe_database_health; then
     [[ "$target_was_empty" == 1 ]] ||
       fail_with database-auth-migration repair "The database did not become healthy within the bounded startup window."
-    required_service_not_ready orbit-db "The database" database-auth-migration database-auth-migration
+    # O-F9: a database container that died is not shown to be an authentication
+    # or migration fault, so it gets the neutral reason; one still starting keeps its own.
+    required_service_not_ready orbit-db "The database" failure database-auth-migration
   fi
 
   installer_ui_phase=application
@@ -2526,9 +2612,14 @@ wait_for_deployment_readiness() {
           "still starting; it is used once it is ready." \
           "The selected local-model service did not become healthy within the bounded startup window."
       fi
-      [[ "$model_pull_requested" != 1 ]] || pull_confirmed_model
-      # The service's last event matches its completion line.
-      [[ "$ollama_ready" == 1 ]] || installer_ui_event optional ollama waiting optional-status continue
+      if [[ "$model_pull_requested" == 1 ]]; then
+        # O-R2: the download runs after the ready screen (run_deferred_model_pull).
+        model_pull_deferred=1
+        ollama_was_ready="$ollama_ready"
+      else
+        # The service's last event matches its completion line.
+        [[ "$ollama_ready" == 1 ]] || installer_ui_event optional ollama waiting optional-status continue
+      fi
       ;;
     *) installer_ui_event optional ollama skipped optional-status skip ;;
   esac
@@ -2542,40 +2633,72 @@ wait_for_deployment_readiness() {
 # never fails the install: Orbit runs without it, and the pull's own words
 # and the command to run it again are shown.
 pull_confirmed_model() {
-  local output="${engine_work_dir}/model-pull.out" again
+  local again words_fd
   # A known, project-scoped name: the container outlives a killed client
   # (its first process is a shell with no TERM handler), so an interrupt
   # removes it by this name -- that container only, never `compose down`.
   local container="${compose_project_name}-orbit-ollama-model-pull-install"
   again="$(shell_words docker compose --env-file "$environment_file" --profile ai-model-pull run --rm orbit-ollama-model-pull)"
+  model_pull_ok=0
+  installer_failure_detail=""
   if [[ "$optional_interrupted" != 1 ]]; then
     installer_ui_event optional ollama running service-preparation pull
     # A killed earlier run can leave this container behind; Docker refuses
     # a second one under the same name, so every retry would fail.
     timeout --signal=TERM --kill-after=1s 15s docker rm -f -- "$container" </dev/null >/dev/null 2>&1 || true
     # A background child, so an interrupt can stop the download (#1456
-    # ruling); its words go to a private file, as a pipe would need a
-    # foreground command substitution.
-    if run_interruptibly docker compose --project-name "$compose_project_name" --env-file "$environment_file" \
-      --profile ai-model-pull run --rm -T --name "$container" orbit-ollama-model-pull </dev/null >"$output" 2>&1; then
+    # ruling). Its words come back through a pipe, as docker_reporting's do:
+    # a full disk is one reason a model download fails, and a file in the
+    # work folder could not then hold Docker's reason (audit Low).
+    exec {words_fd}<> <(:)
+    if run_interruptibly docker_reporting_child "$words_fd" docker compose --project-name "$compose_project_name" --env-file "$environment_file" \
+      --profile ai-model-pull run --rm -T --name "$container" orbit-ollama-model-pull </dev/null; then
+      exec {words_fd}>&-
+      model_pull_ok=1
       installer_ui_event optional ollama completed service-preparation pull
       return 0
     fi
     if [[ "$optional_interrupted" == 1 ]]; then
       timeout --signal=TERM --kill-after=1s 15s docker rm -f -- "$container" </dev/null >/dev/null 2>&1 || true
+    else
+      IFS= read -r -d '' -t 1 -u "$words_fd" installer_failure_detail || true
     fi
+    exec {words_fd}>&-
   fi
   installer_ui_event optional ollama waiting optional-status continue
   if [[ "$optional_interrupted" == 1 ]]; then
+    installer_failure_detail=""
     optional_notes+=("Local model: not downloaded (the install was interrupted); Orbit runs without it. To download it: ${again}")
     return 0
   fi
-  installer_failure_detail="$(tail -c "$docker_capture_bytes" -- "$output" 2>/dev/null | docker_output_excerpt)" || installer_failure_detail=""
   if [[ -n "$installer_failure_detail" ]]; then
     printf 'Orbit installer: Docker said: %s\n' "$installer_failure_detail" >&2 || true
   fi
   installer_failure_detail=""
   optional_notes+=("Local model: the confirmed download did not complete; Orbit runs without it. To try again: ${again}")
+}
+
+# run_deferred_model_pull
+#
+# O-R2: the confirmed model download, once the ready screen and the claim
+# line are on screen, so a long download never holds them back. Its notes
+# are printed after it. The service's last event still matches its line:
+# a failed download already ends on `waiting ... continue` (O-R3), so only
+# a download that worked on a service still starting adds that event.
+run_deferred_model_pull() {
+  [[ "$model_pull_deferred" == 1 ]] || return 0
+  local first_note=${#optional_notes[@]} index
+  installer_ui_phase=optional
+  installer_ui_component=ollama
+  [[ "$optional_interrupted" == 1 ]] ||
+    printf 'Local model: downloading it now; Orbit can already be used.\n' || true
+  pull_confirmed_model
+  if [[ "$ollama_was_ready" != 1 && "$model_pull_ok" == 1 ]]; then
+    installer_ui_event optional ollama waiting optional-status continue
+  fi
+  for ((index = first_note; index < ${#optional_notes[@]}; index++)); do
+    printf '%s\n' "${optional_notes[index]}" || true
+  done
 }
 
 print_completion_screen() {
@@ -2606,7 +2729,8 @@ print_completion_screen() {
   # memory only and printed once, by the application after its start-up
   # reports, in the container's own log -- it has no file, no Compose secret and no installer-visible
   # form, so this is a pointer to where to read it, never the code itself.
-  printf 'Claim this instance: run "docker compose --env-file %s logs orbit-app" and open the claim link it prints to create the first administrator.\n' "$environment_file"
+  # 10-22: the grep picks the notice's heading and link out of the start-up log.
+  printf 'Claim this instance: run "docker compose --env-file %s logs orbit-app | grep -i claim" and open the claim link it prints to create the first administrator.\n' "$environment_file"
   # #968 (slice 1 of #966): a hard block here was considered and rejected --
   # it would fail an offline install -- so this is an instruction, not a
   # gate. The administration screen carries its own persistent reminder
@@ -3332,6 +3456,15 @@ if ! read_engine_outcome; then
   staging_note=""
   [[ "$rollback_armed" == 1 ]] ||
     staging_note=" A hard interruption leaves its staging directory for review: remove it, then rerun."
+  # O-F5: an engine that ended having changed nothing here (cancelled at
+  # its menu, or killed before its first write) leaves nothing to undo.
+  if [[ "$rollback_armed" == 1 ]] && target_unchanged_since_snapshot; then
+    rollback_armed=0
+    if [[ "$engine_status" == 130 ]]; then
+      flush_pending_ui_events
+      exit 130
+    fi
+  fi
   fail_with failure retry "The install engine stopped without reporting a result (docker run exit status ${engine_status}); see the lines above.${staging_note}"
 fi
 # Without an outcome the engine may have committed, so the rollback stayed
@@ -3426,10 +3559,13 @@ wait_for_deployment_readiness
 retire_smtp_lines
 prune_old_undo_copies || true
 
+# Installed and ready: nothing after this is a reason to undo it.
+rollback_armed=0
+# Installed: a closed stdout only loses the screen, not the result. The
+# screen comes before the model download (O-R2); the run still ends with
+# the complete event (docs/engine-events.md).
+print_completion_screen || true
+run_deferred_model_pull
 installer_ui_phase=complete
 installer_ui_component=installer
 installer_ui_event complete installer completed deployment-ready complete
-# Installed and ready: nothing after this is a reason to undo it.
-rollback_armed=0
-# Installed: a closed stdout only loses the screen, not the result.
-print_completion_screen || true
