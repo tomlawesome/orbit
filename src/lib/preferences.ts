@@ -110,6 +110,23 @@ export const themePreferenceSchema = z.object({
 export type ThemePreference = z.infer<typeof themePreferenceSchema>;
 
 /**
+ * What a preferences PUT may carry (#1738 A-S1, W-S2): the theme, and any
+ * other setting it means to change. A setting left out has no value here --
+ * not its default -- so the route writes only what the request names and
+ * every other stored setting stays as it was.
+ */
+export const themePreferenceUpdateSchema = z.object({
+  theme: z.enum(themePacks),
+  textSize: z.enum(textSizes).optional(),
+  emailNotifications: z.boolean().optional(),
+  pushNotifications: z.boolean().optional(),
+  labelDays: z.number().int().min(0).max(365).optional(),
+  skyDriver: z.enum(skyDrivers).optional(),
+  planetSize: z.enum(planetSizes).optional(),
+  importanceOfferDismissed: z.boolean().optional(),
+});
+
+/**
  * The reader's own reminder timing (#468, settings §13). Two offsets, both in
  * days before the date: the first warning is the far one, the final warning
  * the near one, so the final must always be the smaller number — a pair that

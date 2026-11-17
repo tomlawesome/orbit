@@ -64,10 +64,13 @@ export const POST = write(async (event, session) => {
 });
 
 /**
- * The dry run's answer. The refusal's code and words are read off the very
- * response the real call would have sent, so the two cannot drift: whatever
- * `appErrorResponse` would say with a 4xx, the dry run says with a 200. A
- * fault (5xx) is not an answer and still fails the call as it would the save.
+ * The dry run's answer. The refusal's words are read off the very response
+ * the real call would have sent, so the two cannot drift: whatever
+ * `appErrorResponse` would say with a 4xx, the dry run says with a 200. The
+ * code is not always the save's: a new item with no importance is
+ * `validation_failed` on the save (#1463) and `importance_missing` on the dry
+ * run (#1468), each pinned by its own test. A fault (5xx) is not an answer and
+ * still fails the call as it would the save.
  *
  * @param {() => Promise<{ nextDate: string } | undefined | void>} check  the parse and checks the save would run,
  *   and the preview of the result where the command has one
@@ -84,7 +87,8 @@ async function verdict(check) {
     const { error: refusal } = await real.json();
     /* The save answers a missing importance 422 validation_failed (#1463); the
        dry run says it for what it is, not as a malformed command. */
-    const code = /** @type {{ rule?: string }} */ (error).rule === "importance" ? "importance_missing" : refusal.code;
+    const rule = /** @type {{ rule?: string }} */ (error).rule;
+    const code = rule === "importance" || rule === "importanceReload" ? "importance_missing" : refusal.code;
     return json({ refusal: { code, message: refusal.message } }, { headers: NO_STORE });
   }
 }
