@@ -303,6 +303,8 @@ export function cardMessageFor(code) {
       return "Those two passwords are not the same.";
     case "password_unchanged":
       return "That is the password that was refused. Choose a different one.";
+    case "password_change_lapsed":
+      return "This sign-in has lapsed before a new password was saved. Sign in again and choose one then.";
     case "sign_in_unavailable":
       return "Sign-in is briefly unavailable. Try again shortly.";
     case "invalid_request":

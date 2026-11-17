@@ -2,6 +2,7 @@
   import { onDestroy } from "svelte";
   import { resolve } from "$app/paths";
   import { ringFocusIn, ringFocusOut, ringOpens } from "./ring-closes.js";
+  import { refusalMoment } from "./door-state.js";
 
   onDestroy(ringOpens);
 
@@ -63,7 +64,7 @@
    *   onsubmit?: () => void,
    *   onprovider?: () => void,
    *   signInLine?: boolean,
-   *   refusedMoment?: string | null,
+   *   refusedAt?: string | null,
    *   lapsed?: boolean,
    *   onsignin?: (() => void) | null,
    * }}
@@ -86,9 +87,9 @@
     /* setup mode, once the link has been refused: the way on is to sign in,
        so the card offers it under the refusal (#1120, proposal §2.14) */
     signInLine = false,
-    /* renew mode: the refusal's moment, already in the mail's words
-       (door-state.js's refusalMoment); null leaves the sentence without it */
-    refusedMoment = null,
+    /* renew mode: when the sign-in was refused, as the server sent it (ISO);
+       null, or anything not a moment, leaves the sentence without it */
+    refusedAt = null,
     /* renew mode: the hold ran out before a password was saved */
     lapsed = false,
     /* renew mode, lapsed: the host's way back to its own door. The card
@@ -96,6 +97,10 @@
        to the page already showing. */
     onsignin = null,
   } = $props();
+
+  /* The moment in the approval mail's words (refusalMoment, after
+     formatApprovalMoment), so the card and the mail name it alike. */
+  const refusedMoment = $derived(refusalMoment(refusedAt));
 
   /* THE REVEAL (#1120, proposal §2.13): a 44px control on every password
      field, because a password typed on glass is typed blind. One switch for

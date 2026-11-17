@@ -12,7 +12,7 @@
   import {
     APPROVAL_BACKSTOP_MS, CLAIM, DOOR, LOCAL, LOCKED, STARTING, STARTING_BACKSTOP_MS, STARTING_POLL_MS,
     applyStartingBackstop, availabilityOf, cardMessageFor, claimFromHash, doorMessageFor,
-    doorModeOf, nextDoorState, phaseOf, readinessOf, refusalMoment,
+    doorModeOf, nextDoorState, phaseOf, readinessOf,
   } from "./door-state.js";
   import RingCard from "./RingCard.svelte";
   import "$lib/ringcard.css";
@@ -175,7 +175,7 @@
    * with one sentence saying when the refusal was. Saving is the launch.
    */
   /** The refusal's moment in the mail's words, or null. */
-  let refusedMoment = $state(/** @type {string | null} */ (null));
+  let refusedAt = $state(/** @type {string | null} */ (null));
   /** The hold ran out before a password was saved. */
   let renewLapsed = $state(false);
   /** @type {ReturnType<typeof setTimeout> | undefined} */
@@ -451,14 +451,14 @@
    * provider's return the bare door -- and lapses by itself when the hold
    * does, rather than waiting for a press to be told.
    *
-   * @param {unknown} refusedAt the newest refusal, ISO 8601
+   * @param {unknown} refusedAtIso the newest refusal, ISO 8601
    * @param {number} lapsesAt epoch ms
    */
-  function chooseNewPassword(refusedAt, lapsesAt) {
+  function chooseNewPassword(refusedAtIso, lapsesAt) {
     message = "";
     password = "";
     again = "";
-    refusedMoment = refusalMoment(refusedAt);
+    refusedAt = typeof refusedAtIso === "string" ? refusedAtIso : null;
     renewLapsed = false;
     card = "renew";
     showCard(true);
@@ -812,7 +812,7 @@
     {:else if card === "waiting"}
       <Waiting phase={pendingState} {canResendAt} {limited} {busy} {message} onresend={resendApproval} />
     {:else if card === "renew"}
-      <Identity mode="renew" bind:password bind:again {busy} {message} {refusedMoment}
+      <Identity mode="renew" bind:password bind:again {busy} {message} {refusedAt}
                 lapsed={renewLapsed} onsignin={signInAgain} onsubmit={submitNewPassword} />
     {:else if card === "create"}
       <Identity mode="create" bind:email bind:displayName bind:password

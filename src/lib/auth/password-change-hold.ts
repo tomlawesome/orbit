@@ -51,7 +51,10 @@ export async function issuePasswordChangeHold(
 ): Promise<{ refusedAt: string; expiresAt: string }> {
   const ttlSeconds = Math.max(1, Math.floor((expiresAt.getTime() - Date.now()) / 1000));
   const sealed = await sealProof(
-    { userId: refusal.userId, requiredAt: refusal.requiredAt.toISOString() },
+    /* The lapse is carried to the millisecond and checked strictly on open:
+       the proof's own expiry is whole seconds with a few seconds' clock
+       tolerance, which would keep a lapsed hold open a little too long. */
+    { userId: refusal.userId, requiredAt: refusal.requiredAt.toISOString(), lapsesAt: expiresAt.getTime() },
     HOLD_AUDIENCE,
     ttlSeconds,
     config,
@@ -77,6 +80,9 @@ export async function openPasswordChangeHold(cookies: CookieReader, config: Auth
   }
   const requiredAt = typeof payload.requiredAt === "string" ? new Date(payload.requiredAt) : null;
   if (typeof payload.userId !== "string" || payload.userId.length === 0 || !requiredAt || Number.isNaN(requiredAt.getTime())) {
+    throw lapsed();
+  }
+  if (typeof payload.lapsesAt !== "number" || !Number.isFinite(payload.lapsesAt) || Date.now() >= payload.lapsesAt) {
     throw lapsed();
   }
   return { userId: payload.userId, requiredAt };
