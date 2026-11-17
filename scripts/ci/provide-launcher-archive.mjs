@@ -35,28 +35,36 @@ if (!apiBase || !projectId || !pipelineId || !token) fail("CI_API_V4_URL, CI_PRO
 const api = `${apiBase}/projects/${projectId}`;
 const headers = { "JOB-TOKEN": token };
 
-async function successfulJobId(names) {
+// The id of a successful job of one of these names in this pipeline, or null
+// when the whole listing holds none (a real absence). Any non-OK reply, and
+// running out of pages with the listing not ended, fail: neither is absence.
+async function successfulJobId(names, what) {
   for (let page = 1; page <= MAX_PAGES; page += 1) {
     const response = await fetch(`${api}/pipelines/${pipelineId}/jobs?per_page=100&page=${page}`, { headers });
-    if (!response.ok) return null;
+    if (!response.ok) fail(`listing the pipeline's jobs to find ${what} answered HTTP ${response.status}`);
     const jobs = await response.json();
-    if (!Array.isArray(jobs) || jobs.length === 0) return null;
+    if (!Array.isArray(jobs)) fail(`listing the pipeline's jobs to find ${what} did not answer a JSON array`);
     const found = jobs.find((job) => names.includes(job.name) && job.status === "success");
     if (found) return found.id;
+    if (jobs.length < 100) return null;
   }
-  return null;
+  return fail(`reached the page cap (${MAX_PAGES} pages) listing the pipeline's jobs to find ${what}`);
 }
 
-async function artifact(jobId, path) {
+// The artifact's bytes, or null on 404 or 410 (absent or expired). Anything
+// else that is not OK fails.
+async function artifact(jobId, path, what) {
   const response = await fetch(`${api}/jobs/${jobId}/artifacts/${path}`, { headers });
-  return response.ok ? Buffer.from(await response.arrayBuffer()) : null;
+  if (response.ok) return Buffer.from(await response.arrayBuffer());
+  if (response.status === 404 || response.status === 410) return null;
+  return fail(`fetching ${what} answered HTTP ${response.status}`);
 }
 
 mkdirSync(out, { recursive: true });
 const target = join(out, ARCHIVE);
 
-const buildJob = await successfulJobId(["build_launcher", "build_launcher_branch"]);
-const original = buildJob === null ? null : await artifact(buildJob, `.orbit-launcher-artifacts/${ARCHIVE}`);
+const buildJob = await successfulJobId(["build_launcher", "build_launcher_branch"], "the launcher build job");
+const original = buildJob === null ? null : await artifact(buildJob, `.orbit-launcher-artifacts/${ARCHIVE}`, "the launcher archive");
 if (original !== null) {
   writeFileSync(target, original);
   console.log(`provide-launcher-archive: using the archive built by job ${buildJob}`);
@@ -65,11 +73,13 @@ if (original !== null) {
 
 console.log("provide-launcher-archive: this pipeline's launcher archive is gone (expired); rebuilding it from the pinned source");
 const build = process.env.ORBIT_LAUNCHER_BUILD_SCRIPT || "scripts/ci/build-launcher.sh";
-const built = spawnSync("bash", [build, out], { stdio: "inherit" });
+// The build script gets no job token: it clones from a public mirror and needs none.
+const { CI_JOB_TOKEN: _token, ...buildEnv } = process.env;
+const built = spawnSync("bash", [build, out], { stdio: "inherit", env: buildEnv });
 if (built.status !== 0) fail(`the rebuild failed (exit ${built.status})`);
 
-const recordJob = await successfulJobId(["record_image"]);
-const manifestBytes = recordJob === null ? null : await artifact(recordJob, ".orbit-supply-chain/orbit-release-manifest.json");
+const recordJob = await successfulJobId(["record_image"], "the record_image job (for the release manifest)");
+const manifestBytes = recordJob === null ? null : await artifact(recordJob, ".orbit-supply-chain/orbit-release-manifest.json", "the release manifest");
 if (manifestBytes === null) {
   console.log("provide-launcher-archive: no release manifest in this pipeline yet; record_image will hash the archive it is given");
   process.exit(0);

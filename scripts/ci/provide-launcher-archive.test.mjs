@@ -23,7 +23,7 @@ afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 
-async function world({ archive, manifest, jobs }) {
+async function world({ archive, manifest, jobs, archiveStatus, manifestStatus }) {
   const requests = [];
   const server = createServer((req, res) => {
     requests.push(req.url);
@@ -33,6 +33,14 @@ async function world({ archive, manifest, jobs }) {
       return res.end(JSON.stringify(jobs));
     }
     if (url.pathname.endsWith(`/jobs/11/artifacts/.orbit-launcher-artifacts/${ARCHIVE}`) && archive !== undefined) return res.end(archive);
+    if (url.pathname.endsWith(`/jobs/11/artifacts/.orbit-launcher-artifacts/${ARCHIVE}`) && archiveStatus) {
+      res.statusCode = archiveStatus;
+      return res.end("x");
+    }
+    if (url.pathname.endsWith("/jobs/22/artifacts/.orbit-supply-chain/orbit-release-manifest.json") && manifestStatus) {
+      res.statusCode = manifestStatus;
+      return res.end("x");
+    }
     if (url.pathname.endsWith("/jobs/22/artifacts/.orbit-supply-chain/orbit-release-manifest.json") && manifest !== undefined) {
       return res.end(JSON.stringify(manifest));
     }
@@ -48,7 +56,7 @@ async function run(api, { built = "rebuilt-bytes" } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "provide-launcher-"));
   dirs.push(dir);
   const build = join(dir, "build.sh");
-  writeFileSync(build, `#!/usr/bin/env bash\nmkdir -p "$1"\nprintf '%s' '${built}' > "$1/${ARCHIVE}"\necho built > "${dir}/built-marker"\n`);
+  writeFileSync(build, `#!/usr/bin/env bash\nmkdir -p "$1"\nprintf '%s' '${built}' > "$1/${ARCHIVE}"\necho "token=\${CI_JOB_TOKEN-unset}" > "${dir}/built-marker"\n`);
   chmodSync(build, 0o755);
   const out = join(dir, "artifacts");
   const child = spawn(process.execPath, [script, out], {
@@ -67,7 +75,8 @@ async function run(api, { built = "rebuilt-bytes" } = {}) {
   child.stderr.on("data", (c) => { stderr += c; });
   const status = await new Promise((resolve) => child.on("close", resolve));
   const r = { status, stdout, stderr };
-  return { r, out, rebuilt: existsSync(join(dir, "built-marker")) };
+  const marker = join(dir, "built-marker");
+  return { r, out, rebuilt: existsSync(marker), childEnv: existsSync(marker) ? readFileSync(marker, "utf8").trim() : "" };
 }
 
 const jobs = [
@@ -101,6 +110,50 @@ describe("scripts/ci/provide-launcher-archive.mjs", () => {
     expect(r.status, r.stderr).toBe(0);
     expect(rebuilt).toBe(true);
     expect(r.stdout).toMatch(/no release manifest/iu);
+  });
+});
+
+describe("scripts/ci/provide-launcher-archive.mjs lets only a real absence through", () => {
+  it.each([403, 500])("fails on a %i from the manifest fetch, building nothing it cannot check", async (status) => {
+    const { r } = await run(await world({ jobs, manifestStatus: status }));
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(new RegExp(`release manifest.*${status}`, "iu"));
+  });
+
+  it("fails on a 500 from the job listing for the manifest", async () => {
+    const api = await world({ jobs: [jobs[0]] });
+    // the listing answers 500 from the second call on (record_image's lookup)
+    let calls = 0;
+    const original = servers[servers.length - 1].listeners("request")[0];
+    servers[servers.length - 1].removeAllListeners("request");
+    servers[servers.length - 1].on("request", (req, res) => {
+      if (req.url.includes("/pipelines/7/jobs") && ++calls > 1) {
+        res.statusCode = 500;
+        return res.end("x");
+      }
+      original(req, res);
+    });
+    const { r } = await run(api);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/500/u);
+  });
+
+  it("fails on a 500 from the archive download instead of rebuilding", async () => {
+    const { r, rebuilt } = await run(await world({ jobs, archiveStatus: 500 }));
+    expect(r.status).not.toBe(0);
+    expect(rebuilt).toBe(false);
+  });
+
+  it("rebuilds on a 410 from the archive download (expired)", async () => {
+    const { r, rebuilt } = await run(await world({ jobs, archiveStatus: 410, manifest: { files: { [ARCHIVE]: sha("rebuilt-bytes") } } }));
+    expect(r.status, r.stderr).toBe(0);
+    expect(rebuilt).toBe(true);
+  });
+
+  it("does not hand the job token to the build script", async () => {
+    const { r, childEnv } = await run(await world({ jobs: [jobs[0]] }));
+    expect(r.status, r.stderr).toBe(0);
+    expect(childEnv).toBe("token=unset");
   });
 });
 
