@@ -4469,6 +4469,24 @@ restore_transaction_originals_match_live() {
   [[ "$saved" == 1 ]]
 }
 
+# #1876 O-R3: rename to a tombstone, then delete. Renames the staging folder
+# $1, in place, to `.orbit-repair-discard.<same suffix>` (one atomic step, so
+# a kill part way through the removal never leaves a half-emptied folder that
+# the next run reads as an interrupted install), then removes that name. The
+# rename refuses to replace anything already there; if it fails nothing is
+# deleted. Both steps are the folder owner's (#1872). Nothing else in this
+# script reads a `.orbit-repair-discard.*`; remove_leftover_discards clears
+# one a killed run left behind.
+discard_staging_root() {
+  local staging_root="$1" discard
+  discard=".orbit-repair-discard.${staging_root#.orbit-install-staging.}"
+  [[ ! -e "$discard" && ! -L "$discard" ]] || return 1
+  as_folder_owner mv -n -T -- "$staging_root" "$discard" || return 1
+  [[ ! -e "$staging_root" && ! -L "$staging_root" ]] || return 1
+  is_real_non_symlink_directory "$discard" || return 1
+  as_folder_owner rm -rf -- "$discard"
+}
+
 do_restore_transaction() {
   local -a staging_matches=()
   local -a touched=()
@@ -4478,7 +4496,8 @@ do_restore_transaction() {
   # #1872 V1/V2: as root in a folder another user owns, every folder, copy,
   # move and removal below is the owner's (as_folder_owner): the recovery
   # folder and its copies, the dated backup, the restore copies and the
-  # staging folder's removal. Root only reads and compares.
+  # staging folder's rename and removal (discard_staging_root). Root only
+  # reads and compares.
   refuse_unless_owner_writes restore-transaction || return 1
 
   shopt -s nullglob dotglob
@@ -4497,7 +4516,7 @@ do_restore_transaction() {
   # restore would change nothing (committed or not) is removed rather than
   # refused; anything else falls through to the refusals and the restore.
   if engine_lock_idle && restore_transaction_originals_match_live "$staging_root"; then
-    as_folder_owner rm -rf -- "$staging_root" || return 1
+    discard_staging_root "$staging_root" || return 1
     printf 'Orbit repair: removed %s; no install is running and restoring from it would change nothing (every saved file matches the live one).\n' "$staging_root" >&2
     return 0
   fi
@@ -4634,7 +4653,7 @@ do_restore_transaction() {
     # removal loop.
   done
 
-  as_folder_owner rm -rf -- "$staging_root" || return 1
+  discard_staging_root "$staging_root" || return 1
   return 0
 }
 
@@ -6814,6 +6833,30 @@ is_removable_checkpoint_dir() {
   return 0
 }
 
+# #1876: removes each `.orbit-repair-discard.*` an earlier run left when it
+# was stopped between discard_staging_root's rename and the end of its
+# removal. Runs once, at the start of --execute (--check and --plan never
+# call it), and never reads what is inside. Only a real folder is removed, as
+# the folder owner (#1872), and rm -rf does not follow a symlink inside it;
+# anything else under that name is named and left for the operator.
+remove_leftover_discards() {
+  local dir
+  local -a dirs=()
+  for dir in ./.orbit-repair-discard.*; do
+    [[ -e "$dir" || -L "$dir" ]] || continue
+    dirs+=("$dir")
+  done
+  [[ ${#dirs[@]} -gt 0 ]] || return 0
+  refuse_unless_owner_writes discard-cleanup || return 0
+  for dir in "${dirs[@]}"; do
+    if is_real_non_symlink_directory "$dir" && as_folder_owner rm -rf -- "$dir"; then
+      printf 'Orbit repair: removed %s, which an earlier repair run left part removed.\n' "$dir" >&2
+      continue
+    fi
+    printf 'Orbit repair: %s was kept: it is not a folder repair made, or could not be removed; check it and delete it yourself.\n' "$dir" >&2
+  done
+}
+
 # #1849: one --execute run per deployment folder. Takes an exclusive,
 # non-blocking flock on a read-only descriptor of the folder itself (no lock
 # file, so nothing to plant or leave behind) and keeps it open, not
@@ -6859,6 +6902,7 @@ execute_repair() {
   dangerous_exit_code=0
   acquire_repair_run_lock
   snapshot_run_checkpoints
+  remove_leftover_discards
 
   run_diagnosis
 
