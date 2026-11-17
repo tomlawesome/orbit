@@ -1223,7 +1223,7 @@ set -Eeuo pipefail
 # Checkpoint storage — local-only, owner-only, removed after a clean re-check
 # --------------------------------------------------------------------------
 # The bundle is written into a freshly created, mode-0700 directory
-# (`.orbit-repair-checkpoint.<pid>.<random>`, made by the deployment
+# (`.orbit-repair-checkpoint.XXXXXX`, six random characters, made by the deployment
 # folder's owner as root, #1872 V3; a sibling naming convention to the
 # existing `.orbit-repair-recovery.*`/`.orbit-install-staging.XXXXXX`
 # prefixes, distinct so it is never mistaken for either by a later
@@ -2886,7 +2886,9 @@ ensure_recovery_dir() {
 }
 
 # owner_private_dir <variable> <prefix>: a new mode-700 folder named
-# <prefix><pid>.<random>, made by the deployment folder's owner
+# <prefix> and six unpredictable characters (owner_temp_suffix, as for
+# root-chosen temporary names, #1873 X1; never the guessable pid and
+# $RANDOM), made by the deployment folder's owner
 # (as_folder_owner; #1857 S4, #1872 V2/V3), its name left in <variable>.
 # The name is assigned BEFORE the folder exists, never after. The old
 # shape — recovery_dir="$(mktemp -d ...)" — had a window #655 caught on CI:
@@ -2907,9 +2909,10 @@ ensure_recovery_dir() {
 # owner, and if it is still there its name is kept in <variable> (the
 # caller's cleanup removes or names it). Returns 1 either way.
 owner_private_dir() {
-  local attempt
+  local attempt suffix
   for attempt in 1 2 3; do
-    printf -v "$1" '%s%s.%s%s' "$2" "$$" "$RANDOM" "$RANDOM"
+    suffix="$(owner_temp_suffix)" || break
+    printf -v "$1" '%s%s' "$2" "$suffix"
     if [[ "$(id -u)" == 0 ]]; then
       as_folder_owner mkdir -m 700 -- "${!1}" && return 0
       if [[ "$owner_step_problem" == "timed out" ]]; then
