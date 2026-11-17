@@ -58,3 +58,68 @@ describe("a superseded papers re-read still reports the failure of mustRead (#16
     expect(outcomes, "the failure to read mustRead's papers reached a caller").toContain("rejected");
   });
 });
+
+/*
+ * Round two: the act that asked for mustRead rejects whatever superseded its
+ * read, when that item's papers cannot be read. Each act reports once; two
+ * acts with the same mustRead may each reject.
+ */
+describe("whatever supersedes a papers re-read, the act that asked for mustRead still hears of its failure (#1605 W-R7)", () => {
+  const make = (/** @type {() => any} */ view) => drawer.createDrawerActs({
+    view, reread: async () => {}, say: () => {}, focus: () => {}, open: () => "open",
+    itemOf: (id) => /** @type {any} */ ({ id }), amend: () => null,
+  });
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+
+  it("a plain load (a new household object, as after the act's own home read) supersedes it", async () => {
+    const items = Array.from({ length: SEARCH_DOC_CONCURRENCY + 2 }, (_, i) => ({ id: `i${i}`, title: `Item ${i}`, status: "active", documentCount: 1 }));
+    const mustRead = items[items.length - 1].id;
+    let household = { items };
+    const acts = make(() => ({ household, primary: "h1" }));
+    /** @type {() => void} */
+    let release = () => {};
+    const gate = new Promise((resolve) => { release = () => resolve(undefined); });
+    let held = 0;
+    ws.readItemDocuments.mockImplementation(async (/** @type {string} */ _h, /** @type {string} */ id) => {
+      if (id === mustRead) throw new Error("papers would not load");
+      if (held < SEARCH_DOC_CONCURRENCY) { held += 1; await gate; }
+      return [];
+    });
+
+    const asked = acts.rereadSearchDocuments(null, mustRead).then(() => "resolved", () => "rejected");
+    await tick();
+    household = { items }; // the refreshed view: same papers, a new object
+    const plain = acts.loadSearchDocuments(null);
+    release();
+    await plain;
+
+    expect(await asked, "the act that asked for mustRead").toBe("rejected");
+  });
+
+  it("a newer re-read whose `also` no longer lists mustRead (the item was retired) supersedes it", async () => {
+    const items = [
+      { id: "gone", title: "Gone", status: "retired", documentCount: 1 },
+      ...Array.from({ length: 3 }, (_, i) => ({ id: `i${i}`, title: `Item ${i}`, status: "active", documentCount: 1 })),
+    ];
+    const household = { items };
+    const acts = make(() => ({ household, primary: "h1" }));
+    /** @type {() => void} */
+    let release = () => {};
+    const gate = new Promise((resolve) => { release = () => resolve(undefined); });
+    let held = 0;
+    ws.readItemDocuments.mockImplementation(async (/** @type {string} */ _h, /** @type {string} */ id) => {
+      if (held < 4) { held += 1; await gate; }
+      if (id === "gone") throw new Error("papers would not load");
+      return [];
+    });
+
+    const asked = acts.rereadSearchDocuments("gone", "gone").then(() => "resolved", () => "rejected");
+    await tick();
+    const newer = acts.rereadSearchDocuments(null, null).then(() => "resolved", () => "rejected");
+    release();
+    await newer;
+
+    expect(await asked, "the act that asked for the retired item's papers").toBe("rejected");
+  });
+});
+
