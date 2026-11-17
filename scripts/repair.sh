@@ -1204,7 +1204,9 @@ set -Eeuo pipefail
 # bind-mount-and-decrypt pattern: `--volume
 # "$repo_dir/$bundle_path:/recovery/postgres-password.enc:ro" --entrypoint
 # node orbit-app .../recovery-crypto.mjs decrypt
-# /recovery/postgres-password.enc`) using the same passphrase, and compares
+# /recovery/postgres-password.enc`; as root, the mount's source is a
+# private copy outside the folder instead, #1875 W4) using the same
+# passphrase, and compares
 # the recovered value byte-for-byte against the original secret content
 # (never printed either side of the comparison). Only if that round-trip
 # succeeds is the checkpoint considered established. If the bundle cannot be
@@ -1627,6 +1629,7 @@ cleanup() {
 
   [[ -z "${compose_image_tmp:-}" ]] || rm -f -- "$compose_image_tmp" 2>/dev/null || true
   [[ -z "${compose_live_tmp:-}" ]] || rm -f -- "$compose_live_tmp" 2>/dev/null || true
+  [[ -z "${checkpoint_bundle_copy:-}" ]] || rm -f -- "$checkpoint_bundle_copy" 2>/dev/null || true
   # #1848 FR-S1b: the owner's temporary names (#1873 X1: root chose them),
   # held while they exist,
   # removed as the folder's owner (#1848 FIX-S1).
@@ -4554,12 +4557,17 @@ restore_transaction_originals_match_live() {
     [[ ! -L "$backup_path" && ! -L "$path" && ! -L "$(dirname -- "$path")" ]] || return 1
     [[ "$(stat -c %a -- "$backup_path")" == "$(stat -c %a -- "$path")" ]] || return 1
     if [[ -f "$backup_path" ]]; then
-      # #1875 W3: both sides through the bounded read; a failed read is
-      # never "the same".
+      # #1875 W3: as root, both sides through the bounded read and a
+      # SHA-256 compare (never CRC32, which the folder's owner can forge);
+      # a failed read is never "the same". Not root, an exact cmp.
       [[ -f "$path" ]] || return 1
-      backup_sum="$(folder_file_checksum "$backup_path")" || return 1
-      live_sum="$(folder_file_checksum "$path")" || return 1
-      [[ "$backup_sum" == "$live_sum" ]] || return 1
+      if [[ "$(id -u)" == 0 ]]; then
+        backup_sum="$(folder_file_checksum "$backup_path")" || return 1
+        live_sum="$(folder_file_checksum "$path")" || return 1
+        [[ -n "$backup_sum" && "$backup_sum" == "$live_sum" ]] || return 1
+      else
+        cmp -s -- "$backup_path" "$path" || return 1
+      fi
     elif [[ -d "$backup_path" ]]; then
       [[ -d "$path" ]] && diff -r --no-dereference -q -- "$backup_path" "$path" >/dev/null 2>&1 || return 1
       [[ "$(restore_transaction_tree_modes "$backup_path")" == "$(restore_transaction_tree_modes "$path")" ]] || return 1
@@ -5282,14 +5290,25 @@ smtp_owner_write() {
 # opened must be that same regular file (same device and inode, so a link or
 # a FIFO swapped in between is never read), at most 1 MiB before and after
 # the read. The whole read runs under $owner_step_timeout, TERM then KILL
-# $owner_step_grace s later, so a FIFO or a stalled file can't hold root.
+# $owner_step_grace s later, so a FIFO or a stalled file can't hold root;
+# the open itself gets $owner_open_timeout s (a watchdog TERMs the reader),
+# so a FIFO swapped in after the lstat fails at once rather than holding
+# root for the whole limit (#1875 W4). The watchdog closes every inherited
+# descriptor above 2 (the held locks' included), kills its own sleep and is
+# waited for, so it never keeps a lock held even if the reader is killed.
 # A refusal prints one "Orbit repair:" line naming the action, the file and
 # the reason; any other failure returns 1 quietly, as dd did.
 readonly owner_read_cap=1048576
+readonly owner_open_timeout=5
 # shellcheck disable=SC2016 # expanded by the child bash
 readonly owner_read_script='before="$(stat -c "%d:%i %F" -- "$1")" || exit 1
 case "${before#* }" in "regular file"|"regular empty file") ;; *) exit 3;; esac
+{ for fd in /proc/"$BASHPID"/fd/*; do fd="${fd##*/}"; [[ "$fd" =~ ^[0-9]+$ ]] && ((fd > 2)) && eval "exec $fd<&-"; done
+trap "kill \$s 2>/dev/null; exit 0" TERM; sleep "$3" & s=$!; wait "$s" && kill -TERM "$$"; } </dev/null >/dev/null 2>&1 &
+watchdog=$!
 exec 3<"$1" || exit 1
+kill "$watchdog" 2>/dev/null
+wait "$watchdog"
 read -r id size type < <(stat -L -c "%d:%i %s %F" /dev/fd/3) || exit 1
 case "$type" in "regular file"|"regular empty file") ;; *) exit 3;; esac
 [[ "$id" == "${before%% *}" ]] || exit 5
@@ -5297,27 +5316,31 @@ case "$type" in "regular file"|"regular empty file") ;; *) exit 3;; esac
 head -c "$2" <&3 || exit 1
 size="$(stat -L -c %s /dev/fd/3)" || exit 1
 ((size <= $2)) || exit 4'
-# folder_file_checksum <path> (#1875 W3): a checksum of a file in the
-# deployment folder, for root's compares. As root through smtp_read_file
-# (no link followed, regular files only, 1 MiB, time limit); otherwise read
-# by path as before. Returns non-zero when the read fails, so a caller never
-# counts an unread file as the same.
+# folder_file_checksum <path> (#1875 W3): the SHA-256 of a file in the
+# deployment folder, for root's compares (collision-resistant: the folder's
+# owner controls the bytes, so a CRC such as cksum's could be forged). As
+# root through smtp_read_file (no link followed, regular files only, 1 MiB,
+# time limit); otherwise read by path. Returns non-zero when the read fails
+# (pipefail), so a caller never counts an unread file as the same.
 folder_file_checksum() {
+  local sum
   if [[ "$(id -u)" == 0 ]]; then
-    smtp_read_file "$1" | cksum
+    sum="$(set -o pipefail; smtp_read_file "$1" | sha256sum)" || return 1
   else
-    cksum < "$1"
+    sum="$(sha256sum < "$1")" || return 1
   fi
+  printf '%s\n' "${sum%% *}"
 }
 
 smtp_read_file() {
   local status=0 reason
-  LC_ALL=C timeout -k "$owner_step_grace" "$owner_step_timeout" bash -c "$owner_read_script" owner-read "$1" "$owner_read_cap" || status=$?
+  LC_ALL=C timeout -k "$owner_step_grace" "$owner_step_timeout" bash -c "$owner_read_script" owner-read "$1" "$owner_read_cap" "$owner_open_timeout" || status=$?
   case "$status" in
     0) return 0 ;;
     3) reason="it is not a regular file" ;;
     4) reason="it is too large (over 1 MiB)" ;;
     5) reason="it changed while it was being opened" ;;
+    143) reason="opening it did not finish within $owner_open_timeout s (not a regular file)" ;;
     124 | 137) reason="reading it timed out after $owner_step_timeout s and was stopped" ;;
     *) return 1 ;;
   esac
@@ -6089,15 +6112,44 @@ checkpoint_encrypt_postgres_password() {
 
 # Mirrors import-recovery-bundle.sh's own bind-mount-and-decrypt pattern.
 # Prints the recovered 64-hex-character value on stdout (the caller alone is
-# responsible for never printing it onward) or nothing on failure.
+# responsible for never printing it onward) or nothing on failure. $1 is
+# the mount's source: the bundle itself, or as root its private copy
+# (checkpoint_private_copy, #1875 W4).
 checkpoint_decrypt_verify() {
-  local bundle_path="$1"
+  local mount_source="$1"
   printf '%s' "$checkpoint_passphrase" | timeout "$docker_checkpoint_timeout" \
     docker compose --project-name "$project" --env-file "$environment_file" \
     run --rm --no-deps -T \
-    --volume "$repo_dir/$bundle_path:/recovery/postgres-password.enc:ro" \
+    --volume "$mount_source:/recovery/postgres-password.enc:ro" \
     --entrypoint node orbit-app \
     /opt/orbit/scripts/recovery-crypto.mjs decrypt /recovery/postgres-password.enc 2>/dev/null
+}
+
+# #1875 W4: as root, the decrypt check never mounts a path in the
+# deployment folder, which its owner controls: root reads the bundle through
+# the bounded read (smtp_read_file: no link followed, regular file only,
+# 1 MiB, time limit) into a new mktemp file (mode 600) of its own outside
+# the folder (copy to a trusted location, then use), and that copy is
+# mounted read-only. Its name is in $checkpoint_bundle_copy until it is
+# removed, whatever the check's result (the EXIT trap removes it too).
+# Returns 1, with no copy left, when the read fails: the check then cannot
+# be made, which is never a pass.
+checkpoint_bundle_copy=""
+checkpoint_private_copy() {
+  checkpoint_bundle_copy="$(mktemp "${TMPDIR:-/tmp}/orbit-repair-checkpoint-bundle.XXXXXX")" || {
+    checkpoint_bundle_copy=""
+    return 1
+  }
+  if ! smtp_read_file "$1" > "$checkpoint_bundle_copy" ||
+    [[ ! -s "$checkpoint_bundle_copy" ]]; then
+    discard_checkpoint_copy
+    return 1
+  fi
+}
+
+discard_checkpoint_copy() {
+  [[ -z "$checkpoint_bundle_copy" ]] || rm -f -- "$checkpoint_bundle_copy"
+  checkpoint_bundle_copy=""
 }
 
 validate_checkpoint_passphrase() {
@@ -6272,7 +6324,19 @@ do_checkpoint_step() {
     return 1
   fi
 
-  recovered_hex="$(checkpoint_decrypt_verify "$bundle_path")" || verify_status=$?
+  if [[ "$(id -u)" == 0 ]]; then
+    if ! checkpoint_private_copy "$bundle_path"; then
+      printf 'Orbit repair: cannot check the pre-rotation checkpoint %s: it could not be read as a regular file, so it is not trusted; refusing to rotate the database credential.\n' "$bundle_path" >&2
+      checkpoint_passphrase=""
+      original_hex=""
+      as_folder_owner rm -rf -- "$checkpoint_dir" || true
+      return 1
+    fi
+    recovered_hex="$(checkpoint_decrypt_verify "$checkpoint_bundle_copy")" || verify_status=$?
+    discard_checkpoint_copy
+  else
+    recovered_hex="$(checkpoint_decrypt_verify "$repo_dir/$bundle_path")" || verify_status=$?
+  fi
   if [[ "$verify_status" != 0 || "$recovered_hex" != "$original_hex" ]]; then
     printf 'Orbit repair: the pre-rotation checkpoint failed verification; refusing to rotate the database credential.\n' >&2
     checkpoint_passphrase=""
