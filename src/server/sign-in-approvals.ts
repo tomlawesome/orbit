@@ -37,10 +37,10 @@
  */
 
 import { createHash, randomBytes } from "node:crypto";
-import { and, eq, gt, isNull, sql } from "drizzle-orm";
+import { and, eq, gt, isNull, lt, sql } from "drizzle-orm";
 import { base64url } from "jose";
 import { getDb } from "@/db";
-import { auditLog, signInApprovals, users } from "@/db/schema";
+import { auditLog, signInApprovalSends, signInApprovals, users } from "@/db/schema";
 import { describeDevice } from "@/lib/auth/device";
 import { AuthError } from "@/lib/auth/errors";
 import { log } from "@/lib/logger";
@@ -265,22 +265,41 @@ async function readRecipient(userId: string): Promise<Recipient | null> {
 }
 
 /**
- * How many approval mails this account has had inside the last hour.
- *
- * Counted per PENDING SIGN-IN, by its own latest send: a row whose last mail
- * went out inside the window contributes every mail it has ever sent. That
- * rounds the limit the safe way -- a burst of five is never undercounted --
- * at the cost of holding the limit a little past the strict hour for a row
- * that was sent to repeatedly. The alternative is a row per send, which is a
- * second table to hold a number this one can already carry.
+ * How many approval mails this account has had inside the last hour: one
+ * row per mail actually sent, so a mail more than an hour old never counts,
+ * however recently its sign-in was resent (#1604 P-20).
  */
 async function sendsInWindow(userId: string, now: Date): Promise<number> {
   const since = new Date(now.getTime() - APPROVAL_SEND_WINDOW_MS);
   const [row] = await getDb()
-    .select({ sends: sql<number>`coalesce(sum(${signInApprovals.sendCount}), 0)::int` })
-    .from(signInApprovals)
-    .where(and(eq(signInApprovals.userId, userId), gt(signInApprovals.lastSentAt, since)));
+    .select({ sends: sql<number>`count(*)::int` })
+    .from(signInApprovalSends)
+    .where(and(eq(signInApprovalSends.userId, userId), gt(signInApprovalSends.sentAt, since)));
   return row?.sends ?? 0;
+}
+
+/** Notes one mail on the wire against the hour's allowance. */
+async function recordSend(approvalId: string, userId: string, sentAt: Date): Promise<void> {
+  await getDb().insert(signInApprovalSends).values({ approvalId, userId, sentAt });
+}
+
+/** How long a finished or lapsed approval is kept before it is swept. */
+const APPROVAL_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
+
+/**
+ * Deletes approvals that expired more than the retention ago, with their send
+ * rows. Done as one more step of opening a sign-in approval, the way session
+ * and step-up proof rows are swept; a failure here never blocks a sign-in
+ * (#1603 P-29).
+ */
+async function sweepExpiredApprovals(now: Date): Promise<void> {
+  try {
+    await getDb()
+      .delete(signInApprovals)
+      .where(lt(signInApprovals.expiresAt, new Date(now.getTime() - APPROVAL_RETENTION_MS)));
+  } catch {
+    /* housekeeping: the next sign-in tries again */
+  }
 }
 
 /** Puts one approval mail on the wire. Never throws for a provider failure. */
@@ -367,6 +386,7 @@ export async function startSignInApproval(
   const token = createSecret();
   const claim = createSecret();
 
+  await sweepExpiredApprovals(now);
   const recipient = await readRecipient(userId);
   const limited = await sendsInWindow(userId, now) >= APPROVAL_SENDS_PER_HOUR;
 
@@ -397,6 +417,7 @@ export async function startSignInApproval(
     await db.update(signInApprovals)
       .set({ sendCount: 1, lastSentAt: now })
       .where(eq(signInApprovals.id, row.id));
+    await recordSend(row.id, userId, now);
   }
 
   return {
@@ -714,6 +735,7 @@ export async function resendSignInApproval(
         lastSentAt: now,
       })
       .where(eq(signInApprovals.id, row.id));
+    await recordSend(row.id, row.userId, now);
   }
 
   return {

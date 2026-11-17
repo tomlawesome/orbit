@@ -494,6 +494,22 @@ export const signInApprovals = pgTable("sign_in_approvals", {
 ]);
 
 /**
+ * One row per approval mail actually sent, so "five per account per hour"
+ * counts the sends inside the hour and nothing older (#1604 P-20). The
+ * approval's own send_count and last_sent_at stay what they were; this table
+ * is only the hour's tally, swept with the approvals it belongs to.
+ */
+export const signInApprovalSends = pgTable("sign_in_approval_sends", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  approvalId: uuid("approval_id").notNull().references(() => signInApprovals.id, { onDelete: "cascade" }),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  sentAt: timestamp("sent_at", { withTimezone: true }).notNull(),
+}, (table) => [
+  index("sign_in_approval_sends_user_sent_idx").on(table.userId, table.sentAt),
+  index("sign_in_approval_sends_approval_idx").on(table.approvalId),
+]);
+
+/**
  * One row per OIDC step-up proof, so a proof can be spent once and only once
  * (ADR-0023 §5, owner ruling 2026-09-09).
  *
