@@ -186,7 +186,7 @@ async function gate({ env = {}, fetchImpl } = {}) {
 }
 
 // One earlier pipeline on `sha` whose cells passed and which ran for real.
-const passedRun = (sha, id = 299, gate = gateRun) => ({ id, sha, jobs: [cell("success")], gate });
+const passedRun = (sha, id = 299, gate = gateRun + SLOTS) => ({ id, sha, jobs: [cell("success")], gate });
 
 // A passed run on another merge request (iid `mr`), into preview unless the case says otherwise.
 const previewRun = (sha, id, mr, gate = gateRun, extra = {}) => ({
@@ -274,7 +274,7 @@ describe("a change to something updates depend on, after a passed run", () => {
     const base = git("rev-parse", "HEAD");
     touch(path);
 
-    const result = await gate({ fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
+    const result = await gate({ env: slotEnv, fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
 
     expectRun(result);
   });
@@ -285,7 +285,7 @@ describe("a change to something updates depend on, after a passed run", () => {
     touch("drizzle/0002_y.sql");
     touch("docs/notes.md");
 
-    const result = await gate({ fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
+    const result = await gate({ env: slotEnv, fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
 
     expectRun(result);
   });
@@ -296,7 +296,7 @@ describe("a change to nothing updates depend on, after a passed run", () => {
     const base = git("rev-parse", "HEAD");
     touch("src/widget.test.ts");
 
-    const result = await gate({ fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
+    const result = await gate({ env: slotEnv, fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
 
     expect(result).toEqual({ decision: "skip", since: base });
     expect(written()).toContain("UPGRADE_CELLS=skip");
@@ -307,7 +307,7 @@ describe("a change to nothing updates depend on, after a passed run", () => {
     const base = git("rev-parse", "HEAD");
     touch("docs/notes.md");
 
-    await gate({ fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
+    await gate({ env: slotEnv, fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
 
     expect(lines()).toContain(base);
   });
@@ -319,7 +319,7 @@ describe("a change to nothing updates depend on, after a passed run", () => {
     touch("web/config/page.ts");
     touch("src/compose/notes.md");
 
-    const result = await gate({ fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
+    const result = await gate({ env: slotEnv, fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
 
     expect(result).toEqual({ decision: "skip", since: base });
   });
@@ -327,7 +327,7 @@ describe("a change to nothing updates depend on, after a passed run", () => {
   it("writes skip when nothing at all changed since the base", async () => {
     const base = git("rev-parse", "HEAD");
 
-    const result = await gate({ fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
+    const result = await gate({ env: slotEnv, fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
 
     expect(result).toEqual({ decision: "skip", since: base });
   });
@@ -340,10 +340,11 @@ describe("a chain of skips", () => {
     touch("src/b.test.ts");
 
     const result = await gate({
+      env: slotEnv,
       fetchImpl: fakeFetch({
         pipelines: [
           // The newest pipeline skipped: its cells exited 0 and count as passed.
-          { id: 299, sha: skipped, jobs: [cell("success")], gate: gateSkip(realRun) },
+          { id: 299, sha: skipped, jobs: [cell("success")], gate: gateSkip(realRun) + SLOTS },
         ],
       }),
     });
@@ -360,8 +361,9 @@ describe("a chain of skips", () => {
     touch("compose/x.yml");
 
     const result = await gate({
+      env: slotEnv,
       fetchImpl: fakeFetch({
-        pipelines: [{ id: 299, sha: skipped, jobs: [cell("success")], gate: gateSkip(realRun) }],
+        pipelines: [{ id: 299, sha: skipped, jobs: [cell("success")], gate: gateSkip(realRun) + SLOTS }],
       }),
     });
 
@@ -375,8 +377,9 @@ describe("a chain of skips", () => {
     touch("src/b.test.ts");
 
     const result = await gate({
+      env: slotEnv,
       fetchImpl: fakeFetch({
-        pipelines: [{ id: 299, sha: skipped, jobs: [cell("success")], gate: gateSkip(realRun) }],
+        pipelines: [{ id: 299, sha: skipped, jobs: [cell("success")], gate: gateSkip(realRun) + SLOTS }],
       }),
     });
 
@@ -391,9 +394,10 @@ describe("which earlier pipeline is the base", () => {
     touch("src/b.test.ts");
 
     const result = await gate({
+      env: slotEnv,
       fetchImpl: fakeFetch({
         pipelines: [
-          { id: 299, sha: newer, jobs: [cell("failed")], gate: gateRun },
+          { id: 299, sha: newer, jobs: [cell("failed")], gate: gateRun + SLOTS },
           passedRun(older, 298),
         ],
       }),
@@ -407,13 +411,14 @@ describe("which earlier pipeline is the base", () => {
     const newer = touch("src/a.test.ts");
 
     const result = await gate({
+      env: slotEnv,
       fetchImpl: fakeFetch({
         pipelines: [
           {
             id: 299,
             sha: newer,
             jobs: [cell("success", "upgrade_cell", 1), cell("failed", "upgrade_cell", 2)],
-            gate: gateRun,
+            gate: gateRun + SLOTS,
           },
           passedRun(older, 298),
         ],
@@ -428,13 +433,14 @@ describe("which earlier pipeline is the base", () => {
     const newer = touch("src/a.test.ts");
 
     const result = await gate({
+      env: slotEnv,
       fetchImpl: fakeFetch({
         pipelines: [
           {
             id: 299,
             sha: newer,
             jobs: [cell("success", "upgrade_cell", 1), cell("failed", "upgrade_cell_launcher", 2)],
-            gate: gateRun,
+            gate: gateRun + SLOTS,
           },
           passedRun(older, 298),
         ],
@@ -450,6 +456,7 @@ describe("which earlier pipeline is the base", () => {
     touch("src/a.test.ts");
 
     const result = await gate({
+      env: slotEnv,
       fetchImpl: fakeFetch({
         pipelines: [passedRun(newer, 299), passedRun(oldest, 298)],
       }),
@@ -464,8 +471,9 @@ describe("which earlier pipeline is the base", () => {
     const current = touch("src/a.test.ts");
 
     const result = await gate({
+      env: slotEnv,
       fetchImpl: fakeFetch({
-        pipelines: [passedRun(current, CURRENT, gateSkip(older)), passedRun(older, 298)],
+        pipelines: [passedRun(current, CURRENT, gateSkip(older) + SLOTS), passedRun(older, 298)],
       }),
     });
 
@@ -479,13 +487,14 @@ describe("which earlier pipeline is the base", () => {
       id: 299 - index,
       sha: base,
       jobs: [],
-      gate: gateRun,
+      gate: gateRun + SLOTS,
     }));
 
     const result = await gate({
+      env: slotEnv,
       fetchImpl: fakeFetch({
         pipelines,
-        others: [previewRun(base, 150, 5)],
+        others: [previewRun(base, 150, 5, gateRun + SLOTS)],
         mergeRequests: [{ iid: 5, target_branch: "preview" }],
       }),
     });
@@ -502,7 +511,7 @@ describe("which earlier pipeline is the base", () => {
     const base = git("rev-parse", "HEAD");
     touch("src/a.test.ts");
 
-    await gate({ fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
+    await gate({ env: slotEnv, fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
 
     expect(calls.map((call) => new URL(call.url).pathname)).toContain(
       "/api/v4/projects/49/jobs/2990/artifacts/.orbit-upgrade/gate.env",
@@ -514,7 +523,7 @@ describe("the escape hatches and the pipelines that always run", () => {
   async function withASkippablePass(env) {
     const base = git("rev-parse", "HEAD");
     touch("src/a.test.ts");
-    const result = await gate({ env, fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
+    const result = await gate({ env: { ...slotEnv, ...env }, fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
     return result;
   }
 
@@ -590,7 +599,7 @@ describe("any doubt writes run, and the script never throws", () => {
   it("writes run when the merge request's pipelines cannot be listed", async () => {
     touch("src/a.test.ts");
 
-    const result = await gate({ fetchImpl: fakeFetch({ mrPipelinesStatus: 500 }) });
+    const result = await gate({ env: slotEnv, fetchImpl: fakeFetch({ mrPipelinesStatus: 500 }) });
 
     expectRun(result);
     expectNoTokenAnywhere();
@@ -602,7 +611,7 @@ describe("any doubt writes run, and the script never throws", () => {
       throw new Error(`connection refused (token ${TOKEN} must not leak)`);
     };
 
-    const result = await gate({ fetchImpl });
+    const result = await gate({ env: slotEnv, fetchImpl });
 
     expectRun(result);
     expect(lines()).not.toContain(TOKEN);
@@ -613,6 +622,7 @@ describe("any doubt writes run, and the script never throws", () => {
     touch("src/a.test.ts");
 
     const result = await gate({
+      env: slotEnv,
       fetchImpl: fakeFetch({ pipelines: [passedRun(base)], jobsStatus: 500 }),
     });
 
@@ -630,7 +640,7 @@ describe("any doubt writes run, and the script never throws", () => {
       text: async () => "<html>",
     });
 
-    const result = await gate({ fetchImpl });
+    const result = await gate({ env: slotEnv, fetchImpl });
 
     expectRun(result);
   });
@@ -640,6 +650,7 @@ describe("any doubt writes run, and the script never throws", () => {
     touch("src/a.test.ts");
 
     const result = await gate({
+      env: slotEnv,
       fetchImpl: fakeFetch({ pipelines: [{ ...passedRun(base, 299), gate: undefined }] }),
     });
 
@@ -658,6 +669,7 @@ describe("any doubt writes run, and the script never throws", () => {
     touch("src/a.test.ts");
 
     const result = await gate({
+      env: slotEnv,
       fetchImpl: fakeFetch({ pipelines: [passedRun(base, 299, gateText)] }),
     });
 
@@ -669,6 +681,7 @@ describe("any doubt writes run, and the script never throws", () => {
     const unknownBase = "1234567890abcdef1234567890abcdef12345678";
 
     const result = await gate({
+      env: slotEnv,
       fetchImpl: fakeFetch({ pipelines: [passedRun(unknownBase)] }),
     });
 
@@ -696,7 +709,7 @@ describe("the token", () => {
     const base = git("rev-parse", "HEAD");
     touch("src/a.test.ts");
 
-    await gate({ fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
+    await gate({ env: slotEnv, fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
 
     expect(calls.length).toBeGreaterThan(0);
     for (const call of calls) {
@@ -709,7 +722,7 @@ describe("the token", () => {
   });
 
   it("goes to the configured API base", async () => {
-    await gate({ fetchImpl: fakeFetch({ pipelines: [] }) });
+    await gate({ env: slotEnv, fetchImpl: fakeFetch({ pipelines: [] }) });
 
     expect(calls.every((call) => call.url.startsWith(`${API}/`))).toBe(true);
   });
@@ -717,14 +730,14 @@ describe("the token", () => {
   it("appears in no logged line, whatever was decided", async () => {
     const base = git("rev-parse", "HEAD");
     touch("src/a.test.ts");
-    await gate({ fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
+    await gate({ env: slotEnv, fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
     expectNoTokenAnywhere();
 
     touch("scripts/install.sh");
-    await gate({ fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
+    await gate({ env: slotEnv, fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
     expectNoTokenAnywhere();
 
-    await gate({ fetchImpl: fakeFetch({ mrPipelinesStatus: 401 }) });
+    await gate({ env: slotEnv, fetchImpl: fakeFetch({ mrPipelinesStatus: 401 }) });
     expectNoTokenAnywhere();
 
     await gate({ env: { ORBIT_REUSE: "off" }, fetchImpl: fakeFetch() });
@@ -746,10 +759,10 @@ describe("review additions (note 51657)", () => {
       id: 299,
       sha: base,
       pages: [[...filler(99), cell("success", "upgrade_cell", 1)], [cell("failed", "upgrade_cell", 2)]],
-      gate: gateRun,
+      gate: gateRun + SLOTS,
     };
 
-    const result = await gate({ fetchImpl: fakeFetch({ pipelines: [pipeline] }) });
+    const result = await gate({ env: slotEnv, fetchImpl: fakeFetch({ pipelines: [pipeline] }) });
 
     expectRun(result);
     expect(calls.some((call) => new URL(call.url).searchParams.get("page") === "2")).toBe(true);
@@ -762,10 +775,10 @@ describe("review additions (note 51657)", () => {
       id: 299,
       sha: base,
       pages: [[...filler(99), cell("success", "upgrade_cell", 1)], [cell("success", "upgrade_cell", 2)]],
-      gate: gateRun,
+      gate: gateRun + SLOTS,
     };
 
-    const result = await gate({ fetchImpl: fakeFetch({ pipelines: [pipeline] }) });
+    const result = await gate({ env: slotEnv, fetchImpl: fakeFetch({ pipelines: [pipeline] }) });
 
     expect(result).toEqual({ decision: "skip", since: base });
   });
@@ -774,7 +787,7 @@ describe("review additions (note 51657)", () => {
     const base = git("rev-parse", "HEAD");
     touch("config/\u00e9.json");
 
-    const result = await gate({ fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
+    const result = await gate({ env: slotEnv, fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
 
     expectRun(result);
   });
@@ -785,8 +798,9 @@ describe("review additions (note 51657)", () => {
     touch("src/b.test.ts");
 
     const result = await gate({
+      env: slotEnv,
       fetchImpl: fakeFetch({
-        pipelines: [{ ...passedRun(newer, 299, gateRun), status: "running" }, passedRun(older, 298)],
+        pipelines: [{ ...passedRun(newer, 299, gateRun + SLOTS), status: "running" }, passedRun(older, 298)],
       }),
     });
 
@@ -800,6 +814,7 @@ describe("review additions (note 51657)", () => {
       touch("src/a.test.ts");
 
       const result = await gate({
+        env: slotEnv,
         fetchImpl: fakeFetch({ pipelines: [{ ...passedRun(base), status }] }),
       });
 
@@ -879,7 +894,7 @@ describe("the gate watches what upgrade-versions.mjs watches (#1722)", () => {
     const base = git("rev-parse", "HEAD");
     touch("launcher/pin.json");
 
-    const result = await gate({ fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
+    const result = await gate({ env: slotEnv, fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
 
     expectRun(result);
   });
@@ -888,7 +903,7 @@ describe("the gate watches what upgrade-versions.mjs watches (#1722)", () => {
     const base = git("rev-parse", "HEAD");
     touch("src/lib/install-orchestrator/steps.ts");
 
-    const result = await gate({ fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
+    const result = await gate({ env: slotEnv, fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
 
     expectRun(result);
   });
