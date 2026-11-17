@@ -76,8 +76,11 @@ export async function runUpdatePreflight(options: {
   const applied = new Set((await options.query(MIGRATION_JOURNAL_SQL)).map((row) => row[0]));
   const lines: string[] = [];
   for (const precondition of preconditions) {
+    // A precondition gates only the release that ships its contract migration
+    // (expand/contract): when this image carries no such migration, an older
+    // install's pending rows cannot block it (#1854 A-R1).
     const hash = expected.get(precondition.migrationTag);
-    if (hash !== undefined && applied.has(hash)) continue;
+    if (hash === undefined || applied.has(hash)) continue;
     const rows = pendingCount(await options.query(precondition.pendingSql));
     if (rows > 0) lines.push(`update-preflight: blocked ${precondition.column} rows=${rows}`, ...precondition.remedy);
   }
