@@ -25,7 +25,6 @@ export async function pingClamAv(
     const finish = (ready: boolean) => {
       if (settled) return;
       settled = true;
-      clearTimeout(deadline);
       socket.destroy();
       resolve(ready);
     };
@@ -55,6 +54,7 @@ export async function readClamAvVersion(
     const finish = (value: string | null) => {
       if (settled) return;
       settled = true;
+      clearTimeout(deadline);
       socket.destroy();
       resolve(value);
     };
