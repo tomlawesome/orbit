@@ -2849,41 +2849,49 @@ print_entries_preview() {
 
 ensure_recovery_dir() {
   [[ -n "$recovery_dir" ]] && return 0
-  # The name is assigned BEFORE the directory exists, never after. The old
-  # shape — recovery_dir="$(mktemp -d ...)" — had a window #655 caught on CI:
-  # a fatal signal landing while the command substitution is in flight kills
-  # this shell after mktemp has created the directory but before the
-  # assignment completes, so the EXIT trap finds $recovery_dir empty and the
-  # mode-700 copy of live secrets is orphaned. With the name assigned first,
-  # every interruption point leaves the trap knowing exactly what to remove:
-  # before mkdir there is nothing to remove and `rm -rf` of a missing path is
-  # a no-op; from mkdir onwards the directory is removable by name. mkdir
-  # itself refuses an existing path (symlinks included), so a predictable
-  # name cannot be redirected the way a reused one could; a collision just
-  # burns one attempt.
+  owner_private_dir recovery_dir ./.orbit-repair-recovery. || { recovery_dir=""; return 1; }
+}
+
+# owner_private_dir <variable> <prefix>: a new mode-700 folder named
+# <prefix><pid>.<random>, made by the deployment folder's owner
+# (as_folder_owner; #1857 S4, #1872 V2/V3), its name left in <variable>.
+# The name is assigned BEFORE the folder exists, never after. The old
+# shape — recovery_dir="$(mktemp -d ...)" — had a window #655 caught on CI:
+# a fatal signal landing while the command substitution is in flight kills
+# this shell after mktemp has created the directory but before the
+# assignment completes, so the EXIT trap finds the name empty and the
+# mode-700 copy of live secrets is orphaned. With the name assigned first,
+# every interruption point leaves the trap knowing exactly what to remove:
+# before mkdir there is nothing to remove and `rm -rf` of a missing path is
+# a no-op; from mkdir onwards the directory is removable by name. mkdir
+# itself refuses an existing path (symlinks included), so a predictable
+# name cannot be redirected the way a reused one could; a collision just
+# burns one attempt, and any other failure (nothing at the name) stops.
+# As root the owner step's own "Orbit repair:" line (a time-out, what the
+# child said) is shown; otherwise mkdir's words are not, as before.
+owner_private_dir() {
   local attempt
   for attempt in 1 2 3; do
-    recovery_dir="./.orbit-repair-recovery.$$.${RANDOM}${RANDOM}"
-    mkdir -m 700 -- "$recovery_dir" 2>/dev/null && return 0
+    printf -v "$1" '%s%s.%s%s' "$2" "$$" "$RANDOM" "$RANDOM"
+    if [[ "$(id -u)" == 0 ]]; then
+      as_folder_owner mkdir -m 700 -- "${!1}" && return 0
+    else
+      mkdir -m 700 -- "${!1}" 2>/dev/null && return 0
+    fi
+    [[ -e "${!1}" || -L "${!1}" ]] || break
   done
-  recovery_dir=""
+  printf -v "$1" '%s' ""
   return 1
 }
 
 # #1857 S4: the .env-orbit configuration-rollback restore's own recovery
 # folder, made (and removed by cleanup_recovery_dir) the same way, as the
-# deployment folder's owner (as_folder_owner); restore-transaction keeps
-# root's. Separate, so neither action ever writes in the other's.
+# deployment folder's owner. Separate from restore-transaction's, so neither
+# action ever writes in the other's.
 owner_recovery_dir=""
 ensure_owner_recovery_dir() {
   [[ -n "$owner_recovery_dir" ]] && return 0
-  local attempt
-  for attempt in 1 2 3; do
-    owner_recovery_dir="./.orbit-repair-recovery.$$.${RANDOM}${RANDOM}"
-    as_folder_owner mkdir -m 700 -- "$owner_recovery_dir" 2>/dev/null && return 0
-  done
-  owner_recovery_dir=""
-  return 1
+  owner_private_dir owner_recovery_dir ./.orbit-repair-recovery. || { owner_recovery_dir=""; return 1; }
 }
 
 cleanup_recovery_dir() {
@@ -2892,20 +2900,20 @@ cleanup_recovery_dir() {
     owner_recovery_dir=""
   fi
   [[ -n "$recovery_dir" ]] || return 0
-  rm -rf -- "$recovery_dir"
+  as_folder_owner rm -rf -- "$recovery_dir" || true
   recovery_dir=""
 }
 
 # Removes a target path regardless of type, mirroring install.sh's own
-# remove_target_path.
+# remove_target_path; as the deployment folder's owner (#1872 V2).
 remove_repair_path() {
   local path="$1"
   if [[ -L "$path" || -f "$path" ]]; then
-    rm -f -- "$path"
+    as_folder_owner rm -f -- "$path"
   elif [[ -d "$path" ]]; then
-    rm -rf -- "$path"
+    as_folder_owner rm -rf -- "$path"
   elif [[ -e "$path" ]]; then
-    rm -f -- "$path"
+    as_folder_owner rm -f -- "$path"
   fi
 }
 
@@ -4257,8 +4265,14 @@ check_image_identity() {
 # Re-validates the target's current type immediately before acting (see
 # "Action implementations" above). Returns 0 (chmod applied) or 1 (nothing
 # was safe to mutate; the caller reports this as `failed`).
+#
+# #1872 V6: as root in a folder another user owns, the chmod is that
+# owner's (as_folder_owner), never root's by path; a target the owner does
+# not own is left alone, named, and reported `failed`.
 do_fix_permissions() {
-  local resolves="$1" target="$2" path mode
+  local resolves="$1" target="$2" path mode owner_uid
+
+  refuse_unless_owner_writes fix-permissions || return 1
 
   case "$resolves" in
     managed-file-permissions)
@@ -4281,7 +4295,15 @@ do_fix_permissions() {
       ;;
   esac
 
-  chmod "$mode" -- "$path"
+  if [[ "$(id -u)" == 0 && "$smtp_folder_uid" != 0 ]]; then
+    owner_uid="$(stat -c %u -- "$path" 2>/dev/null)" || owner_uid=""
+    if [[ "$owner_uid" != "$smtp_folder_uid" ]]; then
+      printf "Orbit repair: fix-permissions: %s is not owned by the deployment folder's owner (%s), so its mode was not changed; give it to that user, then re-run repair.\n" \
+        "$path" "${smtp_owner_name:-uid $smtp_folder_uid}" >&2
+      return 1
+    fi
+  fi
+  as_folder_owner chmod "$mode" -- "$path"
 }
 
 # --- restore-compose-file (#1484) -------------------------------------------
@@ -4336,9 +4358,9 @@ restore_transaction_self_restore() {
   for ((index = ${#touched[@]} - 1; index >= 0; index--)); do
     path="${touched[index]}"
     live_backup_path="$recovery_dir/live/$path"
-    remove_repair_path "$path"
+    remove_repair_path "$path" || true
     if [[ -e "$live_backup_path" || -L "$live_backup_path" ]]; then
-      cp -a -- "$live_backup_path" "$path" 2>/dev/null || true
+      as_folder_owner cp -a -- "$live_backup_path" "$path" 2>/dev/null || true
     fi
   done
 }
@@ -4411,6 +4433,12 @@ do_restore_transaction() {
   local staging_root path parent backup_path live_backup_path had_backup have_live
   local live_secret_path live_secret_backup_path dated_backup_path
 
+  # #1872 V1/V2: as root in a folder another user owns, every folder, copy,
+  # move and removal below is the owner's (as_folder_owner): the recovery
+  # folder and its copies, the dated backup, the restore copies and the
+  # staging folder's removal. Root only reads and compares.
+  refuse_unless_owner_writes restore-transaction || return 1
+
   shopt -s nullglob dotglob
   staging_matches=(.orbit-install-staging.*)
   shopt -u nullglob dotglob
@@ -4427,7 +4455,7 @@ do_restore_transaction() {
   # restore would change nothing (committed or not) is removed rather than
   # refused; anything else falls through to the refusals and the restore.
   if engine_lock_idle && restore_transaction_originals_match_live "$staging_root"; then
-    rm -rf -- "$staging_root" || return 1
+    as_folder_owner rm -rf -- "$staging_root" || return 1
     printf 'Orbit repair: removed %s; no install is running and restoring from it would change nothing (every saved file matches the live one).\n' "$staging_root" >&2
     return 0
   fi
@@ -4504,11 +4532,11 @@ do_restore_transaction() {
 
     if [[ "$have_live" == 1 ]]; then
       live_backup_path="$recovery_dir/live/$path"
-      mkdir -p -- "$(dirname -- "$live_backup_path")" || {
+      as_folder_owner mkdir -p -- "$(dirname -- "$live_backup_path")" || {
         restore_transaction_self_restore "${touched[@]}"
         return 1
       }
-      cp -a -- "$path" "$live_backup_path" || {
+      as_folder_owner cp -a -- "$path" "$live_backup_path" || {
         restore_transaction_self_restore "${touched[@]}"
         return 1
       }
@@ -4528,7 +4556,7 @@ do_restore_transaction() {
           restore_transaction_self_restore "${touched[@]}"
           return 1
         fi
-        mv -- "$path" "$dated_backup_path" || {
+        as_folder_owner mv -- "$path" "$dated_backup_path" || {
           restore_transaction_self_restore "${touched[@]}"
           return 1
         }
@@ -4543,7 +4571,7 @@ do_restore_transaction() {
     if [[ "$had_backup" == 1 ]]; then
       # cp, not mv: the staged backup stays intact in case a later path in
       # this same action fails and the whole action must self-restore.
-      cp -a -- "$backup_path" "$path" || {
+      as_folder_owner cp -a -- "$backup_path" "$path" || {
         restore_transaction_self_restore "${touched[@]}"
         return 1
       }
@@ -4554,7 +4582,7 @@ do_restore_transaction() {
     # removal loop.
   done
 
-  rm -rf -- "$staging_root" || return 1
+  as_folder_owner rm -rf -- "$staging_root" || return 1
   return 0
 }
 
@@ -4869,6 +4897,32 @@ check_folder_owner() {
     owner_refusal="run as root, it could not look up the deployment folder's owner (uid $smtp_folder_uid) in the user database (getent passwd)"
   fi
   [[ -z "$owner_refusal" ]]
+}
+
+# refuse_unless_owner_writes <action> [<path>...] (#1872 V1, V4): the owner
+# check of an action that, as root, writes in the deployment folder only as
+# its owner. Not root, it checks nothing and returns 0. As root it runs
+# check_folder_owner and, in a folder another user owns, also refuses when
+# a <path> that is a real folder or file belongs to anyone but that owner
+# (foreign_owner_refusal; .orbit-secrets, guarantee 17), since the owner's
+# steps could not write there. A refusal prints the usual
+# "<action> refused, nothing was changed:" line and returns 1.
+refuse_unless_owner_writes() {
+  local action="$1" path refusal=""
+  shift
+  [[ "$(id -u)" == 0 ]] || return 0
+  if ! check_folder_owner; then
+    refusal="$owner_refusal"
+  elif [[ "$smtp_folder_uid" != 0 ]]; then
+    for path in "$@"; do
+      [[ ! -L "$path" && ( -d "$path" || -f "$path" ) ]] || continue
+      refusal="$(foreign_owner_refusal "$path")" && break
+      refusal=""
+    done
+  fi
+  [[ -n "$refusal" ]] || return 0
+  printf 'Orbit repair: %s refused, nothing was changed: %s.\n' "$action" "$refusal" >&2
+  return 1
 }
 
 # clean_terminal_text: stdin to stdout, made safe for root's terminal the way
@@ -5237,7 +5291,7 @@ smtp_backup_dir() {
 # nothing is checked here (smtp_backup_dir still refuses a foreign
 # orbit-install-backups).
 smtp_foreign_folder_refusal() {
-  local path owner_uid owner_name folder_name
+  local path
   local -a paths=()
   [[ "$(id -u)" == 0 ]] || return 0
   # Addendum 2 item 1: step 3 removes the secret as that user, which a
@@ -5254,21 +5308,29 @@ smtp_foreign_folder_refusal() {
   fi
   for path in "${paths[@]}"; do
     if [[ -L "$path" ]] || { [[ ! -d "$path" ]] && ! [[ "$path" == "$smtp_secret_file" && -f "$path" ]]; }; then continue; fi
-    owner_uid="$(stat -c %u -- "$path")" || owner_uid=""
-    [[ "$owner_uid" != "$smtp_writer_uid" ]] || continue
-    owner_name="$(stat -c %U -- "$path" 2>/dev/null)" || owner_name="uid $owner_uid"
-    folder_name="$(stat -c %U -- . 2>/dev/null)" || folder_name="uid $smtp_folder_uid"
-    if [[ "$path" == .orbit-secrets || "$path" == "$smtp_secret_file" ]]; then
-      # The secret is still in use until the retirement deletes it: never
-      # "remove it".
-      printf "%s belongs to another user (%s); give it to the deployment folder's owner (%s), then re-run repair" \
-        "$path" "$owner_name" "$folder_name"
-    else
-      printf "%s belongs to another user (%s); remove it if it is empty, or give it to the deployment folder's owner (%s), then re-run repair" \
-        "$path" "$owner_name" "$folder_name"
-    fi
-    return 0
+    foreign_owner_refusal "$path" && return 0
   done
+}
+
+# foreign_owner_refusal <path>: when <path> belongs to anyone but
+# $smtp_writer_uid, prints the refusal naming it and its owner and returns
+# 0; otherwise prints nothing and returns 1.
+foreign_owner_refusal() {
+  local path="$1" owner_uid owner_name folder_name
+  owner_uid="$(stat -c %u -- "$path")" || owner_uid=""
+  [[ "$owner_uid" != "$smtp_writer_uid" ]] || return 1
+  owner_name="$(stat -c %U -- "$path" 2>/dev/null)" || owner_name="uid $owner_uid"
+  folder_name="$(stat -c %U -- . 2>/dev/null)" || folder_name="uid $smtp_folder_uid"
+  if [[ "$path" == .orbit-secrets || "$path" == "$smtp_secret_file" ]]; then
+    # The secret is still in use until the retirement deletes it: never
+    # "remove it".
+    printf "%s belongs to another user (%s); give it to the deployment folder's owner (%s), then re-run repair" \
+      "$path" "$owner_name" "$folder_name"
+  else
+    printf "%s belongs to another user (%s); remove it if it is empty, or give it to the deployment folder's owner (%s), then re-run repair" \
+      "$path" "$owner_name" "$folder_name"
+  fi
+  return 0
 }
 
 # A checksum of .env-orbit's bytes, to see that nothing edited it between the
@@ -5811,14 +5873,14 @@ resolve_rotate_db_identity() {
 # reused unmodified) inside a one-off orbit-app container, exactly like
 # export-recovery-bundle.sh does for the document KEK — see "Passphrase —
 # the checkpoint" above for the full rationale, including why the passphrase
-# only ever travels over this child's stdin.
+# only ever travels over this child's stdin. The bundle goes to stdout, for
+# the deployment folder's owner to write (smtp_owner_write, #1872 V3).
 checkpoint_encrypt_postgres_password() {
-  local out_path="$1"
   printf '%s' "$checkpoint_passphrase" | timeout "$docker_checkpoint_timeout" \
     docker compose --project-name "$project" --env-file "$environment_file" \
     run --rm --no-deps -T --entrypoint node orbit-app \
     /opt/orbit/scripts/recovery-crypto.mjs encrypt /run/secrets/orbit-postgres-password \
-    > "$out_path" 2>/dev/null
+    2>/dev/null
 }
 
 # Mirrors import-recovery-bundle.sh's own bind-mount-and-decrypt pattern.
@@ -5982,28 +6044,25 @@ do_checkpoint_step() {
     return 1
   fi
 
-  checkpoint_dir="$(mktemp -d "./.orbit-repair-checkpoint.XXXXXX")" || {
+  # #1872 V3: the folder (mode 700) and the bundle in it (mode 600, by
+  # rename from a mktemp name beside it) are made by the deployment
+  # folder's owner; root only produces the bundle's bytes.
+  owner_private_dir checkpoint_dir ./.orbit-repair-checkpoint. || {
     checkpoint_passphrase=""
     original_hex=""
     return 1
   }
   run_checkpoint_dirs+=("$checkpoint_dir")
-  chmod 700 -- "$checkpoint_dir" || {
-    checkpoint_passphrase=""
-    original_hex=""
-    rm -rf -- "$checkpoint_dir"
-    return 1
-  }
 
   bundle_path="$checkpoint_dir/postgres-password.orbkek"
-  if ! checkpoint_encrypt_postgres_password "$bundle_path" || [[ ! -s "$bundle_path" ]]; then
+  if ! smtp_owner_write "$checkpoint_dir" "postgres-password.orbkek.XXXXXX" 600 "$bundle_path" \
+    checkpoint_encrypt_postgres_password || [[ ! -s "$bundle_path" ]]; then
     printf 'Orbit repair: could not create the pre-rotation checkpoint; refusing to rotate the database credential.\n' >&2
     checkpoint_passphrase=""
     original_hex=""
-    rm -rf -- "$checkpoint_dir"
+    as_folder_owner rm -rf -- "$checkpoint_dir" || true
     return 1
   fi
-  chmod 600 -- "$bundle_path" 2>/dev/null || true
 
   recovered_hex="$(checkpoint_decrypt_verify "$bundle_path")" || verify_status=$?
   if [[ "$verify_status" != 0 || "$recovered_hex" != "$original_hex" ]]; then
@@ -6011,7 +6070,7 @@ do_checkpoint_step() {
     checkpoint_passphrase=""
     original_hex=""
     recovered_hex=""
-    rm -rf -- "$checkpoint_dir"
+    as_folder_owner rm -rf -- "$checkpoint_dir" || true
     return 1
   fi
 
@@ -6036,13 +6095,14 @@ do_rotate_credential_step() {
   is_real_non_symlink_directory "$secrets_directory" || return 1
   has_mode "$secrets_directory" 700 || return 1
 
-  local new_password="" status=0 staged_tmp=""
+  local new_password="" status=0
   new_password="$(generate_hex_secret)" || return 1
-  staged_tmp="$(mktemp "$secrets_directory/.installing.XXXXXX")" || { new_password=""; return 1; }
-  if ! printf '%s\n' "$new_password" > "$staged_tmp" || ! chmod 600 -- "$staged_tmp" ||
-    ! mv -f -- "$staged_tmp" "$staged_postgres_password_path"; then
+  # #1872 V4: the deployment folder's owner makes the mktemp file, writes the
+  # password it reads on stdin (printf is a builtin: on no command line),
+  # sets mode 600 and renames it onto the staged name (smtp_owner_write).
+  if ! smtp_owner_write . "$secrets_directory/.installing.XXXXXX" 600 "$staged_postgres_password_path" \
+    printf '%s\n' "$new_password"; then
     new_password=""
-    rm -f -- "$staged_tmp"
     return 1
   fi
 
@@ -6139,6 +6199,13 @@ run_dangerous_step() {
 run_rotate_database_credential_steps() {
   local step
   dangerous_failure_reason=none
+  # #1858 T5, #1872 V1/V4: the action an owner step's line names; as root,
+  # the owner check before the passphrase prompt and any write.
+  owner_action=rotate-database-credential
+  if ! refuse_unless_owner_writes rotate-database-credential "$secrets_directory"; then
+    dangerous_failure_reason="checkpoint-failed"
+    return 1
+  fi
   for step in "${rotate_database_credential_steps[@]}"; do
     if ! run_dangerous_step "$step"; then
       if [[ "$step" == checkpoint ]]; then
@@ -6204,7 +6271,7 @@ run_rotate_database_credential_steps() {
 do_regenerate_secret_step() {
   local target="$1"
   local path="$secrets_directory/$target"
-  local new_secret="" tmp_path=""
+  local new_secret=""
 
   is_real_non_symlink_directory "$secrets_directory" || return 1
   has_mode "$secrets_directory" 700 || return 1
@@ -6213,22 +6280,14 @@ do_regenerate_secret_step() {
   fi
 
   new_secret="$(generate_hex_secret)" || return 1
-  tmp_path="$(mktemp "$secrets_directory/.installing.XXXXXX")" || {
+  # #1872 V4: made, written from stdin (printf is a builtin: the secret is
+  # on no command line), set to mode 600 and renamed into place by the
+  # deployment folder's owner (smtp_owner_write); nothing is left on failure.
+  smtp_owner_write . "$secrets_directory/.installing.XXXXXX" 600 "$path" printf '%s\n' "$new_secret" || {
     new_secret=""
-    return 1
-  }
-  printf '%s\n' "$new_secret" > "$tmp_path" || {
-    new_secret=""
-    rm -f -- "$tmp_path"
-    return 1
-  }
-  chmod 600 -- "$tmp_path" || {
-    new_secret=""
-    rm -f -- "$tmp_path"
     return 1
   }
   new_secret=""
-  mv -- "$tmp_path" "$path"
 }
 
 # O-F1/O-F4 (#1670): the manual restart guidance names the same command
@@ -6283,6 +6342,11 @@ print_manual_restart_commands() {
 run_regenerate_secret_steps() {
   local target written=""
   dangerous_failure_reason=none
+  owner_action=regenerate-secret
+  if ! refuse_unless_owner_writes regenerate-secret "$secrets_directory"; then
+    dangerous_failure_reason="step-failed"
+    return 1
+  fi
   for target in "$@"; do
     if ! do_regenerate_secret_step "$target"; then
       dangerous_failure_reason="step-failed"
@@ -6902,22 +6966,25 @@ confirm_export_diagnostics() {
 # Returns 0 and prints the final path on stderr only (never stdout, matching
 # the checkpoint bundle path above) on success; returns 1, with any partial
 # temp file removed, on any failure.
+#
+# #1872 V5: the file is made, written (from stdin), set to mode 600 and
+# renamed by the deployment folder's owner (smtp_owner_write,
+# as_folder_owner); as root, after the owner check.
 write_export_diagnostics() {
   local content="$1" tmp_path="" final_path=""
 
-  tmp_path="$(mktemp "./.orbit-repair-diagnostics.XXXXXX")" || return 1
-  chmod 600 -- "$tmp_path" 2>/dev/null || true
-  if ! printf '%s\n' "$content" > "$tmp_path" 2>/dev/null; then
-    rm -f -- "$tmp_path"
-    return 1
-  fi
-  chmod 600 -- "$tmp_path" 2>/dev/null || true
+  owner_action=export-diagnostics
+  refuse_unless_owner_writes export-diagnostics || return 1
+  smtp_owner_write . ".orbit-repair-diagnostics.XXXXXX" 600 "" printf '%s\n' "$content" || return 1
+  tmp_path="$smtp_step_tmp"
 
   final_path="${tmp_path}.txt"
-  if ! mv -- "$tmp_path" "$final_path" 2>/dev/null; then
-    rm -f -- "$tmp_path"
+  if ! as_folder_owner mv -T -- "$tmp_path" "$final_path"; then
+    as_folder_owner rm -f -- "$tmp_path" || true
+    smtp_step_tmp=""
     return 1
   fi
+  smtp_step_tmp=""
 
   printf 'Orbit repair: diagnostics exported to %s\n' "$final_path" >&2
   printf 'Orbit repair: (plain text, mode 600 — no encryption; these are public values under ADR-0008.)\n' >&2
