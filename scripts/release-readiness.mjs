@@ -406,7 +406,7 @@ export function runWithLimit(command, args, options = {}) {
 }
 
 /** Environment names a child script may see; everything else (tokens included) stays out. */
-const CHILD_ENV_NAMES = ["PATH", "HOME", "USER", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "TMPDIR", "XDG_RUNTIME_DIR", "DOCKER_CONFIG", "DOCKER_HOST", "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy"];
+const CHILD_ENV_NAMES = ["PATH", "HOME", "USER", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "TMPDIR", "XDG_RUNTIME_DIR", "DOCKER_CONFIG", "DOCKER_HOST", "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy", "BASE_REPIN_TARGET_BRANCH", "ORBIT_BASE_IMAGE_DEV_REMOTE", "ORBIT_MAX_EVIDENCE_AGE_DAYS", "COSIGN_PUBLIC_KEY", "ORBIT_COSIGN", "ORBIT_POLICY_VERSION", "SSH_AUTH_SOCK", "GIT_SSH_COMMAND"];
 
 /** The allowlisted environment for a child script, plus any values the lookup sets itself. */
 function scriptEnv(extra = {}) {
@@ -456,6 +456,7 @@ export async function fetchJson(url, headers, what, { timeoutMs = FETCH_TIMEOUT_
       signal.addEventListener("abort", onAbort, { once: true });
       promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
     });
+  const notJson = () => new Error(`${what} sent a body that is not JSON`);
   const isTimeout = (error) => error?.name === "TimeoutError" || error?.name === "AbortError";
   let response;
   try {
@@ -469,7 +470,14 @@ export async function fetchJson(url, headers, what, { timeoutMs = FETCH_TIMEOUT_
   if (declared > maxBytes) throw new Error(`${what} sent ${declared} bytes, over the ${maxBytes}-byte cap`);
   if (!response.body || typeof response.body.getReader !== "function") {
     // No body stream (a stub that only parses): check the size after parsing.
-    const body = await limited(response.json());
+    let body;
+    try {
+      body = await limited(response.json());
+    } catch (error) {
+      if (error instanceof SyntaxError) throw notJson();
+      if (isTimeout(error) || signal.aborted || error?.message === timedOut().message) throw timedOut();
+      throw new Error(`${what} could not be read: ${errorText(error)}`);
+    }
     if (Buffer.byteLength(JSON.stringify(body) ?? "") > maxBytes) throw tooBig();
     return body;
   }
@@ -493,7 +501,11 @@ export async function fetchJson(url, headers, what, { timeoutMs = FETCH_TIMEOUT_
     if (isTimeout(error) || signal.aborted || error?.message === timedOut().message) throw timedOut();
     throw new Error(`${what} could not be read: ${errorText(error)}`);
   }
-  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  } catch {
+    throw notJson();
+  }
 }
 
 /** The handoff repository's name, from the publish workflow (a non-secret source; #1824). */
