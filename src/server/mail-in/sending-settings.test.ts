@@ -614,7 +614,13 @@ describe("importSendingFromEnvironment", () => {
       rmSync(directory, { recursive: true, force: true });
     }
     expect(result).toBe("imported");
-    expect(inserts(script.ops, mailInSecrets)).toHaveLength(1);
+    const [secret] = inserts(script.ops, mailInSecrets);
+    expect(secret).toBeDefined();
+    // What was stored opens, with the key and the sealing context, to the
+    // file's text without its trailing newline: neither the path, an empty
+    // string nor the newline-terminated text.
+    use([[{ ...accountRow, passwordSecretId: secret!.id }], [secret]]);
+    expect(await settings.resolveSendingAccount()).toMatchObject({ state: "ready", user: "mailer", password: "from-file" });
   });
 
   it("answers already_set when a concurrent start imported first, and removes its own password when its insert lost", async () => {
