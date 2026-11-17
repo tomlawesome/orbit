@@ -546,7 +546,7 @@ describe("refusals that never reach docker", () => {
     const before = secretsSnapshot(deployment);
     const result = run(deployment, script, args.map((arg) => (arg === "BUNDLE" ? bundle : arg)));
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("preflight/key failed; .orbit-secrets/document-kek is a link to a file that does not exist. Remove the link and run again.");
+    expect(result.stderr).toContain("preflight/key failed; .orbit-secrets/document-kek is a link to a file that does not exist, so the key file is missing.");
     // A plain restore must name the link, not send the person looking for a key file (#1584 O-F1).
     expect(result.stderr).not.toContain("document key is missing");
     expect(verbs(result.calls)).toEqual([]);

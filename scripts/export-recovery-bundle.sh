@@ -149,7 +149,14 @@ require_deployment() {
 # key back, or puts back "no key" (#1420).
 # shellcheck disable=SC2317  # import-recovery-bundle.sh carries it unused
 require_live_key() {
+  refuse_dangling_key
   [[ -f "$secrets_directory/document-kek" && ! -L "$secrets_directory/document-kek" ]] || fail 'preflight/key failed; the configured document key is missing.'
+}
+
+# A dangling document-key link is neither a key nor its absence: name the link and how to put
+# the key back, never only "the key is missing" (#1536 O-F2, X-F3; #1603 O-S1, ops-2).
+refuse_dangling_key() {
+  [[ ! -L "$secrets_directory/document-kek" || -e "$secrets_directory/document-kek" ]] || fail 'preflight/key failed; .orbit-secrets/document-kek is a link to a file that does not exist, so the key file is missing. Replace the link with the document key file you kept, or remove the link and restore the key from the recovery bundle with bash scripts/import-recovery-bundle.sh, then run again.'
 }
 
 # Who owns what the engine writes (#1210 D5, #1258). The one-off runs as the
