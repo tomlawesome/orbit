@@ -4238,10 +4238,18 @@ do_restore_compose_file() {
   local image
   [[ ! -e "$compose_file" && ! -L "$compose_file" ]] || return 1
   image="$(pinned_orbit_image)" || return 1
+  # b1 O-S2: a run killed hard (no EXIT trap) leaves its scratch file; only
+  # this action makes files by this name, so the next restore sweeps them.
+  local leftover
+  for leftover in "./.${compose_file}.repair."*; do
+    if [[ -f "$leftover" && ! -L "$leftover" ]]; then rm -f -- "$leftover" || true; fi
+  done
   compose_image_tmp="$(mktemp "./.${compose_file}.repair.XXXXXX")" || { compose_image_tmp=""; return 1; }
+  # b1 O-R4: the bytes reach the disk before the rename can make them the live file.
   if ! read_image_deployment_asset "$image" "$compose_file" "$compose_image_tmp" ||
     ! chmod 0644 -- "$compose_image_tmp" ||
-    ! own_as_folder "$compose_image_tmp"; then
+    ! own_as_folder "$compose_image_tmp" ||
+    ! sync -- "$compose_image_tmp" 2>/dev/null; then
     discard_image_compose
     return 1
   fi
@@ -4252,6 +4260,8 @@ do_restore_compose_file() {
     return 1
   fi
   compose_image_tmp=""
+  # And the rename survives a power cut. Best effort: the file is already in place.
+  sync -- . 2>/dev/null || true
 }
 
 # --- restore-transaction ----------------------------------------------------
@@ -4544,8 +4554,9 @@ do_restore_configuration_rollback() {
   # operator's evidence in the one case that does end with .env-orbit
   # changed and the action reporting failed, the rollback-copy removal below.
   staged="$(mktemp "${environment_file}.repair-restore.XXXXXX" 2>/dev/null)" || return 1
+  # b1 O-R4: flushed before the rename, and the folder after it.
   if ! cp -- "$rollback_path" "$staged" 2>/dev/null || ! chmod 600 -- "$staged" 2>/dev/null ||
-    ! own_as_folder "$staged" 2>/dev/null; then
+    ! own_as_folder "$staged" 2>/dev/null || ! sync -- "$staged" 2>/dev/null; then
     rm -f -- "$staged"
     return 1
   fi
@@ -4553,6 +4564,7 @@ do_restore_configuration_rollback() {
     rm -f -- "$staged"
     return 1
   fi
+  sync -- . 2>/dev/null || true
 
   rm -f -- "$rollback_path" || return 1
   return 0
