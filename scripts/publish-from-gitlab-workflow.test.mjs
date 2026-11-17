@@ -532,7 +532,7 @@ printf '{"payloadType":"application/vnd.in-toto+json","payload":"%s","signatures
       );
       writeFileSync(join(stub, `bundle-${hex(r.digest)}.json`), bundleOf(r.digest));
       if (r.verifies === false) writeFileSync(join(stub, `bad-${hex(r.digest)}`), "");
-      if (r.actualType !== undefined) writeFileSync(join(stub, `type-${hex(r.digest)}`), r.actualType);
+      writeFileSync(join(stub, `type-${hex(r.digest)}`), r.actualType ?? r.label);
     }
     const log = join(root, "calls.log");
     writeFileSync(log, "");
