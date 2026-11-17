@@ -75,6 +75,8 @@ exec '__REAL__' "\${args[@]}"
 //   grandchild  leaves a background process (25 s) holding stdout and stderr, and exits 0
 //   run-then-stop  runs the command it was asked to (as the owner), then SIGSTOPs itself: the step made its
 //               change and then timed out (#1872 V10)
+//   run-then-ignore-term  runs the command it was asked to, then ignores TERM and waits (at most 40 s) (#1873)
+//   run-then-flood  runs the command it was asked to (its output discarded), then writes 8 MiB to stdout and exits 1 (#1873)
 //   flood       writes 8 MiB (no newline) to stdout and to stderr, and exits 1
 function variantSnippet(variant, pidLog) {
   if (!variant) return "";
@@ -83,6 +85,8 @@ function variantSnippet(variant, pidLog) {
     "ignore-term": `echo $$ >> '${pidLog}'; trap '' TERM; for _i in $(seq 1 40); do sleep 1; done; exit 1`,
     grandchild: `sleep 25 & echo $! >> '${pidLog}'; exit 0`,
     "run-then-stop": `args=("$@"); while [[ $# -gt 0 && "$1" != -- ]]; do shift; done; shift; ( export ORBIT_TEST_PRIVDROP=1; "$@" ) >/dev/null 2>&1; echo $$ >> '${pidLog}'; kill -STOP $$; exit 1`,
+    "run-then-ignore-term": `args=("$@"); while [[ $# -gt 0 && "$1" != -- ]]; do shift; done; shift; ( export ORBIT_TEST_PRIVDROP=1; "$@" ) >/dev/null 2>&1; echo $$ >> '${pidLog}'; trap '' TERM; for _i in $(seq 1 40); do sleep 1; done; exit 1`,
+    "run-then-flood": `while [[ $# -gt 0 && "$1" != -- ]]; do shift; done; shift; ( export ORBIT_TEST_PRIVDROP=1; "$@" ) >/dev/null 2>&1; head -c 8388608 /dev/zero | tr '\\0' a; exit 1`,
     flood: `head -c 8388608 /dev/zero | tr '\\0' a; head -c 8388608 /dev/zero | tr '\\0' a >&2; exit 1`,
   }[variant.kind];
   if (body === undefined) throw new Error(`unknown setpriv variant ${variant.kind}`);

@@ -42,10 +42,10 @@ export function mailFolder() {
 const real = (name) => spawnSync("bash", ["-c", `command -v ${name}`], { encoding: "utf8" }).stdout.trim();
 
 // A fake docker whose "image" carries docker-compose.yml (as in repair-compose-from-image.test.mjs, reduced).
-function fakeComposeDocker() {
+function fakeComposeDocker(content = IMAGE_COMPOSE) {
   const binDir = scratchDir("orbit-owner-fakedocker-");
   const imageDir = scratchDir("orbit-owner-image-");
-  writeFileSync(join(imageDir, "docker-compose.yml"), IMAGE_COMPOSE);
+  writeFileSync(join(imageDir, "docker-compose.yml"), content);
   const root = "/opt/orbit/deploy";
   writeFileSync(
     join(binDir, "docker"),
@@ -77,11 +77,11 @@ exit 1
   return binDir;
 }
 
-/** A folder where repair plans restore-compose-file (docker-compose.yml missing). */
-export function composeFolder() {
+/** A folder where repair plans restore-compose-file (docker-compose.yml missing); `content` is what the image carries (#1873 X4). */
+export function composeFolder(content = IMAGE_COMPOSE) {
   const targetDir = makeFixture();
   rmSync(join(targetDir, "docker-compose.yml"));
-  return { targetDir, state: {}, fakeBin: fakeComposeDocker() };
+  return { targetDir, state: {}, fakeBin: fakeComposeDocker(content) };
 }
 
 /** A folder where repair plans the .env-orbit configuration-rollback restore. */
