@@ -3638,9 +3638,10 @@ restore_journal_named() {
 # leave `uncreatable`: the backups folder or lock file could not be made). A
 # lock that is anything but a regular, non-symlink, readable file is
 # `unreadable` and never
-# opened (a FIFO would block; review 5). A regular file is opened read-only,
-# so a lock file that vanishes is never created; one that then cannot be
-# opened is `unreadable` too. A non-blocking lock has three outcomes (audit
+# opened (a FIFO would block; review 5). A regular file is opened
+# read-write when the user running repair may write it, else read-only, and
+# must still be the file checked (#1873 X3); one that then cannot be opened,
+# or is not that file, is `unreadable` too. A non-blocking lock has three outcomes (audit
 # v0.3.9-b O-R1): taken (prints nothing); held by another process, which
 # flock reports only as a silent exit 1 (`held`); or not takeable at all,
 # e.g. NFSv4 refusing an exclusive lock on a read-only descriptor, which
@@ -3660,14 +3661,14 @@ backup_restore_lock_state() {
 # retire-smtp-lines, #1848 FIX-S1 addendum; start-services and
 # recreate-services, #1857 S2), root makes a missing backups folder or lock file as the
 # deployment folder's owner (as_folder_owner), never itself; root then only
-# opens the lock read-only, as before.
+# opens the lock (read-write when it may write it, #1873 X3).
 held_lock_fd=""
 lock_probe_state=""
 lock_made_as_owner=0
 # shellcheck disable=SC2016 # expanded by the child bash
 readonly lock_make_script='umask 077 && mkdir -p -- "$1" && : >>"$2"'
 probe_backup_restore_lock() {
-  local fd status=0 words
+  local fd="" status=0 words before opened
   lock_probe_state=""
   command -v flock >/dev/null 2>&1 || return 0
   if [[ ! -e "$backup_restore_lock_path" && ! -L "$backup_restore_lock_path" ]]; then
@@ -3691,7 +3692,32 @@ probe_backup_restore_lock() {
     lock_probe_state=unreadable
     return 0
   fi
-  if ! { exec {fd}<"$backup_restore_lock_path"; } 2>/dev/null; then
+  # #1873 X3, lstat-open-fstat-compare: the open must never block and never
+  # take a swapped-in file. A writable lock is opened read-write, which on
+  # a FIFO swapped in after the checks above returns at once instead of
+  # waiting for a writer; then the descriptor must be the very regular file
+  # lstat saw (same device and inode), so a link or a FIFO swapped in is
+  # closed again and refused as `unreadable`, with no wait.
+  before="$(stat -c '%d:%i %F' -- "$backup_restore_lock_path" 2>/dev/null)" || before=""
+  case "${before#* }" in
+    "regular file" | "regular empty file") ;;
+    *)
+      lock_probe_state=unreadable
+      return 0
+      ;;
+  esac
+  if [[ -w "$backup_restore_lock_path" ]]; then
+    { exec {fd}<>"$backup_restore_lock_path"; } 2>/dev/null || fd=""
+  else
+    { exec {fd}<"$backup_restore_lock_path"; } 2>/dev/null || fd=""
+  fi
+  if [[ -z "$fd" ]]; then
+    lock_probe_state=unreadable
+    return 0
+  fi
+  opened="$(stat -L -c '%d:%i %F' -- "/dev/fd/$fd" 2>/dev/null)" || opened=""
+  if [[ "$opened" != "$before" ]]; then
+    exec {fd}<&-
     lock_probe_state=unreadable
     return 0
   fi
@@ -4353,15 +4379,21 @@ do_fix_permissions() {
 # before the image is read again (#1558); root reads the image's bytes
 # (streamed, no shell text handling, so trailing blank lines, trailing
 # spaces and non-ASCII survive) and the owner writes them into that file;
-# the owner renames it onto the name with mv -n, which refuses to overwrite
-# a file that appeared meanwhile. Root writes, renames and chowns nothing in
-# the folder; as root in a folder another user owns, check_folder_owner
-# refuses first. Returns 1 with nothing left behind when any step fails; the
-# caller reports `failed`.
+# the owner renames it onto the name with mv -nT, which refuses to overwrite
+# a file that appeared meanwhile and, with -T, never moves the file into a
+# folder that took the name (#1873 X2); the rename counts only when the
+# temporary file is gone and docker-compose.yml is a regular file. The
+# image's bytes are capped at 1 MiB ($owner_read_cap) while they stream: the
+# owner keeps at most one byte more, and a file over the cap fails the
+# restore with a line saying it is too large (#1873 X4). Root writes,
+# renames and chowns nothing in the folder; as root in a folder another
+# user owns, check_folder_owner refuses first. Returns 1 with nothing left
+# behind when any step fails; the caller reports `failed`.
 # shellcheck disable=SC2016 # expanded by the child bash
-readonly owner_fill_script='cat > "$1" && test -s "$1"'
+readonly owner_fill_script='head -c "$2" > "$1" || exit 1; size="$(wc -c < "$1")" || exit 1; '\
+'((size > 0)) || exit 1; ((size < $2)) || exit 4'
 do_restore_compose_file() {
-  local image tmp
+  local image tmp status=0
   if [[ "$(id -u)" == 0 ]] && ! check_folder_owner; then
     printf 'Orbit repair: restore-compose-file refused, nothing was changed: %s.\n' "$owner_refusal" >&2
     return 1
@@ -4369,12 +4401,26 @@ do_restore_compose_file() {
   image="$(pinned_orbit_image)" || return 1
   smtp_owner_write . ".${compose_file}.repair.XXXXXX" 644 "" true || return 1
   tmp="$smtp_step_tmp"
-  # mv -n leaves the source in place when the target appeared in the
-  # meantime (and, in newer coreutils, says so with exit 1).
-  if [[ -e "$compose_file" || -L "$compose_file" ]] ||
-    ! image_deployment_asset_bytes "$image" "$compose_file" |
-    as_folder_owner --pipe bash -c "$owner_fill_script" owner-fill "$tmp" >/dev/null ||
-    ! as_folder_owner mv -n -- "$tmp" "$compose_file" || [[ -e "$tmp" || -L "$tmp" ]]; then
+  if [[ -e "$compose_file" || -L "$compose_file" ]]; then
+    status=1
+  else
+    image_deployment_asset_bytes "$image" "$compose_file" |
+      as_folder_owner --pipe bash -c "$owner_fill_script" owner-fill "$tmp" "$((owner_read_cap + 1))" >/dev/null || status=$?
+    if [[ "$status" == 4 ]]; then
+      printf "Orbit repair: restore-compose-file: the pinned image's %s is too large (over 1 MiB), so it was not restored.\n" "$compose_file" >&2
+    elif [[ "$status" == 0 ]]; then
+      # mv -n leaves the source in place when the target appeared in the
+      # meantime (and, in newer coreutils, says so with exit 1).
+      as_folder_owner mv -nT -- "$tmp" "$compose_file" || true
+      if [[ "$owner_step_problem" == "timed out" ]]; then
+        status=1
+      elif [[ -e "$tmp" || -L "$tmp" ]] || ! is_regular_non_symlink_file "$compose_file"; then
+        printf 'Orbit repair: restore-compose-file: %s appeared while it was being restored (a file, a link or a folder), so the restored copy was not moved onto it.\n' "$compose_file" >&2
+        status=1
+      fi
+    fi
+  fi
+  if [[ "$status" != 0 ]]; then
     as_folder_owner rm -f -- "$tmp" || true
     smtp_step_tmp=""
     return 1
@@ -5106,63 +5152,99 @@ as_folder_owner() {
   return "$status"
 }
 
-# The owner-side script of smtp_owner_write: $1 folder, $2 mktemp template,
-# $3 mode. Stdin goes to a new mktemp file, chmod $3, and its name is
-# printed. One line, so logs of the setpriv call stay one line each. Its own EXIT trap removes the file until the name is handed over,
-# so a parent killed meanwhile (the printf then fails on the closed pipe)
-# leaves none (#1848 FR-S1b).
+# The owner-side script of smtp_owner_write (#1873 X1): $1 the full temp
+# name root chose, $2 the folder, $3 the template it was made from, $4 the
+# mode. The owner checks that $1 is the template's shape in that folder,
+# creates exactly $1, refusing anything already there, a link or a FIFO
+# included (dd conv=excl: O_CREAT|O_EXCL), writes stdin into it, sets mode
+# $4 and prints the name. One line, so logs
+# of the setpriv call stay one line each. The caller chose the name, so the
+# caller removes it on any failure; once the owner has made the file, its
+# own EXIT trap also removes it until the name is handed over, so a parent
+# killed meanwhile leaves none (#1848 FR-S1b). Nothing it did not make is
+# ever removed by that trap.
 # shellcheck disable=SC2016 # expanded by the child bash
-readonly smtp_owner_write_script='tmp=""; trap "[[ -z \$tmp ]] || rm -f -- \"\$tmp\"" EXIT; trap "exit 1" HUP INT PIPE TERM; '\
-'tmp="$(mktemp "$1/$2")" || exit 1; cat > "$tmp" && chmod "$3" -- "$tmp" && printf "%s\n" "$tmp" || exit 1; tmp=""'
+readonly smtp_owner_write_script='umask 077; trap "exit 1" HUP INT PIPE TERM; [[ "$1" == "$2/${3%XXXXXX}"?????? ]] || exit 1; '\
+'dd if=/dev/null of="$1" conv=excl status=none || exit 1; '\
+'trap "rm -f -- \"\$1\"" EXIT; cat > "$1" && chmod "$4" -- "$1" && printf "%s\n" "$1" || exit 1; trap - EXIT'
+
+# owner_temp_suffix: six characters of [A-Za-z0-9] from /dev/urandom, the
+# shape and strength of a mktemp suffix (#1873 X1: root picks the name).
+readonly owner_temp_alphabet='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
+owner_temp_suffix() {
+  local bytes byte suffix=""
+  bytes="$(od -An -N32 -tu1 /dev/urandom 2>/dev/null)" || return 1
+  for byte in $bytes; do
+    # 248 = 4 * 62: no modulo bias.
+    ((byte < 248)) || continue
+    suffix+="${owner_temp_alphabet:byte % 62:1}"
+    ((${#suffix} < 6)) || break
+  done
+  [[ "${#suffix}" == 6 ]] || return 1
+  printf '%s' "$suffix"
+}
 
 # smtp_owner_write <folder> <template> <mode> <target> <producer...>: the one
 # write primitive of retire-smtp-lines (#1848 FIX-S1). Root makes the bytes
-# (<producer>'s stdout); the folder's owner writes them to a mktemp name in
+# (<producer>'s stdout); the folder's owner writes them to a new file in
 # <folder> with <mode> and, once the producer succeeded, renames it over
 # <target> (mv -fT, same folder). An empty <target> leaves the name in
-# $smtp_step_tmp for the caller. On failure nothing is left. The pipeline's
-# status is left in $smtp_write_status: with pipefail it is the rightmost
-# failure, so it is <producer>'s own (smtp_env_rewrite's 3) only when the
-# owner's side succeeded; the owner's side exits 0 or 1 (setpriv 1 or 127).
+# $smtp_step_tmp for the caller. The pipeline's status is left in
+# $smtp_write_status: with pipefail it is the rightmost failure, so it is
+# <producer>'s own (smtp_env_rewrite's 3) only when the owner's side
+# succeeded; the owner's side exits 0 or 1 (setpriv 1 or 127).
+#
+# #1873 X1, the standard pattern "the caller owns the name": root picks the
+# full name, <template> with its XXXXXX replaced by an unpredictable suffix
+# (owner_temp_suffix), and the owner creates exactly that name,
+# create-exclusive. Because root knows the name before the owner starts, it
+# is in $smtp_step_tmp for the EXIT trap from then on, and on any failure,
+# a time-out included (a stopped, stalled, TERM-proof or flooding owner
+# step), root removes it as the owner. Nothing is left behind.
 #
 # #1858: root's reads are bounded. <producer> feeds the owner through a
 # `cat` bounded by $owner_step_timeout plus the grace, so an owner that stops
-# reading can't hold it; the name is read through `head -c 4097` under the
-# same bound, and a name over 4096 bytes is refused before its shape check.
-# The reader's own status follows the name as a last line only root writes.
+# reading can't hold it; what the owner prints back is read through
+# `head -c 4097` under the same bound, refused over 4096 bytes, and must be
+# exactly the chosen name. The reader's own status follows it as a last line
+# only root writes.
 smtp_write_status=0
 smtp_owner_write() {
-  local folder="$1" template="$2" mode="$3" target="$4" name="" status=0 prefix out reader bound
+  local folder="$1" template="$2" mode="$3" target="$4" name suffix said="" status=0 out reader bound problem
   shift 4
-  prefix="$folder/${template%XXXXXX}"
+  smtp_step_tmp=""
+  smtp_write_status=1
+  [[ "$template" == *XXXXXX ]] || return 1
+  suffix="$(owner_temp_suffix)" || return 1
+  name="$folder/${template%XXXXXX}$suffix"
+  smtp_step_tmp="$name"
   bound="$((owner_step_timeout + owner_step_grace))"
   out="$("$@" | LC_ALL=C timeout -k 1 "$bound" cat |
-    as_folder_owner --pipe bash -c "$smtp_owner_write_script" smtp-owner-write "$folder" "$template" "$mode" |
+    as_folder_owner --pipe bash -c "$smtp_owner_write_script" smtp-owner-write "$name" "$folder" "$template" "$mode" |
     { LC_ALL=C timeout -k 1 "$bound" head -c 4097; printf '\n%s' "$?"; })" || status=$?
   reader="${out##*$'\n'}"
-  name="${out%$'\n'*}"
-  while [[ "$name" == *$'\n' ]]; do name="${name%$'\n'}"; done
+  said="${out%$'\n'*}"
+  while [[ "$said" == *$'\n' ]]; do said="${said%$'\n'}"; done
   if ((reader == 124 || reader == 137)) && ((status != 124 && status != 137)); then
     owner_step_timed_out smtp-owner-write
+    owner_step_problem="timed out"
     status="$reader"
   fi
   smtp_write_status="$status"
-  if (("$(LC_ALL=C; printf '%s' "${#name}")" > 4096)); then
-    printf "Orbit repair: %s: the name the step smtp-owner-write printed as the deployment folder's owner is too large (over 4096 bytes), so it was not used.\n" "$owner_action" >&2 || true
-    smtp_step_tmp=""
-    return 1
+  if (("$(LC_ALL=C; printf '%s' "${#said}")" > 4096)); then
+    printf "Orbit repair: %s: what the step smtp-owner-write printed as the deployment folder's owner is too large (over 4096 bytes), so it was not used.\n" "$owner_action" >&2 || true
+    [[ "$status" != 0 ]] || status=1
+  elif [[ "$status" == 0 && "$said" != "$name" ]]; then
+    status=1
   fi
-  # The name comes from a process the owner could steer: only one of the
-  # template's shape is used, and only by commands run as the owner.
-  if [[ -n "$name" ]] && ! [[ "${name:0:${#prefix}}" == "$prefix" && "${name:${#prefix}}" =~ ^[A-Za-z0-9]{6}$ ]]; then
-    return 1
-  fi
-  smtp_step_tmp="$name"
-  if [[ "$status" == 0 && -n "$name" ]] && { [[ -z "$target" ]] || as_folder_owner mv -fT -- "$name" "$target"; }; then
+  if [[ "$status" == 0 ]] && { [[ -z "$target" ]] || as_folder_owner mv -fT -- "$name" "$target"; }; then
     [[ -z "$target" ]] || smtp_step_tmp=""
     return 0
   fi
-  [[ -z "$name" ]] || as_folder_owner rm -f -- "$name" || true
+  # The removal must not hide why the write failed (a caller reads it).
+  problem="$owner_step_problem"
+  as_folder_owner rm -f -- "$name" || true
+  owner_step_problem="$problem"
   smtp_step_tmp=""
   return 1
 }
