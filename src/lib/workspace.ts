@@ -257,6 +257,8 @@ export type WorkspaceCommand =
   | {
       type: "item.upsert";
       householdId: string;
+      /** The retired compatibility kind an older cached page still sends; ignored except to word a refusal (#1738 A-F1). */
+      kind?: string;
       item: ItemIntent;
       activity?: ItemActivityIntent;
       /** Staged documents to bind to the item in the same transaction (#1316). */

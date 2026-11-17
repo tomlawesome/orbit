@@ -1,6 +1,6 @@
 <script>
   import { uuid } from "$lib/uuid.js";
-  import { onDestroy } from "svelte";
+  import { onDestroy, untrack } from "svelte";
   import { beforeNavigate, goto } from "$app/navigation";
   import { page } from "$app/state";
   import { resolve } from "$app/paths";
@@ -191,6 +191,31 @@
     picked.renewal = renewalDays(answer.alreadyHeld, reckoning?.households ?? [], reckoning?.today ?? "");
   }
 
+  /** The household the pick was last asked about, so a change of household can be told from a first pick. */
+  let askedFor = "";
+
+  /** #1789 W-R3, W-F7: the household changed after the file was picked, so the
+      copy staged under the old one is let go and the file is asked about again
+      under the new one, with a fresh id (the server holds the old id under the
+      old household). @param {File} file @param {string} householdId */
+  async function reaskHeld(file, householdId) {
+    await pickStaging?.done;
+    if (attachment !== file || entry.householdId !== householdId || saving || saved) return;
+    letGoStaged();
+    pickRefusal = null;
+    if (picked) { picked.held = null; picked.kept = null; }
+    readHold?.open();
+    readHold = null;
+    documentIds.delete(file);
+    const controller = reading;
+    if (!controller) return;
+    const current = () => reading === controller && attachment === file && entry.householdId === householdId;
+    const gate = readGate();
+    const asked = askHeld(householdId, file, current, gate);
+    pickStaging = { key: `${householdId}:${documentIdOf(file)}`, done: asked };
+    await asked;
+  }
+
   /** "keep it anyway": the card goes back to its usual shape and the read goes on. */
   function keepHeld() {
     if (!picked?.held) return;
@@ -275,6 +300,7 @@
     };
     const householdId = entry.householdId;
     if (!householdId) return;
+    askedFor = householdId;
     /* ADR-0033 step 5: the focus line moves on from the virus check to the
        preview the moment the scan has passed, before anything opens the file. */
     /** @type {(scanned: boolean) => void} */
@@ -344,6 +370,15 @@
     picked = null;
     problem = null;
   }
+
+  $effect(() => {
+    const id = entry.householdId;
+    untrack(() => {
+      if (!attachment || !picked || !askedFor || !id || id === askedFor || saving || saved) return;
+      askedFor = id;
+      reaskHeld(attachment, id);
+    });
+  });
 
   /* Leaving: a read still in flight is nobody's once the screen has gone,
      and the page's object URL goes with it. */

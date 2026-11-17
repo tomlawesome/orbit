@@ -478,6 +478,11 @@ async function runWorkspaceCommand(
           isNotNull(households.deletionRequestedAt),
           sql`${households.deleteAfter} > now()`,
           sql`lower(${households.name}) = lower(${command.household.name.trim()})`,
+          /* Only the caller's own removed households: another member's removed
+             household is not the caller's to restore, and naming it would tell
+             them it exists (#1604 P-19). */
+          inArray(households.id, transaction.select({ id: memberships.householdId }).from(memberships)
+            .where(eq(memberships.userId, userId))),
         )).limit(1);
       if (recoverableName) throw new AppError("household_name_recoverable", "A removed household already uses this name. Restore it, or ask an instance administrator to permanently delete it first.", 409);
       if (dryRun) return;
@@ -744,8 +749,8 @@ async function runWorkspaceCommand(
         status: existing.status,
         scheduleKind: existing.serviceDate ? "service" : existing.renewalDate ? "renewal" : existing.expiryDate ? "expiry" : undefined,
       } : command.basis;
-      // An expiry happens once; a repeat asked of one is refused, not dropped (#1005).
-      if (existing && stored?.scheduleKind === "expiry" && command.item.dueDate && (command.item.recurrenceMonths ?? 0) > 0) {
+      // An expiry happens once; a repeat asked of one is refused, not dropped (#1005), on a reviewed intake's basis too (#1738 A-F3).
+      if (stored?.scheduleKind === "expiry" && command.item.dueDate && (command.item.recurrenceMonths ?? 0) > 0) {
         throw new AppError("invalid_item", "An expiry happens once and does not come round", 422);
       }
       const item = workspaceItemSchema.parse(itemOfIntent(command.item, stored));
@@ -753,7 +758,10 @@ async function runWorkspaceCommand(
          need not mention it, and a reviewed intake (it carries a basis) is an
          import, which may leave it unset. */
       if (!existing && !command.basis && !item.importance) {
-        throw new Refusal("importance");
+        /* A save that still carries the retired kind comes from a page cached
+           from before importance was asked: say to reload, not to choose what
+           that page cannot offer (#1738 A-F1). */
+        throw new Refusal(command.kind === undefined ? "importance" : "importanceReload");
       }
       // #1151 A4-S4: `command.item.version` is optional in the wire schema,
       // but an update with none omitted used to fall back to "whatever the

@@ -72,3 +72,42 @@ describe("readSettingsScreen", () => {
     await expect(readSettingsScreen()).resolves.toMatchObject({ user: { id: "u1" } });
   });
 });
+
+describe("#1789 W-R1: the duplicate alert's workspace read is bounded", () => {
+  beforeEach(() => vi.resetModules());
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("readDueReckoning's read of a stalled /api/workspace is aborted after a bounded time, so it cannot hold the lane forever", async () => {
+    // AbortSignal.timeout runs on a native timer the fake clock cannot move, so
+    // it is replaced by a signal the test fires, and the delay it was asked for is kept.
+    const controller = new AbortController();
+    const asked = /** @type {number[]} */ ([]);
+    vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) => {
+      asked.push(ms);
+      return controller.signal;
+    });
+    let seen = /** @type {AbortSignal | undefined} */ (undefined);
+    vi.stubGlobal("fetch", vi.fn((url, init) => {
+      if (!String(url).includes("/api/workspace")) throw new Error(`unexpected fetch: ${String(url)}`);
+      seen = init?.signal;
+      return new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+      });
+    }));
+    try {
+      const { readDueReckoning } = await import("../../web/src/lib/data/workspace.js");
+      let settled = false;
+      const outcome = readDueReckoning().then(() => "resolved", () => "rejected").finally(() => { settled = true; });
+      await Promise.resolve();
+      expect(seen, "the read carries a signal").toBe(controller.signal);
+      expect(asked, "the signal is a timeout signal").toHaveLength(1);
+      expect(asked[0]).toBeGreaterThan(0);
+      expect(asked[0]).toBeLessThanOrEqual(60_000);
+      expect(settled, "the stalled read is still waiting before the timeout").toBe(false);
+      controller.abort();
+      await expect(outcome).resolves.toBe("rejected");
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+});

@@ -460,7 +460,7 @@ describe("setSendingSettings", () => {
   });
 
   it("through the mailbox it stores no password and resets to the standard submission settings", async () => {
-    const script = use([[accountRow], [{ providerProfile: "gmail" }], [accountRow], [{ id: "row1" }], [mailboxRow], [], []]);
+    const script = use([[accountRow], [{ providerProfile: "gmail" }], [accountRow], [{ passwordSecretId: "box-secret" }], [{ id: "row1" }], [mailboxRow], [], []]);
     await settings.setSendingSettings("admin", 3, mailboxInput);
     const candidate = vi.mocked(verifySmtpProviderConnection).mock.calls[0]![0]!;
     const url = new URL(candidate.smtpUrl);
@@ -537,8 +537,6 @@ describe("importSendingFromEnvironment", () => {
     ["a host that is not a server name", { ...lines, SMTP_HOST: "bad host!" }],
     ["a password in two forms", { ...lines, SMTP_PASSWORD_FILE: "/nonexistent/pw" }],
     ["an unreadable password file", { SMTP_HOST: lines.SMTP_HOST, SMTP_USER: "mailer", SMTP_PASSWORD_FILE: "/nonexistent/pw" }],
-    ["a password with a control character", { ...lines, SMTP_PASSWORD: "a\nb" }],
-    ["a user with a control character", { ...lines, SMTP_USER: "a\tb" }],
   ])("reports %s as unusable and writes nothing", async (_name, environment) => {
     const { ops } = use([[]]);
     expect(await settings.importSendingFromEnvironment(environment as NodeJS.ProcessEnv)).toBe("lines_unusable");
@@ -564,6 +562,16 @@ describe("importSendingFromEnvironment", () => {
       senderName: "Orbit", senderAddress: "orbit@example.test", passwordSecretId: secret!.id, source: "imported", setByUserId: null,
     });
     expect(inserts(script.ops, auditLog)[0]).toMatchObject({ action: "mail_sending_imported", actorUserId: null, changes: { keyId: "k1" } });
+  });
+
+  it.each([
+    ["a password with a control character", { ...lines, SMTP_PASSWORD: "a\nb" }, "accountUser", "mailer"],
+    ["a user with a control character", { ...lines, SMTP_USER: "a\tb" }, "accountUser", "a\tb"],
+  ])("imports %s as the old reader sent it (A-S6, A-F18)", async (_name, environment, field, expected) => {
+    const script = use([[], [], [{ id: "r" }]]);
+    expect(await settings.importSendingFromEnvironment(environment as NodeJS.ProcessEnv)).toBe("imported");
+    expect(settings.sendingImportSkipped()).toBeNull();
+    expect(inserts(script.ops, mailSending)[0]).toMatchObject({ [field]: expected });
   });
 
   it("takes implicit TLS to port 465 and an explicit port as given", async () => {
@@ -606,7 +614,13 @@ describe("importSendingFromEnvironment", () => {
       rmSync(directory, { recursive: true, force: true });
     }
     expect(result).toBe("imported");
-    expect(inserts(script.ops, mailInSecrets)).toHaveLength(1);
+    const [secret] = inserts(script.ops, mailInSecrets);
+    expect(secret).toBeDefined();
+    // What was stored opens, with the key and the sealing context, to the
+    // file's text without its trailing newline: neither the path, an empty
+    // string nor the newline-terminated text.
+    use([[{ ...accountRow, passwordSecretId: secret!.id }], [secret]]);
+    expect(await settings.resolveSendingAccount()).toMatchObject({ state: "ready", user: "mailer", password: "from-file" });
   });
 
   it("answers already_set when a concurrent start imported first, and removes its own password when its insert lost", async () => {

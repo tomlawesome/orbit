@@ -190,6 +190,17 @@ describe("warmUp (#1575)", () => {
     expect(fetch.warm()).toEqual(["/__data.json", "/"]);
   });
 
+  it("#1603 b2 W-R3: a warm request still waiting at 20 s is aborted, not left running", async () => {
+    const fetch = fakeFetch((path) => (path === "/" ? new Promise(() => {}) : ok()));
+    start({ fetch });
+
+    await advance(19_000);
+    const stuck = fetch.calls.find((c) => c.path === "/");
+    expect(stuck?.init?.signal, "the warm request carries an abort signal").toBeInstanceOf(AbortSignal);
+    await advance(1_200);
+    expect(stuck.init.signal.aborted).toBe(true);
+  });
+
   it("stops at 20 s counted from the start, and a loader that answers late sends nothing", async () => {
     const gate = deferred();
     const run = start({ fetch: fakeFetch((path, probes) => (probes <= 200 ? refuse() : ok())), loaders: [() => gate.promise] });

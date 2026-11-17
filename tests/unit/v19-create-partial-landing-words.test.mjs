@@ -718,6 +718,90 @@ describe.each([
   });
 });
 
+describe("#1789 W-F3 desk: Add does not save a duplicate nobody has answered", () => {
+  it("the pick's stage got no answer, the press's stage says the household already holds it: the alert shows and nothing is bound", async () => {
+    stageAnswers = [lostNetwork, stagedHeld()];
+    const form = await fillDesk();
+    expect(alertUp(), "no verdict yet at the pick").toBe(false);
+    await form.pressAdd();
+    expect(alertUp(), "the alert is the answer").toBe(true);
+    expect(ofKind("command"), "nothing is bound until the person chooses").toHaveLength(0);
+    expect(goto).not.toHaveBeenCalled();
+  });
+});
+
+describe("#1789 desk: a copy staged by the Add press is let go like one staged at the pick", () => {
+  /** The pick's stage never gets through, so the Add press stages the file itself; the save is then refused. */
+  async function pressStagedThenRefused() {
+    stageAnswers = [lostNetwork, stagedOk()];
+    commandAnswers = [commandRefused];
+    const form = await fillDesk();
+    await form.pressAdd();
+    const stages = ofKind("stage");
+    expect(stages, "the pick's stage and the press's stage").toHaveLength(2);
+    expect(ofKind("command"), "the save was sent and refused").toHaveLength(1);
+    return { form, pressed: header(stages[1], "x-orbit-document-id") };
+  }
+
+  it("W-S2: replacing the file lets the press-staged copy go", async () => {
+    const { form, pressed } = await pressStagedThenRefused();
+    await form.pickFile(pdf("other.pdf"));
+    expect(ofKind("discard").map((one) => one.id)).toContain(pressed);
+  });
+
+  it("W-S2: leaving the form unsaved lets the press-staged copy go", async () => {
+    const { pressed } = await pressStagedThenRefused();
+    mounted?.teardown();
+    mounted = null;
+    await settle();
+    expect(ofKind("discard").map((one) => one.id)).toContain(pressed);
+  });
+
+  it("W-S1: a copy re-made after the server refused the bind is let go when the form is left", async () => {
+    /* staged at the pick, then the first save's bind is refused (the sweep retired it): the next Add stages a fresh copy */
+    const unavailable = () => json({ error: { code: "document_not_available", message: "That document is not available" } }, 422);
+    commandAnswers = [unavailable, commandRefused];
+    const form = await fillDesk();
+    await form.pressAdd();
+    await form.pressAdd();
+    const stages = ofKind("stage");
+    expect(stages.length, "the pick's stage and a re-made one").toBe(2);
+    const remade = header(stages[1], "x-orbit-document-id");
+    expect(remade).not.toBe(header(stages[0], "x-orbit-document-id"));
+    mounted?.teardown();
+    mounted = null;
+    await settle();
+    expect(ofKind("discard").map((one) => one.id)).toContain(remade);
+  });
+});
+
+describe("#1789 pocket: changing household after picking a file", () => {
+  /** Two households, the file picked under the first, then the household switched on the form. */
+  async function pickThenSwitch() {
+    const second = { id: "hh-2", name: "Cottage", currency: "GBP", items: [], sections: [{ id: "s-c", name: "Home", accent: "a", visible: true }] };
+    workspace.households.push(second);
+    try {
+      const form = await fillPocket();
+      expect(ofKind("stage").map((one) => one.url), "the pick staged under the first household").toEqual(["/api/households/hh-1/documents"]);
+      entryForm.props.entry = { ...entryForm.props.entry, householdId: "hh-2", sectionId: "s-c" };
+      await settle();
+      return form;
+    } finally {
+      workspace.households.pop();
+    }
+  }
+
+  it("W-R3: the copy staged under the old household is let go", async () => {
+    const first = (await pickThenSwitch(), header(ofKind("stage")[0], "x-orbit-document-id"));
+    expect(ofKind("discard").map((one) => one.id)).toContain(first);
+  });
+
+  it("W-F7: the duplicate verdict is asked again under the new household", async () => {
+    await pickThenSwitch();
+    expect(ofKind("stage").map((one) => one.url), "a stage under the new household").toContain("/api/households/hh-2/documents");
+  });
+});
+
 describe("#1437 review M2: following the alert's link leaves without asking only when it leaves", () => {
   async function deskWithAlert() {
     stageAnswers = [stagedHeld()];

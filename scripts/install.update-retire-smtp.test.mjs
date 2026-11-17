@@ -28,12 +28,12 @@ import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 
 import { PROCESS_TEST_TIMEOUT_MS } from "./process-budget.mjs";
-import { makePreprovisionedDeployment, makeTarget, recognisedVolume, runInstall } from "./install-test-support.mjs";
+import { copyInstalledFolder, makePreprovisionedDeployment, makeTarget, recognisedVolume, runInstall } from "./install-test-support.mjs";
 
-vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
+vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS, hookTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 const COMPLETION_LINE =
   "Outgoing mail: SMTP credentials were migrated to Orbit's mail settings. They were removed from .env-orbit and deleted from the secrets folder.";
@@ -41,12 +41,17 @@ const FAKE_PASSWORD = "TEST-NOT-A-REAL-PASSWORD";
 const SMTP_KEYS = ["SMTP_HOST", "SMTP_PORT", "SMTP_SECURITY", "SMTP_USER", "SMTP_PASSWORD", "SMTP_PASSWORD_FILE", "SMTP_FROM"];
 const COMMENTED = ["# SMTP_HOST=smtp.example.test", "# SMTP_FROM=Orbit <old@example.test>"];
 
+/** A real plain install, made once for the file (#1861) and copied per test: the tests only need it as their starting state. */
+let installedTemplate;
+beforeAll(() => {
+  installedTemplate = makeTarget();
+  makePreprovisionedDeployment(installedTemplate);
+  expect(runInstall(installedTemplate, {}, ["--plain", "--install"]).status).toBe(0);
+});
+
 /** A deployment made by a real plain install, ready to be updated. */
 function installedFolder() {
-  const targetDir = makeTarget();
-  makePreprovisionedDeployment(targetDir);
-  expect(runInstall(targetDir, {}, ["--plain", "--install"]).status).toBe(0);
-  return targetDir;
+  return copyInstalledFolder(installedTemplate);
 }
 
 /** The pre-#1629 shape: SMTP lines, the overlay in COMPOSE_FILE, the password file (or an inline password). */
@@ -386,8 +391,12 @@ describe("install.sh --plain --update: the SMTP undo copy (#1834 slice 1)", () =
 
   it("a status command that fails afterwards (non-zero exit) also keeps the copy", () => {
     const targetDir = withSmtpLines(installedFolder());
-    // The first answer is good; once the secret is gone the command answers nothing usable.
-    const result = update(targetDir, line("imported", true), { FAKE_MAIL_SENDING_STATUS_AFTER_SECRET_GONE: "mail-sending source=imported" });
+    // The first answer is good; once the secret is gone the command prints an
+    // answer that would pass the gate on its own but exits non-zero.
+    const result = update(targetDir, line("imported", true), {
+      FAKE_MAIL_SENDING_STATUS_AFTER_SECRET_GONE: line("imported", true),
+      FAKE_MAIL_SENDING_STATUS_AFTER_SECRET_GONE_EXIT: "1",
+    });
     expect(result.status).toBe(0);
     expect(undoCopies(targetDir)).toHaveLength(1);
   });

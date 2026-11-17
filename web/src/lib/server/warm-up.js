@@ -35,6 +35,7 @@ export async function warmUp({ port, host, loaders, fetch = globalThis.fetch, lo
   const base = `http://${host.includes(":") ? `[${host}]` : host}:${port}`;
   let stopped = false;
   let timer;
+  const abort = new AbortController();
 
   /** @param {Response | undefined} response */
   const discard = (response) => response?.body?.cancel().catch(() => {});
@@ -76,7 +77,7 @@ export async function warmUp({ port, host, loaders, fetch = globalThis.fetch, lo
     for (const path of WARM_PATHS) {
       if (stopped) return;
       try {
-        const response = await fetch(`${base}${path}`, { headers: HEADERS });
+        const response = await fetch(`${base}${path}`, { headers: HEADERS, signal: abort.signal });
         await response?.arrayBuffer?.();
       } catch {
         skipped();
@@ -104,6 +105,7 @@ export async function warmUp({ port, host, loaders, fetch = globalThis.fetch, lo
     /* a courtesy: the first reader pays for whatever was not warmed */
   } finally {
     stopped = true;
+    abort.abort();
     clearTimeout(timer);
   }
 }

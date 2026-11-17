@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { blankEntry, createCommandOf, entryOf, intentOf } from "../../web/src/routes/create/entry.js";
+import { refusalWords } from "../../src/lib/refusals";
+import { CHOOSE_IMPORTANCE, blankEntry, createCommandOf, entryOf, intentOf } from "../../web/src/routes/create/entry.js";
 
 /*
  * #1463: the Add form holds an `importance` ("low" | "normal" | "high", or
@@ -30,5 +31,11 @@ describe("the entry's importance", () => {
     const entry = { ...blankEntry({ name: "Sweep", householdId: "h1" }), sectionId: "s-home" };
     expect("importance" in intentOf(entry)).toBe(false);
     expect("importance" in createCommandOf(entry, { householdId: "h1", currency: "GBP", id: "i-1" }).item).toBe(false);
+  });
+});
+
+describe("#1738 W-F15: one wording for the missing importance", () => {
+  it("the form's hold text is the engine's refusal wording", () => {
+    expect(CHOOSE_IMPORTANCE).toBe(refusalWords.importance);
   });
 });

@@ -2115,6 +2115,8 @@ read_environment_value() {
       # A CRLF .env-orbit is valid; drop the CR.
       value="${line#*=}"
       value="${value%$'\r'}"
+      # Compose drops blanks between the "=" and the value; so do we.
+      value="${value#"${value%%[![:blank:]]*}"}"
       # Read the value the way Compose's env-file parser does: a trailing
       # comment (spaces or tabs, then "#", to the end) comes off, then
       # trailing spaces and tabs, then one pair of matching quotes. Otherwise

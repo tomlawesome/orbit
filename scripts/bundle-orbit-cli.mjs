@@ -33,7 +33,10 @@ import { dirname, resolve } from "node:path";
 
 const projectRoot = resolve(import.meta.dirname, "..");
 const entryPoint = resolve(projectRoot, "src/cli/orbit.ts");
-const outfile = resolve(projectRoot, "dist/cli/orbit.js");
+// An optional first argument names another output file (#1861: the Vitest
+// globalSetup builds into a per-run temporary directory, never dist/). The
+// flags below are the same either way, so the bundle's content is too.
+const outfile = process.argv[2] === undefined ? resolve(projectRoot, "dist/cli/orbit.js") : resolve(process.argv[2]);
 const esbuildBinary = resolve(projectRoot, "node_modules/.bin/esbuild");
 
 if (!existsSync(esbuildBinary)) {
