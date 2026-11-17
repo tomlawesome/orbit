@@ -481,28 +481,64 @@ installer_ui_select() {
   done
 }
 
+# Display width of $1 in terminal columns, set in installer_ui_width_result (no
+# subshell). wcwidth-style lookup (Markus Kuhn's wcwidth.c, Unicode
+# EastAsianWidth W and F): those characters take two columns, everything else
+# one. Combining and zero-width characters are not handled.
+installer_ui_width_result=0
+installer_ui_width() {
+  local text="$1" c code n=0 i
+  for ((i = 0; i < ${#text}; i++)); do
+    c="${text:i:1}"
+    printf -v code '%d' "'$c" 2>/dev/null || code=0
+    if ((code < 0x1100)); then
+      n=$((n + 1))
+    elif ((code <= 0x115F || code == 0x2329 || code == 0x232A ||
+      (code >= 0x2E80 && code <= 0xA4CF && code != 0x303F) ||
+      (code >= 0xAC00 && code <= 0xD7A3) || (code >= 0xF900 && code <= 0xFAFF) ||
+      (code >= 0xFE10 && code <= 0xFE19) || (code >= 0xFE30 && code <= 0xFE6F) ||
+      (code >= 0xFF00 && code <= 0xFF60) || (code >= 0xFFE0 && code <= 0xFFE6) ||
+      (code >= 0x1F300 && code <= 0x1F64F) || (code >= 0x1F900 && code <= 0x1F9FF) ||
+      (code >= 0x20000 && code <= 0x3FFFD))); then
+      n=$((n + 2))
+    else
+      n=$((n + 1))
+    fi
+  done
+  installer_ui_width_result=$n
+}
+
 # Cursor echo for a terminal that cannot repaint (TERM=dumb), without escape
 # sequences, as readline does: \b to move left, reprint to move right, and an
 # edit reprints the tail then backs over it. No-op unless plain_echo is set.
+# $4 is the text moved over; \b counts are display columns, not characters.
 installer_ui_plain_move() {
   [[ "$2" == 1 ]] || return 0
   if [[ "$3" == back ]]; then
     local n
-    for ((n = 0; n < $4; n++)); do printf '\b' >&"$1"; done
+    installer_ui_width "$4"
+    for ((n = 0; n < installer_ui_width_result; n++)); do printf '\b' >&"$1"; done
   else
     printf '%s' "$4" >&"$1"
   fi
 }
 
-# $3 leading backspaces, $4 inserted text, $5 tail after the cursor, $6 1 to
-# blank one trailing cell (a character was removed).
+# $3 text backed over first, $4 inserted text, $5 tail after the cursor, $6 the
+# removed character (blanked with as many cells as its display width).
 installer_ui_plain_edit() {
   [[ "$2" == 1 ]] || return 0
-  local n
-  for ((n = 0; n < $3; n++)); do printf '\b' >&"$1"; done
+  local n cells=0 blank=0
+  installer_ui_width "$3"
+  for ((n = 0; n < installer_ui_width_result; n++)); do printf '\b' >&"$1"; done
   printf '%s' "$4$5" >&"$1"
-  ((${6:-0} == 0)) || printf ' ' >&"$1"
-  for ((n = 0; n < ${#5} + ${6:-0}; n++)); do printf '\b' >&"$1"; done
+  if [[ -n "${6:-}" ]]; then
+    installer_ui_width "$6"
+    blank=$installer_ui_width_result
+    for ((n = 0; n < blank; n++)); do printf ' ' >&"$1"; done
+  fi
+  installer_ui_width "$5"
+  cells=$((installer_ui_width_result + blank))
+  for ((n = 0; n < cells; n++)); do printf '\b' >&"$1"; done
 }
 
 installer_ui_read_value() {
@@ -549,21 +585,23 @@ installer_ui_read_value() {
         status=130
         break
         ;;
-      left) ((arrows == 0)) && continue; ((cursor > 0)) && { cursor=$((cursor - 1)); installer_ui_plain_move "$terminal_fd" "$plain_echo" back 1; } ;;
+      left) ((arrows == 0)) && continue; ((cursor > 0)) && { cursor=$((cursor - 1)); installer_ui_plain_move "$terminal_fd" "$plain_echo" back "${value:cursor:1}"; } ;;
       right) ((arrows == 0)) && continue; ((cursor < ${#value})) && { installer_ui_plain_move "$terminal_fd" "$plain_echo" fwd "${value:cursor:1}"; cursor=$((cursor + 1)); } ;;
-      home) ((arrows == 0)) && continue; installer_ui_plain_move "$terminal_fd" "$plain_echo" back "$cursor"; cursor=0 ;;
+      home) ((arrows == 0)) && continue; installer_ui_plain_move "$terminal_fd" "$plain_echo" back "${value:0:cursor}"; cursor=0 ;;
       end) ((arrows == 0)) && continue; installer_ui_plain_move "$terminal_fd" "$plain_echo" fwd "${value:cursor}"; cursor=${#value} ;;
       backspace)
         if ((cursor > 0)); then
+          local removed="${value:cursor-1:1}"
           value="${value:0:cursor-1}${value:cursor}"
           cursor=$((cursor - 1))
-          installer_ui_plain_edit "$terminal_fd" "$plain_echo" 1 "" "${value:cursor}" 1
+          installer_ui_plain_edit "$terminal_fd" "$plain_echo" "$removed" "" "${value:cursor}" "$removed"
         fi
         ;;
       delete)
         if ((cursor < ${#value})); then
+          local removed="${value:cursor:1}"
           value="${value:0:cursor}${value:cursor+1}"
-          installer_ui_plain_edit "$terminal_fd" "$plain_echo" 0 "" "${value:cursor}" 1
+          installer_ui_plain_edit "$terminal_fd" "$plain_echo" "" "" "${value:cursor}" "$removed"
         fi
         ;;
       paste-start)
@@ -573,7 +611,7 @@ installer_ui_read_value() {
         }
         value="${value:0:cursor}${insert}${value:cursor}"
         cursor=$((cursor + ${#insert}))
-        installer_ui_plain_edit "$terminal_fd" "$plain_echo" 0 "$insert" "${value:cursor}" 0
+        installer_ui_plain_edit "$terminal_fd" "$plain_echo" "" "$insert" "${value:cursor}" ""
         ;;
       char:*)
         insert="${key#char:}"
@@ -583,14 +621,15 @@ installer_ui_read_value() {
         }
         value="${value:0:cursor}${insert}${value:cursor}"
         cursor=$((cursor + ${#insert}))
-        installer_ui_plain_edit "$terminal_fd" "$plain_echo" 0 "$insert" "${value:cursor}" 0
+        installer_ui_plain_edit "$terminal_fd" "$plain_echo" "" "$insert" "${value:cursor}" ""
         ;;
       *) ;;
     esac
 
     if [[ "$visibility" == text && "$repaint" == 1 ]]; then
       printf '\r\033[2K%s%s' "$prompt" "$value" >&"$terminal_fd"
-      tail=$((${#value} - cursor))
+      installer_ui_width "${value:cursor}"
+      tail=$installer_ui_width_result
       ((tail == 0)) || printf '\033[%dD' "$tail" >&"$terminal_fd"
     fi
   done
