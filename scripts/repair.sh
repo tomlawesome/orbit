@@ -4277,14 +4277,16 @@ do_restore_compose_file() {
     discard_image_compose
     return 1
   fi
-  # b1 O-R4: the bytes reach the disk before the rename can make them the live file.
   if ! read_image_deployment_asset "$image" "$compose_file" "$compose_image_tmp" {compose_image_tmp_lock_fd}<&- ||
     ! chmod 0644 -- "$compose_image_tmp" ||
-    ! own_as_folder "$compose_image_tmp" ||
-    ! sync -- "$compose_image_tmp" 2>/dev/null; then
+    ! own_as_folder "$compose_image_tmp"; then
     discard_image_compose
     return 1
   fi
+  # b1 O-R4: the bytes reach the disk before the rename can make them the live
+  # file. Best effort, like the folder's sync below: a sync that fails must not
+  # throw away a restore that is otherwise complete.
+  sync -- "$compose_image_tmp" 2>/dev/null || true
   mv -n -- "$compose_image_tmp" "$compose_file" || { discard_image_compose; return 1; }
   # mv -n leaves the source in place when the target appeared in the meantime.
   if [[ -e "$compose_image_tmp" ]]; then
@@ -4587,12 +4589,14 @@ do_restore_configuration_rollback() {
   # operator's evidence in the one case that does end with .env-orbit
   # changed and the action reporting failed, the rollback-copy removal below.
   staged="$(mktemp "${environment_file}.repair-restore.XXXXXX" 2>/dev/null)" || return 1
-  # b1 O-R4: flushed before the rename, and the folder after it.
   if ! cp -- "$rollback_path" "$staged" 2>/dev/null || ! chmod 600 -- "$staged" 2>/dev/null ||
-    ! own_as_folder "$staged" 2>/dev/null || ! sync -- "$staged" 2>/dev/null; then
+    ! own_as_folder "$staged" 2>/dev/null; then
     rm -f -- "$staged"
     return 1
   fi
+  # b1 O-R4: flushed before the rename, and the folder after it. Both best
+  # effort: a failing sync must not stop the rollback.
+  sync -- "$staged" 2>/dev/null || true
   if ! mv -f -- "$staged" "$environment_file" 2>/dev/null; then
     rm -f -- "$staged"
     return 1

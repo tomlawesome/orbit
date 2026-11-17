@@ -4030,6 +4030,25 @@ describe("scripts/repair.sh --execute --safe-only", () => {
     expect(result.stdout).toContain("diagnosis result=healthy");
   });
 
+  it("O-R4 review: a failing sync does not stop the .env-orbit rollback", () => {
+    const targetDir = makeFixture();
+    const goodEnv = readFileSync(join(targetDir, ".env-orbit"), "utf8");
+    writeFileSync(join(targetDir, ".env-orbit.orbit-config.rollback"), goodEnv);
+    chmodSync(join(targetDir, ".env-orbit.orbit-config.rollback"), 0o600);
+    chmodSync(join(targetDir, ".env-orbit"), 0o644);
+    const shimDir = scratchDir();
+    writeFileSync(join(shimDir, "sync"), "#!/bin/sh\nexit 1\n");
+    chmodSync(join(shimDir, "sync"), 0o755);
+
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], {}, { env: { PATH: `${shimDir}:${process.env.PATH}` } });
+
+    expect(result.stdout).toContain(
+      "execute action=restore-transaction resolves=configuration-migration-interrupted result=done",
+    );
+    expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toBe(goodEnv);
+    expect(existsSync(join(targetDir, ".env-orbit.orbit-config.rollback"))).toBe(false);
+  });
+
   // O-S5 V3 (audit v0.3.9-c, #1844): run as root (sudo), the restored .env-orbit is
   // given the deployment folder's owner (`chown --reference=.`, restore-compose-file's
   // rule) before the rename. Root is simulated by shims ahead of the real tools on

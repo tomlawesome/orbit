@@ -366,6 +366,17 @@ describe("repair.sh's compose restore is durable and leaves no scratch file (aud
       holder.kill("SIGKILL");
     }
   });
+
+  it("O-R4 review: a failing sync does not stop the compose restore", () => {
+    const targetDir = makeDeployment({});
+    const shimDir = scratchDir("orbit-repair-sync-fails-");
+    writeFileSync(join(shimDir, "sync"), "#!/bin/sh\nexit 1\n");
+    chmodSync(join(shimDir, "sync"), 0o755);
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], { pathPrefix: shimDir });
+    expect(existsSync(join(targetDir, "docker-compose.yml")), result.combined).toBe(true);
+    expect(result.stdout).toContain("execute action=restore-compose-file resolves=compose-file-restorable result=done");
+    expect(readdirSync(targetDir).filter((name) => name.startsWith(".docker-compose.yml.repair"))).toEqual([]);
+  });
 });
 
 describe("repair.sh restores a missing docker-compose.yml from the image (#1484)", () => {
