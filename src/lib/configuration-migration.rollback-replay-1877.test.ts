@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -133,4 +133,75 @@ describe("a leftover rollback copy from a migration that finished (#1877)", () =
       expect(readFileSync(envFile(dir), "utf8")).toBe(migrated);
     });
   }
+
+  // Spec point 4: a copy that cannot be read is no proof, so it is never deleted.
+  // (mode 000 is readable by root, so that case is skipped when running as root.)
+  const unreadable: Array<[string, (dir: string) => void, boolean]> = [
+    [
+      "mode 000",
+      (dir) => {
+        chmodSync(copyOf(dir), 0o000);
+      },
+      process.getuid?.() === 0,
+    ],
+    [
+      "a directory in its place",
+      (dir) => {
+        rmSync(copyOf(dir));
+        mkdirSync(copyOf(dir), { mode: 0o700 });
+      },
+      false,
+    ],
+  ];
+  for (const [label, make, skip] of unreadable) {
+    for (const [path, target] of [
+      ["migrating to the next release", targetB],
+      ["re-running the same target", targetA],
+    ] as const) {
+      it.skipIf(skip)(`a copy that cannot be read (${label}): ${path} never deletes it, and the file is untouched`, () => {
+        const { dir, migrated } = killedAfterRename();
+        make(dir);
+        const result = migrateEnvironmentFile(envFile(dir), target());
+        // Not proven, so the migrate path refuses; the already-current path refuses or keeps and names it.
+        if (target === targetB) expect(result).toEqual({ status: 1, stdout: "", stderr: "configuration_migration\n" });
+        else expect(result.status === 1 ? result.stderr === "configuration_migration\n" : result.stderr.includes(copyOf(dir))).toBe(true);
+        expect(lstatSync(copyOf(dir), { throwIfNoEntry: false })).toBeDefined();
+        expect(readFileSync(envFile(dir), "utf8")).toBe(migrated);
+      });
+    }
+  }
+
+  // A copy past 1 MiB is not read whole: even a valid pre-migration file padded
+  // past the limit must be kept, not replayed and deleted.
+  describe("a leftover copy larger than 1 MiB", () => {
+    const PADDED = LEGACY + "# padding\n".repeat(120_000);
+    function paddedState(): { dir: string; migrated: string } {
+      const dir = mkdtempSync(join(tmpdir(), "orbit-migration-replay-"));
+      dirs.push(dir);
+      writeFileSync(envFile(dir), PADDED, { mode: 0o600 });
+      expect(migrateEnvironmentFile(envFile(dir), targetA()).status).toBe(0);
+      const migrated = readFileSync(envFile(dir), "utf8");
+      writeFileSync(copyOf(dir), PADDED, { mode: 0o600 });
+      expect(lstatSync(copyOf(dir)).size).toBeGreaterThan(1024 * 1024);
+      return { dir, migrated };
+    }
+
+    it("re-running the same target keeps it and names it, never deleting it", () => {
+      const { dir, migrated } = paddedState();
+      const result = migrateEnvironmentFile(envFile(dir), targetA());
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe(ALREADY_CURRENT_STDOUT);
+      expect(result.stderr).toContain(copyOf(dir));
+      expect(readFileSync(copyOf(dir), "utf8")).toBe(PADDED);
+      expect(readFileSync(envFile(dir), "utf8")).toBe(migrated);
+    });
+
+    it("migrating to the next release refuses and leaves it", () => {
+      const { dir, migrated } = paddedState();
+      const result = migrateEnvironmentFile(envFile(dir), targetB());
+      expect(result).toEqual({ status: 1, stdout: "", stderr: "configuration_migration\n" });
+      expect(readFileSync(copyOf(dir), "utf8")).toBe(PADDED);
+      expect(readFileSync(envFile(dir), "utf8")).toBe(migrated);
+    });
+  });
 });
