@@ -58,6 +58,34 @@ describe("loadStagedPage", () => {
     expect(previewPageHref("/api/x/preview?a=b", 2)).toBe("/api/x/preview?a=b&page=2");
   });
 
+  describe("a 503 document_preview_busy answers busy (#1446 decision 3)", () => {
+    /** @param {Record<string, string>} headers @param {string} [code] */
+    const busyResponse = (headers, code = "document_preview_busy") => ({
+      ok: false, status: 503, headers: new Headers(headers),
+      json: async () => ({ error: { code, message: "Orbit is busy; try again shortly" } }),
+      blob: async () => { throw new Error("blob() must not be read on a non-200 answer"); },
+    });
+
+    it("carries the Retry-After seconds", async () => {
+      fetched.mockResolvedValueOnce(busyResponse({ "retry-after": "7" }));
+      expect(await loadStagedPage("href")).toEqual({ kind: "busy", retryAfterSeconds: 7 });
+    });
+
+    it("clamps Retry-After to 1-10 and defaults to 5 when absent or not whole seconds", async () => {
+      for (const [header, expected] of [["0", 1], ["1", 1], ["10", 10], ["11", 10], ["300", 10], ["-3", 5], ["soon", 5], ["", 5], ["2.5", 5]]) {
+        fetched.mockResolvedValueOnce(busyResponse({ "retry-after": header }));
+        expect(await loadStagedPage("href"), `Retry-After "${header}"`).toEqual({ kind: "busy", retryAfterSeconds: expected });
+      }
+      fetched.mockResolvedValueOnce(busyResponse({}));
+      expect(await loadStagedPage("href")).toEqual({ kind: "busy", retryAfterSeconds: 5 });
+    });
+
+    it("only the document_preview_busy code says wait; any other 503 stays undrawable", async () => {
+      fetched.mockResolvedValueOnce(busyResponse({ "retry-after": "5" }, "document_unavailable"));
+      expect(await loadStagedPage("href")).toEqual({ kind: "undrawable" });
+    });
+  });
+
   it("404 and 410 both answer gone -- the mail was decided or burned up", async () => {
     fetched.mockResolvedValueOnce(statusResponse(404));
     expect(await loadStagedPage("href")).toEqual({ kind: "gone" });
