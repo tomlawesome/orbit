@@ -169,7 +169,7 @@ describe("#1872 V1: the owner check comes first; a missing setpriv refuses each 
     });
   }
 
-  for (const name of ["restore-transaction", "regenerate-secret", "diagnostics", "fix-permissions"]) {
+  for (const name of Object.keys(ACTIONS)) {
     it(`${name}: an owner that can't be read refuses the same way, nothing written`, () => {
       const folder = ACTIONS[name].make();
       const shims = shimsFor(folder.targetDir, { ownerUnreadable: true });
@@ -288,6 +288,18 @@ describe("#1872 V4: rotate-credential and regenerate-secret write the secret as 
     expect(withoutBackups(treeSnapshot(folder.targetDir))).toBe(before);
   });
 
+  it("rotate-credential: when .orbit-secrets is not the owner's, the action is refused and the password is not changed", () => {
+    const folder = mismatchFolder();
+    const shims = shimsFor(folder.targetDir, { rootOwned: "dir" });
+    const result = run("rotate-credential", shims, folder);
+    expect(result.stdout).not.toContain(ACTIONS["rotate-credential"].done);
+    expect(orbitLines(result).length, "no 'Orbit repair:' line says why").toBeGreaterThan(0);
+    expect(readFileSync(join(folder.targetDir, ".orbit-secrets", "postgres-password"), "utf8")).toBe(`${"a".repeat(64)}\n`);
+    expect(existsSync(join(folder.targetDir, ".orbit-secrets", ".repair-staged-postgres-password"))).toBe(false);
+    expect(readdirSync(join(folder.targetDir, ".orbit-secrets")).filter((entry) => entry.startsWith(".installing."))).toEqual([]);
+    expect(rootWrites(shims)).toEqual([]);
+  });
+
   it("regenerate-secret: when the owner can't make the temp file, the action reports failed and root makes nothing", () => {
     const folder = missingSecretFolder();
     const shims = shimsFor(folder.targetDir, { setprivFail: "*smtp-owner-write*" });
@@ -398,6 +410,7 @@ describe("#1872 V7: each owner step is time- and size-bounded; a failure release
     expect(result.stderr.length, "the child's words were not capped").toBeLessThan(40_000);
     // After a failed rotate step the checkpoint of the old credential is kept on purpose (#1834); the owner made it.
     const kept = name === "rotate-credential" ? readdirSync(folder.targetDir).filter((entry) => entry.startsWith(".orbit-repair-checkpoint.")) : [];
+    if (name === "rotate-credential") expect(kept, "the checkpoint of the old credential was not kept").toHaveLength(1);
     for (const entry of kept) {
       expect(statSync(join(folder.targetDir, entry)).uid, "the kept checkpoint is not the owner's").toBe(UID);
       expect(modeOf(join(folder.targetDir, entry)), "the kept checkpoint is not mode 700").toBe("700");
@@ -407,10 +420,16 @@ describe("#1872 V7: each owner step is time- and size-bounded; a failure release
     expect(lockFree(folder.targetDir), "the backup/restore lock is still held").toBe(true);
   }
 
-  for (const name of Object.keys(ACTIONS)) {
-    it(`${name}: a stalled owner step ends as timed out within the limit plus grace, no lock held, nothing left`, () => {
+  // The restore's own cp and mv steps as well as its first mkdir.
+  const CASES = [
+    ...Object.keys(ACTIONS).map((name) => ({ label: name, name, stall: ACTIONS[name].stall, flood: ACTIONS[name].flood })),
+    { label: "restore-transaction (cp)", name: "restore-transaction", stall: '*" cp "*', flood: '*" cp "*' },
+    { label: "restore-transaction (mv)", name: "restore-transaction", stall: '*" mv "*', flood: '*" mv "*' },
+  ];
+  for (const { label, name, stall, flood } of CASES) {
+    it(`${label}: a stalled owner step ends as timed out within the limit plus grace, no lock held, nothing left`, () => {
       const folder = prepared(name);
-      const shims = shimsFor(folder.targetDir, { variant: { kind: "stop", match: ACTIONS[name].stall } });
+      const shims = shimsFor(folder.targetDir, { variant: { kind: "stop", match: stall } });
       try {
         const result = run(name, shims, folder, { env: LIMIT });
         expect(setprivNaming(shims, /./u).length, "no owner step was started").toBeGreaterThan(0);
@@ -420,9 +439,9 @@ describe("#1872 V7: each owner step is time- and size-bounded; a failure release
       }
     });
 
-    it(`${name}: an owner step that floods its output is capped and the action fails with nothing left`, () => {
+    it(`${label}: an owner step that floods its output is capped and the action fails with nothing left`, () => {
       const folder = prepared(name);
-      const shims = shimsFor(folder.targetDir, { variant: { kind: "flood", match: ACTIONS[name].flood } });
+      const shims = shimsFor(folder.targetDir, { variant: { kind: "flood", match: flood } });
       try {
         const result = run(name, shims, folder, { env: LIMIT });
         expect(setprivNaming(shims, /./u).length, "no owner step was started").toBeGreaterThan(0);
@@ -432,6 +451,124 @@ describe("#1872 V7: each owner step is time- and size-bounded; a failure release
       }
     });
   }
+});
+
+// --- V9: a failed restore never loses the operator's file ---------------------------------------------------------
+
+describe("#1872 V9: restore-transaction's self-restore keeps the operator's file", () => {
+  const ORIGINAL_ENV = "APP_URL=https://orbit.repair-test.internal";
+  const COMPOSE = "services:\n  orbit-app:\n    image: busybox\n";
+  const survives = (targetDir) => {
+    expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toContain(ORIGINAL_ENV);
+    expect(modeOf(join(targetDir, ".env-orbit"))).toBe("600");
+    expect(readFileSync(join(targetDir, "docker-compose.yml"), "utf8")).toBe(COMPOSE);
+  };
+  const FAILED = "execute action=restore-transaction resolves=staging-evidence-present result=failed";
+
+  it("an owner mv that fails: the unchanged .env-orbit is never removed, and both files are as they were", () => {
+    const folder = restoreFolder();
+    const shims = shimsFor(folder.targetDir, { setprivFail: '*" mv "*' });
+    const result = run("restore-transaction", shims, folder);
+    expect(shims.setprivCalls().length, "the restore never used setpriv").toBeGreaterThan(0);
+    expect(result.stdout).toContain(FAILED);
+    survives(folder.targetDir);
+    expect(setprivNaming(shims, /\brm\b.* (\.\/)?\.env-orbit$/u), "the self-restore removed an .env-orbit that was never changed").toEqual([]);
+    expect(rootWrites(shims)).toEqual([]);
+  });
+
+  it("an owner cp of the saved original that fails: both files are as they were", () => {
+    const folder = restoreFolder();
+    const shims = shimsFor(folder.targetDir, { setprivFail: "*cp*orbit-install-staging*" });
+    const result = run("restore-transaction", shims, folder);
+    expect(shims.setprivCalls().length, "the restore never used setpriv").toBeGreaterThan(0);
+    expect(result.stdout).toContain(FAILED);
+    survives(folder.targetDir);
+    expect(rootWrites(shims)).toEqual([]);
+  });
+
+  it("an owner rm that fails: both files are as they were", () => {
+    const folder = restoreFolder();
+    const shims = shimsFor(folder.targetDir, { setprivFail: '*" rm "*' });
+    const result = run("restore-transaction", shims, folder);
+    expect(shims.setprivCalls().length, "the restore never used setpriv").toBeGreaterThan(0);
+    expect(result.stdout).toContain(FAILED);
+    survives(folder.targetDir);
+    expect(rootWrites(shims)).toEqual([]);
+  });
+
+  for (const [what, match] of [["an owner mv that stalls", '*" mv "*'], ["an owner cp of the saved original that stalls", "*cp*orbit-install-staging*"]]) {
+    it(`${what}: the step is timed out and both files are as they were`, () => {
+      const folder = restoreFolder();
+      const shims = shimsFor(folder.targetDir, { variant: { kind: "stop", match } });
+      try {
+        const result = run("restore-transaction", shims, folder, { env: LIMIT });
+        expect(shims.setprivCalls().length, "the restore never used setpriv").toBeGreaterThan(0);
+        expect(result.hung).toBe(false);
+        expect(result.ms).toBeLessThan(BUDGET_MS);
+        expect(orbitLines(result).some((line) => /timed out/u.test(line)), result.stderr.slice(0, 1500)).toBe(true);
+        survives(folder.targetDir);
+        expect(setprivNaming(shims, /\brm\b.* (\.\/)?\.env-orbit$/u), "the self-restore removed an .env-orbit that was never changed").toEqual([]);
+        expect(rootWrites(shims)).toEqual([]);
+      } finally {
+        shims.cleanup();
+      }
+    });
+  }
+
+  it("when the copy-back also fails, the recovery folder is kept after exit and the 'Orbit repair:' line names it", () => {
+    const folder = restoreFolder();
+    // The restore's copy of the saved original fails, and so does the self-restore's copy back from the recovery folder.
+    const shims = shimsFor(folder.targetDir, { setprivFail: '*cp*orbit-install-staging*|*"cp -a -- ./.orbit-repair-recovery"*' });
+    const result = run("restore-transaction", shims, folder);
+    expect(result.stdout).toContain(FAILED);
+    const kept = readdirSync(folder.targetDir).filter((entry) => entry.startsWith(".orbit-repair-recovery."));
+    expect(kept, "the recovery folder was removed at exit").toHaveLength(1);
+    expect(readFileSync(join(folder.targetDir, kept[0], "live", "docker-compose.yml"), "utf8"), "the original is not in the kept folder").toBe(COMPOSE);
+    const naming = orbitLines(result).filter((line) => line.includes(kept[0]));
+    expect(naming, `no 'Orbit repair:' line names the kept folder ${kept[0]}:\n${result.stderr.slice(0, 1500)}`).not.toEqual([]);
+    expect(rootWrites(shims)).toEqual([]);
+  });
+});
+
+// --- V10 --------------------------------------------------------------------------------------------------------------
+
+describe("#1872 V10: a folder made by an owner step that then timed out is not retried and leaves no orphan", () => {
+  const mkCalls = (shims, re) => setprivNaming(shims, re).filter((line) => /\b(mkdir|mktemp)\b/u.test(line));
+
+  it("restore-transaction: the recovery folder is made once; the action fails as timed out and no recovery folder is left", () => {
+    const folder = restoreFolder();
+    const shims = shimsFor(folder.targetDir, { variant: { kind: "run-then-stop", match: "*mkdir*orbit-repair-recovery*" } });
+    try {
+      const result = run("restore-transaction", shims, folder, { env: LIMIT });
+      expect(result.hung).toBe(false);
+      expect(result.ms).toBeLessThan(BUDGET_MS);
+      expect(result.stdout).toContain("execute action=restore-transaction resolves=staging-evidence-present result=failed");
+      expect(orbitLines(result).some((line) => /timed out/u.test(line)), result.stderr.slice(0, 1500)).toBe(true);
+      expect(mkCalls(shims, /orbit-repair-recovery/u), "the folder was made again under a new name").toHaveLength(1);
+      expect(readdirSync(folder.targetDir).filter((entry) => entry.startsWith(".orbit-repair-recovery.")), "a recovery folder was orphaned").toEqual([]);
+      expect(rootWrites(shims)).toEqual([]);
+    } finally {
+      shims.cleanup();
+    }
+  });
+
+  it("the credential checkpoint: the folder is made once; no checkpoint folder is left and the rotation does not run", () => {
+    const folder = mismatchFolder();
+    const shims = shimsFor(folder.targetDir, { variant: { kind: "run-then-stop", match: "*orbit-repair-checkpoint*" } });
+    try {
+      const result = run("credential checkpoint", shims, folder, { env: LIMIT });
+      expect(result.hung).toBe(false);
+      expect(result.ms).toBeLessThan(BUDGET_MS);
+      expect(result.stdout).not.toContain(ACTIONS["credential checkpoint"].done);
+      expect(orbitLines(result).some((line) => /timed out/u.test(line)), result.stderr.slice(0, 1500)).toBe(true);
+      expect(mkCalls(shims, /orbit-repair-checkpoint/u), "the folder was made again under a new name").toHaveLength(1);
+      expect(readdirSync(folder.targetDir).filter((entry) => entry.startsWith(".orbit-repair-checkpoint."))).toEqual([]);
+      expect(readFileSync(join(folder.targetDir, ".orbit-secrets", "postgres-password"), "utf8")).toBe(`${"a".repeat(64)}\n`);
+      expect(rootWrites(shims)).toEqual([]);
+    } finally {
+      shims.cleanup();
+    }
+  });
 });
 
 // --- not root: unchanged ----------------------------------------------------------------------------------------------
@@ -463,13 +600,29 @@ describe("#1872: not root, nothing changes (no owner check, no setpriv, the same
 
 // --- V8 ---------------------------------------------------------------------------------------------------------------
 
-describe("#1872 V8: guarantee 59 names these actions as owner writes", () => {
-  it("docs/installer-guarantees.md lists restore-transaction, the credential checkpoint, rotate-credential, regenerate-secret, the diagnostics file and fix-permissions", () => {
-    const text = readFileSync(new URL("../docs/installer-guarantees.md", import.meta.url), "utf8");
-    const section = /^59\. `smtp-lines-retirable`.*$/mu.exec(text)?.[0];
-    expect(section, "the repair guarantee 59 (smtp-lines-retirable) was not found").toBeDefined();
-    for (const name of ["restore-transaction", "rotate-credential", "regenerate-secret", "fix-permissions"]) expect(section).toContain(name);
-    expect(section, "the credential checkpoint is not named").toMatch(/checkpoint/u);
-    expect(section, "the diagnostics file is not named").toMatch(/diagnostics/u);
+describe("#1872 V8: guarantee 59 says these actions write as the folder's owner", () => {
+  const text = readFileSync(new URL("../docs/installer-guarantees.md", import.meta.url), "utf8");
+  const section = /^59\. `smtp-lines-retirable`.*$/mu.exec(text)?.[0] ?? "";
+  const start = section.indexOf("(#1872)");
+  const end = section.indexOf("Each runs the same owner checks");
+  const clause = start >= 0 && end > start ? section.slice(start, end) : "";
+
+  it("guarantee 59 has a #1872 passage on the owner's writes", () => {
+    expect(section, "the repair guarantee 59 (smtp-lines-retirable) was not found").not.toBe("");
+    expect(clause, "no passage starting at '(#1872)' and ending before 'Each runs the same owner checks'").not.toBe("");
   });
+
+  const WORDING = {
+    "restore-transaction makes its recovery folder, copies, moves and removals as the owner": /`restore-transaction`[^;]*recovery folder[^;]*`cp -a`[^;]*\bas the owner\b/u,
+    "the checkpoint folder (mode 700) and its bundle are made by the owner": /`\.orbit-repair-checkpoint\.\*`[^;]*mode 700[^;]*made by the owner/u,
+    "rotate-credential and regenerate-secret: the owner writes the secret from standard input, never a command line, sets mode 600 and renames": /`rotate-credential` and `regenerate-secret`[^;]*owner[^;]*standard input \(never on a command line\)[^;]*mode 600[^;]*rename/u,
+    "they refuse, nothing written, when .orbit-secrets belongs to anyone else": /refuse, nothing written, when `\.orbit-secrets` belongs to anyone else/u,
+    "the diagnostics file is made, written, set to mode 600 and renamed by the owner": /`\.orbit-repair-diagnostics\.\*`[^;]*mode 600 and renamed by the owner/u,
+    "fix-permissions runs chmod as the owner, never root's by path, and reports failed for a file not the owner's": /`fix-permissions` runs its `chmod` as the owner, never root's by path[^;]*reporting `failed`[^;]*not owned by the deployment folder's owner/u,
+  };
+  for (const [what, re] of Object.entries(WORDING)) {
+    it(what, () => {
+      expect(clause).toMatch(re);
+    });
+  }
 });

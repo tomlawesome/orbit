@@ -69,10 +69,12 @@ exec '__REAL__' "\${args[@]}"
 // What a misbehaving setpriv does (#1858): `variant` is { kind, match } where match is a bash case pattern over the
 // setpriv call's whole argument string (default: every call). Each variant bounds its own lifetime (a leak ends
 // within ~40 s) and logs the pids it leaves, for privShims().cleanup().
-// A variant never runs the command it was asked to, so it leaves nothing in the folder.
+// Except run-then-stop, a variant never runs the command it was asked to, so it leaves nothing in the folder.
 //   stop        SIGSTOPs itself
 //   ignore-term ignores TERM and waits (at most 40 s)
 //   grandchild  leaves a background process (25 s) holding stdout and stderr, and exits 0
+//   run-then-stop  runs the command it was asked to (as the owner), then SIGSTOPs itself: the step made its
+//               change and then timed out (#1872 V10)
 //   flood       writes 8 MiB (no newline) to stdout and to stderr, and exits 1
 function variantSnippet(variant, pidLog) {
   if (!variant) return "";
@@ -80,6 +82,7 @@ function variantSnippet(variant, pidLog) {
     stop: `echo $$ >> '${pidLog}'; kill -STOP $$; exit 1`,
     "ignore-term": `echo $$ >> '${pidLog}'; trap '' TERM; for _i in $(seq 1 40); do sleep 1; done; exit 1`,
     grandchild: `sleep 25 & echo $! >> '${pidLog}'; exit 0`,
+    "run-then-stop": `args=("$@"); while [[ $# -gt 0 && "$1" != -- ]]; do shift; done; shift; ( export ORBIT_TEST_PRIVDROP=1; "$@" ) >/dev/null 2>&1; echo $$ >> '${pidLog}'; kill -STOP $$; exit 1`,
     flood: `head -c 8388608 /dev/zero | tr '\\0' a; head -c 8388608 /dev/zero | tr '\\0' a >&2; exit 1`,
   }[variant.kind];
   if (body === undefined) throw new Error(`unknown setpriv variant ${variant.kind}`);
