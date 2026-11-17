@@ -402,7 +402,10 @@ before it on stdout is a `recovery-command:` line ("Recovery command (v0)").
   reason=optional-status action=continue`, the run still ends with
   `phase=complete ... deployment-ready`, and the completion screen names
   each such service. A failed confirmed model download ends the same way
-  for any install (`component=ollama ... action=continue`). An update keeps
+  for any install (`component=ollama ... action=continue`). When a model
+  download is requested, it runs after the completion screen, and
+  `phase=complete` comes only after the download has ended (done or
+  failed), so `complete` is always the run's last event. An update keeps
   failing on an optional service with `optional-unavailable` and `repair`.
 - The private scanner off by choice (#1170: `DOCUMENT_SCAN_MODE=disabled`,
   the engine's outcome `scanner=off`): `clamav` is not pulled or waited on,
