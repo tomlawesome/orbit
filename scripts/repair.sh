@@ -2255,6 +2255,14 @@ fetch_image_compose() {
 discard_image_compose() {
   [[ -z "$compose_image_tmp" ]] || rm -f -- "$compose_image_tmp"
   compose_image_tmp=""
+  release_compose_image_tmp_lock
+}
+
+# The fd of the flock this run holds on compose_image_tmp (b1 O-S2), if any.
+compose_image_tmp_lock_fd=""
+release_compose_image_tmp_lock() {
+  [[ -z "$compose_image_tmp_lock_fd" ]] || exec {compose_image_tmp_lock_fd}<&-
+  compose_image_tmp_lock_fd=""
 }
 
 # Removes the managed-file-missing finding for the Compose file; the caller
@@ -4239,15 +4247,38 @@ do_restore_compose_file() {
   local image
   [[ ! -e "$compose_file" && ! -L "$compose_file" ]] || return 1
   image="$(pinned_orbit_image)" || return 1
-  # b1 O-S2: a run killed hard (no EXIT trap) leaves its scratch file; only
-  # this action makes files by this name, so the next restore sweeps them.
-  local leftover
-  for leftover in "./.${compose_file}.repair."*; do
-    if [[ -f "$leftover" && ! -L "$leftover" ]]; then rm -f -- "$leftover" || true; fi
-  done
-  compose_image_tmp="$(mktemp "./.${compose_file}.repair.XXXXXX")" || { compose_image_tmp=""; return 1; }
+  # b1 O-S2: a run killed hard (no EXIT trap) leaves its scratch file. No lock
+  # covers this action, so each run holds a flock on its own scratch file
+  # while it exists, and the next restore sweeps only names of exactly
+  # mktemp's shape that it can lock: the kernel drops a dead run's lock, even
+  # after kill -9, while a running repair's scratch file stays locked. The
+  # owner's own files, such as .docker-compose.yml.repair.bak, never match.
+  # Without flock there is no sweep: a live run's file can't be told apart.
+  local leftover sweep_fd
+  local scratch_prefix="./.${compose_file}.repair."
+  if command -v flock >/dev/null 2>&1; then
+    for leftover in "$scratch_prefix"*; do
+      [[ "${leftover#"$scratch_prefix"}" =~ ^[A-Za-z0-9]{6}$ ]] || continue
+      [[ -f "$leftover" && ! -L "$leftover" ]] || continue
+      { exec {sweep_fd}<"$leftover"; } 2>/dev/null || continue
+      if flock -n "$sweep_fd" 2>/dev/null; then rm -f -- "$leftover" || true; fi
+      exec {sweep_fd}<&-
+    done
+  fi
+  compose_image_tmp="$(mktemp "${scratch_prefix}XXXXXX")" || { compose_image_tmp=""; return 1; }
+  # A sweep that won the race to the lock has removed the file: give up.
+  if ! { exec {compose_image_tmp_lock_fd}<"$compose_image_tmp"; } 2>/dev/null; then
+    compose_image_tmp_lock_fd=""
+    compose_image_tmp=""
+    return 1
+  fi
+  if command -v flock >/dev/null 2>&1 &&
+    { ! flock -n "$compose_image_tmp_lock_fd" 2>/dev/null || [[ ! -f "$compose_image_tmp" ]]; }; then
+    discard_image_compose
+    return 1
+  fi
   # b1 O-R4: the bytes reach the disk before the rename can make them the live file.
-  if ! read_image_deployment_asset "$image" "$compose_file" "$compose_image_tmp" ||
+  if ! read_image_deployment_asset "$image" "$compose_file" "$compose_image_tmp" {compose_image_tmp_lock_fd}<&- ||
     ! chmod 0644 -- "$compose_image_tmp" ||
     ! own_as_folder "$compose_image_tmp" ||
     ! sync -- "$compose_image_tmp" 2>/dev/null; then
@@ -4261,6 +4292,7 @@ do_restore_compose_file() {
     return 1
   fi
   compose_image_tmp=""
+  release_compose_image_tmp_lock
   # And the rename survives a power cut. Best effort: the file is already in place.
   sync -- . 2>/dev/null || true
 }

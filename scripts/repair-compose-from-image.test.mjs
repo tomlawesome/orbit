@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
@@ -334,6 +334,37 @@ describe("repair.sh's compose restore is durable and leaves no scratch file (aud
     const second = runRepair(targetDir, ["--execute", "--safe-only"]);
     expect(existsSync(join(targetDir, "docker-compose.yml")), second.combined).toBe(true);
     expect(readdirSync(targetDir).filter((name) => name.startsWith(".docker-compose.yml.repair"))).toEqual([]);
+  });
+
+  it("O-S2 review: the sweep leaves the owner's own .docker-compose.yml.repair.bak alone", () => {
+    const targetDir = makeDeployment({});
+    const ownerFile = join(targetDir, ".docker-compose.yml.repair.bak");
+    writeFileSync(ownerFile, "owner's notes\n");
+    const result = runRepair(targetDir, ["--execute", "--safe-only"]);
+    expect(existsSync(join(targetDir, "docker-compose.yml")), result.combined).toBe(true);
+    expect(existsSync(ownerFile), result.combined).toBe(true);
+    expect(readFileSync(ownerFile, "utf8")).toBe("owner's notes\n");
+  });
+
+  it("O-S2 review: the sweep leaves a scratch file of a repair that is still running", async () => {
+    const targetDir = makeDeployment({});
+    // A scratch file of exactly mktemp's shape, locked the way a running
+    // repair holds its own, by a process that outlives the repair under test.
+    const liveScratch = join(targetDir, ".docker-compose.yml.repair.AbC123");
+    writeFileSync(liveScratch, "half-written by another repair\n");
+    const holder = spawn("flock", [liveScratch, "-c", "echo locked; sleep 30"], { stdio: ["ignore", "pipe", "ignore"] });
+    try {
+      await new Promise((resolve, reject) => {
+        holder.stdout.once("data", resolve);
+        holder.once("error", reject);
+        holder.once("exit", () => reject(new Error("the lock holder exited early")));
+      });
+      const result = runRepair(targetDir, ["--execute", "--safe-only"]);
+      expect(existsSync(join(targetDir, "docker-compose.yml")), result.combined).toBe(true);
+      expect(existsSync(liveScratch), result.combined).toBe(true);
+    } finally {
+      holder.kill("SIGKILL");
+    }
   });
 });
 
