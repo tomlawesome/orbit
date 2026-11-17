@@ -119,9 +119,10 @@ async function holdBytes(
 }
 
 /**
- * Identifies, scans and structure-checks the received file. The check's one
- * copy of it lives in this frame only and is zeroed and freed here, so the seal that
- * follows never runs with it held (#1571, as the upload's own check does).
+ * Identifies, scans and structure-checks the received file. It checks the
+ * caller's bytes when given (the caller keeps and releases them); only a copy
+ * it read from quarantine itself is zeroed and freed here, so the seal that
+ * follows never runs with a second copy held (#1571, #1605 A-Q2).
  */
 async function checkReceivedAttachment(
   received: ReceivedDocument,
