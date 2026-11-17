@@ -74,7 +74,7 @@
    *   previewSrc?: string,
    *   pageHref?: string,
    *   pageNo?: number,
-   *   picture?: { src: string, page: number, count: number | null, failed: boolean },
+   *   picture?: { src: string, page: number, count: number | null, failed: boolean, retrying?: boolean, runs?: number },
    * }} Props
    */
   /** @type {Props} */
@@ -114,12 +114,18 @@
      picture it was handed would not draw. */
   let ownLost = $state(false);
   let brokenSrc = $state("");
+  /* #1870: "try again" on a lost page; `ownRuns` re-announces each failure. */
+  let retryTick = $state(0);
+  let ownRetrying = $state(false);
+  let ownRuns = $state(0);
+  const retrying = $derived(picture ? Boolean(picture.retrying) : ownRetrying);
+  const runs = $derived(picture ? (picture.runs ?? 0) : ownRuns);
   /* What is drawn: the host's page (`picture`) or the reader's own. */
   const shownSrc = $derived(picture ? picture.src : source ? pageUrl : previewSrc);
   const drawnPage = $derived(picture ? picture.page : shownPage);
   /* #1436: the stored count seeds the reader before any page answers. */
   const count = $derived(picture ? picture.count : (pageCount ?? (typeof doc.pageCount === "number" ? doc.pageCount : null)));
-  const lost = $derived((picture ? picture.failed : ownLost) || (brokenSrc !== "" && brokenSrc === shownSrc));
+  const lost = $derived((picture ? picture.failed : (ownLost || ownRetrying)) || (brokenSrc !== "" && brokenSrc === shownSrc));
   const turn = $derived(pageTurn(pageNo, count));
   const UNDRAWN = "this page could not be drawn";
 
@@ -127,7 +133,10 @@
   function turnTo(next) {
     if (!turn.arrows || count === null) return;
     const target = Math.min(count, Math.max(1, next));
-    if (target === pageNo) return;
+    if (target === pageNo) {
+      if (lost) retry();
+      return;
+    }
     /* An arrow that goes (the last page reached by the right one) hands
        focus to the other once it is drawn, so focus never lands on nothing. */
     const active = document.activeElement;
@@ -145,6 +154,20 @@
     }
   }
 
+  /* #1870: ask again for the lost page; focus returns to the panel once drawn. */
+  function retry() {
+    if (retrying) return;
+    brokenSrc = "";
+    if (picture) pageNo = pageNo;
+    else { ownRetrying = true; ownLost = false; retryTick++; }
+    wasRetrying = true;
+  }
+  let wasRetrying = false;
+  $effect(() => {
+    if (!lost && !retrying && wasRetrying) { wasRetrying = false; tick().then(() => panel?.focus({ preventScroll: true })); }
+    else if (lost && !retrying) wasRetrying = false;
+  });
+
   /** @param {string} url */
   function showPage(url) {
     if (pageUrl) URL.revokeObjectURL(pageUrl);
@@ -158,20 +181,24 @@
   $effect(() => {
     if (!open || !source || picture) return;
     const wanted = pageNo;
+    void retryTick;
     const controller = new AbortController();
     loadStagedPage(previewPageHref(source, wanted), controller.signal).then((result) => {
       if (controller.signal.aborted) {
         if (result.kind === "page") URL.revokeObjectURL(result.url);
         return;
       }
-      if (result.kind !== "page") { ownLost = true; return; }
+      if (result.kind !== "page") { ownLost = true; ownRetrying = false; ownRuns++; return; }
       showPage(result.url);
       ownLost = false;
+      ownRetrying = false;
       shownPage = wanted;
       if (result.pageCount !== null) pageCount = result.pageCount;
     }).catch((error) => {
       if (error instanceof DOMException && error.name === "AbortError") return;
       ownLost = true;
+      ownRetrying = false;
+      ownRuns++;
     });
     return () => controller.abort();
   });
@@ -335,7 +362,9 @@
         {#if lost}
           <!-- #1501: a page that could not be loaded says so where the page
                would be; the old page never stays up under the new number. -->
-          <p class="p-error rd-lost" role="alert">{UNDRAWN}</p>
+          {#key runs}<p class="p-error rd-lost" role="alert">{UNDRAWN}</p>{/key}
+          <button type="button" class="rd-retry" disabled={retrying} aria-label="Try page {pageNo} again"
+                  onclick={retry}>try again</button>
         {:else}
         <img bind:this={img} src={shownSrc || undefined} alt="Page {drawnPage} of {doc.name}"
              style:width={natural.w ? `${Math.round(natural.w * shownScale)}px` : undefined}
@@ -404,6 +433,12 @@
     box-shadow:0 18px 44px rgba(0,0,0,.45)}
   .rd-stage.zoomed img{max-width:none;max-height:none}
   .rd-lost{margin:0;text-align:center}
+  .rd-stage:has(.rd-lost){grid-auto-flow:row;place-content:center;gap:4px}
+  .rd-retry{justify-self:center;font:0.65625rem var(--mono);color:var(--ink-quiet);background:none;border:0;
+    cursor:pointer;padding:0 8px;min-height:44px;letter-spacing:.02em}
+  .rd-retry:hover{color:var(--ink)}
+  .rd-retry:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;border-radius:999px}
+  .rd-retry:disabled{opacity:.4;cursor:default}
   /* round-6's round glass arrows: 44px at the page's edges on a phone, 48px
      and further in on the desk. */
   .rd-arrow{position:absolute;top:50%;transform:translateY(-50%);z-index:1;width:44px;height:44px;

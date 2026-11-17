@@ -64,7 +64,7 @@
   /** #1151 W1-R10, as the belt: a hung page request reads as "could not
       draw" after this long, never as a reticle spinning for ever. */
   const LOAD_TIMEOUT_MS = 15_000;
-  const UNDRAWN_PAGE = "this page could not be drawn — try again";
+  const UNDRAWN_PAGE = "this page could not be drawn";
 
   /* The paper on show — kept through the bottom sheet's slide down after
      the host has let it go. */
@@ -88,6 +88,12 @@
   /* #1501: the page last turned to could not be loaded (the reader shows
      that in place of its picture). */
   let turnLost = $state(false);
+  /* #1870: "try again" was pressed and the answer is awaited (the line stays,
+     the button is disabled); `lostRuns` counts failures so each one is
+     announced afresh; `retryFocus` marks focus that was on the button. */
+  let retrying = $state(false);
+  let lostRuns = $state(0);
+  let retryFocus = false;
   let readerOpen = $state(false);
   /** @type {HTMLElement | undefined} */
   let card = $state();
@@ -144,6 +150,8 @@
     restoring = false;
     problem = null;
     turnLost = false;
+    retrying = false;
+    retryFocus = false;
     src = "";
     pageNo = 1;
     shownPage = 1;
@@ -185,6 +193,8 @@
         src = result.url;
         shownPage = n;
         turnLost = false;
+        retrying = false;
+        if (retryFocus) { retryFocus = false; tick().then(() => card?.focus({ preventScroll: true })); }
         if (result.pageCount !== null) pageCount = result.pageCount;
       } else if (result.kind === "gone" && paper.staged) {
         clearTimeout(loadTimer);
@@ -201,14 +211,19 @@
   function missed() {
     problem = UNDRAWN_PAGE;
     turnLost = true;
+    retrying = false;
+    lostRuns++;
   }
 
   /** The pager's arrows, the keys, and the reader's turns all land here. @param {number} n */
   function turn(n) {
-    if (!shown || n === pageNo) return;
+    const again = n === pageNo && turnLost;
+    if (!shown || (n === pageNo && !again)) return;
     pageNo = n;
     problem = null;
     turnLost = false;
+    retrying = again;
+    if (!again) retryFocus = false;
     /* From here the turn's own answer decides; the first load's deadline no longer applies. */
     clearTimeout(loadTimer);
     loadPage(shown, n, token, true);
@@ -444,12 +459,14 @@
         </div>
       {/if}
 
-      {#if st === "available" && turnLost}
+      {#if st === "available" && (turnLost || retrying)}
         <!-- #1559: a turn whose page could not be loaded says so in place of
              the picture, as the reader does (#1501) — never the new number
              over the old page. -->
         <div class="focus">
-          <div class="focusline" role="alert">{UNDRAWN_PAGE}</div>
+          {#key lostRuns}<div class="focusline" role="alert">{UNDRAWN_PAGE}</div>{/key}
+          <button type="button" class="quiet" disabled={retrying} aria-label="Try page {pageNo} again"
+                  onclick={() => { retryFocus = true; turn(pageNo); }}>try again</button>
         </div>
       {:else if st === "available"}
         <div class="topsheet">
@@ -466,7 +483,7 @@
 
     {#if paged}
       <Pager page={pageNo} count={pageCount} onturn={turn} />
-      {#if problem && !turnLost}<div class="problem" role="alert">{problem}</div>{/if}
+      {#if problem && !turnLost && !retrying}<div class="problem" role="alert">{problem}</div>{/if}
       {#if shown.staged}<div class="rcfoot"><span class="rcnote">not yet in orbit · attached on acceptance</span></div>{/if}
     {:else if st === "available" && shown.staged}
       <!-- #1155: nothing can be done with a staged paper here; the foot says why -->
@@ -498,7 +515,7 @@
        calls turn() here, the one fetch. -->
   <Reader bind:open={readerOpen} doc={shown} {itemTitle} onremove={remove}
           staged={Boolean(shown.staged)}
-          picture={{ src, page: shownPage, count: pageCount, failed: turnLost }}
+          picture={{ src, page: shownPage, count: pageCount, failed: turnLost || retrying, retrying, runs: lostRuns }}
           bind:pageNo={() => pageNo, turn} />
 {/if}
 
