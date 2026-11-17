@@ -741,3 +741,105 @@ describe("installer semantic UI", () => {
     expect(ordinary.stdout).not.toContain("simulation");
   });
 });
+
+// Wide characters in text prompts (#1885). A tiny terminal model: one line of
+// cells, a cursor column, double-width for East Asian wide characters, and
+// only the controls the widget may use (\b, \r, CSI K/D/C). Overwriting half
+// of a wide character blanks the other half, as real terminals do.
+function isWideChar(ch) {
+  const cp = ch.codePointAt(0);
+  return (cp >= 0x1100 && cp <= 0x115f) || (cp >= 0x2e80 && cp <= 0xa4cf)
+    || (cp >= 0xac00 && cp <= 0xd7a3) || (cp >= 0xf900 && cp <= 0xfaff)
+    || (cp >= 0xfe30 && cp <= 0xfe6f) || (cp >= 0xff00 && cp <= 0xff60)
+    || (cp >= 0xffe0 && cp <= 0xffe6) || (cp >= 0x20000 && cp <= 0x3fffd);
+}
+
+function displayWidth(text) {
+  let width = 0;
+  for (const ch of text) width += isWideChar(ch) ? 2 : 1;
+  return width;
+}
+
+function renderFirstLine(stdout) {
+  const cells = [];
+  let col = 0;
+  const blank = (at) => { cells[at] = " "; };
+  const put = (ch) => {
+    const w = isWideChar(ch) ? 2 : 1;
+    for (let at = col; at < col + w; at++) {
+      if (cells[at] === "") blank(at - 1);
+      if (cells[at + 1] === "" && at + 1 >= col + w) blank(at + 1);
+    }
+    cells[col] = ch;
+    if (w === 2) cells[col + 1] = "";
+    col += w;
+  };
+  const chars = [...stdout];
+  for (let i = 0; i < chars.length; i++) {
+    const ch = chars[i];
+    if (ch === "\n" || (ch === "\r" && chars[i + 1] === "\n")) break;
+    if (ch === "\r") { col = 0; continue; }
+    if (ch === "\b") { col = Math.max(0, col - 1); continue; }
+    if (ch === "\x1b" && chars[i + 1] === "[") {
+      let j = i + 2;
+      let param = "";
+      while (/[0-9;?]/u.test(chars[j] ?? "")) param += chars[j++];
+      const final = chars[j];
+      const n = param === "" ? 1 : Number(param);
+      if (final === "D") col = Math.max(0, col - n);
+      else if (final === "C") col += n;
+      else if (final === "K") {
+        if (param === "2") cells.length = 0;
+        else cells.length = Math.min(cells.length, col);
+      }
+      i = j;
+      continue;
+    }
+    put(ch);
+  }
+  for (let at = 0; at < cells.length; at++) if (cells[at] === undefined) cells[at] = " ";
+  return { text: cells.join("").replace(/\s+$/u, ""), column: col };
+}
+
+describe("installer text prompts with double-width characters (#1885)", () => {
+  const body = 'source "$1"; exec 3<>/dev/tty; value="$(installer_ui_read_text 3 "Answer: " 64)"; printf "\\nVALUE=%s\\n" "$value"';
+  const LEFT = "\x1b[D";
+  const HOME = "\x1b[H";
+  const DELETE = "\x1b[3~";
+  const BACKSPACE = "\x7f";
+  const modes = [
+    ["dumb terminal", { TERM: "dumb" }],
+    ["repainting terminal", { TERM: "xterm" }],
+  ];
+  // [name, keys typed before Enter, stored value, cursor offset in the value]
+  const cases = [
+    ["left arrows over a wide character", `a中b${LEFT}${LEFT}X`, "aX中b", 2],
+    ["backspace after a wide character", `a中b${LEFT}${BACKSPACE}`, "ab", 1],
+    ["backspace before a wide character", `a中b${LEFT}${LEFT}${BACKSPACE}`, "中b", 0],
+    ["delete of a wide character", `a中b${HOME}\x1b[C${DELETE}`, "ab", 1],
+    ["inserting a wide character mid-line", `ab${LEFT}中`, "a中b", 2],
+    ["home then typing before wide characters", `中文x${HOME}Y`, "Y中文x", 1],
+  ];
+
+  for (const [modeName, env] of modes) {
+    for (const [name, keys, stored, cursorChars] of cases) {
+      it(`shows exactly the stored value after ${name} on a ${modeName}`, async () => {
+        const result = await runPtyOpenStdin(
+          body,
+          `${keys}\r`,
+          { ...env, LC_ALL: "C.UTF-8" },
+          "Answer: ",
+        );
+
+        expect(result.status).toBe(0);
+        expect(result.stdout).toMatch(new RegExp(`VALUE=${stored}\\r?\\n`, "u"));
+        const screen = renderFirstLine(result.stdout);
+        expect(screen.text).toBe(`Answer: ${stored}`);
+        // The cursor sits two columns past each wide character before it.
+        expect(screen.column).toBe(
+          displayWidth("Answer: ") + displayWidth([...stored].slice(0, cursorChars).join("")),
+        );
+      });
+    }
+  }
+});
