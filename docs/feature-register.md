@@ -42,11 +42,13 @@ documents retained. Both sources use one editable draft-and-approval flow.
 
 1. Orbit connects to an external mail server using IMAP to monitor a dedicated
    inbound mailbox.
-2. Orbit associates the message with a registered user using a cryptographically
-   unguessable per-user recipient alias or token verified against the SMTP
-   envelope-recipient metadata preserved by the provider. The visible `From`
-   or `To` headers alone are never sufficient. Messages whose forwarding path
-   strips required identity evidence are quarantined for explicit association.
+2. Orbit associates the message with the registered user who listed and verified
+   the sending address, and only when the sending domain's DKIM signature
+   verifies and aligns (ADR-0017 decision 3). The per-user recipient alias,
+   verified against the SMTP envelope-recipient metadata preserved by the
+   provider, must agree: an alias naming a different member leaves the message
+   unattributed. An unsigned or unaligned `From` line never attributes a
+   message. Messages that match no one are held for association.
 3. Orbit places accepted messages into that user's private, durable ingestion
    queue. IMAP UIDVALIDITY and UID make reconnects and
    retries idempotent.
@@ -126,7 +128,8 @@ boundary:
 
 - one dedicated instance mailbox using bounded polling and verified TLS;
 - a provider-preserved envelope-recipient header plus versioned HMAC per-user
-  aliases, with visible mail headers excluded from identity;
+  aliases, which ADR-0017 decision 3 later made corroborate the sender rather
+  than attribute mail;
 - private user-owned encrypted staging rather than hidden household items;
 - transient direct-upload inspection and one source-aware approval contract;
 - PDF-only mailbox staging, bounded MIME/message limits, ignored non-PDF
