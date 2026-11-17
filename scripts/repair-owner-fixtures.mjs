@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { FIXTURE_IMAGE, makeFixture, prepareRepair, scratchDir } from "./repair-test-harness.mjs";
+import { makeFixture, prepareRepair, scratchDir } from "./repair-test-harness.mjs";
 
 // Folders and a runner shared by the #1857 and #1858 tests: one deployment folder for each repair action that
 // writes in the deployment folder, plus a runner that executes repair.sh under a hard wall-clock cap (a repair
