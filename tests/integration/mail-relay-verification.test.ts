@@ -10,6 +10,7 @@ import {
   mailInSenderAddresses,
   users,
 } from "@/db/schema";
+import { endMaintenance, openMaintenanceWindow, readMaintenanceState } from "@/server/maintenance";
 import { requireInstanceMetadataWriter } from "@/server/metadata/fields";
 import { setMailboxSettings, type MailboxSettingsDependencies, type MailboxSettingsInput } from "@/server/mail-in/mailbox-settings";
 import { RELAY_LISTENING, RELAY_NOT_USABLE, readRelaySettings } from "@/server/mail-in/relay-settings";
@@ -267,6 +268,21 @@ describe("POST /api/settings/mail-relay/verification (decision 7c)", () => {
     const fresh = await openLink(session, newer);
     expect(fresh.headers.get("location")).toContain("sender=verified");
     expect(await hasVerifiedSenderAddress(fixture.users.member.id)).toBe(true);
+  });
+
+  it("SEC-P1/1: during maintenance a member opening the emailed link does not verify the address", async () => {
+    const session = await fixture.session("member");
+    expect((await send(session)).status).toBe(202);
+    const token = tokenIn(mail.sent[0].text);
+    const state = await readMaintenanceState();
+    const opened = await openMaintenanceWindow(fixture.users.admin.id, state.version, { body: "Planned upgrade underway.", expectedEndAt: null });
+    try {
+      const response = await openLink(session, token);
+      expect(response.headers.get("location") ?? "").not.toContain("sender=verified");
+      expect(await hasVerifiedSenderAddress(fixture.users.member.id)).toBe(false);
+    } finally {
+      await endMaintenance(fixture.users.admin.id, opened.version);
+    }
   });
 
   it("lands the reader on Settings, where the relay now lives (#1509): /settings?sender=verified and ?sender=unverified", async () => {

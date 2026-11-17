@@ -19,6 +19,7 @@
  *    (`"ui" | "imported" | null`), beside `mailboxIngestion`: the field the
  *    launcher (ai/orbit-launcher#339) reads.
  */
+import postgres from "postgres";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanupIntegrationEnvironment, createIntegrationFixture, lockTheInstance, type IntegrationFixture } from "./support/fixtures";
 import {
@@ -47,7 +48,7 @@ vi.mock("nodemailer", async (importOriginal) => {
 const { readMailboxSettings, removeMailboxCredential, setMailboxSettings } = await import("@/server/mail-in/mailbox-settings");
 const { secondFactorConfigured } = await import("@/server/sign-in-approvals");
 const { sendBoundedMail, outgoingMailReady } = await import("@/server/invitations/send");
-const { getAdministratorOperations } = await import("@/server/admin-operations");
+const { getAdministratorOperations, verifySmtpProvider } = await import("@/server/admin-operations");
 
 let fixture: IntegrationFixture;
 let admin: string;
@@ -331,6 +332,41 @@ describe("sendBoundedMail reads the sending row, not SMTP_*", () => {
     } finally {
       restore();
     }
+  });
+
+  it("A-R1: testing the relay while the key is missing says the password is locked, not that sending is not set up", async () => {
+    const { setSendingSettings } = await sending();
+    await setSendingSettings(admin, null, anotherAccount);
+    const restore = lockTheInstance();
+    try {
+      const { result } = await verifySmtpProvider(admin);
+      expect(result).toBe("credential_locked");
+    } finally {
+      restore();
+    }
+  });
+
+  it("FR-3: choosing mailbox sending while the mailbox credential is being removed never leaves sending on a removed credential", async () => {
+    const { setSendingSettings, readSendingSettings } = await sending();
+    await setUpMailbox();
+    const url = process.env.DATABASE_URL;
+    if (!url) throw new Error("DATABASE_URL is required");
+    const other = postgres(url, { max: 1, prepare: false });
+    try {
+      /* Another administrator is mid-removal: holding the mailbox row. */
+      await other`begin`;
+      await other`select id from mail_in_mailbox for update`;
+      const choosing = setSendingSettings(admin, null, viaMailbox).then(() => null, (error: unknown) => error);
+      await new Promise((resolve) => setTimeout(resolve, 750));
+      await other`update mail_in_mailbox set password_secret_id = null, enabled = false`;
+      await other`commit`;
+      await choosing;
+    } finally {
+      await other`rollback`.catch(() => undefined);
+      await other.end();
+    }
+
+    expect((await readSendingSettings(admin)).via).not.toBe("mailbox");
   });
 
   it("records the last send, which the card shows as last sent", async () => {

@@ -50,6 +50,11 @@ describe("startup configuration", () => {
     expect(JSON.stringify(getConfigurationProblems())).not.toContain("example.invalid");
   });
 
+  it("A-F13: a leftover SMTP_* line is not a mail problem: outgoing mail is the Mail card's sending row, not these lines", () => {
+    expect(() => validateStartupConfiguration({ ...baseEnvironment(), SMTP_HOST: "smtp.example.invalid" })).not.toThrow();
+    expect(getConfigurationProblems().map((problem) => problem.setting)).not.toContain("mail");
+  });
+
   it.each([
     ["version", { ORBIT_CONFIG_SCHEMA_VERSION: "2" }, "ORBIT_CONFIG_SCHEMA_VERSION"],
     ["missing secret file", { SESSION_SECRET: undefined, SESSION_SECRET_FILE: "/missing/runtime-secret" }, "authentication"],

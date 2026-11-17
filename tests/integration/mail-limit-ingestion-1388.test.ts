@@ -55,8 +55,8 @@ async function rowFor(uidValidity: number) {
 }
 
 /** One message the server reports as `size` bytes, from `from`; a real small signed source stands behind it. */
-async function collect(from: string, size: number) {
-  const uidValidity = freshValidity();
+async function collect(from: string, size: number, validity?: number) {
+  const uidValidity = validity ?? freshValidity();
   const downloads: string[] = [];
   const headers = attributedHeaders(from);
   const source = await signedSource(from, "mail-limit-1388\r\n");
@@ -225,6 +225,33 @@ describe("mail size limit in ingestion (#1388)", () => {
 
       await setMail(fixture, 1 * MIB);
       expect((await collect("stranger@example.invalid", 3 * MIB)).failureCode).toBe("message_too_large");
+    } finally {
+      await setMail(fixture, null);
+      await fixture.cleanup();
+    }
+  }, 60_000);
+
+  it("A-S4: a receipt awaiting retry is settled as too large once the limit is lowered below its message", async () => {
+    const fixture = await createIntegrationFixture("mail-limit-retry-lowered");
+    try {
+      const member = fixture.users.member.id;
+      const address = await verifiedSenderFor(member);
+      await reconcileImapRecipientAliases(config());
+      await setMail(fixture, 10 * MIB);
+      const uidValidity = freshValidity();
+      const first = await collect(address, 3 * MIB, uidValidity);
+      expect(TOO_LARGE).not.toContain(first.failureCode);
+      /* The member's mail is waiting for a retry of its attachment step. */
+      await getDb().update(imapIngestionMessages)
+        .set({ status: "processing", receiptStatus: "processing", failureCode: null })
+        .where(eq(imapIngestionMessages.mailboxUidValidity, String(uidValidity)));
+
+      await setMail(fixture, 1 * MIB);
+      await collect(address, 3 * MIB, uidValidity);
+
+      const row = await rowFor(uidValidity);
+      expect(row.status).not.toBe("processing");
+      expect(TOO_LARGE).toContain(row.failureCode);
     } finally {
       await setMail(fixture, null);
       await fixture.cleanup();
