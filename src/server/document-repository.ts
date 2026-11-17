@@ -1281,7 +1281,11 @@ export async function restoreDocument(userId: string, documentId: string): Promi
     }
     const [changed] = await transaction.update(documents).set({
       lifecycle: "available",
-      deleteAfter: null,
+      // A staged upload that was never bound (sealed under an item id, no item)
+      // gets a fresh hold so the storage sweep still retires it (#1605 P-25).
+      deleteAfter: record.itemId === null && record.sealedItemId !== null
+        ? new Date(Date.now() + stagedUploadHoldMs(config))
+        : null,
       version: sql`${documents.version} + 1`,
       updatedAt: new Date(),
     }).where(and(eq(documents.id, documentId), eq(documents.lifecycle, "pending_deletion"))).returning();
