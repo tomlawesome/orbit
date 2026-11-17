@@ -181,3 +181,112 @@ describe("the hourly approval mail limit under concurrent requests (#1882)", () 
     expect(results.filter((result) => !result.limited && result.sendError === null)).toHaveLength(delivered.length);
   }, 120_000);
 });
+
+/**
+ * THE LOCK ITSELF. A mail's own delay sits after the reservation commits, so
+ * it leaves only a millisecond between the count and the insert: a build
+ * without the per-user lock could still pass by luck. Here a trigger on the
+ * send table sleeps inside the transaction, after the count has been read and
+ * before the row lands, widening that gap to `GAP_SECONDS`. Without the lock
+ * every call reads the same count in that gap; with it they queue.
+ */
+const GAP_SECONDS = 0.3;
+
+describe("the lock closes a wide gap between the count and the reservation (#1882)", () => {
+  beforeEach(async () => {
+    await getDb().execute(sql.raw(`
+      create or replace function sign_in_sends_gap_1882() returns trigger language plpgsql as
+      $$ begin perform pg_sleep(${GAP_SECONDS}); return new; end $$`));
+    await getDb().execute(sql.raw(`
+      create trigger sign_in_sends_gap_1882 before insert on sign_in_approval_sends
+      for each row execute function sign_in_sends_gap_1882()`));
+  });
+  afterEach(async () => {
+    await getDb().execute(sql.raw("drop trigger if exists sign_in_sends_gap_1882 on sign_in_approval_sends"));
+    await getDb().execute(sql.raw("drop function if exists sign_in_sends_gap_1882()"));
+  });
+
+  it("open, resend and mixed calls with four sent reserve exactly one more", async () => {
+    const userId = await account();
+    await alreadySent(userId, APPROVAL_SENDS_PER_HOUR - 1);
+    const approvals = await Promise.all(Array.from({ length: 3 }, () => pending(userId)));
+
+    await Promise.all([
+      ...Array.from({ length: 3 }, () => open(userId)),
+      ...approvals.map((approval) => resend(approval.claim)),
+    ]);
+
+    expect(delivered).toHaveLength(1);
+    expect(await sendsInTheHour(userId)).toBe(APPROVAL_SENDS_PER_HOUR);
+  }, 120_000);
+
+  it("from none sent, eight simultaneous opens reserve no more than five", async () => {
+    const userId = await account();
+    await Promise.all(Array.from({ length: 8 }, () => open(userId)));
+    expect(delivered).toHaveLength(APPROVAL_SENDS_PER_HOUR);
+    expect(await sendsInTheHour(userId)).toBe(APPROVAL_SENDS_PER_HOUR);
+  }, 120_000);
+});
+
+/** A mailer that fails the first `failures` mails it is asked for, and delivers the rest. */
+function flakyMailer(failures: number) {
+  let asked = 0;
+  return {
+    async sendEmail(notification: SmtpNotification) {
+      const mine = asked++;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      if (mine < failures) throw new Error("relay refused");
+      delivered.push(notification.to);
+    },
+  };
+}
+
+describe("a failed send hands its slot back and takes only its own row (#1882)", () => {
+  it("open: a send that fails leaves the allowance unspent, so a later request can send", async () => {
+    const userId = await account();
+    await alreadySent(userId, APPROVAL_SENDS_PER_HOUR - 1);
+
+    const failed = await startSignInApproval(userId, FACTS, { mailer: flakyMailer(1) });
+    expect(failed.sendError).not.toBeNull();
+    expect(failed.limited).toBe(false);
+    expect(delivered).toHaveLength(0);
+    expect(await sendsInTheHour(userId)).toBe(APPROVAL_SENDS_PER_HOUR - 1);
+
+    expect(await open(userId)).toMatchObject({ limited: false, sendError: null });
+    expect(delivered).toHaveLength(1);
+    expect(await sendsInTheHour(userId)).toBe(APPROVAL_SENDS_PER_HOUR);
+  }, 60_000);
+
+  it("resend: a send that fails leaves the allowance unspent, so a later resend can send", async () => {
+    const userId = await account();
+    await alreadySent(userId, APPROVAL_SENDS_PER_HOUR - 1);
+    const first = await pending(userId);
+    const second = await pending(userId);
+
+    const failed = await resendSignInApproval(first.claim, { mailer: flakyMailer(1) });
+    expect(failed).toMatchObject({ state: "sent" });
+    expect((failed as { sendError: unknown }).sendError).not.toBeNull();
+    expect(await sendsInTheHour(userId)).toBe(APPROVAL_SENDS_PER_HOUR - 1);
+
+    expect(await resend(second.claim)).toMatchObject({ state: "sent", sendError: null });
+    expect(delivered).toHaveLength(1);
+    expect(await sendsInTheHour(userId)).toBe(APPROVAL_SENDS_PER_HOUR);
+  }, 60_000);
+
+  it("a failure among concurrent sends deletes only its own row and the cap still holds", async () => {
+    const userId = await account();
+    const mailer = flakyMailer(2);
+
+    const results = await Promise.all(Array.from({ length: 8 }, () =>
+      startSignInApproval(userId, FACTS, { mailer })));
+
+    const failures = results.filter((result) => result.sendError !== null);
+    expect(failures).toHaveLength(2);
+    expect(delivered.length).toBeLessThanOrEqual(APPROVAL_SENDS_PER_HOUR);
+    expect(delivered.length).toBeGreaterThanOrEqual(3);
+    /* Every delivered mail still has its row, and nothing else does: a
+       failure that deleted a neighbour's row would leave fewer rows than
+       mails. */
+    expect(await sendsInTheHour(userId)).toBe(delivered.length);
+  }, 120_000);
+});
