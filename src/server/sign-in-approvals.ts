@@ -266,7 +266,7 @@ async function readRecipient(userId: string): Promise<Recipient | null> {
 
 /**
  * How many approval mails this account has had inside the last hour: one
- * row per mail actually sent, so a mail more than an hour old never counts,
+ * row per attempted send, so a mail more than an hour old never counts,
  * however recently its sign-in was resent (#1604 P-20).
  */
 async function sendsInWindow(userId: string, now: Date): Promise<number> {
@@ -278,7 +278,10 @@ async function sendsInWindow(userId: string, now: Date): Promise<number> {
   return row?.sends ?? 0;
 }
 
-/** Notes one mail on the wire against the hour's allowance. */
+/**
+ * Reserves one mail against the hour's allowance. Written before the mail is
+ * sent (#1879 A-R2), so the count is never lower than the mails sent.
+ */
 async function recordSend(approvalId: string, userId: string, sentAt: Date): Promise<void> {
   await getDb().insert(signInApprovalSends).values({ approvalId, userId, sentAt });
 }
@@ -380,9 +383,9 @@ async function mailApproval(
  * by looking up an existing row. Writing the row first means that same
  * crash instead leaves an unsent, harmless row that simply expires -- the
  * waiting tab never got a response either, so it retries and gets a new one.
- * A pending sign-in that could not be posted is still written and still
- * counts toward the hourly limit once it does send, exactly as before; only
- * the order changed.
+ * A pending sign-in that could not be posted is still written. Every
+ * attempted mail counts toward the hourly limit, reserved before the send
+ * (#1879 A-R2), so a failed send counts too.
  */
 export async function startSignInApproval(
   userId: string,
@@ -410,22 +413,28 @@ export async function startSignInApproval(
     lastSentAt: null,
   }).returning({ id: signInApprovals.id });
 
-  /* An account that vanished between the password check and this read is a
-     send that did not happen, never a send that silently counted: `sent`
-     decides whether the hour's allowance is spent, so it has to mean "a mail
-     went out". */
-  const sendError = limited
-    ? null
-    : recipient
-      ? await mailApproval(recipient, token, facts, now, expiresAt, options)
-      : "unknown";
+  /* Reserve, then send (#1879 A-R2): the hour's send row is written before
+     the mail goes out, so no mail can leave that the limit never sees. A send
+     that then fails still counts, over-counting by one, which is the safe
+     side for a second-factor limit (ADR-0027 §8). An account that vanished
+     between the password check and this read is never mailed, so it reserves
+     nothing. The approval's own count and time are stamped only once the
+     mail is out (#1151 A1-R1). */
+  let sendError: ApprovalSendError | null = null;
+  if (!limited) {
+    if (recipient) {
+      await recordSend(row.id, userId, now);
+      sendError = await mailApproval(recipient, token, facts, now, expiresAt, options);
+    } else {
+      sendError = "unknown";
+    }
+  }
   const sent = !limited && sendError === null;
 
   if (sent) {
     await db.update(signInApprovals)
       .set({ sendCount: 1, lastSentAt: now })
       .where(eq(signInApprovals.id, row.id));
-    await recordSend(row.id, userId, now);
   }
 
   return {
@@ -730,6 +739,9 @@ export async function resendSignInApproval(
   if (!recipient) return { state: "unknown" };
 
   const token = createSecret();
+  /* Reserve, then send (#1879 A-R2), as when opening: the send row is
+     written first, so a failed send over-counts by one and never under. */
+  await recordSend(row.id, row.userId, now);
   const sendError = await mailApproval(recipient, token, row, row.createdAt, row.expiresAt, options);
   if (sendError === null) {
     /* The new link only becomes the live one once it is actually in the post:
@@ -743,7 +755,6 @@ export async function resendSignInApproval(
         lastSentAt: now,
       })
       .where(eq(signInApprovals.id, row.id));
-    await recordSend(row.id, row.userId, now);
   }
 
   return {

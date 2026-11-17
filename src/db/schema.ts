@@ -495,7 +495,7 @@ export const signInApprovals = pgTable("sign_in_approvals", {
 ]);
 
 /**
- * One row per approval mail actually sent, so "five per account per hour"
+ * One row per attempted approval send, so "five per account per hour"
  * counts the sends inside the hour and nothing older (#1604 P-20). The
  * approval's own send_count and last_sent_at stay what they were; this table
  * is only the hour's tally, swept with the approvals it belongs to.

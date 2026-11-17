@@ -273,8 +273,8 @@ vi.mock("@/db", async () => {
     update,
     delete: remove,
     /* One process, one store: a transaction here is the rules running in
-       order, which is what these tests are about. Rollback is PostgreSQL's
-       to prove, and the integration suite's to check. */
+       order. Rollback is PostgreSQL's to prove, and the integration suite's
+       to check. */
     transaction: (body: (executor: unknown) => unknown) => Promise.resolve(body(db)),
   };
   return { getDb: () => db };
@@ -646,6 +646,71 @@ describe("a refusal (ADR-0027 §8 and consequences)", () => {
     await startSignInApproval(USER, { userAgent: CHROME, clientAddress: null }, { mailer });
     await decideSignInApproval(tokenFromLatestMail(), "approved");
     expect(await takeDeniedSignInNotice(USER)).toBeNull();
+  });
+});
+
+describe("a send is reserved before it is mailed (#1879 A-R2)", () => {
+  /** A mailer that notes how many send rows existed at the moment it was called. */
+  function watchingMailer(fail = false) {
+    const seen: number[] = [];
+    return {
+      seen,
+      async sendEmail(notification: { to: string; subject: string; text: string }) {
+        seen.push(store.sends.length);
+        if (fail) throw new Error("smtp down");
+        posted.push({ to: notification.to, subject: notification.subject, text: notification.text });
+      },
+    };
+  }
+
+  it("opening: the send row exists before the mailer is called", async () => {
+    const watcher = watchingMailer();
+    await startSignInApproval(USER, { userAgent: CHROME, clientAddress: null }, { mailer: watcher, now: NINE });
+    expect(watcher.seen).toEqual([1]);
+    expect(store.sends).toHaveLength(1);
+  });
+
+  it("resending: the new send row exists before the mailer is called", async () => {
+    const pending = await startSignInApproval(USER, { userAgent: CHROME, clientAddress: null }, { mailer, now: NINE });
+    const watcher = watchingMailer();
+    await resendSignInApproval(pending.claim, { mailer: watcher, now: at(NINE, APPROVAL_RESEND_INTERVAL_MS) });
+    expect(watcher.seen).toEqual([2]);
+    expect(store.sends).toHaveLength(2);
+  });
+
+  it("opening: a mail that fails still leaves its count row, and the approval's count, time and link stay unset", async () => {
+    const result = await startSignInApproval(USER, { userAgent: CHROME, clientAddress: null }, { mailer: watchingMailer(true), now: NINE });
+    expect(result.sendError).not.toBeNull();
+    expect(store.sends).toHaveLength(1);
+    expect(store.approvals[0].sendCount).toBe(0);
+    expect(store.approvals[0].lastSentAt).toBeNull();
+  });
+
+  it("resending: a mail that fails still leaves its count row; the count, time and old link stay as they were", async () => {
+    const pending = await startSignInApproval(USER, { userAgent: CHROME, clientAddress: null }, { mailer, now: NINE });
+    const oldToken = tokenFromLatestMail();
+    const before = { ...store.approvals[0] };
+
+    const outcome = await resendSignInApproval(pending.claim, {
+      mailer: watchingMailer(true),
+      now: at(NINE, APPROVAL_RESEND_INTERVAL_MS),
+    });
+    expect(outcome).toMatchObject({ state: "sent" });
+    expect((outcome as { sendError: unknown }).sendError).not.toBeNull();
+    expect(store.sends).toHaveLength(2);
+    expect(store.approvals[0].sendCount).toBe(before.sendCount);
+    expect(store.approvals[0].lastSentAt).toEqual(before.lastSentAt);
+    expect(store.approvals[0].tokenHash).toBe(before.tokenHash);
+    expect((await readSignInApproval(oldToken))?.state).toBe("open");
+  });
+
+  it("a retry adds one row per attempt", async () => {
+    const pending = await startSignInApproval(USER, { userAgent: CHROME, clientAddress: null }, { mailer: watchingMailer(true), now: NINE });
+    expect(store.sends).toHaveLength(1);
+    await resendSignInApproval(pending.claim, { mailer: watchingMailer(true), now: at(NINE, APPROVAL_RESEND_INTERVAL_MS) });
+    expect(store.sends).toHaveLength(2);
+    await resendSignInApproval(pending.claim, { mailer, now: at(NINE, 2 * APPROVAL_RESEND_INTERVAL_MS) });
+    expect(store.sends).toHaveLength(3);
   });
 });
 

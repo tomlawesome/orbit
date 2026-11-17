@@ -1,7 +1,8 @@
 <script>
   import { uuid } from "$lib/uuid.js";
   import { onDestroy, untrack } from "svelte";
-  import { beforeNavigate, goto } from "$app/navigation";
+  import { holdUnsaved } from "$lib/unsaved.js";
+  import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import { resolve } from "$app/paths";
   import {
@@ -526,18 +527,23 @@
 
   /* ---- leaving with something typed (§2.5) ----------------------------- */
   let leaveOpen = $state(false);
-  /** @type {URL | null} */
-  let leaveTo = null;
   let leaving = false;
-  beforeNavigate(({ cancel, to, type }) => {
-    if (!dirty || leaving || type === "leave" || !to) return;
-    cancel();
-    leaveTo = to.url;
-    leaveOpen = true;
+  /* #1879 W-S1: the root layout's one guard asks this callout, and only this,
+     before a navigation leaves a dirty form; `leaving` keeps the navigation it
+     resumes from being asked again. */
+  /** @type {((yes: boolean) => void) | null} */
+  let answer = null;
+  /** @returns {Promise<boolean>} */
+  const ask = () => new Promise((settle) => { answer = settle; leaveOpen = true; });
+  const releaseUnsaved = holdUnsaved(() => dirty && !leaving, { ask });
+  onDestroy(releaseUnsaved);
+  /* Dismissing the callout any other way than "leave" is "stay". */
+  $effect(() => {
+    if (!leaveOpen) { answer?.(false); answer = null; }
   });
   function leave() {
-    leaving = true;
-    const to = leaveTo;
+    const resume = answer;
+    answer = null;
     leaveOpen = false;
     /* The callout's own history entry comes off first, or the address we go
        to lands on the entry that is about to be popped. */
@@ -546,11 +552,9 @@
       if (done) return;
       done = true;
       removeEventListener("popstate", go);
-      /* `to` is the address the held-back navigation was already going to,
-         so it is resolved; only the fallback needs resolve(). */
-      const href = to ? `${to.pathname}${to.search}${to.hash}` : resolve("/home");
-      // eslint-disable-next-line svelte/no-navigation-without-resolve
-      setTimeout(() => goto(href), 0);
+      /* The layout carries on to the address the held-back navigation was
+         already going to. */
+      setTimeout(() => resume?.(true), 0);
     };
     addEventListener("popstate", go);
     setTimeout(go, 350);
