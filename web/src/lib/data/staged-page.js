@@ -61,15 +61,48 @@ function busySecondsOf(response) {
   return Math.min(10, Math.max(1, Number(raw)));
 }
 
+/** The most of a 503's body that is read to find its code; a longer body is not the server's busy answer (#1446). */
+export const STAGED_PAGE_ERROR_BODY_MAX_BYTES = 16 * 1024;
+
+/**
+ * The 503's body as text, read through the stream up to the limit and then
+ * cancelled; null when the body is longer than the limit.
+ * @param {Response} response
+ * @returns {Promise<string | null>}
+ */
+async function boundedBodyText(response) {
+  const reader = response.body?.getReader();
+  if (!reader) return null;
+  const chunks = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > STAGED_PAGE_ERROR_BODY_MAX_BYTES) return null;
+      chunks.push(value);
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+  const bytes = new Uint8Array(total);
+  let at = 0;
+  for (const chunk of chunks) { bytes.set(chunk, at); at += chunk.byteLength; }
+  return new TextDecoder().decode(bytes);
+}
+
 /**
  * Whether a 503 is the server's "busy, ask again shortly" (#1446): only its
- * own code says so; any other 503 is a page that could not be drawn.
+ * own code says so, in a body within the limit; any other 503 is a page that
+ * could not be drawn.
  * @param {Response} response
  */
 async function isBusyAnswer(response) {
   try {
-    const body = await response.json();
-    return body?.error?.code === "document_preview_busy";
+    const text = response.body ? await boundedBodyText(response) : JSON.stringify(await response.json());
+    if (text === null) return false;
+    return JSON.parse(text)?.error?.code === "document_preview_busy";
   } catch {
     return false;
   }

@@ -249,8 +249,8 @@ function release(pool: SandboxPool): void {
 }
 
 /** Runs `run` in a slot of `pool`, or answers `refused()` without running it when the bounded view queue turns the draw away. */
-async function inPool<T>(pool: SandboxPool, run: () => Promise<T>, refused?: () => T): Promise<T> {
-  if (!(await acquire(pool))) return refused!();
+async function inPool<T>(pool: SandboxPool, run: () => Promise<T>, refused: () => T): Promise<T> {
+  if (!(await acquire(pool))) return refused();
   try {
     return await run();
   } finally {
@@ -617,7 +617,7 @@ export async function inspectPdfStructureInSandbox(input: PdfInput, options: { m
   return inPool("check", async () => {
     const verdict = await withPdfDescriptor(input, async (handle) => verdictOf(await runPdfinfo(handle, false), options.maxPages));
     return verdict ?? { reason: "structure_check_unavailable" };
-  });
+  }, () => ({ reason: "structure_check_unavailable" }));
 }
 
 /** What `pdfinfo` says a file's page count is, whatever the cap; or why it said nothing. */
@@ -641,7 +641,7 @@ export async function readPdfPageCountInSandbox(input: PdfInput, pool: SandboxPo
       return { outcome: "refused" };
     });
     return answer ?? { outcome: "failed", stop: "unavailable" };
-  });
+  }, () => ({ outcome: "failed", stop: "queue_full" }));
 }
 
 /** A drawn page's edge: a whole number of pixels, at least one and at most the asked-for long edge. */
@@ -1035,7 +1035,7 @@ export async function inspectImageInSandbox(
   const outcome = await inPool("check", () => runImageChild(file ? { file } : { bytes }, {
     message: { mediaType, width: declared.width, height: declared.height },
     wallMs: limits.wallMs,
-  }));
+  }), (): ChildOutcome => ({ stop: "queue_full" }));
   if ("stop" in outcome) return "structure_check_unavailable";
   const message = outcome.message;
   return isAnswer(message) && message.outcome === "opened" ? "supported_structure" : "unsupported_structure";
