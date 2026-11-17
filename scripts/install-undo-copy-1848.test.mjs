@@ -237,3 +237,36 @@ describe("#1874 O-R2 install.sh prune: Ctrl-C at the undo-copy prompt", () => {
     expect(flags, settings).toContain("echo");
   });
 });
+
+// Same prompt, but stdin is not the terminal: the stty state must be saved from /dev/tty, not stdin.
+describe("#1874 install.sh prune: Ctrl-C at the undo-copy prompt with stdin redirected", () => {
+  it("restores echo on /dev/tty when stdin is /dev/null", async () => {
+    const targetDir = installedFolder();
+    writeFolder(join(backups(targetDir), FOLDER), { ".env-orbit": COPY });
+    const binDir = makeFakeBin();
+    const logDir = mkdtempSync(join(tmpdir(), "orbit-install-log-"));
+    const env = { ...baseEnvironment(binDir, logDir), ...updateEnv() };
+    const command = `trap : INT; bash ${installScript} --plain --update </dev/null; printf '\\nSTTY-BEGIN\\n'; stty -a; printf 'STTY-END\\n'`;
+    const output = await new Promise((resolve, reject) => {
+      const child = spawn("script", ["-qeE", "never", "-c", command, "/dev/null"], { cwd: targetDir, env });
+      let stdout = "";
+      let sent = false;
+      const timer = setTimeout(() => { child.kill("SIGKILL"); reject(new Error(`timed out; output so far: ${stdout}`)); }, PROCESS_TEST_TIMEOUT_MS);
+      child.stdout.setEncoding("utf8");
+      child.stdout.on("data", (chunk) => {
+        stdout += chunk;
+        if (!sent && stdout.includes("CANNOT")) {
+          sent = true;
+          setTimeout(() => child.stdin.write("\x03"), 300);
+        }
+      });
+      child.on("error", reject);
+      child.on("close", () => { clearTimeout(timer); resolve(stdout); });
+    });
+    const settings = output.replace(/\r/gu, "").split("STTY-BEGIN\n")[1]?.split("STTY-END")[0] ?? "";
+    expect(settings, `no stty output in: ${output}`).not.toBe("");
+    const flags = settings.split(/[\s;]+/u);
+    expect(flags, settings).not.toContain("-echo");
+    expect(flags, settings).toContain("echo");
+  });
+});
