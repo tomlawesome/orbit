@@ -199,6 +199,8 @@
       } else if (result.kind === "gone" && paper.staged) {
         clearTimeout(loadTimer);
         gone = true;
+        retrying = false;
+        retryFocus = false;
       } else if (src || turned) missed();
       else failed();
     }).catch((error) => {
@@ -213,6 +215,15 @@
     turnLost = true;
     retrying = false;
     lostRuns++;
+  }
+
+  /** The reader's "try again" (#1870): `undrawn` says the page arrived but the
+      reader could not draw it, so it is asked for afresh like a lost turn.
+      @param {number} n @param {boolean} undrawn */
+  function again(n, undrawn) {
+    if (retrying) return;
+    if (undrawn && n === pageNo) turnLost = true;
+    turn(n);
   }
 
   /** The pager's arrows, the keys, and the reader's turns all land here. @param {number} n */
@@ -465,8 +476,16 @@
              over the old page. -->
         <div class="focus">
           {#key lostRuns}<div class="focusline" role="alert">{UNDRAWN_PAGE}</div>{/key}
-          <button type="button" class="quiet" disabled={retrying} aria-label="Try page {pageNo} again"
-                  onclick={() => { retryFocus = true; turn(pageNo); }}>try again</button>
+          <button type="button" class="quiet" aria-disabled={retrying ? "true" : undefined} aria-label="Try page {pageNo} again"
+                  onclick={(event) => {
+                    if (retrying) return;
+                    /* focus stays on the button (aria-disabled, not disabled); it moves to the
+                       card on success only if it was there, or nowhere (Safari never focuses a
+                       clicked button) */
+                    const at = document.activeElement;
+                    retryFocus = at === event.currentTarget || at === document.body || !at;
+                    turn(pageNo);
+                  }}>try again</button>
         </div>
       {:else if st === "available"}
         <div class="topsheet">
@@ -515,7 +534,7 @@
        calls turn() here, the one fetch. -->
   <Reader bind:open={readerOpen} doc={shown} {itemTitle} onremove={remove}
           staged={Boolean(shown.staged)}
-          picture={{ src, page: shownPage, count: pageCount, failed: turnLost || retrying, retrying, runs: lostRuns }}
+          picture={{ src, page: shownPage, count: pageCount, failed: turnLost || retrying, retrying, runs: lostRuns, again }}
           bind:pageNo={() => pageNo, turn} />
 {/if}
 
@@ -622,7 +641,7 @@
     background:none;border:0;cursor:pointer;padding:0 8px;height:44px;text-decoration:none;letter-spacing:.02em}
   .quiet:hover{color:var(--ink)}
   .quiet:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;border-radius:999px}
-  .quiet:disabled{opacity:.4;cursor:default}
+  .quiet:disabled,.quiet[aria-disabled="true"]{opacity:.4;cursor:default}
   .problem{font:0.8125rem var(--mono);color:var(--overdue-text);text-align:center;padding:0 8px 8px;line-height:1.6}
 
   /* UNDER 1200px there is no room beside the drawer: the card is the phone's

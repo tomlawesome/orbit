@@ -74,7 +74,7 @@
    *   previewSrc?: string,
    *   pageHref?: string,
    *   pageNo?: number,
-   *   picture?: { src: string, page: number, count: number | null, failed: boolean, retrying?: boolean, runs?: number },
+   *   picture?: { src: string, page: number, count: number | null, failed: boolean, retrying?: boolean, runs?: number, again?: (n: number, undrawn: boolean) => void },
    * }} Props
    */
   /** @type {Props} */
@@ -145,6 +145,8 @@
     pageNo = target;
     problem = null;
     ownLost = false;
+    ownRetrying = false;
+    wasRetrying = false;
     stage?.scrollTo({ top: 0, left: 0 });
     if (leaving) {
       tick().then(() => {
@@ -155,12 +157,16 @@
   }
 
   /* #1870: ask again for the lost page; focus returns to the stage once drawn. */
-  function retry() {
+  function retry(/** @type {Event} [event] */ event) {
     if (retrying) return;
+    const broken = brokenSrc !== "" && brokenSrc === shownSrc;
     brokenSrc = "";
-    if (picture) pageNo = pageNo;
+    /* focus moves back only if it was on the button, or nowhere (Safari) */
+    const at = document.activeElement;
+    const pressed = event?.currentTarget;
+    wasRetrying = pressed ? (at === pressed || at === document.body || !at) : false;
+    if (picture) picture.again?.(pageNo, broken);
     else { ownRetrying = true; ownLost = false; retryTick++; }
-    wasRetrying = true;
   }
   let wasRetrying = false;
   $effect(() => {
@@ -263,6 +269,8 @@
       /* pageNo stays: the preview beneath shows the page the reader was on. */
       pageCount = null;
       ownLost = false;
+      ownRetrying = false;
+      wasRetrying = false;
       brokenSrc = "";
       showPage("");
       if (opener?.isConnected) opener.focus({ preventScroll: true });
@@ -363,7 +371,7 @@
           <!-- #1501: a page that could not be loaded says so where the page
                would be; the old page never stays up under the new number. -->
           {#key runs}<p class="p-error rd-lost" role="alert">{UNDRAWN}</p>{/key}
-          <button type="button" class="rd-retry" disabled={retrying} aria-label="Try page {pageNo} again"
+          <button type="button" class="rd-retry" aria-disabled={retrying ? "true" : undefined} aria-label="Try page {pageNo} again"
                   onclick={retry}>try again</button>
         {:else}
         <img bind:this={img} src={shownSrc || undefined} alt="Page {drawnPage} of {doc.name}"
@@ -439,7 +447,7 @@
     cursor:pointer;padding:0 8px;min-height:44px;letter-spacing:.02em}
   .rd-retry:hover{color:var(--ink)}
   .rd-retry:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;border-radius:999px}
-  .rd-retry:disabled{opacity:.4;cursor:default}
+  .rd-retry[aria-disabled="true"]{opacity:.4;cursor:default}
   /* round-6's round glass arrows: 44px at the page's edges on a phone, 48px
      and further in on the desk. */
   .rd-arrow{position:absolute;top:50%;transform:translateY(-50%);z-index:1;width:44px;height:44px;

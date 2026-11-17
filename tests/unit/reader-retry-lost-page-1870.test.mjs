@@ -119,7 +119,8 @@ describe("card: try again on a lost page (#1870)", () => {
     expect(asked.slice(before), "exactly one request, for page 2").toEqual([2]);
     expect(target.textContent, "line stays while retrying").toContain(LINE);
     const retrying = /** @type {HTMLButtonElement} */ (target.querySelector(RETRY2));
-    expect(retrying.disabled, "disabled while retrying").toBe(true);
+    expect(retrying.getAttribute("aria-disabled"), "aria-disabled while retrying").toBe("true");
+    expect(retrying.disabled, "not natively disabled, so focus stays").toBe(false);
     retrying.click();
     retrying.click();
     flushSync();
@@ -172,6 +173,22 @@ describe("card: try again on a lost page (#1870)", () => {
     expect(asked.filter((n) => n === 2), "page 2: the first ask and the one retry only").toHaveLength(2);
   });
 
+  it("C5b: asking again for the page already drawn (a key toward the same page) sends no request", async () => {
+    const { target, flushSync, asked } = await cardWithLostTwo(() => Promise.resolve(ok()));
+    target.querySelector(".sheet img")?.dispatchEvent(new Event("load"));
+    flushSync();
+    await quiet();
+    /** @type {HTMLButtonElement} */ (target.querySelector(".sheet")).click();
+    flushSync();
+    await quiet();
+    const before = asked.length;
+    for (const key of ["Home", "ArrowLeft", "PageUp"]) window.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
+    flushSync();
+    await quiet();
+    expect(document.querySelector(".rd-retry"), "no button on a drawn page").toBeNull();
+    expect(asked.length - before).toBe(0);
+  });
+
   it("C6: turning away and back to a lost page asks for it again (existing behaviour, kept)", async () => {
     const { target, flushSync, asked } = await cardWithLostTwo((attempt) => Promise.resolve(attempt === 1 ? bad() : ok()));
     await click(target, "Next page", flushSync);
@@ -215,7 +232,12 @@ describe("reader over the card: try again (#1870)", () => {
     flushSync();
     await quiet();
     expect(asked.slice(before)).toEqual([2]);
-    expect(/** @type {HTMLButtonElement} */ (layer.querySelector(RETRY2)).disabled).toBe(true);
+    const waiting = /** @type {HTMLButtonElement} */ (layer.querySelector(RETRY2));
+    expect(waiting.getAttribute("aria-disabled")).toBe("true");
+    waiting.click();
+    flushSync();
+    await quiet();
+    expect(asked.length - before, "a second press while waiting sends nothing").toBe(1);
     hold.release(ok());
     flushSync();
     await quiet();
@@ -239,6 +261,28 @@ describe("reader over the card: try again (#1870)", () => {
     expect(layer.querySelector(".rd-lost")?.textContent).toBe(LINE);
     expect(/** @type {HTMLButtonElement} */ (layer.querySelector(RETRY2)).disabled).toBe(false);
     expect(watch.count()).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe("reader over the card: an undrawn page (#1870)", () => {
+  it("R5: a page that arrived but will not draw is asked for again by the button", async () => {
+    const mounted = await cardWithLostTwo(() => Promise.resolve(ok()));
+    const { target, flushSync, asked } = mounted;
+    target.querySelector(".sheet img")?.dispatchEvent(new Event("load"));
+    flushSync();
+    await quiet();
+    /** @type {HTMLButtonElement} */ (target.querySelector(".sheet")).click();
+    flushSync();
+    await quiet();
+    const layer = /** @type {HTMLElement} */ (document.querySelector(".rd-layer"));
+    await click(layer, "Next page", flushSync);
+    layer.querySelector(".rd-stage img")?.dispatchEvent(new Event("error"));
+    flushSync();
+    await quiet();
+    expect(layer.querySelector(RETRY2), "line and button shown for the undrawn page").not.toBeNull();
+    const before = asked.length;
+    await click(layer, "Try page 2 again", flushSync);
+    expect(asked.slice(before), "the page is requested again").toEqual([2]);
   });
 });
 
