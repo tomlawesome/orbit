@@ -278,9 +278,15 @@ async function sendsInWindow(userId: string, now: Date): Promise<number> {
   return row?.sends ?? 0;
 }
 
-/** Notes one mail on the wire against the hour's allowance. */
-async function recordSend(approvalId: string, userId: string, sentAt: Date): Promise<void> {
-  await getDb().insert(signInApprovalSends).values({ approvalId, userId, sentAt });
+type Executor = Parameters<Parameters<ReturnType<typeof getDb>["transaction"]>[0]>[0];
+
+/**
+ * Notes one mail on the wire against the hour's allowance. Always called
+ * inside the transaction that also stamps the approval's own count, so the
+ * send row and the approval update land together or not at all (#1879 A-R2).
+ */
+async function recordSend(executor: Executor, approvalId: string, userId: string, sentAt: Date): Promise<void> {
+  await executor.insert(signInApprovalSends).values({ approvalId, userId, sentAt });
 }
 
 /** How long a finished or lapsed approval is kept before it is swept. */
@@ -421,11 +427,19 @@ export async function startSignInApproval(
       : "unknown";
   const sent = !limited && sendError === null;
 
+  /* The mail is already out by here, so the approval's count and the hour's
+     send row are written in one transaction (#1879 A-R2): either both land
+     or neither does. If that transaction fails, the error reaches the caller
+     and the sign-in shows as failed; the mail sent just before it is then
+     uncounted, a window of one mail that the order cannot close without
+     counting mails that never went out. */
   if (sent) {
-    await db.update(signInApprovals)
-      .set({ sendCount: 1, lastSentAt: now })
-      .where(eq(signInApprovals.id, row.id));
-    await recordSend(row.id, userId, now);
+    await db.transaction(async (transaction) => {
+      await transaction.update(signInApprovals)
+        .set({ sendCount: 1, lastSentAt: now })
+        .where(eq(signInApprovals.id, row.id));
+      await recordSend(transaction, row.id, userId, now);
+    });
   }
 
   return {
@@ -735,15 +749,18 @@ export async function resendSignInApproval(
     /* The new link only becomes the live one once it is actually in the post:
        replacing the digest first would kill the reader's working link to
        replace it with one that never arrived. */
-    await db
-      .update(signInApprovals)
-      .set({
-        tokenHash: secretDigest(token),
-        sendCount: sql`${signInApprovals.sendCount} + 1`,
-        lastSentAt: now,
-      })
-      .where(eq(signInApprovals.id, row.id));
-    await recordSend(row.id, row.userId, now);
+    await db.transaction(async (transaction) => {
+      /* One transaction with the send row (#1879 A-R2), as when opening. */
+      await transaction
+        .update(signInApprovals)
+        .set({
+          tokenHash: secretDigest(token),
+          sendCount: sql`${signInApprovals.sendCount} + 1`,
+          lastSentAt: now,
+        })
+        .where(eq(signInApprovals.id, row.id));
+      await recordSend(transaction, row.id, row.userId, now);
+    });
   }
 
   return {
