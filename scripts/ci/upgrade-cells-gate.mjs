@@ -21,7 +21,8 @@
  * merge request's or another's), its gate artefact names B, nothing an update
  * depends on changed between B and this head, and its slot tags equal this
  * pipeline's. Runs are tried newest first; one whose inputs differ is passed
- * over, but one whose data is missing or unreadable ends the search with "run".
+ * over, but one whose data is missing or unreadable (a gate file with no slot
+ * tags included) ends the search with "run". No slot tags here means "run".
  *
  * Nothing here may fail the job that calls it: any API, parse or git error is
  * logged and read as "run". The token is sent as a header, never printed.
@@ -200,6 +201,8 @@ async function findReuse({ env, fetchImpl, cwd, log }) {
   const project = encodeURIComponent(env.CI_PROJECT_ID ?? "");
   const options = { token, fetchImpl };
   const ownSlots = slotTags(Object.entries(env));
+  // No slot tags here means no run can be shown to have tested the same ones.
+  if (!ownSlots) return { reason: "this pipeline has no upgrade slot tags (ORBIT_UPGRADE_SLOT_*)" };
   const passedOver = [];
 
   for (const pipeline of await candidates({ env, base, project, options })) {
@@ -225,7 +228,10 @@ async function findReuse({ env, fetchImpl, cwd, log }) {
     const since = baseFromGate(text, pipeline.sha);
     if (!since) return doubt("its gate file names no base");
 
-    if (slotTags(parseEnvFile(text)) !== ownSlots) {
+    const runSlots = slotTags(parseEnvFile(text));
+    // A gate file with no slot lines (one written before #1767) is missing data.
+    if (!runSlots) return doubt("its gate file records no slot tags");
+    if (runSlots !== ownSlots) {
       passedOver.push(`pipeline ${pipeline.id} ran with other slot tags`);
       log(`pipeline ${pipeline.id} (${pipeline.sha}) passed on base ${since} with other slot tags: not reused`);
       continue;
