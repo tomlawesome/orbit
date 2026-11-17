@@ -893,13 +893,11 @@ async function csrfFetch(path, { method = "POST", body, signal, headers = {} } =
 /**
  * Saves a theme and/or a text size (#1180), PUT /api/preferences.
  *
- * The route replaces the six display fields at once (theme, text size, label
- * days, sky driver, planet size, importance offer), so the body is always
- * whole: the picked field(s), and everything else taken fresh from the
- * server's session (`refresh: true`), never from a cache that another tab may
- * have outdated. The body never carries the notification channels; the route
- * writes those only when a body carries them, so this save leaves them, and
- * any pending deliveries, as they are.
+ * The route writes only the fields the body carries (#1738) -- and cancels
+ * pending deliveries for any channel sent as false -- yet the body is still
+ * built whole here: the picked field(s), and everything else taken fresh from the
+ * server's session (`refresh: true`), never from a cache that another tab or
+ * the notifications panel may have outdated.
  *
  * Saves run one at a time (a promise chain), and each body is built from the
  * latest local picks merged over the fresh session, so two quick picks cannot

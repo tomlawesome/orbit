@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { userPreferences } from "../../src/db/schema";
 import { themePreferenceSchema } from "../../src/lib/preferences";
 
 /*
@@ -90,11 +91,13 @@ describe("PUT /api/preferences planetSize", () => {
     expect((await response.json()).preference.planetSize).toBe(planetSize);
   });
 
-  it("defaults to \"cost\" when the body leaves it out, and stores that", async () => {
+  it("defaults to \"cost\" when the body leaves it out: not written (#1738 A-S1), the column default stores it", async () => {
     const { writes } = stubDatabase();
     const response = await put(whole({}));
     expect(response.status).toBe(200);
-    expect(writes[0].planetSize).toBe("cost");
+    expect(writes[0]).not.toHaveProperty("planetSize");
+    expect(userPreferences.planetSize.default).toBe("cost");
+    expect(userPreferences.planetSize.notNull).toBe(true);
     expect((await response.json()).preference.planetSize).toBe("cost");
   });
 
@@ -123,7 +126,9 @@ describe("PUT /api/preferences importanceOfferDismissed", () => {
     const { writes } = stubDatabase();
     const response = await put(whole({}));
     expect(response.status).toBe(200);
-    expect(writes[0].importanceOfferDismissed).toBe(false);
+    expect(writes[0]).not.toHaveProperty("importanceOfferDismissed");
+    expect(userPreferences.importanceOfferDismissed.default).toBe(false);
+    expect(userPreferences.importanceOfferDismissed.notNull).toBe(true);
     expect((await response.json()).preference.importanceOfferDismissed).toBe(false);
   });
 

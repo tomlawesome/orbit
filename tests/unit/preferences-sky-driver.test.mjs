@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { userPreferences } from "../../src/db/schema";
 import { themePreferenceSchema } from "../../src/lib/preferences";
 
 /*
@@ -98,11 +99,13 @@ describe("PUT /api/preferences skyDriver", () => {
     expect((await response.json()).preference.skyDriver).toBe("warning");
   });
 
-  it("defaults to \"due\" when the body leaves it out, and stores that", async () => {
+  it("defaults to \"due\" when the body leaves it out: not written (#1738 A-S1), the column default stores it", async () => {
     const { writes } = stubDatabase();
     const response = await put(whole({}));
     expect(response.status).toBe(200);
-    expect(writes[0].skyDriver).toBe("due");
+    expect(writes[0]).not.toHaveProperty("skyDriver");
+    expect(userPreferences.skyDriver.default).toBe("due");
+    expect(userPreferences.skyDriver.notNull).toBe(true);
     expect((await response.json()).preference.skyDriver).toBe("due");
   });
 
