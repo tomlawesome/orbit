@@ -74,7 +74,7 @@ export const INBOX_FIXTURE = {
       attachmentCount: 1,
       classification: "unavailable",
       canApprove: false,
-      canDiscard: true,
+      canDiscard: false,
       message:
         "Its attachment was larger than Orbit can store. You can add the item yourself and attach the file from Documents.",
       reason: "too_large",

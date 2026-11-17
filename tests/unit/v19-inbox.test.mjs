@@ -158,4 +158,12 @@ describe("INBOX_FIXTURE failed receipts match the server's classification", () =
       expect(receipt.classification, receipt.id).toBe("unavailable");
     }
   });
+
+  it("a failed too-large receipt offers no discard, as the server does (ST-43)", () => {
+    const receipt = INBOX_FIXTURE.receipts.find((one) => one.id === "r-scan-only");
+    const server = reviewInboxState("failed", "document_too_large");
+    expect(server.canDiscard).toBe(false);
+    expect(receipt.canDiscard).toBe(server.canDiscard);
+    expect(receipt.canApprove).toBe(server.canApprove);
+  });
 });
