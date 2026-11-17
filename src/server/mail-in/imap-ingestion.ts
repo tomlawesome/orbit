@@ -491,6 +491,20 @@ function isMemberFailureRow(receipt: { status: string; failureCode: string | nul
   return Boolean(receipt) && (receipt!.status === "failed" || receipt!.status === "discarded") && receipt!.failureCode === failureCode;
 }
 
+/**
+ * A-S4: a receipt filed under a higher limit and still waiting for a retry,
+ * read again after the limit was lowered below its message, is settled as too
+ * large rather than left processing to be fetched every cycle.
+ */
+async function settleRetryAsTooLarge(receipt: { id: string; status: string }): Promise<void> {
+  if (receipt.status !== "processing") return;
+  await getDb().update(imapIngestionMessages).set({
+    status: "failed", receiptStatus: "cancelled", failureCode: "message_too_large",
+    attachmentProcessingLockedAt: null, attachmentProcessingLeaseToken: null, attachmentProcessingNextAttemptAt: null,
+    updatedAt: new Date(),
+  }).where(and(eq(imapIngestionMessages.id, receipt.id), eq(imapIngestionMessages.status, "processing")));
+}
+
 type ReceiptTransaction = Parameters<Parameters<ReturnType<typeof getDb>["transaction"]>[0]>[0];
 
 /**
@@ -1452,6 +1466,7 @@ export async function runImapIngestionCycle(
               .returning({ id: imapIngestionMessages.id });
             filed = Boolean(resolved);
           }
+          if (kept && !kept.created && oversized && kept.userId === sender.userId) await settleRetryAsTooLarge(kept);
           if (filed || isMemberFailureRow(kept, memberFailureCode)) unattributedUids.push(message.uid);
           return;
         }
@@ -1584,6 +1599,7 @@ export async function runImapIngestionCycle(
         /* An oversized message nobody is named for is deleted too, unanswered
            (#1724); its body was never read. */
         if (receipt && (!userId || strangerNow) && oversized && !receipt.userId && receipt.failureCode === "message_too_large") unattributedUids.push(message.uid);
+        if (receipt && !receipt.created && userId && receipt.userId === userId && oversized) await settleRetryAsTooLarge(receipt);
         if (receipt && userId && receipt.userId === userId && !oversized && !held && receipt.status !== "held") {
           const claim = await claimImapAttachmentProcessing(receipt.id);
           if (claim) await processImapAttachments(client, message, claim, receipt.userId, mailLimitBytes);
