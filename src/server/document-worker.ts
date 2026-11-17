@@ -21,7 +21,7 @@ import { purgeExpiredRejectedDocuments } from "@/server/document-maintenance/rej
 import { runScannerHealthCheck, SCANNER_HEALTH_CHECK_INTERVAL_MS } from "@/server/document-maintenance/scanner-health";
 import { getDocumentConfig } from "@/server/documents/config";
 import { pingClamAv } from "@/server/documents/scanner";
-import { claimExpiredPurgeJobs, failPurgeJob, processPurgeJob } from "@/server/document-maintenance/purge-jobs";
+import { claimExpiredPurgeJobs, failPurgeJob, processPurgeJob, PURGE_BATCH_SIZE } from "@/server/document-maintenance/purge-jobs";
 import { reconcileDocumentStorage, rejectInterruptedDocuments } from "@/server/document-maintenance/storage-reconciliation";
 import { backfillDocumentContentIndexes } from "@/server/document-maintenance/content-index-backfill";
 import { backfillImapAttachmentHashes } from "@/server/document-maintenance/imap-attachment-hash-backfill";
@@ -91,15 +91,30 @@ export async function runDocumentMaintenanceCycle(): Promise<void> {
       await failScannerRecoveryJob(job, "scanner_failed");
     }
   }
-  const jobs = await claimExpiredPurgeJobs();
-  for (const job of jobs) {
-    log.info({ event: "document.job", state: "starting", action: "retry_job" });
-    try {
-      const outcome = await processPurgeJob(job);
-      if (outcome === "completed") log.info({ event: "document.job", state: "ready", action: "none" });
-    } catch (error) {
-      await failPurgeJob(job, error);
+  await drainExpiredPurges();
+}
+
+/**
+ * #1605 P-1: the retention purge drains its whole backlog each cycle, a batch
+ * of PURGE_BATCH_SIZE at a time until a claim comes back short (a batched
+ * drain loop). Each job is tried at most once a cycle: a failed purge goes
+ * back to `retry`, and its five attempts are spread over five cycles.
+ */
+async function drainExpiredPurges(): Promise<void> {
+  const tried: string[] = [];
+  while (true) {
+    const jobs = await claimExpiredPurgeJobs(PURGE_BATCH_SIZE, tried);
+    for (const job of jobs) {
+      tried.push(job.id);
+      log.info({ event: "document.job", state: "starting", action: "retry_job" });
+      try {
+        const outcome = await processPurgeJob(job);
+        if (outcome === "completed") log.info({ event: "document.job", state: "ready", action: "none" });
+      } catch (error) {
+        await failPurgeJob(job, error);
+      }
     }
+    if (jobs.length < PURGE_BATCH_SIZE) return;
   }
 }
 
