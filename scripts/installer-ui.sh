@@ -512,10 +512,14 @@ installer_ui_read_value() {
   [[ "$maximum" =~ ^[1-9][0-9]{0,5}$ ]] || return 2
   [[ "$visibility" == text || "$visibility" == secret ]] || return 2
   [[ "${TERM:-}" != dumb && "${ORBIT_INSTALLER_PLAIN:-0}" != 1 ]] || repaint=0
-  # Plain mode does not repaint, so visible text is echoed as typed, with no
-  # escape sequences: the cursor stays at the end (arrow keys are ignored),
-  # and a backspace erases the last character (#1834).
+  # Three cases. Repainting terminal: the line is redrawn, arrows move the
+  # cursor. Plain mode on a normal TERM (ORBIT_INSTALLER_PLAIN=1/--plain): no
+  # echo is repainted, the cursor stays at the end, arrow keys are ignored
+  # (#1834). TERM=dumb: visible text is echoed with no escape sequences, arrows
+  # and edits move the cursor by \b and reprint (plain_echo).
   [[ "$visibility" != text ]] || ((repaint == 1)) || plain_echo=1
+  local arrows=1
+  [[ "${ORBIT_INSTALLER_PLAIN:-0}" != 1 || "${TERM:-}" == dumb ]] || arrows=0
 
   saved_state="$(stty -g <&"$terminal_fd" 2>/dev/null)" || return 1
   # Trap before raw mode, as in installer_ui_select: a signal landing between
@@ -545,10 +549,10 @@ installer_ui_read_value() {
         status=130
         break
         ;;
-      left) ((cursor > 0)) && { cursor=$((cursor - 1)); installer_ui_plain_move "$terminal_fd" "$plain_echo" back 1; } ;;
-      right) ((cursor < ${#value})) && { installer_ui_plain_move "$terminal_fd" "$plain_echo" fwd "${value:cursor:1}"; cursor=$((cursor + 1)); } ;;
-      home) installer_ui_plain_move "$terminal_fd" "$plain_echo" back "$cursor"; cursor=0 ;;
-      end) installer_ui_plain_move "$terminal_fd" "$plain_echo" fwd "${value:cursor}"; cursor=${#value} ;;
+      left) ((arrows == 0)) && continue; ((cursor > 0)) && { cursor=$((cursor - 1)); installer_ui_plain_move "$terminal_fd" "$plain_echo" back 1; } ;;
+      right) ((arrows == 0)) && continue; ((cursor < ${#value})) && { installer_ui_plain_move "$terminal_fd" "$plain_echo" fwd "${value:cursor:1}"; cursor=$((cursor + 1)); } ;;
+      home) ((arrows == 0)) && continue; installer_ui_plain_move "$terminal_fd" "$plain_echo" back "$cursor"; cursor=0 ;;
+      end) ((arrows == 0)) && continue; installer_ui_plain_move "$terminal_fd" "$plain_echo" fwd "${value:cursor}"; cursor=${#value} ;;
       backspace)
         if ((cursor > 0)); then
           value="${value:0:cursor-1}${value:cursor}"
