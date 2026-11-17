@@ -101,8 +101,9 @@ describe("a busy page turn is retried once, quietly (#1446 decision 3)", () => {
     expect(target.textContent).not.toContain(LOST);
   });
 
-  it("a second busy is the lost state, with try again, and no third request", async () => {
-    const { target, flushSync, asked } = await mountReader((n) => Promise.resolve(n === 2 ? busy("1") : ok()));
+  it("a second busy is the lost state, and a repeat press tries again, with no third request before it", async () => {
+    const { target, flushSync, asked } = await mountReader((n) => Promise.resolve(n === 3 ? busy("1") : ok()));
+    await press(target, flushSync, "Next page");
     await press(target, flushSync, "Next page");
     await vi.advanceTimersByTimeAsync(1_000);
     flushSync();
@@ -110,18 +111,16 @@ describe("a busy page turn is retried once, quietly (#1446 decision 3)", () => {
 
     expect(target.textContent).toContain(LOST);
     expect(target.textContent).not.toContain(BUSY);
-    const again = [...target.querySelectorAll("button")].find((b) => /try again/i.test(b.textContent ?? "") || /try again/i.test(b.getAttribute("aria-label") ?? ""));
-    expect(again, "a try again control, not only the words").toBeTruthy();
-
     await vi.advanceTimersByTimeAsync(60_000);
     flushSync();
     await quiet();
-    expect(asked.filter((n) => n === 2), "one request and one retry, no more, until pressed").toHaveLength(2);
+    expect(asked.filter((n) => n === 3), "one request and one retry, no more, until pressed").toHaveLength(2);
 
-    /** @type {HTMLButtonElement} */ (again).click();
+    /* The existing way to try again (#1605): a repeat press on the lost page. */
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "End", bubbles: true, cancelable: true }));
     flushSync();
     await quiet();
-    expect(asked.filter((n) => n === 2), "a press fetches the page again").toHaveLength(3);
+    expect(asked.filter((n) => n === 3), "a repeat press fetches the page again").toHaveLength(3);
   });
 
   it("clamps a long Retry-After to 10 s for the wait", async () => {
