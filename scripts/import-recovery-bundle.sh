@@ -158,7 +158,14 @@ require_deployment() {
 # key back, or puts back "no key" (#1420).
 # shellcheck disable=SC2317  # import-recovery-bundle.sh carries it unused
 require_live_key() {
+  refuse_dangling_key
   [[ -f "$secrets_directory/document-kek" && ! -L "$secrets_directory/document-kek" ]] || fail 'preflight/key failed; the configured document key is missing.'
+}
+
+# A dangling document-key link is neither a key nor its absence: name the link and how to put
+# the key back, never only "the key is missing" (#1536 O-F2, X-F3; #1603 O-S1, ops-2).
+refuse_dangling_key() {
+  [[ ! -L "$secrets_directory/document-kek" || -e "$secrets_directory/document-kek" ]] || fail 'preflight/key failed; .orbit-secrets/document-kek is a link to a file that does not exist, so the key file is missing. Remove the link and restore the document key from your kept copy of the secrets directory: rm .orbit-secrets/document-kek && install -m 0400 /path/to/your/copy/document-kek .orbit-secrets/document-kek, then run again.'
 }
 
 # Who owns what the engine writes (#1210 D5, #1258). The one-off runs as the
@@ -290,7 +297,7 @@ recovery_bundle="$1"
 require_deployment health
 # A dangling document-key link is neither a key nor its absence: refuse it before Orbit is
 # touched, naming the link and what to do (#1536 O-F2, X-F3).
-[[ ! -L "$secrets_directory/document-kek" || -e "$secrets_directory/document-kek" ]] || fail 'preflight/key failed; .orbit-secrets/document-kek is a link to a file that does not exist. Remove the link and run again.'
+refuse_dangling_key
 engine_host_identity
 run_engine "$recovery_bundle" import-recovery-bundle --preflight /orbit-input/bundle.tar </dev/null || exit $?
 keep_stopped_message='Orbit recovery import: the inner restore evidence was preserved; keep Orbit stopped and run bash scripts/restore.sh --recover.'
@@ -300,6 +307,12 @@ rollback_key="$secrets_directory/document-kek.import-rollback"
 rollback_key_message() {
   printf 'Orbit recovery import: the import was interrupted after it swapped the document key; the previous document key is preserved at %s. Keep Orbit stopped and move it back to %s by hand before starting Orbit.\n' \
     "$rollback_key" "$secrets_directory/document-kek" >&2
+}
+# A key-less import killed after it wrote the recovered key leaves this marker and no journal.
+no_key_marker="$secrets_directory/document-kek.import-no-key"
+no_key_marker_message() {
+  printf 'Orbit recovery import: the import was interrupted after it wrote the recovered document key to a deployment that had none; its marker is %s. Keep Orbit stopped and run bash scripts/import-recovery-bundle.sh again with the same bundle: it removes that key first.\n' \
+    "$no_key_marker" >&2
 }
 # A signal, a timeout or a fail() after the stop must not leave Orbit down once the engine has
 # ended (the trap waits for it): the engine's own restart is a no-op in its container. A locked
@@ -317,6 +330,12 @@ restart_app() {
   fi
   if [[ -e "$rollback_key" ]]; then
     rollback_key_message
+    return 0
+  fi
+  # A key-less import (#1420) killed before its journal recorded "no previous key" leaves its
+  # marker: the live key was written by that run, not the deployment's (#1603 L-F3).
+  if [[ -e "$no_key_marker" || -L "$no_key_marker" ]]; then
+    no_key_marker_message
     return 0
   fi
   compose start orbit-app >/dev/null 2>&1 || printf 'Orbit could not be started again.\n' >&2
@@ -347,6 +366,10 @@ if [[ -f "$journal_path" ]]; then
 fi
 if [[ -e "$rollback_key" ]]; then
   rollback_key_message
+  exit "$((status == 0 ? 1 : status))"
+fi
+if [[ -e "$no_key_marker" || -L "$no_key_marker" ]]; then
+  no_key_marker_message
   exit "$((status == 0 ? 1 : status))"
 fi
 compose start orbit-app >/dev/null 2>&1 || fail "Orbit could not be started again."

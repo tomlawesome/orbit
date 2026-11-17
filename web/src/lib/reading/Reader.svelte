@@ -122,6 +122,9 @@
   const lost = $derived((picture ? picture.failed : ownLost) || (brokenSrc !== "" && brokenSrc === shownSrc));
   const turn = $derived(pageTurn(pageNo, count));
   const UNDRAWN = "this page could not be drawn";
+  /* #1605 W-F8: a waiting attachment is not yet in Orbit, so its lost page
+     says so; the mail it came with may have been decided meanwhile. */
+  const STAGED_UNDRAWN = "this page of the waiting attachment could not be drawn";
 
   /** @param {number} next */
   function turnTo(next) {
@@ -335,7 +338,7 @@
         {#if lost}
           <!-- #1501: a page that could not be loaded says so where the page
                would be; the old page never stays up under the new number. -->
-          <p class="p-error rd-lost" role="alert">{UNDRAWN}</p>
+          <p class="p-error rd-lost" role="alert">{staged ? STAGED_UNDRAWN : UNDRAWN}</p>
         {:else}
         <img bind:this={img} src={shownSrc || undefined} alt="Page {drawnPage} of {doc.name}"
              style:width={natural.w ? `${Math.round(natural.w * shownScale)}px` : undefined}

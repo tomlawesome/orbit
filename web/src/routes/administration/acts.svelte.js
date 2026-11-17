@@ -463,6 +463,9 @@ export async function runMailTest(which, { card, reread }) {
   }
 }
 
+/** Job ids whose retry request is in flight (#1605 W-Q3). */
+const retryingJobs = new Set();
+
 /**
  * Retries a failed document job. The row shows queued at once (`retried`,
  * read by words.js's jobsOf); the next re-read settles it against the server.
@@ -470,6 +473,12 @@ export async function runMailTest(which, { card, reread }) {
  * @param {{ card: Card, retried: Record<string, { status: string, at: string, was: string }>, wake?: Wake }} on
  */
 export async function retryJob(job, { card, retried, wake = quiet }) {
+  /* #1605 W-Q3: one press is one request. A press while this job's retry is
+     in flight (a double tap, or the other layout's button) sends nothing, and
+     a row already shown queued is not retried again with its stale status:
+     the next re-read (a newer updatedAt) settles it first. */
+  if (retryingJobs.has(job.id) || retried[job.id]?.was === job.updatedAt) return;
+  retryingJobs.add(job.id);
   card.problem = null;
   try {
     await retryDocumentJob(job.id, job.status);
@@ -477,5 +486,7 @@ export async function retryJob(job, { card, retried, wake = quiet }) {
     wake(`${JOB_KINDS[job.kind] ?? job.kind} is queued to try again`);
   } catch (error) {
     card.problem = wordsOf(error);
+  } finally {
+    retryingJobs.delete(job.id);
   }
 }
