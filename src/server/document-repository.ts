@@ -1279,14 +1279,9 @@ export async function restoreDocument(userId: string, documentId: string): Promi
       // pending purge and its metadata so a valid retry can finalize it.
       throw new AppError("document_unavailable", "That document cannot currently be restored", 503);
     }
-    /* #1605 P-25: a document no item binds is a staged upload (every path that
-       leaves one unbound gives it a hold, and binding clears it). Deleted the
-       ordinary way, its hold became the retention window; restored, it gets a
-       fresh staged hold back, or nothing would ever expire the unbound copy.
-       Decided in the update, so a bind that lands first keeps it held by none. */
     const [changed] = await transaction.update(documents).set({
       lifecycle: "available",
-      deleteAfter: sql`case when ${documents.itemId} is null then ${new Date(Date.now() + stagedUploadHoldMs(config)).toISOString()}::timestamptz else null end`,
+      deleteAfter: null,
       version: sql`${documents.version} + 1`,
       updatedAt: new Date(),
     }).where(and(eq(documents.id, documentId), eq(documents.lifecycle, "pending_deletion"))).returning();
