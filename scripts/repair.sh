@@ -1320,12 +1320,14 @@ set -Eeuo pipefail
 # target's own step re-proves the secrets directory is still real,
 # non-symlink, mode 700, and that the target itself is still genuinely
 # missing (the same TOCTOU re-check `fix-permissions` performs), then
-# writes the new secret exactly like `configure.sh`'s own
-# `ensure_secret_file` (scripts/configure.sh:777-802): `mktemp`ped under
-# the secrets directory (mode 600 from creation, before any content lands
-# in it), content written, mode 600 set again defensively, then an atomic
-# same-directory `mv` onto the live secret path — never a different
-# discipline invented here. When this run's dangerous batch ALSO contains
+# writes the new secret with the discipline of `configure.sh`'s own
+# `ensure_secret_file` (scripts/configure.sh:777-802): a name repair
+# chooses under the secrets directory, created exclusively by the
+# deployment folder's owner (`dd conv=excl` under umask 077, so mode 600
+# from creation, before any content lands in it; #1873 X1), content
+# written, mode 600 set again defensively, then an atomic same-directory
+# `mv` onto the live secret path — never a different discipline invented
+# here. When this run's dangerous batch ALSO contains
 # rotate-database-credential, regenerate-secret's targets run AFTER the
 # rotate sequence completes successfully (see execute_dangerous_batch),
 # never before and never if rotation itself failed.
@@ -1346,8 +1348,8 @@ set -Eeuo pipefail
 # recovered by hand; if the failure is at or after rotate step 3 (i.e. step
 # 2 already staged a new credential), the staged file's fixed path is ALSO
 # named, since the database may already be expecting that value. A
-# regenerate-secret step failure needs no such guidance — `mktemp` + `mv` is
-# all-or-nothing, so a failed target has written nothing recoverable or
+# regenerate-secret step failure needs no such guidance — exclusive create +
+# `mv` is all-or-nothing, so a failed target has written nothing recoverable or
 # stale to point at. EVERY dangerous-class plan entry deferred to this run
 # — including a regenerate-secret target never reached because rotation
 # failed first, or vice versa — is then reported
@@ -1475,14 +1477,16 @@ set -Eeuo pipefail
 # with no controlling terminal and no `ORBIT_REPAIR_PROMPTS=machine` opt-in
 # declines — fail-closed — rather than guessing at consent. Declining (by
 # either channel, or by reaching this fail-closed default) writes nothing at
-# all: no `mktemp` call is ever made before confirmation succeeds, so a
-# decline leaves no temporary file behind either.
+# all: no file is created before confirmation succeeds, so a decline
+# leaves no temporary file behind either.
 #
 # The write mirrors the discipline already in this script (see the checkpoint
-# bundle and the config-rollback restore above): `mktemp` under the
-# installation directory (mode 600 from creation), the full content written,
-# mode 600 set again defensively, then an atomic same-directory rename onto a
-# second, equally random `mktemp`-derived final name — so a reader can never
+# bundle and the config-rollback restore above): a name repair chooses under
+# the installation directory (`.orbit-repair-diagnostics.` and six random
+# characters), created exclusively by the deployment folder's owner (mode 600
+# from creation; #1873 X1), the full content written, mode 600 set again
+# defensively, then an atomic same-directory rename onto that name plus
+# `.txt`, as unpredictable as the first — so a reader can never
 # observe a partially-written file at the path this run ultimately reports.
 # That path is reported on stderr only, exactly like the checkpoint bundle
 # path above — never on stdout. No encryption: these are public values under
@@ -1496,8 +1500,8 @@ set -Eeuo pipefail
 #      confirmation channel was available at all (see above); zero mutation
 #      either way.
 #   2  usage error.
-#   4  failed — the file could not be created/written (e.g. `mktemp`/`mv`
-#      failure); zero mutation.
+#   4  failed — the file could not be created/written (e.g. the exclusive
+#      create or `mv` failed); zero mutation.
 #   5  not-an-orbit-installation — identical trigger/meaning to every other
 #      mode; the check/plan content is still printed (matching `--check`/
 #      `--plan`'s own early-exit behavior), but no identity line, preview,
@@ -1623,7 +1627,8 @@ cleanup() {
 
   [[ -z "${compose_image_tmp:-}" ]] || rm -f -- "$compose_image_tmp" 2>/dev/null || true
   [[ -z "${compose_live_tmp:-}" ]] || rm -f -- "$compose_live_tmp" 2>/dev/null || true
-  # #1848 FR-S1b: retire-smtp-lines's mktemp names, held while they exist,
+  # #1848 FR-S1b: the owner's temporary names (#1873 X1: root chose them),
+  # held while they exist,
   # removed as the folder's owner (#1848 FIX-S1).
   [[ -z "${smtp_rewrite_tmp:-}" ]] || as_folder_owner rm -f -- "$smtp_rewrite_tmp" 2>/dev/null || true
   [[ -z "${smtp_step_tmp:-}" ]] || as_folder_owner rm -f -- "$smtp_step_tmp" 2>/dev/null || true
@@ -3640,8 +3645,10 @@ restore_journal_named() {
 # `unreadable` and never
 # opened (a FIFO would block; review 5). A regular file is opened
 # read-write when the user running repair may write it, else read-only, and
-# must still be the file checked (#1873 X3); one that then cannot be opened,
-# or is not that file, is `unreadable` too. A non-blocking lock has three outcomes (audit
+# must still be the file checked (#1873 X3); one that -w calls writable but
+# that will not open read-write is `unwritable` (never reopened read-only);
+# one that otherwise cannot be opened, or is not that file, is `unreadable`
+# too. A non-blocking lock has three outcomes (audit
 # v0.3.9-b O-R1): taken (prints nothing); held by another process, which
 # flock reports only as a silent exit 1 (`held`); or not takeable at all,
 # e.g. NFSv4 refusing an exclusive lock on a read-only descriptor, which
@@ -3707,7 +3714,14 @@ probe_backup_restore_lock() {
       ;;
   esac
   if [[ -w "$backup_restore_lock_path" ]]; then
+    # No read-only fallback: -w said writable, so a refused read-write
+    # open (NFS root_squash, a mode changed meanwhile) fails closed and is
+    # named as such (`unwritable`).
     { exec {fd}<>"$backup_restore_lock_path"; } 2>/dev/null || fd=""
+    if [[ -z "$fd" ]]; then
+      lock_probe_state=unwritable
+      return 0
+    fi
   else
     { exec {fd}<"$backup_restore_lock_path"; } 2>/dev/null || fd=""
   fi
@@ -3749,6 +3763,10 @@ lock_state_refusal() {
   local lock_state="$1"
   if [[ "$lock_state" == unreadable ]]; then
     printf "repair can't check whether a backup, restore or export is running: the lock at %s can't be read" \
+      "$backup_restore_lock_path"
+  elif [[ "$lock_state" == unwritable ]]; then
+    # #1873 X3: -w said writable, the read-write open was refused.
+    printf "repair can't check whether a backup, restore or export is running: the lock at %s could not be opened for writing, although its permissions say it can be; make it writable for the user running repair (on NFS, check root_squash), then re-run repair" \
       "$backup_restore_lock_path"
   elif [[ "$lock_state" == uncreatable ]]; then
     if [[ "$lock_made_as_owner" == 1 && "$(id -u)" == 0 && "${smtp_folder_uid:-0}" != 0 ]]; then
@@ -4382,7 +4400,8 @@ do_fix_permissions() {
 # the owner renames it onto the name with mv -nT, which refuses to overwrite
 # a file that appeared meanwhile and, with -T, never moves the file into a
 # folder that took the name (#1873 X2); the rename counts only when the
-# temporary file is gone and docker-compose.yml is a regular file. The
+# temporary file is gone and docker-compose.yml is a regular file, also
+# when the owner's mv step timed out after the rename landed. The
 # image's bytes are capped at 1 MiB ($owner_read_cap) while they stream: the
 # owner keeps at most one byte more, and a file over the cap fails the
 # restore with a line saying it is too large (#1873 X4). Root writes,
@@ -4409,11 +4428,17 @@ do_restore_compose_file() {
     if [[ "$status" == 4 ]]; then
       printf "Orbit repair: restore-compose-file: the pinned image's %s is too large (over 1 MiB), so it was not restored.\n" "$compose_file" >&2
     elif [[ "$status" == 0 ]]; then
-      # mv -n leaves the source in place when the target appeared in the
+      # mv -nT leaves the source in place when the target appeared in the
       # meantime (and, in newer coreutils, says so with exit 1).
       as_folder_owner mv -nT -- "$tmp" "$compose_file" || true
       if [[ "$owner_step_problem" == "timed out" ]]; then
-        status=1
+        # #1873 X2: a rename is atomic, so a step stopped after it landed
+        # leaves the temporary name gone and docker-compose.yml a regular
+        # file (mv -nT never replaces one that appeared): that restore is
+        # done. Anything else stays failed.
+        if [[ -e "$tmp" || -L "$tmp" ]] || ! is_regular_non_symlink_file "$compose_file"; then
+          status=1
+        fi
       elif [[ -e "$tmp" || -L "$tmp" ]] || ! is_regular_non_symlink_file "$compose_file"; then
         printf 'Orbit repair: restore-compose-file: %s appeared while it was being restored (a file, a link or a folder), so the restored copy was not moved onto it.\n' "$compose_file" >&2
         status=1
@@ -4872,14 +4897,16 @@ restart_compose_service() {
 # stderr to a 4 KiB pipe root prints on failure, a cleared environment, and
 # every other descriptor closed, the held lock's included. That includes the backup/restore lock: a missing
 # backups folder or lock file is made as the owner (wherever ORBIT_BACKUP_DIR
-# points), and root only opens the lock read-only and takes flock on it. Root
+# points), and root only opens the existing lock (read-write when it may
+# write it, else read-only, #1873 X3) and takes flock on it. Root
 # reads, decides and runs docker; it creates, writes, chmods, renames and
 # removes nothing under the folder, so never through a symlink. In a
 # root-owned folder root writes directly. Either way a .orbit-secrets or its
 # secret file, an orbit-install-backups, an undo folder to adopt or the one
 # the step record names that belongs to anyone but the user whose files the
 # run makes is refused, named, before anything is written. Every file goes to
-# a name mktemp chooses and is renamed into place. Root in a folder it does
+# a name root chooses, which the owner creates exclusively (dd conv=excl,
+# #1873 X1), and is renamed into place. Root in a folder it does
 # not own refuses, nothing changed, without setpriv or setsid, or when the
 # owner has no user-database entry.
 readonly smtp_retirement_record=".orbit-smtp-retirement"
@@ -5310,14 +5337,14 @@ smtp_env_lines() {
 }
 
 # smtp_write_record <step>: the step record (step=, and copy= naming the undo
-# copy's folder when one is known), written to a name mktemp chooses (created
-# O_EXCL, mode 600) and renamed over the record, so no fixed name a planted
+# copy's folder when one is known), written to a name root chooses (created
+# by the owner O_EXCL, mode 600, #1873 X1) and renamed over the record, so no fixed name a planted
 # symlink could sit at is ever opened for writing (FIX-S1).
 smtp_write_record() {
   smtp_owner_write . "${smtp_retirement_record}.XXXXXX" 600 "$smtp_retirement_record" smtp_record_lines "$1"
 }
 
-# #1848 FR-S1b: the mktemp name that exists right now, for the EXIT trap
+# #1848 FR-S1b: the temporary name that exists right now, for the EXIT trap
 # (cleanup): the rewrite of .env-orbit, and one of the record or undo-copy
 # temporary files, which never exist at the same time.
 smtp_rewrite_tmp=""
@@ -5393,8 +5420,8 @@ smtp_find_orphan_copy() {
 }
 
 # smtp_write_copy <folder>: the undo copy of the lines the retirement removes
-# from .env-orbit, written as the owner to a mktemp name in <folder> (mode
-# 600) and renamed over <folder>/.env-orbit, so an existing copy (a hard
+# from .env-orbit, written as the owner to a name root chooses in <folder>
+# (created exclusively, mode 600, #1873 X1) and renamed over <folder>/.env-orbit, so an existing copy (a hard
 # link or a symlink included) is replaced, never written through (#1834,
 # #1848 FIX-S1).
 smtp_write_copy() {
@@ -6222,7 +6249,8 @@ do_checkpoint_step() {
   fi
 
   # #1872 V3: the folder (mode 700) and the bundle in it (mode 600, by
-  # rename from a mktemp name beside it) are made by the deployment
+  # rename from a root-chosen name beside it that the owner creates
+  # exclusively, #1873 X1) are made by the deployment
   # folder's owner; root only produces the bundle's bytes.
   owner_private_dir checkpoint_dir ./.orbit-repair-checkpoint. || {
     # #1872 V10: a folder its timed-out owner step made and could not
@@ -6264,8 +6292,8 @@ do_checkpoint_step() {
 }
 
 # Step 2. Generates a fresh credential, stages it to the FIXED
-# $staged_postgres_password_path, by rename from a mktemp name in the same
-# folder, BEFORE touching the database (see "Step
+# $staged_postgres_password_path, by rename from a root-chosen name in the
+# same folder that the owner creates exclusively (#1873 X1), BEFORE touching the database (see "Step
 # iterator" above for why), then rotates the database role over a
 # local-socket (trust-auth) connection so no prior knowledge of the
 # database's current password is ever required.
@@ -6277,7 +6305,8 @@ do_rotate_credential_step() {
 
   local new_password="" status=0
   new_password="$(generate_hex_secret)" || return 1
-  # #1872 V4: the deployment folder's owner makes the mktemp file, writes the
+  # #1872 V4: the deployment folder's owner creates the root-chosen file
+  # exclusively (#1873 X1), writes the
   # password it reads on stdin (printf is a builtin: on no command line),
   # sets mode 600 and renames it onto the staged name (smtp_owner_write).
   if ! smtp_owner_write . "$secrets_directory/.installing.XXXXXX" 600 "$staged_postgres_password_path" \
@@ -6313,7 +6342,7 @@ do_update_config_step() {
 
 # Step 4 of the rotation, and the reason it is not do_restart_services itself.
 #
-# update-config lands the new secret with `mktemp` + `mv` (:3113), which is
+# update-config lands the new secret with a rename of a newly made file, which is
 # what makes a half-written secret impossible -- and which necessarily gives
 # the path a NEW inode. A Compose `file:` secret is a bind mount of an inode,
 # not of a path, so any container that keeps running across that rename holds
@@ -6446,8 +6475,9 @@ run_rotate_database_credential_steps() {
 #
 # The write itself mirrors configure.sh's ensure_secret_file discipline
 # (scripts/configure.sh:777-802) exactly, not a different one invented here:
-# staged under the secrets directory via mktemp (which creates the file at
-# mode 600 atomically, before any content is written), content written,
+# staged under the secrets directory at a name repair chooses, which the
+# deployment folder's owner creates exclusively (dd conv=excl under umask
+# 077: mode 600 atomically, before any content is written; #1873 X1), content written,
 # mode 600 set again defensively, then an atomic same-directory rename onto
 # the live secret path. No checkpoint step: the finding only ever fires when
 # the secret file is absent/empty, so there is no valid prior content to
@@ -6499,7 +6529,7 @@ print_manual_restart_commands() {
 # decision 8: "the iterator... stops at the first failed step; nothing
 # later runs"). No checkpoint bundle to name in failure guidance here —
 # unlike rotate-credential, a failed regenerate step has written nothing
-# (mktemp + rename is all-or-nothing), so there is no half-applied state to
+# (exclusive create + rename is all-or-nothing), so there is no half-applied state to
 # recover, only a target that still needs a secret.
 #
 # SS1-S5: a freshly minted secret only reaches the running orbit-app
@@ -6936,7 +6966,7 @@ snapshot_run_checkpoints() {
 }
 
 # True when $1 can be read and holds nothing but the checkpoint bundle (a
-# regular file), or nothing at all (a run killed between mktemp and the
+# regular file), or nothing at all (a run killed between mkdir and the
 # bundle write). An unreadable folder cannot be listed, so it is never judged
 # removable.
 is_removable_checkpoint_dir() {
@@ -7150,9 +7180,10 @@ confirm_export_diagnostics() {
 
 # Writes $1 (the already-previewed, already-confirmed export content) to a
 # freshly created file, mirroring the checkpoint bundle's own discipline:
-# mktemp (mode 600 from creation) under the installation directory, content
+# a name repair chooses under the installation directory, created
+# exclusively by the owner (mode 600 from creation; #1873 X1), content
 # written, mode 600 set again defensively, then an atomic same-directory
-# rename onto a second, equally random final name — so a reader can never
+# rename onto that name plus `.txt` — so a reader can never
 # observe a partially-written file at the path this run ultimately reports.
 # Returns 0 and prints the final path on stderr only (never stdout, matching
 # the checkpoint bundle path above) on success; returns 1, with any partial
