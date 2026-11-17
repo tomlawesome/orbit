@@ -328,35 +328,7 @@ describe("repair.sh restores a missing docker-compose.yml from the image (#1484)
     expect(file.isSymbolicLink?.() ?? false).toBe(false);
   });
 
-  // FIX-S1 (audit v0.3.9-c, #1844, V6): run as root, the restore gives the mktemp
-  // name the folder's owner without following a link (`chown --no-dereference`).
-  // Root is simulated by shims, as in repair-retire-smtp-1817.test.mjs: `id -u`
-  // prints 0; `chown` logs "<args> exists=<yes|no> link=<yes|no>" for its last
-  // argument and runs the real chown (which succeeds: --reference=. names the
-  // test user's own uid).
-  it("FIX-S1: a root restore chowns the mktemp name with --no-dereference", () => {
-    const targetDir = makeDeployment({});
-    const shimDir = scratchDir("orbit-repair-compose-root-shims-");
-    const log = join(shimDir, "chown.log");
-    const real = (name) => spawnSync("bash", ["-c", `command -v ${name}`], { encoding: "utf8" }).stdout.trim();
-    writeFileSync(join(shimDir, "id"), `#!/usr/bin/env bash\nif [[ $# -eq 1 && "$1" == -u ]]; then echo 0; exit 0; fi\nexec '${real("id")}' "$@"\n`);
-    chmodSync(join(shimDir, "id"), 0o755);
-    writeFileSync(
-      join(shimDir, "chown"),
-      `#!/usr/bin/env bash\nlast="\${@: -1}"\nif [[ -e "$last" || -L "$last" ]]; then there=yes; else there=no; fi\nif [[ -L "$last" ]]; then link=yes; else link=no; fi\nprintf '%s exists=%s link=%s\\n' "$*" "$there" "$link" >> '${log}'\nexec '${real("chown")}' "$@"\n`,
-    );
-    chmodSync(join(shimDir, "chown"), 0o755);
-
-    const result = runRepair(targetDir, ["--execute", "--safe-only"], { pathPrefix: shimDir });
-
-    const restored = join(targetDir, "docker-compose.yml");
-    expect(existsSync(restored), `docker-compose.yml was not restored.\n${result.combined}`).toBe(true);
-    expect(readFileSync(restored).equals(IMAGE_COMPOSE)).toBe(true);
-    expect(fileMode(restored)).toBe("644");
-    const calls = existsSync(log) ? lines(readFileSync(log, "utf8")) : [];
-    expect(calls, `chown calls:\n${calls.join("\n")}`).toHaveLength(1);
-    expect(calls[0]).toMatch(/^--no-dereference --reference=\. -- \.\/\.docker-compose\.yml\.repair\.[A-Za-z0-9]{6} exists=yes link=no$/u);
-  });
+  // FIX-S1 (root restore chowns the mktemp name) retired: #1857 S3 moved the write to the folder owner through setpriv with no root chown; covered by "the temporary file, its mode and the rename all run under setpriv" in repair-owner-writes-1857.test.mjs.
 
   it("reads the file from the image pinned in .env-orbit (the digest, never a tag or a pull)", () => {
     const targetDir = makeDeployment({});
