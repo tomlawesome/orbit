@@ -866,10 +866,10 @@ import { STAGED_PAGE_TIMEOUT_MS } from "./staged-page.js";
  * A mutating fetch with the session's CSRF token, like applyCommand's.
  *
  * @param {string} path
- * @param {{ method?: string, body?: unknown, signal?: AbortSignal }} [options]
+ * @param {{ method?: string, body?: unknown, signal?: AbortSignal, headers?: Record<string, string> }} [options]
  * @returns {Promise<Response>}
  */
-async function csrfFetch(path, { method = "POST", body, signal } = {}) {
+async function csrfFetch(path, { method = "POST", body, signal, headers = {} } = {}) {
   const { csrfToken } = await readSession();
   /* A FormData goes as it is (#1566): the browser streams it, a File part
      straight from disk, and sets the multipart type with its boundary. */
@@ -878,6 +878,7 @@ async function csrfFetch(path, { method = "POST", body, signal } = {}) {
     method,
     credentials: "same-origin",
     headers: {
+      ...headers,
       ...(body !== undefined && !form ? { "content-type": "application/json" } : {}),
       "x-csrf-token": csrfToken,
     },
@@ -2729,16 +2730,18 @@ export async function inspectPickedDocument(householdId, file, { signal } = {}) 
  * time alone where the mockup showed "policy-schedule.pdf · 2d ago".
  *
  * The address is capability-bearing — anyone holding it can post into this
- * user's review queue — so it is never cached here, only rendered.
+ * user's review queue — so it is never cached here, only rendered. What is
+ * kept is the answer's `ETag` (#1848 W-R1): the generation the address came
+ * from, a count that names no one, which the next rotate sends as `If-Match`.
  *
  * @param {{ signal?: AbortSignal }} [options]
  * @returns {Promise<Relay>}
  */
 export async function readRelay({ signal } = {}) {
+  const response = await fetch("/api/settings/mail-relay", { credentials: "same-origin", ...(signal ? { signal } : {}) });
   /** @type {{ relay?: { address?: string, listening?: string, lastReceivedLabel?: string, lastReceived?: string, ingest?: string, adminPaused?: boolean, sender?: RelaySender | null, senders?: RelaySenderRow[] } }} */
-  const body = await json(
-    await fetch("/api/settings/mail-relay", { credentials: "same-origin", ...(signal ? { signal } : {}) }),
-  );
+  const body = await json(response);
+  keepRelayTag(response);
   const relay = body.relay ?? {};
   return {
     /* No address is a real answer, not a gap: mail-in may be off. */
@@ -2760,6 +2763,8 @@ export async function readRelay({ signal } = {}) {
  * The body carries an action and NOTHING ELSE — no user, no generation, no
  * address. The endpoint acts on the session's own member and cannot be asked
  * to act on anyone else, and the seam must not be the place that changes that.
+ * A rotate or cut off sends the last read's `ETag` as `If-Match` (#1848 W-R1),
+ * so a press made against an address that has since changed rotates nothing.
  *
  * `rotate` keeps the old address collecting for fourteen days so mail already
  * on its way still arrives; `cutOff` stops it immediately, which is what a
@@ -2775,8 +2780,16 @@ export async function readRelay({ signal } = {}) {
  * @returns {Promise<Relay>}
  */
 export async function rotateRelay(action) {
+  const conditional = action === "rotate" || action === "cut_off";
+  const response = await csrfFetch("/api/settings/mail-relay", {
+    method: "PUT",
+    body: { action },
+    ...(conditional && relayTag ? { headers: { "if-match": relayTag } } : {}),
+    ...(action === "rotate" ? { signal: AbortSignal.timeout(STAGED_PAGE_TIMEOUT_MS) } : {}),
+  });
   /** @type {{ relay?: { address?: string, listening?: string, lastReceived?: string, ingest?: string, adminPaused?: boolean, sender?: RelaySender | null, senders?: RelaySenderRow[] } }} */
-  const body = await json(await csrfFetch("/api/settings/mail-relay", { method: "PUT", body: { action }, ...(action === "rotate" ? { signal: AbortSignal.timeout(STAGED_PAGE_TIMEOUT_MS) } : {}) }));
+  const body = await json(response);
+  keepRelayTag(response);
   const relay = body.relay ?? {};
   return {
     address: relay.address ?? NO_ADDRESS,
@@ -2789,12 +2802,24 @@ export async function rotateRelay(action) {
   };
 }
 
+/** The relay's last `ETag`, sent back as `If-Match` (#1848 W-R1); null until a read gives one. */
+/** @type {string | null} */
+let relayTag = null;
+
+/** @param {Response} response */
+function keepRelayTag(response) {
+  const tag = response.headers?.get?.("etag");
+  if (tag) relayTag = tag;
+}
+
 /**
  * Rotates the relay address, and when the outcome is unknown, finds it out
  * (#1810 W-R2). Standard pattern: re-read after an unknown-outcome write. A
  * refusal (4xx) is the server's answer and is thrown as it is; anything else
  * (no answer at all, a 5xx, a lost response) may have applied, so the relay
- * is read again and its address compared with the one held before. Answers
+ * is read again and its address compared with the one held before. A 412
+ * (#1848 W-R1) is read the same way: the relay moved on since this screen
+ * read it, perhaps by this member's own earlier press whose answer was lost. Answers
  * the relay to show and whether it rotated; `relay` is null when even the
  * re-read could not answer, or answered with no address, and nothing is known.
  *
@@ -2806,7 +2831,7 @@ export async function rotateRelayReconciled(before) {
     return { relay: await rotateRelay("rotate"), rotated: true };
   } catch (error) {
     const status = error instanceof WorkspaceError ? error.status : undefined;
-    if (status !== undefined && status >= 400 && status < 500) throw error;
+    if (status !== undefined && status >= 400 && status < 500 && status !== 412) throw error;
   }
   try {
     const relay = await readRelay({ signal: AbortSignal.timeout(STAGED_PAGE_TIMEOUT_MS) });
@@ -2818,8 +2843,12 @@ export async function rotateRelayReconciled(before) {
   }
 }
 
-/** What a rotate says when the server refused it, or the re-read shows the old address (#1151 W2-R6). */
+/** What a rotate says when the server refused it (#1151 W2-R6). */
 export const ROTATE_UNCHANGED = "not rotated — your address is unchanged. try again";
+/** What a rotate says when the member is over the rotation limits (#1848 W-R1). */
+export const ROTATE_LIMITED = "not rotated — rotated too often lately. your address is unchanged; try again later";
+/** What a rotate says when its outcome was unknown and the re-read shows the old address (#1848 W-R1). */
+export const ROTATE_NOT_CONFIRMED = "rotate not confirmed — your address still reads the same. try again";
 /** What a rotate says when neither it nor the re-read after it answered. */
 export const ROTATE_UNKNOWN = "rotate not confirmed — Orbit could not reach your relay. reload to see your address";
 

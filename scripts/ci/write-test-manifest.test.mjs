@@ -188,12 +188,12 @@ describe("install.sh's update-path check against a write-test-manifest.sh manife
     expect(result.stdout).not.toContain("reason=update-path");
     expect(result.stderr).not.toContain("This install is on");
     expect(/^docker pull /mu.test(result.calls)).toBe(true);
-  });
+  }, 30_000); // runs install.sh: a real subprocess, slow on a loaded host (docs/flakes.md)
 
   it("refuses an update from v0.3.5 when it is not passed", () => {
     const result = update("v0.3.5", {});
     expect(result.status).not.toBe(0);
     expect(eventLines(result.stdout).some((e) => e.includes("reason=update-path"))).toBe(true);
     expect(/^docker pull /mu.test(result.calls)).toBe(false);
-  });
+  }, 30_000);
 });

@@ -83,13 +83,44 @@ describe("publish-from-gitlab workflow", () => {
     expect(step).not.toContain("continue-on-error");
   });
 
-  it("binds the SBOM it will attest to GitLab's signed predicate before copying anything (#1824)", () => {
+  it("publishes the SBOM the verifier extracted from GitLab's signed attestation, not a handed-off file (D-S6 43a)", () => {
     const verify = workflow.indexOf("- name: Verify GitLab's signed evidence before copying");
     const step = workflow.slice(verify, workflow.indexOf("\n      - name:", verify + 1));
-    // The same file the SBOM attestation step later uses.
-    expect(step).toContain("ORBIT_SBOM_FILE: ${{ steps.evidence.outputs.sbom }}");
-    expect(workflow).toContain("sbom-path: ${{ steps.evidence.outputs.sbom }}");
+    // The verifier writes the verified SPDX document to ORBIT_SBOM_OUT, and the
+    // SBOM attestation step later reads exactly that path.
+    const out = step.match(/^\s*ORBIT_SBOM_OUT: (.+)$/mu)?.[1]?.trim();
+    expect(out, "ORBIT_SBOM_OUT in the verify step").toBeTruthy();
+    expect(workflow).toContain(`sbom-path: ${out}`);
     expect(workflow.indexOf("sbom-path:")).toBeGreaterThan(verify);
+    // Nothing takes the SBOM from the handoff any more.
+    expect(workflow).not.toContain("steps.evidence.outputs.sbom");
+    expect(workflow).not.toContain("ORBIT_SBOM_FILE");
+  });
+
+  it("copies the spdxjson referrers to GHCR along with the validation ones (D-S6 43a addendum 4)", () => {
+    const copy = workflow.indexOf("- name: Copy the exact tested digest");
+    const step = workflow.slice(copy, workflow.indexOf("\n      - name:", copy + 1));
+    expect(step).toContain("https://spdx.dev/Document");
+    // Still the validation type too, still copied by digest.
+    expect(step).toContain("PREDICATE_TYPE");
+    expect(step).toContain("dev.sigstore.bundle.predicateType");
+    expect(step).toMatch(/crane copy "\$\{THROWAWAY_IMAGE\}@\$\{referrer\}"/u);
+  });
+
+  it("makes the GHCR verify step demand the SBOM attestation, writing it to a temporary path (D-S6 43a addendum 4)", () => {
+    const arrival = workflow.indexOf("- name: Verify GitLab's evidence arrived on GHCR");
+    expect(arrival).toBeGreaterThanOrEqual(0);
+    const step = workflow.slice(arrival, workflow.indexOf("\n      - name:", arrival + 1));
+    expect(step).toContain("scripts/ci/verify-validation-evidence.sh");
+    expect(step).toMatch(/ORBIT_SBOM_OUT[:=]/u);
+    const out = step.match(/ORBIT_SBOM_OUT[:=]\s*(\S+)/u)?.[1] ?? "";
+    expect(out).toMatch(/RUNNER_TEMP|mktemp|\/tmp\//u);
+  });
+
+  it("no longer waits for, fetches or requires an SBOM in the handoff (D-S6 43a)", () => {
+    expect(awaitScript).not.toContain("readonly SBOM=");
+    expect(awaitScript).not.toContain("image.spdx.json");
+    expect(awaitScript).not.toMatch(/printf 'sbom=/u);
   });
 
   it("checks that GitLab's attestation arrived on GHCR before the preview channel tag is moved (#1824)", () => {
@@ -135,7 +166,7 @@ describe("publish-from-gitlab workflow", () => {
     expect(record).toBeGreaterThan(verify);
     expect(workflow).toContain("actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6");
     expect(workflow).toContain("subject-digest: ${{ steps.evidence.outputs.digest }}");
-    expect(workflow).toContain("sbom-path: ${{ steps.evidence.outputs.sbom }}");
+    expect(workflow).toContain("sbom-path: ");
     expect(workflow).toContain("gh attestation verify");
     expect(workflow).toContain("oci://${REGISTRY}/${IMAGE_NAME}@${IMAGE_DIGEST}");
   });
@@ -209,9 +240,7 @@ describe("github-await-handoff.sh", () => {
     // file and its fields.
     expect(recordScript).toContain('output="${output_dir}/gitlab-tested-image.json"');
     expect(ci).toContain(".orbit-supply-chain/gitlab-tested-image.json \\\n");
-    expect(ci).toContain(".orbit-supply-chain/image.spdx.json \\\n");
     expect(awaitScript).toContain("readonly EVIDENCE=gitlab-tested-image.json");
-    expect(awaitScript).toContain("readonly SBOM=image.spdx.json");
     for (const field of ["commit", "ref", "pipelineId", "imageDigest", "imageReference", "recordedAt"]) {
       expect(recordScript).toContain(`"${field}":`);
       expect(awaitScript).toContain(field);
@@ -293,5 +322,90 @@ describe("gitlab-record-tested-image.sh", () => {
       expect(result.status, bad).toBe(1);
       expect(result.stderr, bad).toContain("image reference");
     }
+  });
+});
+
+/*
+ * The copy step's referrer filter (D-S6 43a addendum 2): the node -e script is
+ * sliced out of the workflow and run on sample referrer indexes, passed the
+ * predicate type the way the step does.
+ */
+describe("publish-from-gitlab copy step referrer filter", () => {
+  const VALIDATION_TYPE = "https://tomlawson.io/attestations/orbit-validation/v1";
+  const SPDX_TYPE = "https://spdx.dev/Document";
+  const BUNDLE = "application/vnd.dev.sigstore.bundle.v0.3+json";
+  const stepStart = workflow.indexOf("name: Copy the exact tested digest");
+  const step = workflow.slice(stepStart);
+  const open = step.indexOf("node -e '");
+  const close = step.indexOf("' -- \"${predicate_type}\"", open);
+  const filter = step.slice(open + "node -e '".length, close);
+  const d = (c) => `sha256:${c.repeat(64)}`;
+  const referrer = (digest, predicateType, artifactType = BUNDLE) => ({
+    mediaType: "application/vnd.oci.image.manifest.v1+json",
+    digest,
+    size: 1,
+    artifactType,
+    annotations: predicateType === undefined ? {} : { "dev.sigstore.bundle.predicateType": predicateType },
+  });
+  const runFilter = (manifests) =>
+    spawnSync("node", ["-e", filter, "--", VALIDATION_TYPE], {
+      input: JSON.stringify({ schemaVersion: 2, manifests }),
+      encoding: "utf8",
+    });
+
+  it("the extracted filter is the step's node script, and the step passes it the verifier's predicate type", () => {
+    expect(open).toBeGreaterThan(-1);
+    expect(close).toBeGreaterThan(open);
+    expect(filter).toContain("process.argv[1]");
+    expect(step).toContain("sed -n 's/^readonly PREDICATE_TYPE=");
+    const verifier = readFileSync(new URL("./ci/verify-validation-evidence.sh", import.meta.url), "utf8");
+    expect(verifier).toContain(`readonly PREDICATE_TYPE="${VALIDATION_TYPE}"`);
+  });
+
+  it("prints both the validation and the SBOM referrer digests when both are present", () => {
+    const r = runFilter([referrer(d("a"), VALIDATION_TYPE), referrer(d("b"), SPDX_TYPE)]);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout.split("\n").filter(Boolean).sort()).toEqual([d("a"), d("b")]);
+  });
+
+  it("prints nothing when only an SBOM referrer is present", () => {
+    const r = runFilter([referrer(d("b"), SPDX_TYPE)]);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toBe("");
+  });
+
+  it("never prints a referrer of another artifactType, even with a wanted predicateType", () => {
+    const r = runFilter([
+      referrer(d("a"), VALIDATION_TYPE),
+      referrer(d("b"), SPDX_TYPE),
+      referrer(d("c"), VALIDATION_TYPE, "application/vnd.example.other"),
+      referrer(d("e"), SPDX_TYPE, "application/vnd.example.other"),
+    ]);
+    expect(r.stdout.split("\n").filter(Boolean).sort()).toEqual([d("a"), d("b")]);
+  });
+
+  it("never prints a referrer of another predicateType or with none", () => {
+    const r = runFilter([
+      referrer(d("a"), VALIDATION_TYPE),
+      referrer(d("c"), "https://slsa.dev/provenance/v1"),
+      referrer(d("e"), undefined),
+    ]);
+    expect(r.stdout).toBe(d("a"));
+  });
+
+  it("prints nothing for a validation-type referrer of another artifactType alone", () => {
+    const r = runFilter([referrer(d("c"), VALIDATION_TYPE, "application/vnd.example.other"), referrer(d("b"), SPDX_TYPE)]);
+    expect(r.stdout).toBe("");
+  });
+
+  it("refuses the step, naming the missing attestation, when the filter's output is empty", () => {
+    const guard = step.indexOf('[[ -n "${referrers}" ]]');
+    expect(guard).toBeGreaterThan(close);
+    const block = step.slice(guard, step.indexOf("\n          }", guard) + 12);
+    expect(block).toContain("no attestation of type");
+    expect(block).toContain("to copy");
+    expect(block).toMatch(/exit 1/u);
+    // Nothing is copied before the guard.
+    expect(step.slice(0, guard)).not.toContain("crane copy");
   });
 });

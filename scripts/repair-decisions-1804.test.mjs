@@ -9,7 +9,7 @@ import { composeUpCalls, makeFixture, runRepair, scratchDir } from "./repair-tes
 vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 const RESTORE_GUIDANCE_PREFIX =
-  "manual step: a restore has not been finished and keeps Orbit stopped; run bash scripts/restore.sh --finish once Orbit is healthy, or bash scripts/restore.sh --recover to roll it back, then re-run repair (resolves=";
+  "manual step: a restore has not been finished and keeps Orbit stopped; run bash scripts/restore.sh --finish and follow what it says (it says when Orbit may be started), or bash scripts/restore.sh --recover to roll it back, then re-run repair (resolves=";
 const UNDECIDED_GUIDANCE =
   "manual step: services are not running, and repair can't tell which folder this deployment's containers were made in; check them with docker ps -a, then re-run repair (resolves=services-not-running)";
 

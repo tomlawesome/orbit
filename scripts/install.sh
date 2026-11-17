@@ -1998,6 +1998,13 @@ name_earlier_originals() {
 # them and removes nothing.
 readonly undo_copy_folder_pattern='^[0-9]{8}T[0-9]{6}Z(-repair)?(-[2-9])?$'
 
+# smtp_copy_tmp_name <name>: <name> is a temporary file repair.sh's mktemp
+# makes in an undo folder, which a killed repair leaves (#1848 FR-S1b).
+smtp_copy_tmp_name() {
+  local LC_ALL=C
+  [[ "$1" =~ ^(\.env-orbit|docker-compose\.mail\.yml)\.smtp-copy\.[A-Za-z0-9]{6}$ ]]
+}
+
 # undo_copy_folder_qualifies <folder>: <folder> is a real dated folder (not a
 # symlink) directly inside a real orbit-install-backups, readable, holding
 # nothing but the names the installer and repair.sh write there, each a
@@ -2011,7 +2018,7 @@ undo_copy_folder_qualifies() {
   for entry in "$folder"/*; do
     case "${entry##*/}" in
       .env-orbit | "$smtp_overlay_file" | "$smtp_copy_marker" | .env-orbit.smtp-copy.tmp) ;;
-      *) status=1; break ;;
+      *) smtp_copy_tmp_name "${entry##*/}" || { status=1; break; } ;;
     esac
     is_regular_non_symlink_file "$entry" || { status=1; break; }
   done
@@ -3041,13 +3048,22 @@ smtp_read_record() {
 
 # smtp_discard_copy: the change is confirmed. Removes the files the
 # retirement wrote into the undo copy's folder (.env-orbit's lines and its
-# temporary file, the copy marker and, from repair.sh, the overlay), the
-# folder when nothing else is in it, then the step record. Anything else in
-# the folder stays.
+# temporary file, the copy marker and, from repair.sh, the overlay and the
+# temporary files a killed repair left, #1848 FR-S1b), the folder when
+# nothing else is in it, then the step record. Anything else in the folder
+# stays.
 smtp_discard_copy() {
+  local saved_options entry status=0
   if [[ -n "$smtp_copy_dir" && ! -L orbit-install-backups && -d "$smtp_copy_dir" && ! -L "$smtp_copy_dir" ]]; then
     rm -f -- "$smtp_copy_dir/.env-orbit" "$smtp_copy_dir/$smtp_overlay_file" "$smtp_copy_dir/$smtp_copy_marker" \
       "$smtp_copy_dir/.env-orbit.smtp-copy.tmp" || return 1
+    saved_options="$(shopt -p nullglob)" || true
+    shopt -s nullglob
+    for entry in "$smtp_copy_dir"/.env-orbit.smtp-copy.?????? "$smtp_copy_dir/$smtp_overlay_file".smtp-copy.??????; do
+      if smtp_copy_tmp_name "${entry##*/}"; then rm -f -- "$entry" || status=1; fi
+    done
+    eval "$saved_options"
+    [[ "$status" == 0 ]] || return 1
     rmdir -- "$smtp_copy_dir" 2>/dev/null || true
   fi
   rm -f -- "$smtp_retirement_record"

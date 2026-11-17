@@ -18,8 +18,9 @@
  * only its sha256 digest is written, so nothing in this module may put an
  * address in a row, a log, an audit `changes` blob or an error.
  */
-import { and, asc, eq, gt, inArray, isNotNull, isNull, lte, notInArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lte, notInArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
+import { AppError, RateLimitedError } from "@/lib/errors";
 import { auditLog, imapIngestionMessages, imapRecipientAliases, mailInRelays, users } from "@/db/schema";
 import type { ImapIngestionConfig } from "./core/config";
 import { deriveImapRecipientAlias, digestImapRecipientAlias } from "./core/imap-recipient";
@@ -43,16 +44,39 @@ export type RelayRotationMode = "rotate" | "cut_off";
 
 /**
  * Deliberately generic, like every other refusal on this path: a conflicting
- * rotation must not tell the caller anything about the relay it lost to.
+ * rotation must not tell the caller anything about the relay it lost to. A
+ * 409, not a 500 (#1848 W-R1): the request lost a race, it did not fail.
  */
-export class RelayConflictError extends Error {
-  readonly code = "relay_conflict";
-
+export class RelayConflictError extends AppError {
   constructor() {
-    super("The relay changed while this request was in flight");
+    super("relay_conflict", "The relay changed while this request was in flight", 409);
     this.name = "RelayConflictError";
   }
 }
+
+/**
+ * A rotate sent with `If-Match` for a generation the relay has moved on from
+ * (#1848 W-R1, RFC 9110 section 13.1.1): 412, and nothing changes. The member
+ * pressed against an address they no longer hold, so the press is refused
+ * rather than rotating the address they have not seen yet.
+ */
+export class RelayPreconditionError extends AppError {
+  constructor() {
+    super("relay_changed", "The relay changed since it was read", 412);
+    this.name = "RelayPreconditionError";
+  }
+}
+
+/**
+ * The member's rotation limits (#1848 W-R1, owner's decision in note 59462):
+ * at most 2 in any 60 minutes and 5 in any 14 days, rotate and cut off alike.
+ * A sliding-window log over the `mail_in_relay_rotated` audit rows, which
+ * nothing prunes; the administrator's key rotation writes no such row.
+ */
+export const RELAY_ROTATION_WINDOWS = [
+  { limit: 2, windowMs: 60 * 60 * 1000 },
+  { limit: 5, windowMs: 14 * 24 * 60 * 60 * 1000 },
+] as const;
 
 type RelayExecutor = Pick<ReturnType<typeof getDb>, "select" | "insert" | "update">;
 
@@ -191,9 +215,19 @@ export async function rotateRelay(
   mode: RelayRotationMode,
   config: ImapIngestionConfig,
   now = new Date(),
+  expectedGeneration?: number,
 ): Promise<RelayRotationResult> {
   return getDb().transaction(async (transaction) => {
-    const relay = await ensureRelayRow(userId, transaction);
+    await ensureRelayRow(userId, transaction);
+    /* The row lock (#1848 W-R1) orders every rotate of this member: a second
+       press waits here, then sees the first one's generation and audit row. */
+    const [relay] = await transaction.select(relayColumns).from(mailInRelays)
+      .where(eq(mailInRelays.userId, userId)).for("update");
+    if (!relay) throw new RelayConflictError();
+    if (expectedGeneration !== undefined && expectedGeneration !== relay.currentGeneration) {
+      throw new RelayPreconditionError();
+    }
+    await refuseOverRotationLimit(transaction, userId, now);
     const next = nextRelayGeneration(relay, graceFor(mode), now);
     const [updated] = await transaction.update(mailInRelays).set({
       currentGeneration: next.currentGeneration,
@@ -221,6 +255,8 @@ export async function rotateRelay(
       entityType: "mail_in_relay",
       entityId: userId,
       action: "mail_in_relay_rotated",
+      // The limits' log: the same clock as the windows they are counted in.
+      createdAt: now,
       changes: {
         fromGeneration: relay.currentGeneration,
         toGeneration: updated.currentGeneration,
@@ -235,6 +271,37 @@ export async function rotateRelay(
       previousExpiresAt: updated.previousExpiresAt!,
     };
   });
+}
+
+/**
+ * Refuses a rotation over either limit, with how long until the rotation that
+ * holds the limit leaves its window. Runs under the relay row's lock, so two
+ * presses cannot both count the same room.
+ */
+async function refuseOverRotationLimit(executor: RelayExecutor, userId: string, now: Date): Promise<void> {
+  const widest = Math.max(...RELAY_ROTATION_WINDOWS.map((window) => window.windowMs));
+  const rows = await executor.select({ createdAt: auditLog.createdAt }).from(auditLog).where(and(
+    eq(auditLog.actorUserId, userId),
+    eq(auditLog.entityType, "mail_in_relay"),
+    eq(auditLog.action, "mail_in_relay_rotated"),
+    gt(auditLog.createdAt, new Date(now.getTime() - widest)),
+  )).orderBy(desc(auditLog.createdAt));
+  let limited = false;
+  let waitMs = 0;
+  for (const { limit, windowMs } of RELAY_ROTATION_WINDOWS) {
+    const inWindow = rows.filter((row) => row.createdAt.getTime() > now.getTime() - windowMs);
+    if (inWindow.length < limit) continue;
+    limited = true;
+    // Room comes back when the rotation that fills the limit leaves its window.
+    waitMs = Math.max(waitMs, inWindow[limit - 1]!.createdAt.getTime() + windowMs - now.getTime());
+  }
+  if (limited) {
+    throw new RateLimitedError(
+      "relay_rotation_limited",
+      "The relay was rotated too often lately",
+      Math.max(1, Math.ceil(waitMs / 1000)),
+    );
+  }
 }
 
 /**

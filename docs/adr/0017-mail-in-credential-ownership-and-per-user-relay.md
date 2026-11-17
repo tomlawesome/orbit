@@ -830,3 +830,22 @@ rows only (`src/server/mail-in/sender-addresses.ts`, `requestSenderCheck` and
 6); attribution of addable mail only to a verified row and an
 aligned signature; the seed's silence when another member holds the address
 verified.
+
+## Amendment (#1848 W-R1, 2026-11-15): rotation is conditional and limited
+
+Owner's decision in #1848 note 59462; design in notes 59391 and 59466.
+
+- **Conditional rotate.** `GET /api/settings/mail-relay` answers
+  `ETag: "<current generation>"`. A rotate or cut off sent with `If-Match`
+  happens only from that generation; otherwise it is `412 relay_changed`
+  and nothing changes (RFC 9110 section 13.1.1). The generation is a count
+  that names no member, so decision 2's rule that only the session names the
+  member stands. It travels in headers, never in the body.
+- **Limits.** A member may rotate (rotate and cut off alike) at most 2 times
+  in any 60 minutes and 5 times in any 14 days. The count is a sliding-window
+  log over the member's `mail_in_relay_rotated` audit rows, taken under the
+  relay row's lock. Over a limit is `429 relay_rotation_limited` with
+  `Retry-After`. The administrator's `mail_in_alias_key_rotated` is not
+  limited and does not count. A member at the limit with a leaked address
+  asks the administrator.
+- **Lost race.** `relay_conflict` is a 409, not a 500.

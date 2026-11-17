@@ -13,7 +13,7 @@
   import { watchTour } from "$lib/tour/watch.js";
   import { alertsSupported, syncAlerts } from "$lib/push/alerts.js";
   import {
-    ROTATE_UNCHANGED, ROTATE_UNKNOWN, addSender, dismissReceipt, readRelay, readSentLately, removeSender, rotateRelay, rotateRelayReconciled,
+    ROTATE_LIMITED, ROTATE_NOT_CONFIRMED, ROTATE_UNCHANGED, ROTATE_UNKNOWN, WorkspaceError, addSender, dismissReceipt, readRelay, readSentLately, removeSender, rotateRelay, rotateRelayReconciled,
     sendSenderCheck, wordsOf,
   } from "$lib/data/workspace.js";
   import { ADMIN_PAUSED_WORDS, copyRelayAddress, relayAddressLabel } from "$lib/relay-address.js";
@@ -368,14 +368,15 @@
         const outcome = await rotateRelayReconciled(relay?.address ?? "");
         if (outcome.relay) relayShared.rotated = outcome.relay;
         if (outcome.rotated) wake("new address · the old one collects for 14 more days");
-        else await refuse(outcome.rotated === null ? ROTATE_UNKNOWN : ROTATE_UNCHANGED);
+        else await refuse(outcome.rotated === null ? ROTATE_UNKNOWN : ROTATE_NOT_CONFIRMED);
       } else {
         relayShared.rotated = await rotateRelay(action);
         wake(action === "pause" ? "ingest paused · mail is held until you resume" : "ingest resumed");
       }
-    } catch {
+    } catch (error) {
+      /* #1848 W-R1: over the limits says so; any other refusal is the plain one. */
       await refuse(action === "rotate"
-        ? ROTATE_UNCHANGED
+        ? error instanceof WorkspaceError && error.code === "relay_rotation_limited" ? ROTATE_LIMITED : ROTATE_UNCHANGED
         : `not ${action === "pause" ? "paused" : "resumed"} — Orbit could not reach your relay`);
     } finally {
       working = null;

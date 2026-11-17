@@ -35,13 +35,9 @@ rejected.
    `scripts/ci/attest-tested-image.sh` the moment the pushed digest exists,
    pushed to `registry.tomlawson.io` beside the image. Predicate:
    `{commit, ref, pipelineId, pipelineUrl, imageDigest, policyVersion,
-   recordedAt, sbomSha256}`. `sbomSha256` (added 2026-11-12, #1824) is the
-   sha256 of the image's SBOM, `image.spdx.json`, which is not signed
-   itself: a verifier handed the SBOM it is about to attest
-   (`ORBIT_SBOM_FILE`) refuses one that differs (mismatch) and evidence
-   without the field (missing). It is not part of the claim compared for
-   ambiguity, so an attestation minted before the field existed does not
-   conflict with a newer one; callers that pass no SBOM accept either.
+   recordedAt}`. The `sbomSha256` field added on 2026-11-12 (#1824) was
+   removed by 43a (#1848): the SBOM is now attested itself; see the
+   amendment below.
    Signed with a long-lived owner-held key pair; the public key
    is committed as `cosign.pub` at the repository root. `gitlab-tested-image.json`
    remains as transport and discovery, never trust.
@@ -130,6 +126,44 @@ rejected.
    (ai/orbit-base-image `Dockerfile.signing`), and `ensure-cosign.sh`
    refuses to sign with any other version. So the pin is still decided here,
    but a bump means rebuilding and re-pinning that image too.
+
+### Amendment (2026-11-16, #1848, D-S6 43a: the SBOM is attested itself)
+
+Owner decisions 43a and 45a (#1848). `sign_evidence` attests the image's
+SBOM, `image.spdx.json`, as a second cosign attestation over the same digest
+(`cosign attest --type spdxjson`), with the same key and flags as the
+validation record, which no longer carries `sbomSha256`. The SBOM travels to
+GitHub inside the saved image layout (`cosign save` keeps every attestation
+as an OCI referrer, checked on the pinned 3.1.4), so `handoff_to_github`
+checks it is there and no longer hands the file over separately.
+
+The shared verifier gains one optional output, `ORBIT_SBOM_OUT`. Only when
+it is set does it verify the spdxjson attestations too and write the chosen
+SPDX document there, for publishing; on any refusal it writes nothing.
+Countersign and stable promotion leave it unset and are unchanged. Validation
+records of other predicate types in cosign's output are ignored and counted;
+the ambiguity and mismatch checks run on the matching ones.
+
+**Newest-SBOM rule.** A retried `sign_evidence` leaves several SBOM
+attestations, and with no transparency log there is no trusted signing time,
+so the verifier orders them by the signed SPDX `creationInfo.created`, which
+must be an RFC 3339 date-time, compared as an instant. The newest wins.
+Identical documents at that instant are one; different documents at it are
+refused as ambiguous, naming both sha256 digests; a missing or unparseable
+`created` on any of them, or no SBOM attestation, is refused as missing.
+Rejected: having the validation record carry the SBOM's digest (the field
+43a removes).
+
+**Addendum (inline review).** An SBOM attestation whose in-toto subject is
+another digest is refused with exit 10, naming both digests. A cosign SBOM
+output over 64 MiB is refused unread (exit 11), and echoed cosign stderr is
+cut to 4096 bytes. The logged SBOM sha256 is of the written file, the
+re-serialised SPDX document, so it matches `sha256sum` of `ORBIT_SBOM_OUT`,
+not GitLab's `image.spdx.json`. `publish-from-gitlab.yml` copies the SBOM
+attestations to GHCR with the validation ones and its GHCR check sets
+`ORBIT_SBOM_OUT`, so GHCR readers keep a GitLab-key binding of the SBOM.
+Digests attested before 43a have no SBOM attestation, so GitHub refuses to
+publish them; re-validate them on GitLab.
 
 ## Consequences
 
