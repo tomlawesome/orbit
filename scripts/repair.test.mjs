@@ -6872,6 +6872,11 @@ describe("scripts/repair.sh credential checkpoint removal after a clean re-check
     const kept = checkpointDirs(targetDir);
     expect(kept).toHaveLength(1);
     expect(existsSync(findCheckpointBundle(targetDir))).toBe(true);
+    // The kept checkpoint is an ORBKEK01 bundle in an owner-only folder with an
+    // owner-only file: the format and modes the happy-path test no longer sees.
+    expect(mode(join(targetDir, kept[0]))).toBe("700");
+    expect(mode(findCheckpointBundle(targetDir))).toBe("600");
+    expect(readFileSync(findCheckpointBundle(targetDir)).subarray(0, 8).toString("ascii")).toBe("ORBKEK01");
     expectKeptAndNamed(result, kept[0]);
     expectStdoutIsEnumOnly(result.stdout);
   });
