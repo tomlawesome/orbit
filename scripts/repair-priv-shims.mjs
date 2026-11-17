@@ -45,7 +45,7 @@ exec '__REAL__' "$@"
 
 // stat shim: lies about what a simulated run cannot make true without a second user. For the folder ".": the
 // group (%g, %G) becomes a gid that is not the test user's primary group. For ".orbit-secrets" (dir) or
-// ".orbit-secrets/smtp-password" (file): the owner (%u, %U) becomes root.
+// ".orbit-secrets/smtp-password" (file) or ".env-orbit" (env): the owner (%u, %U) becomes root.
 const STAT_SHIM = String.raw`args=("$@"); last="\${args[$((\${#args[@]} - 1))]}"
 if [[ "$last" == . || "$last" == ./ ]] && [[ -n '__FAKEGID__' ]]; then
   for i in "\${!args[@]}"; do
@@ -53,6 +53,7 @@ if [[ "$last" == . || "$last" == ./ ]] && [[ -n '__FAKEGID__' ]]; then
   done
 fi
 case "$last" in
+  *.env-orbit) lie=env;;
   *.orbit-secrets/smtp-password) lie=file;;
   *.orbit-secrets|*.orbit-secrets/) lie=dir;;
   *) lie="";;
@@ -88,8 +89,8 @@ function variantSnippet(variant, pidLog) {
 /**
  * Builds the shim directory. `setpriv: false` leaves setpriv off PATH altogether (every other executable of the
  * original PATH is linked into a private bin, setpriv excepted). `folderGid` makes `stat` report that gid for the
- * deployment folder; `rootOwned` ("dir" or "file") makes it report root as the owner of .orbit-secrets or its
- * secret file. Logs, one line each:
+ * deployment folder; `rootOwned` ("dir", "file" or "env") makes it report root as the owner of .orbit-secrets, its
+ * secret file or .env-orbit. Logs, one line each:
  *   tools.log:   "<tool> marker=<0|1> under=<0|1> cwd=<cwd> args=<args>"   (under: names a path under the folder)
  *   child.log:   "<tool>|<marker>|<session id>|<stdin target>|<extra fds>|<parent command line>"
  *   setpriv.log: "<argv of the setpriv call>"   (and "BAD <argv>" when it lacks the three required options; exit 99)

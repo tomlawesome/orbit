@@ -122,7 +122,7 @@ const timeoutBinary = real("timeout") || "/usr/bin/timeout";
  * state); `fakeBin` goes first on PATH; `shims.env` carries the simulated root. The run is capped at `capSeconds`
  * (the whole process group is killed after it); `ms` is how long it took.
  */
-export function runOwner(targetDir, { shims, state = {}, fakeBin = null, env = {}, imported = true, capSeconds = 25, args = ["--execute", "--safe-only"] } = {}) {
+export function runOwner(targetDir, { shims, state = {}, fakeBin = null, env = {}, imported = true, capSeconds = 25, args = ["--execute", "--safe-only"], input = "y\n" } = {}) {
   const options = { ...state, ...(imported ? { mailStatus: "mail-sending source=imported imported-from-environment=true" } : {}), env: { ...shims.env, ...env } };
   const { merged, decorate } = prepareRepair(targetDir, options);
   if (fakeBin) merged.PATH = `${fakeBin}:${merged.PATH}`;
@@ -130,7 +130,7 @@ export function runOwner(targetDir, { shims, state = {}, fakeBin = null, env = {
   const result = spawnSync(timeoutBinary, ["-k", "2", String(capSeconds), "bash", join(targetDir, "scripts", "repair.sh"), ...args], {
     cwd: targetDir,
     encoding: "utf8",
-    input: "y\n",
+    input,
     env: merged,
     timeout: (capSeconds + 15) * 1000,
     killSignal: "SIGKILL",
