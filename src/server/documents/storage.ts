@@ -99,23 +99,26 @@ function uploadIdleTimeoutError(): AppError {
 }
 
 /**
- * Watches one upload for silence: started before the first read, touched on
- * every chunk, and once the sender has been quiet for the idle timeout its
- * `expired` promise rejects and stays rejected, so the read in flight (or the
- * next one) ends the upload.
+ * Watches one upload for the sender's silence: started before the first read,
+ * and once the sender has been quiet for the idle timeout its `expired`
+ * promise rejects and stays rejected, so the read in flight (or the next one)
+ * ends the upload. Only the waits for the sender count: `pause()` around the
+ * server's own work (writing a chunk) stops the clock, `resume()` restarts it.
  */
-function watchUploadIdle(): { touch(): void; expired: Promise<never>; stop(): void } {
+function watchUploadIdle(): { pause(): void; resume(): void; expired: Promise<never>; stop(): void } {
   let lastActivity = Date.now();
+  let paused = false;
   let fail!: (error: AppError) => void;
   const expired = new Promise<never>((_, reject) => { fail = reject; });
   expired.catch(() => undefined); // observed by the read race; never an unhandled rejection
   const timer = setInterval(() => {
-    if (Date.now() - lastActivity < UPLOAD_IDLE_TIMEOUT_MS) return;
+    if (paused || Date.now() - lastActivity < UPLOAD_IDLE_TIMEOUT_MS) return;
     clearInterval(timer);
     fail(uploadIdleTimeoutError());
   }, UPLOAD_IDLE_TIMEOUT_MS / 4);
   return {
-    touch: () => { lastActivity = Date.now(); },
+    pause: () => { paused = true; },
+    resume: () => { paused = false; lastActivity = Date.now(); },
     expired,
     stop: () => clearInterval(timer),
   };
@@ -166,7 +169,7 @@ export class LocalDocumentStorage {
       while (true) {
         const { value, done } = await Promise.race([reader.read(), idle.expired]);
         if (done) break;
-        idle.touch();
+        idle.pause(); // the chunk is here; what follows is the server's own time
         // A view, not a copy: the chunk is hashed and written in this iteration and never kept.
         const chunk = Buffer.from(value.buffer, value.byteOffset, value.byteLength);
         sizeBytes += chunk.length;
@@ -181,7 +184,7 @@ export class LocalDocumentStorage {
           leadingLength += prefix.length;
         }
         await handle.write(chunk);
-        idle.touch(); // a slow disk is not a silent sender
+        idle.resume(); // waiting for the sender again
       }
       if (sizeBytes === 0) throw new AppError("document_empty", "Choose a non-empty document", 422);
       if (declaredBytes !== undefined && sizeBytes !== declaredBytes) {
