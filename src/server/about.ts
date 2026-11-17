@@ -109,6 +109,9 @@ const LIVE_PROBES: AboutProbes = {
 /** A saved version is asked for again once it is this old (stale-while-revalidate). */
 const REFRESH_AFTER_MS = 10 * 60 * 1_000;
 
+/** A service whose last check failed is asked again once this much time has passed. */
+const RETRY_FAILED_AFTER_MS = 30 * 1_000;
+
 /**
  * How long a look with nothing saved yet waits for the probe it starts. The
  * server warms the saved answer at start-up (warmAboutFacts), so this is the
@@ -119,8 +122,9 @@ const REFRESH_AFTER_MS = 10 * 60 * 1_000;
 const FIRST_LOOK_MS = 5;
 
 interface Saved {
-  /** The last version a probe read; kept when a later probe fails. */
+  /** The version the last check read; null once that check failed (#1603). */
   version: string | null;
+  /** When the last check finished, whether it succeeded or not; 0 before the first. */
   savedAt: number;
   inFlight: Promise<void> | null;
 }
@@ -149,13 +153,13 @@ function refresh(
   const started = (async () => {
     try {
       const version = parse(await withTimeout(Promise.resolve().then(ask), null));
-      /* A failed or silent probe never replaces what was seen before. */
-      if (version !== null) {
-        row.version = version;
-        row.savedAt = Date.now();
-      }
+      /* A version is shown only while the last check of it succeeded: a
+         failed or silent probe turns it into "not known" (#1603 A-F2, A-F3). */
+      row.version = version;
+      row.savedAt = Date.now();
     } catch {
-      /* the saved answer stands */
+      row.version = null;
+      row.savedAt = Date.now();
     }
   })().finally(() => {
     row.inFlight = null;
@@ -193,7 +197,7 @@ async function probe(
   const row = savedFor(probes, id);
   if (row.savedAt === 0) {
     await waitUpTo(refresh(row, ask, parse), FIRST_LOOK_MS);
-  } else if (Date.now() - row.savedAt > REFRESH_AFTER_MS) {
+  } else if (Date.now() - row.savedAt > (row.version === null ? RETRY_FAILED_AFTER_MS : REFRESH_AFTER_MS)) {
     void refresh(row, ask, parse);
   }
   return { id, state: "running", version: row.version };
