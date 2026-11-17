@@ -36,15 +36,13 @@ interface OwnedPurgeRecord {
 export const PURGE_BATCH_SIZE = 25;
 
 /**
- * Claims up to `limit` expired purge jobs, oldest deletion first, leaving out
- * `excludeJobIds`: the jobs this cycle has already tried, so a failed purge
- * (back to `retry`, claimable at once) waits for the next cycle rather than
- * spending its attempts in this one.
+ * Claims up to `limit` expired purge jobs in job-id order, after `afterJobId`
+ * when given: a keyset cursor, so a cycle pages through its backlog once and
+ * never meets a job it already tried (a failed purge is back to `retry` and
+ * claimable at once).
  */
-export async function claimExpiredPurgeJobs(limit = PURGE_BATCH_SIZE, excludeJobIds: readonly string[] = []): Promise<ClaimedDocumentJob[]> {
-  const excluded = excludeJobIds.length > 0
-    ? sql`and job.id <> all(${`{${excludeJobIds.join(",")}}`}::uuid[])`
-    : sql``;
+export async function claimExpiredPurgeJobs(limit = PURGE_BATCH_SIZE, afterJobId?: string): Promise<ClaimedDocumentJob[]> {
+  const excluded = afterJobId ? sql`and job.id > ${afterJobId}::uuid` : sql``;
   const rows = await getDb().execute(sql<ClaimedDocumentJob>`
     with claimable as materialized (
       select job.id, job.status as previous_status
@@ -59,7 +57,7 @@ export async function claimExpiredPurgeJobs(limit = PURGE_BATCH_SIZE, excludeJob
         and document.delete_after <= now()
         and (job.lease_expires_at is null or job.lease_expires_at < now())
         ${excluded}
-      order by document.delete_after
+      order by job.id
       for update of job skip locked
       limit ${limit}
     ), claimed as (
@@ -69,6 +67,7 @@ export async function claimExpiredPurgeJobs(limit = PURGE_BATCH_SIZE, excludeJob
       claimed.lease_token as "leaseToken", claimable.previous_status as "previousStatus"
     from claimed
     inner join claimable on claimable.id = claimed.id
+    order by claimed.id
   `);
   return rows as unknown as ClaimedDocumentJob[];
 }

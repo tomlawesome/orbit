@@ -96,16 +96,16 @@ export async function runDocumentMaintenanceCycle(): Promise<void> {
 
 /**
  * #1605 P-1: the retention purge drains its whole backlog each cycle, a batch
- * of PURGE_BATCH_SIZE at a time until a claim comes back short (a batched
- * drain loop). Each job is tried at most once a cycle: a failed purge goes
- * back to `retry`, and its five attempts are spread over five cycles.
+ * of PURGE_BATCH_SIZE at a time, paging by job id (a keyset cursor) until a
+ * claim comes back short. The cursor also means each job is tried at most
+ * once a cycle: a failed purge goes back to `retry`, and its five attempts
+ * are spread over five cycles.
  */
 async function drainExpiredPurges(): Promise<void> {
-  const tried: string[] = [];
+  let after: string | undefined;
   while (true) {
-    const jobs = await claimExpiredPurgeJobs(PURGE_BATCH_SIZE, tried);
+    const jobs = await claimExpiredPurgeJobs(PURGE_BATCH_SIZE, after);
     for (const job of jobs) {
-      tried.push(job.id);
       log.info({ event: "document.job", state: "starting", action: "retry_job" });
       try {
         const outcome = await processPurgeJob(job);
@@ -115,6 +115,7 @@ async function drainExpiredPurges(): Promise<void> {
       }
     }
     if (jobs.length < PURGE_BATCH_SIZE) return;
+    after = jobs.at(-1)!.id;
   }
 }
 
