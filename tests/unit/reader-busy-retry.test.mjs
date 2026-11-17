@@ -43,7 +43,10 @@ const busy = (/** @type {string} */ seconds = "2") => new Response(
   { status: 503, headers: { "Retry-After": seconds, "Content-Type": "application/json" } },
 );
 
-const quiet = () => vi.advanceTimersByTimeAsync(0).then(() => settle());
+const quiet = async () => {
+  if (vi.isFakeTimers()) await vi.advanceTimersByTimeAsync(0);
+  else await settle();
+};
 
 /** @param {(n: number, call: number, signal: AbortSignal | undefined) => Promise<Response>} plan */
 async function mountReader(plan) {

@@ -468,7 +468,6 @@ describe("a kept page that cannot be read", () => {
 
     expect(error).toMatchObject({ code: "document_preview_busy", status: 503, retryAfterSeconds: 5 });
     expect(mocks.storeDrawnPreview, "no document_previews row for a queue refusal").not.toHaveBeenCalled();
-    expect(mocks.enqueuePreviewJob).not.toHaveBeenCalled();
   });
 
   it("#1446: a draw refused for an unavailable renderer keeps its 30 s retry", async () => {

@@ -1,4 +1,4 @@
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { largeFixtureDirectory, removeFixtureDirectory, writeFixtureFile } from "../../../tests/support/large-pdf";
@@ -78,6 +78,7 @@ async function settled(promise: Promise<unknown>): Promise<boolean> {
 
 beforeEach(() => {
   pending = [];
+  for (const name of readdirSync(directory)) if (name.startsWith("gate-") || name.startsWith("ran-")) rmSync(join(directory, name), { force: true });
   setSandboxLimits({ pdftoppmPath: holdingRenderer(), pdfinfoPath: holdingInfo("count"), wallMs: FOREVER_MS, concurrency: { check: 2, view: 2, background: 1 } });
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
 });
