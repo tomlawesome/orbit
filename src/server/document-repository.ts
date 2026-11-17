@@ -507,6 +507,9 @@ export async function readDocumentTransferState(documentId: string): Promise<{ s
   return { state: "pending" };
 }
 
+/** #1605 P-1: staged uploads one member may hold waiting to be attached to an item. */
+export const STAGED_UPLOADS_PER_MEMBER_LIMIT = 100;
+
 async function reserveDocumentMetadata(input: {
   documentId: string;
   userId: string;
@@ -546,6 +549,19 @@ async function reserveDocumentMetadata(input: {
     }
     if (Number(householdUsage.total) + input.sizeBytes > config.householdQuotaBytes) {
       throw new AppError("document_household_quota", "This household has reached its document storage limit", 413);
+    }
+    if (input.staged) {
+      const [{ total: staged }] = await transaction
+        .select({ total: sql<number>`count(*)` })
+        .from(documents)
+        .where(and(eq(documents.uploadedByUserId, input.userId), isNull(documents.itemId), eq(documents.lifecycle, "available")));
+      if (Number(staged) >= STAGED_UPLOADS_PER_MEMBER_LIMIT) {
+        throw new AppError(
+          "document_staged_limit",
+          "You already have 100 uploads waiting to be attached to an item. Attach or delete some first",
+          429,
+        );
+      }
     }
     await transaction.insert(documents).values({
       id: input.documentId,
