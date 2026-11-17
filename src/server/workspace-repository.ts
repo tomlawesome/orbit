@@ -856,7 +856,7 @@ async function runWorkspaceCommand(
         await transaction.insert(items).values({ id: itemId, householdId, version: 1, ...values });
       }
       if (documentIds.length > 0) {
-        await transaction.update(documents).set({ itemId, deleteAfter: null, boundAt: new Date(), updatedAt: new Date() })
+        await transaction.update(documents).set({ itemId, deleteAfter: null, boundAt: sql`coalesce(${documents.boundAt}, now())`, updatedAt: new Date() })
           .where(inArray(documents.id, documentIds));
       }
       // Every encrypted column on the row was just rewritten - Tier 1 and, since

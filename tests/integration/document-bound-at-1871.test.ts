@@ -154,6 +154,33 @@ describe("binding sets bound_at in the same update that clears the hold (#1871)"
   });
 });
 
+describe("a later item save does not move bound_at on a document that is already bound (#1871 review)", () => {
+  it("keeps the original bound_at when the item is saved again with the same documentIds", async () => {
+    // Catches the item-save bind overwriting bound_at with now() on every save.
+    const fixture = await createIntegrationFixture("b1871-bind-keep");
+    const owner = await fixture.session("owner");
+    const id = await stage(fixture, owner, "b1871 bind keep");
+    const sealed = (await getDb().execute(sql`select sealed_item_id from documents where id = ${id}`))[0] as { sealed_item_id: string };
+    const save = (version?: number) => callRouteForSession(workspaceCommand, owner, {
+      url: "http://127.0.0.1:3000/api/workspace/commands",
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        type: "item.upsert",
+        householdId: fixture.household.id,
+        item: { id: sealed.sealed_item_id, sectionId: fixture.section.id, title: "Boiler cover", currency: "GBP", dueDate: "2026-11-02", recurrenceMonths: 12, importance: "normal", ...(version ? { version } : {}) },
+        documentIds: [id],
+      }),
+    });
+    expect((await save()).status).toBe(200);
+    const original = new Date(new Date().getTime() - 7 * 86_400_000);
+    await getDb().execute(sql`update documents set bound_at = ${original.toISOString()}::timestamptz where id = ${id}`);
+    expect((await save(2)).status).toBe(200);
+    const state = await row(id);
+    expect(new Date(state.bound_at!).getTime()).toBe(original.getTime());
+  });
+});
+
 describe("the stagedDiscard guard reads 'still a staged upload' as item_id null and bound_at null (#1871)", () => {
   it("refuses a kept document whose item is gone even while it carries a delete_after, and leaves it available", async () => {
     // Catches the old guard (item_id null and delete_after set): it would discard a kept paper straight to the purge.

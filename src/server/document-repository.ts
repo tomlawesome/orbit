@@ -1208,7 +1208,7 @@ export async function requestDocumentDeletion(
      goes at the next purge, not after the retention window. Every other
      delete -- an unbound document included, such as one whose item was
      deleted -- keeps the window and its restore. A staged copy is one no item
-     binds that still carries its hold; the update takes it only while it
+     has ever bound (bound_at null) that still carries its hold; the update takes it only while it
      still is one, so a bind that wins the race keeps the file. */
   const staged = options.stagedDiscard === true;
   if (staged && (record.itemId !== null || record.boundAt !== null || record.deleteAfter === null)) {
