@@ -669,3 +669,78 @@ describe("classify-changed-paths.mjs as a script", () => {
     });
   });
 });
+
+// #1766: the audit record under .agents/reviews/ is documentation, so a change
+// made of docs and audit records stays on the fast lane.
+describe("audit record fast-lane classification (#1766)", () => {
+  const flat = ".agents/reviews/batch-b-2026-11-17.md";
+  const nested = ".agents/reviews/2026/11/batch-b.md";
+
+  it("keeps a flat and a nested audit record in the fast lane", () => {
+    for (const path of [flat, nested]) {
+      expect(pathRisk(path), path).toBe(CI_RISK.FAST);
+      expect(classifyCiRisk([path]), path).toBe(CI_RISK.FAST);
+    }
+  });
+
+  it("keeps changelog, docs and an audit record together in the fast lane", () => {
+    expect(classifyCiRisk(["CHANGELOG.md", "docs/feature-register.md", flat])).toBe(CI_RISK.FAST);
+  });
+
+  it("classifies an audit record with server source as integration", () => {
+    expect(classifyCiRisk([flat, "src/server/x.ts"])).toBe(CI_RISK.INTEGRATION);
+  });
+
+  it("classifies an audit record with system-risk files as system", () => {
+    for (const path of [
+      "Dockerfile",
+      ".github/workflows/ci.yml",
+      "package.json",
+      "scripts/install.sh",
+      ".github/supply-chain-policy.json",
+    ]) {
+      expect(classifyCiRisk([flat, path]), path).toBe(CI_RISK.SYSTEM);
+    }
+  });
+
+  it("classifies docs plus an audit record as fast, not system", () => {
+    expect(classifyCiRisk(["docs/a.md", flat])).toBe(CI_RISK.FAST);
+  });
+
+  it("keeps every other .agents path at system", () => {
+    for (const path of [
+      ".agents/reviews/x.sh",
+      ".agents/reviews/x.md.sh",
+      ".agents/notes.md",
+      ".agents/x.md",
+    ]) {
+      expect(pathRisk(path), path).toBe(CI_RISK.SYSTEM);
+    }
+  });
+
+  it("does not fast-lane a path with a dot or dot-dot segment", () => {
+    for (const path of [
+      ".agents/reviews/../../x.md",
+      ".agents/reviews/./x.md",
+      ".agents/reviews/a/../b.md",
+    ]) {
+      expect(pathRisk(path), path).not.toBe(CI_RISK.FAST);
+    }
+  });
+
+  it("requires no build, integration or system job for an audit-only change", () => {
+    const requirements = ciRequirements([flat, nested]);
+    expect(requirements.risk).toBe(CI_RISK.FAST);
+    expect(requirements.build).toBe(false);
+    expect(requirements.integration).toBe(false);
+    expect(requirements.system).toBe(false);
+    expect(requirements.web).toBe(false);
+    expect(requirements.e2e).toBe(false);
+    expect(requirements.licence).toBe(false);
+    expect(requirements.launcherCompat).toBe(false);
+  });
+
+  it("leaves classifyCiLane unchanged by the audit record rule", () => {
+    expect(classifyCiLane([flat])).toBe(classifyCiLane([".agents/notes.md"]));
+  });
+});
