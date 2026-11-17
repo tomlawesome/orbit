@@ -25,6 +25,7 @@ export async function pingClamAv(
     const finish = (ready: boolean) => {
       if (settled) return;
       settled = true;
+      clearTimeout(deadline);
       socket.destroy();
       resolve(ready);
     };
@@ -35,6 +36,8 @@ export async function pingClamAv(
     socket.on("close", () => finish(false));
   });
 }
+
+const CLAMAV_VERSION_REPLY_LIMIT = 1024;
 
 /**
  * Asks clamd for its VERSION line, e.g. `ClamAV 1.5.4/28137/Mon Sep 28
@@ -55,10 +58,14 @@ export async function readClamAvVersion(
       socket.destroy();
       resolve(value);
     };
-    socket.setTimeout(Math.min(options.timeoutMs, 5_000), () => finish(null));
+    /* One deadline for the whole exchange: an idle timeout restarts on each
+       chunk, so a server trickling bytes would hold the socket open for ever. */
+    const deadline = setTimeout(() => finish(null), Math.min(options.timeoutMs, 5_000));
     socket.on("error", () => finish(null));
     socket.on("data", (chunk: Buffer) => {
       reply += chunk.toString("ascii");
+      /* A real VERSION line is under 100 bytes; refuse anything that runs on. */
+      if (reply.length > CLAMAV_VERSION_REPLY_LIMIT) return finish(null);
       if (reply.includes("\0")) finish(reply.replace(/\0+$/, "").trim());
     });
     socket.on("connect", () => socket.write(Buffer.from("zVERSION\0", "ascii")));
