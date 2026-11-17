@@ -1,3 +1,4 @@
+import { CONTENT_INDEX_BACKFILL_BATCH_SIZE, DOCUMENT_WORKER_POLL_MS } from "@/server/document-maintenance/backfill-rate";
 import { readExpectedMigrationHashes } from "./migration-integrity";
 
 // Contract migrations and what must be true before each may run (#1779,
@@ -26,6 +27,13 @@ export interface ContractPrecondition {
   remedy: string[];
 }
 
+/*
+ * Worked out from the defaults: the batch and the tick are fixed settings, but
+ * a cycle that has other work to do, or a restart, can make the real rate
+ * lower, so the text says "about".
+ */
+const BACKFILL_DOCUMENTS_PER_MINUTE = Math.round(CONTENT_INDEX_BACKFILL_BATCH_SIZE * (60_000 / DOCUMENT_WORKER_POLL_MS));
+
 export const CONTRACT_PRECONDITIONS: readonly ContractPrecondition[] = [
   {
     // The drop ships later (note 58520 decision 3, build note C). Until then
@@ -37,7 +45,7 @@ export const CONTRACT_PRECONDITIONS: readonly ContractPrecondition[] = [
     description: "documents whose content hash is still stored in plain form, not yet sealed under the household key",
     pendingSql: "SELECT count(*) FROM documents WHERE content_sha256 IS NOT NULL",
     remedy: [
-      "Orbit is still moving documents under the household key. The running version finishes this in the background, about 200 documents a minute.",
+      `Orbit is still moving documents under the household key. The running version finishes this in the background, about ${BACKFILL_DOCUMENTS_PER_MINUTE} documents a minute.`,
       "Leave Orbit running and run the update again later.",
       "If Orbit is locked because its household key is missing, restore the key and let Orbit run before updating.",
     ],

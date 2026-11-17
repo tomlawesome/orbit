@@ -25,6 +25,7 @@ import { claimExpiredPurgeJobs, failPurgeJob, processPurgeJob } from "@/server/d
 import { reconcileDocumentStorage, rejectInterruptedDocuments } from "@/server/document-maintenance/storage-reconciliation";
 import { backfillDocumentContentIndexes } from "@/server/document-maintenance/content-index-backfill";
 import { backfillImapAttachmentHashes } from "@/server/document-maintenance/imap-attachment-hash-backfill";
+import { DOCUMENT_WORKER_POLL_MS } from "@/server/document-maintenance/backfill-rate";
 import { startPreviewWorker } from "@/server/document-maintenance/preview-jobs";
 
 export { purgeClaimOutcome } from "@/server/document-maintenance/claims";
@@ -103,11 +104,13 @@ export async function runDocumentMaintenanceCycle(): Promise<void> {
   }
 }
 
+export { DOCUMENT_WORKER_POLL_MS };
+
 /**
  * Starts one maintenance loop per process, and beside it the kept-preview
  * loop (#1433 D13); PostgreSQL leases coordinate replicas.
  */
-export function startDocumentWorker(pollMilliseconds = 60_000): void {
+export function startDocumentWorker(pollMilliseconds = DOCUMENT_WORKER_POLL_MS): void {
   if (workerState.__orbitDocumentWorkerStarted) return;
   workerState.__orbitDocumentWorkerStarted = true;
   startPreviewWorker();
