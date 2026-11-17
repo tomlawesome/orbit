@@ -56,6 +56,10 @@ async function scannerHealthCheckIfDue(scanner: { scanning: boolean; reachable: 
   await runScannerHealthCheck({ ping: async () => scanner.reachable }, { now });
 }
 
+/** #1605 P-1: purge jobs drain in batches of 25 for at most 30 s of the 60 s cycle. */
+export const PURGE_DRAIN_BATCH = 25;
+export const PURGE_DRAIN_BUDGET_MS = 30_000;
+
 export async function runDocumentMaintenanceCycle(): Promise<void> {
   await rejectInterruptedDocuments();
   /* #1437: the documents stored before their fingerprint existed, a batch a cycle. */
@@ -91,16 +95,20 @@ export async function runDocumentMaintenanceCycle(): Promise<void> {
       await failScannerRecoveryJob(job, "scanner_failed");
     }
   }
-  const jobs = await claimExpiredPurgeJobs();
-  for (const job of jobs) {
-    log.info({ event: "document.job", state: "starting", action: "retry_job" });
-    try {
-      const outcome = await processPurgeJob(job);
-      if (outcome === "completed") log.info({ event: "document.job", state: "ready", action: "none" });
-    } catch (error) {
-      await failPurgeJob(job, error);
+  const drainStartedAt = Date.now();
+  let jobs: Awaited<ReturnType<typeof claimExpiredPurgeJobs>>;
+  do {
+    jobs = await claimExpiredPurgeJobs();
+    for (const job of jobs) {
+      log.info({ event: "document.job", state: "starting", action: "retry_job" });
+      try {
+        const outcome = await processPurgeJob(job);
+        if (outcome === "completed") log.info({ event: "document.job", state: "ready", action: "none" });
+      } catch (error) {
+        await failPurgeJob(job, error);
+      }
     }
-  }
+  } while (jobs.length >= PURGE_DRAIN_BATCH && Date.now() - drainStartedAt < PURGE_DRAIN_BUDGET_MS);
 }
 
 /**
