@@ -210,8 +210,9 @@ set -Eeuo pipefail
 #                                   is disabled and the overlay is missing
 #                                   (an idle scanner still runs). Scanner off
 #                                   with both in step is healthy, not a
-#                                   finding. Plans as manual: configure.sh
-#                                   --set-scanner writes both.
+#                                   finding. The fail case plans as manual
+#                                   (configure.sh --set-scanner writes both);
+#                                   the info case is reported, never planned.
 #   managed-file-permissions     — .env-orbit exists but is not mode 600.
 #   secrets-directory-invalid    — .orbit-secrets missing, symlinked, the
 #                                   wrong type, or not mode 700 (any one
