@@ -560,8 +560,8 @@ export function materializeDeliveriesForCandidate(
 /**
  * The deliveries for every candidate row of one item and member (one row per
  * reminder rule). The catch-up collapse is per item, member and channel, not
- * per rule: two rules that both fell in an outage are one missed mail, not two,
- * and none when another reminder of the item is on time (RANGE-F14). Candidates of different items or members are kept apart.
+ * per rule: two rules that both fell in an outage are one missed mail, not two
+ * (RANGE-F14). Candidates of different items or members are kept apart.
  */
 export function materializeDeliveriesForCandidates(
   candidates: readonly MaterializationCandidate[],
@@ -587,9 +587,7 @@ export function materializeDeliveriesForCandidates(
       const onTime = eligible.filter(({ scheduledFor }) => scheduledFor >= catchUpBoundary);
       const overdue = eligible.filter(({ candidate, scheduledFor }) => scheduledFor < catchUpBoundary && scheduledFor >= candidate.createdAt);
       const chosen = [...onTime];
-      /* A later reminder that is on time already reaches the member: a missed
-         earlier one adds a second mail for the same item, so it is dropped. */
-      if (overdue.length > 0 && onTime.length === 0) {
+      if (overdue.length > 0) {
         chosen.push(overdue.reduce((latest, missed) => (missed.scheduledFor > latest.scheduledFor ? missed : latest)));
       }
       const seen = new Set<number>();

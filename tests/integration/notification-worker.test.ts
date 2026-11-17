@@ -895,14 +895,22 @@ describe("notification worker PostgreSQL contracts", () => {
     ]);
     const recipients: string[] = [];
 
-    await runNotificationCycle(workerConfig(), {
-      now: () => new Date("2026-03-29T23:00:00.000Z"),
-      providers: fakeProviders((notification) => { recipients.push(notification.to); }),
-      nextLeaseToken: () => deterministicLeaseToken(70),
-    });
+    try {
+      await runNotificationCycle(workerConfig(), {
+        now: () => new Date("2026-03-29T23:00:00.000Z"),
+        providers: fakeProviders((notification) => { recipients.push(notification.to); }),
+        nextLeaseToken: () => deterministicLeaseToken(70),
+      });
 
-    expect((await deliveriesForEvent(event.id)).filter((delivery) => delivery.channel === "email")).toHaveLength(1);
-    expect(recipients.filter((to) => to === fixture.users.owner.email)).toHaveLength(1);
+      expect((await deliveriesForEvent(event.id)).filter((delivery) => delivery.channel === "email")).toHaveLength(1);
+      expect(recipients.filter((to) => to === fixture.users.owner.email)).toHaveLength(1);
+    } finally {
+      /* This test runs the worker at a later clock than its neighbours; its event
+         and rules must not stay behind for their cycles to pick up. */
+      await db.delete(schema.notificationDeliveries).where(eq(schema.notificationDeliveries.eventId, event.id));
+      await db.delete(dueEvents).where(eq(dueEvents.id, event.id));
+      await db.delete(reminderRules).where(eq(reminderRules.itemId, fixture.item.id));
+    }
   });
 
   it("#479: raises the recipient's own first and final warnings for an item that set no rules of its own", async () => {
