@@ -121,6 +121,7 @@ type ExpectedIndex = { table: string; columns: string[]; unique: boolean };
 export const EXPECTED_INDEXES: Record<string, ExpectedIndex> = {
   audit_household_activity_idx: { table: "audit_log", columns: ["household_id", "entity_type", "created_at"], unique: false },
   audit_household_entity_idx: { table: "audit_log", columns: ["household_id", "entity_type", "entity_id"], unique: false },
+  audit_relay_rotation_idx: { table: "audit_log", columns: ["actor_user_id", "action", "created_at"], unique: false },
   document_crypto_storage_key_unique: { table: "document_crypto", columns: ["storage_key"], unique: true },
   document_household_content_index_idx: { table: "documents", columns: ["household_id", "content_index"], unique: false },
   document_household_item_created_idx: { table: "documents", columns: ["household_id", "item_id", "created_at"], unique: false },
