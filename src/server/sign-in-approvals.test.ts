@@ -40,6 +40,8 @@ const store = vi.hoisted(() => ({
   users: [] as Row[],
   audit: [] as Row[],
   nextId: 1,
+  /** #1879 A-R2: when set, inserting a send row fails, as a stop between the two writes would. */
+  failSendInsert: false,
 }));
 
 /* #1629: whether outgoing mail is set up is the sending row's answer
@@ -180,6 +182,7 @@ vi.mock("@/db", async () => {
   function insert(table: unknown) {
     return {
       values(value: Row) {
+        if (table === schema.signInApprovalSends && store.failSendInsert) throw new Error("send row insert failed");
         const row: Row = {
           id: `row-${store.nextId += 1}`,
           createdAt: new Date(),
@@ -273,9 +276,21 @@ vi.mock("@/db", async () => {
     update,
     delete: remove,
     /* One process, one store: a transaction here is the rules running in
-       order, which is what these tests are about. Rollback is PostgreSQL's
-       to prove, and the integration suite's to check. */
-    transaction: (body: (executor: unknown) => unknown) => Promise.resolve(body(db)),
+       order. It does undo its own writes when the body throws (#1879 A-R2),
+       so "both or neither" is checkable here; PostgreSQL's own rollback is
+       the integration suite's to check. */
+    transaction: async (body: (executor: unknown) => unknown) => {
+      const saved = new Map<Row[], Row[]>();
+      for (const rows of [store.approvals, store.sends, store.credentials, store.users, store.audit]) {
+        saved.set(rows, structuredClone(rows));
+      }
+      try {
+        return await body(db);
+      } catch (error) {
+        for (const [rows, before] of saved) rows.splice(0, rows.length, ...before);
+        throw error;
+      }
+    },
   };
   return { getDb: () => db };
 });
@@ -336,6 +351,7 @@ beforeEach(() => {
   store.credentials.length = 0;
   store.users.length = 0;
   store.audit.length = 0;
+  store.failSendInsert = false;
   posted = [];
   process.env.APP_URL = APP_URL;
   store.users.push({
@@ -646,6 +662,32 @@ describe("a refusal (ADR-0027 §8 and consequences)", () => {
     await startSignInApproval(USER, { userAgent: CHROME, clientAddress: null }, { mailer });
     await decideSignInApproval(tokenFromLatestMail(), "approved");
     expect(await takeDeniedSignInNotice(USER)).toBeNull();
+  });
+});
+
+describe("a send's two writes commit together (#1879 A-R2)", () => {
+  it("opening: when the send row cannot be written, the approval's send count is not left behind", async () => {
+    store.failSendInsert = true;
+    await startSignInApproval(USER, { userAgent: CHROME, clientAddress: null }, { mailer, now: NINE }).catch(() => undefined);
+
+    expect(store.sends).toHaveLength(0);
+    expect(store.approvals).toHaveLength(1);
+    expect(store.approvals[0].sendCount).toBe(0);
+    expect(store.approvals[0].lastSentAt).toBeNull();
+  });
+
+  it("resending: when the send row cannot be written, the count, the time and the link are left as they were", async () => {
+    const pending = await startSignInApproval(USER, { userAgent: CHROME, clientAddress: null }, { mailer, now: NINE });
+    const before = { ...store.approvals[0] };
+    expect(store.sends).toHaveLength(1);
+
+    store.failSendInsert = true;
+    await resendSignInApproval(pending.claim, { mailer, now: at(NINE, APPROVAL_RESEND_INTERVAL_MS) }).catch(() => undefined);
+
+    expect(store.sends).toHaveLength(1);
+    expect(store.approvals[0].sendCount).toBe(before.sendCount);
+    expect(store.approvals[0].lastSentAt).toEqual(before.lastSentAt);
+    expect(store.approvals[0].tokenHash).toBe(before.tokenHash);
   });
 });
 
