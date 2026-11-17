@@ -98,8 +98,8 @@
     onsignin = null,
   } = $props();
 
-  /* The moment in the approval mail's words (refusalMoment, after
-     formatApprovalMoment), so the card and the mail name it alike. */
+  /* The moment as the wording table writes it (refusalMoment): the month in
+     full, and the same UTC minute formatApprovalMoment gives the mail. */
   const refusedMoment = $derived(refusalMoment(refusedAt));
 
   /* THE REVEAL (#1120, proposal §2.13): a 44px control on every password

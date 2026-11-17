@@ -78,7 +78,7 @@ export const POST = api(
 
     if (pending.state === "password_change_required") {
       clearPendingSignInCookie(event.cookies, config);
-      const hold = await issuePasswordChangeHold(event.cookies, pending.refusal, config, pending.expiresAt);
+      const hold = await issuePasswordChangeHold(event.cookies, pending.refusal, config);
       return answer({ state: "password_change_required", refusedAt: hold.refusedAt });
     }
 

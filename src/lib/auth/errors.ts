@@ -57,11 +57,16 @@ export type AuthErrorCode =
      new password that is the refused one; `password_mismatch` is the two
      entries disagreeing (or the second missing). `password_change_lapsed` is
      a hold that has run out, been spent, or never existed: one word for all
-     three, as a setup link has. */
+     three, as a setup link has. `password_recovery_required` is a marked
+     password typed on an instance with no mail relay: with no verified
+     channel to renew it through, it signs nobody in and the way back is a
+     setup link from an administrator (OWASP/NIST: a known-compromised
+     password is reset only through a verified channel). */
   | "password_change_required"
   | "password_unchanged"
   | "password_mismatch"
-  | "password_change_lapsed";
+  | "password_change_lapsed"
+  | "password_recovery_required";
 
 /**
  * Closed internal diagnostic reasons for a token-exchange failure.

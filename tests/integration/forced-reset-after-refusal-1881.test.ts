@@ -36,16 +36,18 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
-import { auditLog, instanceAuthority, sessions, signInApprovals, users } from "@/db/schema";
-import { pendingSignInCookieName, sessionCookieName, transactionCookieName } from "@/lib/auth/cookies";
+import { auditLog, instanceAuthority, localCredentials, sessions, signInApprovals, users } from "@/db/schema";
+import { passwordChangeCookieName, pendingSignInCookieName, sessionCookieName, transactionCookieName } from "@/lib/auth/cookies";
+import { PasswordChangeRequiredError } from "@/lib/auth/errors";
+import * as sessionModule from "@/lib/auth/session";
 import * as oidc from "@/lib/auth/oidc";
 import type { OidcMetadata, VerifiedIdentity } from "@/lib/auth/oidc";
-import { hashPassword } from "@/lib/auth/password";
+import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import { getAuthConfig, resetAuthConfigForTests } from "@/lib/env";
 import { createSession } from "@/lib/auth/session";
 import { createLocalUser, issueSetupToken, linkIdentity } from "@/server/local-credentials";
 import { SIGN_IN_APPROVAL_TTL_MS } from "@/server/sign-in-approvals";
-import { ORIGIN } from "./support/auth";
+import { actorFor, ORIGIN } from "./support/auth";
 import { cleanupIntegrationEnvironment } from "./support/fixtures";
 import { clearSending, setUpSending } from "./support/mail-sending-1629";
 import { callRoute, loadRoute, type RouteHandler } from "./support/request-event";
@@ -79,6 +81,7 @@ const { GET: signInNotice } = await loadRoute("auth/sign-in-notice");
 const { GET: startProviderLogin } = await loadRoute("auth/login");
 const { GET: providerCallback } = await loadRoute("auth/callback");
 const { POST: consumeSetup } = await loadRoute("auth/local/setup");
+const { POST: changePassword } = await loadRoute("auth/local/password");
 
 /* The save route does not exist yet. Loading it inside each case, rather than
    at the top, makes every case fail on its own line instead of the whole file
@@ -490,7 +493,8 @@ describe("the new password follows the rules (#1881, mock-up R)", () => {
 
   it("refuses a made-up hold", async () => {
     await landOnTheStep("forged-hold");
-    const cookieName = pendingSignInCookieName(getAuthConfig());
+    // Under the hold's own cookie name, so the forgery is read as a hold and refused as one.
+    const cookieName = passwordChangeCookieName(getAuthConfig());
     const refused = await save({ password: NEW_PASSWORD, passwordAgain: NEW_PASSWORD }, `${cookieName}=not-a-real-hold`);
     expect(refused.status).toBeGreaterThanOrEqual(400);
     expect(refused.status).toBeLessThan(500);
@@ -720,5 +724,226 @@ describe("the refusal's existing record is unchanged (#1881 adds a mark, removes
     const trail = await getDb().select({ action: auditLog.action }).from(auditLog)
       .where(and(eq(auditLog.entityId, account.id), eq(auditLog.action, "sign_in_refused")));
     expect(trail).toHaveLength(1);
+  });
+});
+
+/* ------------------------------------------------- review of #1881, round 1 */
+
+/** The hold cookie's value out of a landed answer's replayable cookies. */
+function holdValueOf(hold: string): string {
+  const name = passwordChangeCookieName(getAuthConfig());
+  const pair = hold.split("; ").find((part) => part.startsWith(`${name}=`));
+  if (!pair) throw new Error("the landed answer carried no hold cookie");
+  return pair.slice(name.length + 1);
+}
+
+async function passwordHashOf(userId: string): Promise<string> {
+  const [row] = await getDb().select({ hash: localCredentials.passwordHash }).from(localCredentials)
+    .where(eq(localCredentials.userId, userId));
+  return row.hash;
+}
+
+async function markOf(userId: string): Promise<Date | null> {
+  const [row] = await getDb().select({ at: localCredentials.passwordChangeRequiredAt }).from(localCredentials)
+    .where(eq(localCredentials.userId, userId));
+  return row.at;
+}
+
+describe("the hold cannot be forged or outlived (#1881 review)", () => {
+  it("refuses a tampered hold as lapsed, saves nothing, and leaves the mark", async () => {
+    const { account, hold } = await landOnTheStep("tampered-hold");
+    const value = holdValueOf(hold);
+    const at = Math.floor(value.length / 2);
+    const flipped = `${value.slice(0, at)}${value[at] === "A" ? "B" : "A"}${value.slice(at + 1)}`;
+    expect(flipped).not.toBe(value);
+    const before = await passwordHashOf(account.id);
+
+    const refused = await save(
+      { password: NEW_PASSWORD, passwordAgain: NEW_PASSWORD },
+      `${passwordChangeCookieName(getAuthConfig())}=${flipped}`,
+    );
+    expect(refused.status).toBe(400);
+    expect(await errorCode(refused)).toBe("password_change_lapsed");
+    expect(sessionCookieOf(refused)).toBeUndefined();
+    expect(await passwordHashOf(account.id)).toBe(before);
+    expect(await markOf(account.id)).not.toBeNull();
+  });
+
+  it("voids an old hold once a second refusal re-marks the account", async () => {
+    const { account, hold } = await landOnTheStep("re-marked");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    mail.sent.length = 0;
+    await refuseASignIn(account.email);
+    const before = await passwordHashOf(account.id);
+
+    const refused = await save({ password: NEW_PASSWORD, passwordAgain: NEW_PASSWORD }, hold);
+    expect(refused.status).toBe(400);
+    expect(await errorCode(refused)).toBe("password_change_lapsed");
+    expect(sessionCookieOf(refused)).toBeUndefined();
+    expect(await passwordHashOf(account.id)).toBe(before);
+  });
+
+  it("gives the hold its own ten minutes from issue, however late the approval was pressed", async () => {
+    const account = await seedAccount("late-press");
+    await refuseASignIn(account.email);
+    mail.sent.length = 0;
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const typed = await typePassword(account.email);
+    // Pressed with half a minute of the approval left.
+    vi.setSystemTime(new Date(Date.now() + SIGN_IN_APPROVAL_TTL_MS - 30 * SECOND));
+    expect((await press(mailedToken(), "approved")).status).toBe(200);
+    const { hold } = await expectForced(await collectWith(claimOf(typed)), account.id);
+
+    // Five minutes later the approval is long gone, but the hold is not.
+    vi.setSystemTime(new Date(Date.now() + 5 * 60 * SECOND));
+    await expectSavedAndSignedIn(await save({ password: NEW_PASSWORD, passwordAgain: NEW_PASSWORD }, hold), account.id);
+  });
+
+  it("changes nothing for a disabled account, whatever its hold says", async () => {
+    const { account, hold } = await landOnTheStep("disabled-hold");
+    await getDb().update(users).set({ disabledAt: new Date() }).where(eq(users.id, account.id));
+    const before = await passwordHashOf(account.id);
+
+    const refused = await save({ password: NEW_PASSWORD, passwordAgain: NEW_PASSWORD }, hold);
+    expect(refused.status).toBeGreaterThanOrEqual(400);
+    expect(refused.status).toBeLessThan(500);
+    expect(sessionCookieOf(refused)).toBeUndefined();
+    expect(await sessionCount(account.id)).toBe(0);
+    expect(await passwordHashOf(account.id)).toBe(before);
+    expect(await markOf(account.id)).not.toBeNull();
+    const audited = await getDb().select({ id: auditLog.id }).from(auditLog)
+      .where(and(eq(auditLog.entityId, account.id), eq(auditLog.action, "password_changed")));
+    expect(audited).toHaveLength(0);
+  });
+});
+
+describe("with no mail relay, a marked password signs nobody in (#1881 review: reset only through a verified channel)", () => {
+  it("refuses the password, issues no hold and no session, and points to a recovery link", async () => {
+    const account = await seedAccount("no-relay");
+    await refuseASignIn(account.email);
+    await clearSending();
+
+    const typed = await typePassword(account.email);
+    expect(typed.status).toBe(403);
+    expect(await errorCode(typed)).toBe("password_recovery_required");
+    expect(sessionCookieOf(typed)).toBeUndefined();
+    expect(readSetCookie(typed, passwordChangeCookieName(getAuthConfig()))?.value ?? "").toBe("");
+    expect(await sessionCount(account.id)).toBe(0);
+    expect(await markOf(account.id)).not.toBeNull();
+  });
+
+  it("still answers a wrong password on a marked account as credentials_invalid (the mark is not probed)", async () => {
+    const account = await seedAccount("no-relay-wrong");
+    await refuseASignIn(account.email);
+    await clearSending();
+    const typed = await typePassword(account.email, "not-the-password-at-all");
+    expect(typed.status).toBe(401);
+    expect(await errorCode(typed)).toBe("credentials_invalid");
+  });
+
+  it("signs an unmarked account in by password as before (the guard for the case above)", async () => {
+    const account = await seedAccount("no-relay-clean");
+    await clearSending();
+    const typed = await typePassword(account.email);
+    expect(await typed.json()).toEqual({ authenticated: true });
+    expect(sessionCookieOf(typed)).toBeDefined();
+  });
+});
+
+describe("the other ways to a new password refuse the refused one (#1881 review)", () => {
+  it("a recovery link answers the refused password with password_unchanged and stays unspent", async () => {
+    const account = await seedAccount("setup-same");
+    await refuseASignIn(account.email);
+    const { token } = await issueSetupToken(account.id, "recovery");
+
+    const refused = await post(consumeSetup, "/api/auth/local/setup", { token, password: OLD_PASSWORD });
+    expect(refused.status).toBe(400);
+    expect(await errorCode(refused)).toBe("password_unchanged");
+    expect(sessionCookieOf(refused)).toBeUndefined();
+
+    await expectSavedAndSignedIn(
+      await post(consumeSetup, "/api/auth/local/setup", { token, password: NEW_PASSWORD }),
+      account.id,
+    );
+  });
+
+  it("a recovery link cannot be used to test the refused password without limit", async () => {
+    const account = await seedAccount("setup-guessing");
+    await refuseASignIn(account.email);
+    const { token } = await issueSetupToken(account.id, "recovery");
+    vi.useFakeTimers({ toFake: ["Date"] });
+
+    const codes: string[] = [];
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      codes.push(await errorCode(await post(consumeSetup, "/api/auth/local/setup", { token, password: OLD_PASSWORD })));
+    }
+    expect(codes.slice(0, 5)).toEqual(Array(5).fill("password_unchanged"));
+    expect(codes.at(-1)).toBe("too_many_attempts");
+  });
+
+  it("the signed-in change answers the refused password with password_unchanged and changes nothing", async () => {
+    const account = await seedAccount("signed-in-same");
+    const actor = await actorFor(account.id);
+    await refuseASignIn(account.email);
+    const before = await passwordHashOf(account.id);
+
+    const refused = await callRoute(changePassword, {
+      url: `${ORIGIN}/api/auth/local/password`,
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        origin: ORIGIN,
+        "sec-fetch-site": "same-origin",
+        cookie: actor.cookie,
+        "x-csrf-token": actor.csrfToken,
+      },
+      body: JSON.stringify({ password: OLD_PASSWORD, currentPassword: OLD_PASSWORD }),
+    });
+    expect(refused.status).toBe(400);
+    expect(await errorCode(refused)).toBe("password_unchanged");
+    expect(await passwordHashOf(account.id)).toBe(before);
+    expect(await markOf(account.id)).not.toBeNull();
+  });
+});
+
+describe("a password saved as the account is marked again answers with the hold, never a raw 403 (#1881 review)", () => {
+  it("the recovery link: saved, no session, the hold to the change step", async () => {
+    const account = await seedAccount("setup-race");
+    const { token } = await issueSetupToken(account.id, "recovery");
+    const remarked = new Date();
+    vi.spyOn(sessionModule, "createSession").mockRejectedValueOnce(new PasswordChangeRequiredError(account.id, remarked));
+
+    const answered = await post(consumeSetup, "/api/auth/local/setup", { token, password: NEW_PASSWORD });
+    expect(answered.status).toBe(200);
+    expect(await answered.clone().json()).toEqual({ state: "password_change_required", refusedAt: remarked.toISOString() });
+    expect(sessionCookieOf(answered)).toBeUndefined();
+    expect(readSetCookie(answered, passwordChangeCookieName(getAuthConfig()))?.value ?? "").not.toBe("");
+    expect((await verifyPassword(await passwordHashOf(account.id), NEW_PASSWORD)).verified).toBe(true);
+  });
+
+  it("the signed-in change: saved, no session, the hold to the change step", async () => {
+    const account = await seedAccount("signed-in-race");
+    const actor = await actorFor(account.id);
+    const remarked = new Date();
+    vi.spyOn(sessionModule, "createSession").mockRejectedValueOnce(new PasswordChangeRequiredError(account.id, remarked));
+
+    const answered = await callRoute(changePassword, {
+      url: `${ORIGIN}/api/auth/local/password`,
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        origin: ORIGIN,
+        "sec-fetch-site": "same-origin",
+        cookie: actor.cookie,
+        "x-csrf-token": actor.csrfToken,
+      },
+      body: JSON.stringify({ password: NEW_PASSWORD, currentPassword: OLD_PASSWORD }),
+    });
+    expect(answered.status).toBe(200);
+    expect(await answered.clone().json()).toMatchObject({ changed: true, state: "password_change_required", refusedAt: remarked.toISOString() });
+    expect(sessionCookieOf(answered)).toBeUndefined();
+    expect(readSetCookie(answered, passwordChangeCookieName(getAuthConfig()))?.value ?? "").not.toBe("");
+    expect((await verifyPassword(await passwordHashOf(account.id), NEW_PASSWORD)).verified).toBe(true);
   });
 });

@@ -596,7 +596,7 @@ export type PendingSignInState =
   | { state: "approved"; userId: string; session?: MintedApprovalSession }
   /* Approved, but the account's password is marked (#1881): the approval is
      spent and the caller issues the change-password hold, never a session. */
-  | { state: "password_change_required"; refusal: PasswordChangeRequiredError; expiresAt: Date }
+  | { state: "password_change_required"; refusal: PasswordChangeRequiredError }
   | { state: "denied" }
   | { state: "unknown" };
 
@@ -658,9 +658,10 @@ export async function collectSignInApproval(
   } catch (error) {
     // A marked password (#1881) is an answer too: the approval stays spent --
     // it has done its job, the email factor is passed -- and what the tab
-    // collects is the change-password hold, which lapses with this approval.
+    // collects is the change-password hold, which runs its own ten minutes
+    // from being issued, so a late press still leaves time to type.
     if (error instanceof PasswordChangeRequiredError) {
-      return { state: "password_change_required", refusal: error, expiresAt: row.expiresAt };
+      return { state: "password_change_required", refusal: error };
     }
     // A disabled account is an answer, not a hiccup: the approval stays
     // spent, or re-enabling the account within the TTL would let the old

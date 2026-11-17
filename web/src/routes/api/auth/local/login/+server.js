@@ -6,7 +6,6 @@ import {
 } from "orbit/lib/auth/cookies";
 import { AuthError, PasswordChangeRequiredError } from "orbit/lib/auth/errors";
 import { authErrorResponse } from "orbit/lib/auth/http";
-import { issuePasswordChangeHold } from "orbit/lib/auth/password-change-hold";
 import { assertSameOrigin, createSession, deleteSessionToken } from "orbit/lib/auth/session";
 import { getAuthConfig } from "orbit/lib/env";
 import { verifyCredential } from "orbit/server/local-credentials";
@@ -129,14 +128,20 @@ export const POST = api(
       if (error instanceof AuthError && error.code === "account_disabled") {
         throw new AuthError("credentials_invalid", INVALID_MESSAGE, 401);
       }
-      /* A refused sign-in marked this password (#1881). With no factor the
-         password is the whole of the sign-in (ADR-0027 §2), so it earns what
-         an approved one would: the change-password hold, never a session. */
+      /* A refused sign-in marked this password (#1881): somebody else knows
+         it. With no relay there is no second factor (ADR-0027 §2), so the
+         password would be the whole of the way to a new one, and the person
+         who knew it could take the account through the hold. Refused instead,
+         with no hold and no session; the way back is a setup link from an
+         administrator (owner's coordinator decision on the #1881 review:
+         OWASP/NIST, a known-compromised password is reset only through a
+         verified channel). Only a VERIFIED password gets here, so this tells
+         nobody anything a wrong password could. */
       if (error instanceof PasswordChangeRequiredError) {
-        const hold = await issuePasswordChangeHold(event.cookies, error, config);
-        return new Response(
-          JSON.stringify({ authenticated: false, state: "password_change_required", refusedAt: hold.refusedAt }),
-          { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store" } },
+        throw new AuthError(
+          "password_recovery_required",
+          "This password can no longer sign in; ask an administrator for a new setup link",
+          403,
         );
       }
       throw error;

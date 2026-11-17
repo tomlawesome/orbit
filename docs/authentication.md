@@ -117,8 +117,14 @@ a wrong password does. It also means somebody else knew your password, so it
 marks the password: the next sign-in with it still needs the approval mail,
 and once approved it asks for a new password — different from the old one —
 before it lets you in. Signing in through your identity provider asks the
-same. The mark stays until a new password is saved, there or through a setup
-or recovery link; it does not wear off.
+same. You have ten minutes on that step. The mark stays until a new password
+is saved, there or through a setup or recovery link; it does not wear off.
+
+If the mail relay has since been turned off, the marked password no longer
+signs in at all, because there is no approval mail left to prove it is you.
+The door says so: ask an administrator for a new setup link. (While there is
+no relay that link cannot be mailed either, so the relay has to be set up
+again first.)
 
 ## Adding OIDC later
 

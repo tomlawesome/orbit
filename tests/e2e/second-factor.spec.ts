@@ -1,7 +1,7 @@
 import { expect, test, type Browser, type Page } from "@playwright/test";
 import { settleArrival } from "./support/arrival";
 import { claimInstanceAsAdministrator } from "./support/bootstrap";
-import { householdRegister } from "./support/households";
+import { householdRegister, sessionHeaders } from "./support/households";
 import { ensureLocalPassword } from "./support/local-credentials";
 import { workerAccount, workerEmail, workerFixturePassword } from "./support/worker-identity";
 import { newestApprovalUid, waitForApprovalLink } from "./support/mail";
@@ -33,7 +33,7 @@ resetDatabaseBetweenSpecFiles();
  *
  * #1612 (ADR-0039): the factor itself -- a password alone signs nobody in, the
  * link opens nothing until pressed, only the typing browser collects, "this
- * wasn't me" counts and leaves its notice, a provider sign-in is never asked --
+ * wasn't me" counts and marks the password, a provider sign-in is never asked --
  * is proved at the API in tests/integration/sign-in-second-factor.test.ts, and
  * "an identity-provider sign-in is never challenged" moved there whole. What
  * stays here is the two journeys that walk the door, the waiting card, the
@@ -80,7 +80,7 @@ let seated = false;
  * That bounce is what broke this file first time out: the step-up inside
  * `ensureLocalPassword` comes back to /settings, the hook sent it to `/`, and
  * the helper waited twenty seconds for a URL that was never coming. The
- * refusal line the second test reads is drawn on /home, which is gated the
+ * second test ends on /home once its new password is saved, which is gated the
  * same way, so the same seat is what lets that assertion be made at all.
  *
  * The shape sign-in-methods.spec.ts uses for the same reason, swept the same
@@ -232,7 +232,7 @@ test("a password alone signs nobody in: the emailed approval is what opens the d
     .toMatchObject({ user: { displayName: OUTSIDER().name } });
 });
 
-test("\"this wasn't me\" turns the sign-in away, and the account holder is told next time", async ({ page, browser }) => {
+test("\"this wasn't me\" turns the sign-in away, and the next sign-in must choose a new password", async ({ page, browser }) => {
   test.setTimeout(240_000);
 
   const knocked = await typeThePassword(page);
@@ -246,27 +246,49 @@ test("\"this wasn't me\" turns the sign-in away, and the account holder is told 
   await expect(page).toHaveURL(/\/login$/);
   expect((await page.request.get("/api/auth/session", { maxRetries: 2 })).status()).toBe(401);
 
-  /* AND THE OTHER HALF OF A REFUSAL: somebody knew that password, so the next
-     sign-in that DOES work carries one line about it. */
+  /* AND THE OTHER HALF OF A REFUSAL (#1881): somebody knew that password, so
+     the next sign-in that IS approved gets no session. The door shows the
+     ring card again, asking for a new password, and naming when the refusal
+     was; saving one is the way in. */
   const knockedAgain = await typeThePassword(page);
   await expect(page.locator(".card.waiting")).toBeVisible({ timeout: 30_000 });
   const approved = await waitForApprovalLink(OUTSIDER().email, 60_000, knockedAgain);
   await decideOnAnotherDevice(browser, approved, "#approveyes");
 
-  /* THE SKY THEY LAND ON, and not a second visit to it. Asking for the notice
-     is what spends it -- /api/auth/sign-in-notice takes it in the statement
-     that answers -- so the first /home this tab draws is the only one that can
-     carry the line. The approved tab goes there on its own, because this
-     reader has a household; navigating again afterwards would be reading a sky
-     whose notice the landing had already taken. */
+  const renew = page.locator(".card.renew");
+  await expect(renew).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator("#cardask")).toHaveText("Choose a new password");
+  await expect(renew.locator(".note.why")).toContainText("A sign-in with this password was refused on");
+  await expect(renew.locator(".note.why")).toContainText(/\d{1,2} (January|February|March|April|May|June|July|August|September|October|November|December) \d{4} at \d{2}:\d{2} UTC/);
+  await expect(page).toHaveURL(/\/login$/);
+  expect((await page.request.get("/api/auth/session", { maxRetries: 2 })).status(), "the approved, marked sign-in got a session").toBe(401);
+
+  /* The refused password is refused again, in the card's own words. */
+  await page.fill("#idpassword", OUTSIDER().password);
+  await page.fill("#idagain", OUTSIDER().password);
+  await page.locator("#idbtn").click();
+  await expect(renew.locator(".err.shown")).toHaveText("That is the password that was refused. Choose a different one.", { timeout: 30_000 });
+
+  /* A new one saves, signs in, and goes home. */
+  const renewed = `${OUTSIDER().password}-renewed-1881`;
+  await page.fill("#idpassword", renewed);
+  await page.fill("#idagain", renewed);
+  await page.locator("#idbtn").click();
   await settleArrival(page);
   await expect(page).toHaveURL(/\/home$/, { timeout: 30_000 });
-  const notice = page.locator(".refused");
-  await expect(notice).toBeVisible({ timeout: 30_000 });
-  await expect(notice).toContainText("refused");
-  await expect(notice.getByRole("link", { name: "change your password" })).toBeVisible();
+  const session = await page.request.get("/api/auth/session", { maxRetries: 2 });
+  expect(session.ok(), "saving the new password did not sign the reader in").toBe(true);
+  expect((await session.json()) as { user: { displayName: string } })
+    .toMatchObject({ user: { displayName: OUTSIDER().name } });
+  /* The one-time home line is gone: the card said it. */
+  await expect(page.locator(".refused")).toHaveCount(0);
 
-  /* Said once: asking for it spent it, so a reload is a clean sky. */
-  await page.reload();
-  await expect(page.locator(".refused")).toHaveCount(0, { timeout: 30_000 });
+  /* Put FIXTURE_PASSWORD's one value back (support/local-credentials.ts),
+     through the product's own signed-in change: the mark is cleared, so the
+     old value is an ordinary new password now. */
+  const restored = await page.request.post("/api/auth/local/password", {
+    headers: await sessionHeaders(page),
+    data: { password: OUTSIDER().password, currentPassword: renewed },
+  });
+  expect(restored.status(), "the fixture password could not be put back").toBe(200);
 });

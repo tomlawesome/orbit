@@ -110,17 +110,29 @@ change of memorized secret on evidence of compromise.
 - The mark is checked where every sign-in path mints a session
   (`createSession`): password and provider alike. A marked account gets no
   session. The next password sign-in still needs the emailed approval; once
-  approved, and for a provider sign-in or an instance without the factor once
-  the password is right, the browser is given only a change-password hold — a
-  sealed, HTTP-only proof for one route, `POST
-  /api/auth/local/login/new-password` — that lapses with the approval's ten
-  minutes (ten minutes from issue where no approval preceded it).
+  approved, and for a provider sign-in, the browser is given only a
+  change-password hold — a sealed, HTTP-only proof for one route, `POST
+  /api/auth/local/login/new-password` — that lasts ten minutes from being
+  issued, so an approval pressed late still leaves time to type. It ends at
+  once when the mark changes (saved, or a later refusal), and a disabled
+  account's hold changes nothing.
+- On an instance with no mail relay there is no verified channel, and the
+  password would be the whole of the way to a new one: the person who knew it
+  could take the account. A correct but marked password is refused there
+  (`password_recovery_required`, 403) with no hold and no session; the way
+  back is a new setup link from an administrator (#1881 review; OWASP/NIST: a
+  known-compromised password is reset only through a verified channel). A
+  wrong password still answers `credentials_invalid`, so the mark cannot be
+  probed.
 - The new password must differ from the refused one, and is held to the setup
   and recovery rules (ADR-0021 §6). Saving it clears the mark in the same
   statement that writes the hash, revokes every session the account held
   (ADR-0023 §7) and records `password_changed`; only then is a session minted.
   A setup or recovery link, or a signed-in change, clears it the same way and
-  is held to the same "not the refused one" rule.
+  is held to the same "not the refused one" rule. A link holder has not proved
+  the old password, so each `password_unchanged` answer to a link counts
+  against the credential's sign-in backoff (ADR-0023 §4), and while that
+  backoff holds the link is refused with `too_many_attempts`.
 - The mark has no time limit: it is security state, not a notice, and is not
   spent by being shown. The one-time notice on the sky goes; the moment of the
   refusal is said on the new-password step instead (design round

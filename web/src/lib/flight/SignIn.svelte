@@ -10,7 +10,7 @@
   import { fetchFlightAhead } from "./fetch-ahead.js";
   import { isFirstVisit } from "./door-seen.js";
   import {
-    APPROVAL_BACKSTOP_MS, CLAIM, DOOR, LOCAL, LOCKED, STARTING, STARTING_BACKSTOP_MS, STARTING_POLL_MS,
+    APPROVAL_BACKSTOP_MS, CLAIM, RENEW_HOLD_MS, DOOR, LOCAL, LOCKED, STARTING, STARTING_BACKSTOP_MS, STARTING_POLL_MS,
     applyStartingBackstop, availabilityOf, cardMessageFor, claimFromHash, doorMessageFor,
     doorModeOf, nextDoorState, phaseOf, readinessOf,
   } from "./door-state.js";
@@ -183,9 +183,6 @@
   /** The error code of the last refused POST, for the one refusal that
       changes the card rather than its line (`password_change_lapsed`). */
   let lastCode = /** @type {unknown} */ (undefined);
-  /** When the approval this tab is waiting on lapses: the hold it may turn
-      into lapses with it (#1881). */
-  let approvalExpiresAt = 0;
 
   /**
    * Raises or drops the card layer. `showform` is the same class the arrival
@@ -337,12 +334,9 @@
       waitForApproval(answer.pending);
       return;
     }
-    /* No factor on this instance, and a refused sign-in marked the password:
-       the hold, ten minutes from now (#1881). */
-    if (answer.state === "password_change_required") {
-      chooseNewPassword(answer.refusedAt, Date.now() + APPROVAL_BACKSTOP_MS);
-      return;
-    }
+    /* No factor here, so a marked password is refused outright
+       (password_recovery_required, #1881 review) and lands in `present`'s
+       message: there is no verified channel to renew it through. */
     markLaunch();
     location.href = returnTo;
   }
@@ -353,7 +347,6 @@
     pendingState = "waiting";
     limited = pending.limited === true;
     canResendAt = Date.parse(pending.canResendAt) || 0;
-    approvalExpiresAt = Date.parse(pending.expiresAt) || Date.now() + APPROVAL_BACKSTOP_MS;
     card = "waiting";
     showCard(true);
     approvalFailures = 0;
@@ -412,8 +405,8 @@
       }
       if (answer?.state === "password_change_required") {
         /* Approved, but the password is marked: no session came with this
-           answer, only the hold, which lapses with the approval (#1881). */
-        chooseNewPassword(answer.refusedAt, approvalExpiresAt);
+           answer, only the hold, which runs ten minutes from now (#1881). */
+        chooseNewPassword(answer.refusedAt, Date.now() + RENEW_HOLD_MS);
         return;
       }
       if (answer?.state === "denied") {
@@ -691,7 +684,7 @@
         return;
       }
       if (first.state === DOOR) {
-        if (renewAsked) chooseNewPassword(renewRefusedAt, Date.now() + APPROVAL_BACKSTOP_MS);
+        if (renewAsked) chooseNewPassword(renewRefusedAt, Date.now() + RENEW_HOLD_MS);
         else wearFace(first.face);
         readyWhenDrawn();
         return;

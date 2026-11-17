@@ -38,17 +38,18 @@ export interface PasswordChangeHold {
 /**
  * Seals a hold for a marked account and puts it in this browser's cookie.
  *
- * `expiresAt` is the approval's own lapse when an approval preceded it (the
- * hold "lapses with the approval's ten minutes" and a refused entry never
- * extends it); a provider sign-in, or one on an instance without the second
- * factor, gets ten minutes from now.
+ * Every hold runs ten minutes from being issued, whichever way in led here:
+ * an approval pressed late must still leave time to type (#1881 review). A
+ * refused entry never extends it, and it ends at once, whatever its clock
+ * says, when the mark it names is cleared or replaced: the save compares the
+ * two under the credential's row lock (`completePasswordRenewal`).
  */
 export async function issuePasswordChangeHold(
   cookies: CookieSink,
   refusal: PasswordChangeRequiredError,
   config: AuthConfig,
-  expiresAt: Date = new Date(Date.now() + PASSWORD_CHANGE_HOLD_TTL_MS),
 ): Promise<{ refusedAt: string; expiresAt: string }> {
+  const expiresAt = new Date(Date.now() + PASSWORD_CHANGE_HOLD_TTL_MS);
   const ttlSeconds = Math.max(1, Math.floor((expiresAt.getTime() - Date.now()) / 1000));
   const sealed = await sealProof(
     /* The lapse is carried to the millisecond and checked strictly on open:

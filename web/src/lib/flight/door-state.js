@@ -303,6 +303,8 @@ export function cardMessageFor(code) {
       return "Those two passwords are not the same.";
     case "password_unchanged":
       return "That is the password that was refused. Choose a different one.";
+    case "password_recovery_required":
+      return "Somebody else knew this password, so it no longer signs in. Ask an administrator for a new setup link.";
     case "password_change_lapsed":
       return "This sign-in has lapsed before a new password was saved. Sign in again and choose one then.";
     case "sign_in_unavailable":
@@ -329,6 +331,10 @@ export const STARTING_POLL_MS = 4_000;
     link is told it lapsed while the server would still have taken it. */
 export const APPROVAL_BACKSTOP_MS = 10 * 60_000;
 
+/** How long the change-password hold lasts from being issued (#1881):
+    src/lib/auth/password-change-hold.ts's PASSWORD_CHANGE_HOLD_TTL_MS. */
+export const RENEW_HOLD_MS = 10 * 60_000;
+
 /**
  * The other pure decision in this module (#869): given the state
  * {@link nextDoorState} already decided for this round, a deadline and the
@@ -353,13 +359,15 @@ export function applyStartingBackstop(state, deadline, now) {
   return now >= deadline ? FAILED : STARTING;
 }
 
-const MOMENT_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const MOMENT_MONTHS = ["January", "February", "March", "April", "May", "June", "July",
+  "August", "September", "October", "November", "December"];
 
 /**
- * A refusal's moment, in the words the approval mail and page already use
- * for a moment (`formatApprovalMoment`, src/server/sign-in-approvals/mail.ts):
- * "11 Nov 2026 at 21:14 UTC" (#1881). UTC and to the minute, so the card says
- * the same time the mail did. `null` for anything that is not a moment, so a
+ * A refusal's moment, as the ratified wording table writes it: "11 November
+ * 2026 at 21:14 UTC" (#1881). The month is in full, as the table has it; UTC
+ * and to the minute, as `formatApprovalMoment`
+ * (src/server/sign-in-approvals/mail.ts) gives the approval mail, so the card
+ * and the mail name the same minute. `null` for anything that is not a moment, so a
  * hostile or garbled answer puts nothing on the card rather than "NaN".
  *
  * @param {unknown} iso

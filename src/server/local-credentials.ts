@@ -823,14 +823,33 @@ export async function passwordChangeRequiredAt(userId: string): Promise<Date | n
  * password is ADR-0023's business, not this rule's -- so the derivation it
  * costs is spent only on the few accounts that carry the mark. Run before any
  * transaction is opened, so a 64 MiB derivation never holds a row lock.
+ *
+ * `throttle` is for a caller whose holder has not proved the old password (a
+ * setup or recovery link, #1881 review): a `password_unchanged` answer tells
+ * them the guess WAS the old password, so each one counts against the
+ * credential's own sign-in backoff (`recordLocalCredentialFailure`, the login
+ * route's limiter), and while that backoff holds the comparison is not made
+ * at all. One live link per account (issuing one kills the last), so the
+ * credential's count is the link's count.
  */
-export async function assertNotRefusedPassword(userId: string, password: string): Promise<void> {
+export async function assertNotRefusedPassword(
+  userId: string,
+  password: string,
+  options: { throttle?: boolean } = {},
+): Promise<void> {
   const [row] = await getDb()
-    .select({ passwordHash: localCredentials.passwordHash, requiredAt: localCredentials.passwordChangeRequiredAt })
+    .select({
+      passwordHash: localCredentials.passwordHash,
+      requiredAt: localCredentials.passwordChangeRequiredAt,
+      lockedUntil: localCredentials.lockedUntil,
+    })
     .from(localCredentials)
     .where(eq(localCredentials.userId, userId))
     .limit(1);
   if (!row?.requiredAt) return;
+  if (options.throttle && row.lockedUntil && row.lockedUntil > new Date()) {
+    throw new AuthError("too_many_attempts", "Too many attempts; try again shortly", 429);
+  }
   let verified: boolean;
   try {
     ({ verified } = await verifyPassword(row.passwordHash, password));
@@ -841,6 +860,7 @@ export async function assertNotRefusedPassword(userId: string, password: string)
     throw error;
   }
   if (verified) {
+    if (options.throttle) await recordFailure(userId);
     throw new AuthError("password_unchanged", "Choose a password different from the one that was refused", 400);
   }
 }
@@ -880,12 +900,16 @@ export async function completePasswordRenewal(
 ): Promise<PasswordChangeOutcome> {
   return getDb().transaction(async (transaction) => {
     const [row] = await transaction
-      .select({ requiredAt: localCredentials.passwordChangeRequiredAt })
+      .select({ requiredAt: localCredentials.passwordChangeRequiredAt, disabledAt: users.disabledAt })
       .from(localCredentials)
+      .innerJoin(users, eq(users.id, localCredentials.userId))
       .where(eq(localCredentials.userId, userId))
-      .for("update")
+      .for("update", { of: localCredentials })
       .limit(1);
-    if (!row?.requiredAt || row.requiredAt.getTime() !== requiredAt.getTime()) {
+    /* A disabled account's hold changes nothing (#1881 review): disabling
+       is an administrator's decision and outranks the reader's renewal. It
+       answers as lapsed, the one word every dead hold gets. */
+    if (!row || row.disabledAt || !row.requiredAt || row.requiredAt.getTime() !== requiredAt.getTime()) {
       throw new AuthError("password_change_lapsed", "This sign-in has lapsed; sign in again", 400);
     }
     return applyPasswordChange(transaction, userId, passwordHash, userId);
