@@ -81,7 +81,9 @@ describe("reviewed intake and bound_at (#1871)", () => {
         uploadedByUserId: fixture.users.member.id, displayName: "kept.pdf", mediaType: "application/pdf", sizeBytes: 128,
         contentSha256: "0".repeat(64), lifecycle: "available", scanStatus: "skipped", availableAt: bound, boundAt: bound, deleteAfter: null,
       });
-      await approveReviewedIntake(fixture.users.member.id, input).catch(() => undefined);
+      // The kept paper holds the attachment's id, so the approval is refused cleanly
+      // rather than replacing it.
+      await expect(approveReviewedIntake(fixture.users.member.id, input)).rejects.toMatchObject({ code: "document_conflict", status: 409 });
       // The approval stages its own copy under the attachment's id, so a deleted
       // stray would come back as a different row: check it is still this one.
       const rows = await getDb().select({ name: documents.displayName, sealed: documents.sealedItemId, boundAt: documents.boundAt }).from(documents).where(eq(documents.id, attachmentId));
