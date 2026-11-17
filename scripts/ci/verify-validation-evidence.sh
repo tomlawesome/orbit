@@ -34,6 +34,8 @@
 #                        one whose SPDX creationInfo.created is missing or
 #                        not an RFC 3339 date-time; or a cosign SBOM output
 #                        larger than 64 MiB, refused before it is parsed.
+#                        Likewise a validation cosign output larger than
+#                        64 MiB, refused before it is read or parsed.
 #   ambiguous (exit 12)  Verified attestations disagree about what was
 #                        validated. Two records that are identical except
 #                        recordedAt are one item of evidence (a retried
@@ -106,9 +108,11 @@ source "${repo_root}/scripts/release-metadata-patterns.sh"
 # Must match scripts/ci/attest-tested-image.sh; a test asserts they agree.
 readonly PREDICATE_TYPE="https://tomlawson.io/attestations/orbit-validation/v1"
 # Bounded reads (43a): cosign stderr echoed on a refusal is cut to its first
-# STDERR_ECHO_BYTES; the SBOM output is refused unread above MAX_SBOM_BYTES.
+# STDERR_ECHO_BYTES; the SBOM output is refused unread above MAX_SBOM_BYTES,
+# and the validation output above MAX_VALIDATION_BYTES (#1862), the same limit.
 readonly STDERR_ECHO_BYTES=4096
 readonly MAX_SBOM_BYTES=$((64 * 1024 * 1024))
+readonly MAX_VALIDATION_BYTES="$MAX_SBOM_BYTES"
 
 fail() { printf 'verify-validation-evidence: %s\n' "$1" >&2; exit 2; }
 refuse() { # $1 ground, $2 exit code, $3 message
@@ -174,6 +178,11 @@ if ! "$cosign_cmd" verify-attestation \
   head -c "$STDERR_ECHO_BYTES" -- "$cosign_err" | sed 's/^/verify-validation-evidence: cosign: /' >&2
   refuse missing 11 "no verifiable validation attestation of type ${PREDICATE_TYPE} for ${subject}; validation has not attested this digest under the committed key"
 fi
+
+# Bounded read (#1862): the size is checked before node reads or parses a byte.
+validation_bytes="$(stat -c %s -- "$verified")"
+(( validation_bytes <= MAX_VALIDATION_BYTES )) ||
+  refuse missing 11 "the verified validation output for ${ORBIT_DIGEST} is ${validation_bytes} bytes, larger than the $((MAX_VALIDATION_BYTES / 1048576)) MiB limit; refusing to read it"
 
 # The SBOM attestations, only when the caller wants the SBOM. Their judgement
 # waits until the validation records have passed (node, below), so a refusal
