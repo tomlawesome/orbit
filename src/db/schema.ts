@@ -482,8 +482,9 @@ export const signInApprovals = pgTable("sign_in_approvals", {
   decidedAt: timestamp("decided_at", { withTimezone: true }),
   /* The send limits of ADR-0027 §8, counted where they cannot be forgotten by
      a restart: how many links this pending sign-in has put in the post, and
-     when the last one went. "Five per account per hour" is these counts summed
-     across the account's rows, and "resend after 60 s" is this timestamp. */
+     when the last one went. "Resend after 60 s" is this timestamp; "five per
+     account per hour" is counted from sign_in_approval_sends, one row per
+     mail (#1604 P-20). */
   sendCount: integer("send_count").notNull().default(0),
   lastSentAt: timestamp("last_sent_at", { withTimezone: true }),
   noticeShownAt: timestamp("notice_shown_at", { withTimezone: true }),

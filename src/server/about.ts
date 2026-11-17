@@ -14,8 +14,9 @@ import { readTikaVersion } from "@/server/documents/tika";
  * and nothing about where it runs: versions and the image reference only,
  * never a hostname, URL, port, error string or path. Each sidecar is asked
  * its own version, in the background; a read never waits on a live probe
- * (#1465). What a probe last read stands until the next probe reads another
- * (a failed or unreadable one keeps it). A sidecar that is switched off says
+ * (#1465). A version is shown only while the last probe of it succeeded: a
+ * failed or unreadable one turns it into "not known" until a later probe
+ * reads it (#1603). A sidecar that is switched off says
  * so, and one that has never been read is `version: null`, which the page
  * draws as "not known" unless the compose file pins a tag for it (the page
  * falls back to that, marked pinned; web/src/lib/about/group.js). Nothing is

@@ -298,7 +298,15 @@ async function sweepExpiredApprovals(now: Date): Promise<void> {
       .delete(signInApprovals)
       .where(lt(signInApprovals.expiresAt, new Date(now.getTime() - APPROVAL_RETENTION_MS)));
   } catch {
-    /* housekeeping: the next sign-in tries again */
+    /* Housekeeping: sign-in goes ahead and the next one tries again. One
+       bounded line, no row or address in it. */
+    log.warn({
+      event: "auth.local",
+      state: "degraded",
+      reason: "unexpected_failure",
+      action: "check_database",
+      impact: "none",
+    });
   }
 }
 

@@ -198,16 +198,20 @@ describe("sign-in approvals", () => {
     const row = (expiresAt: Date, over: Record<string, unknown> = {}) => ({
       userId, tokenHash: randomUUID(), claimHash: randomUUID(), expiresAt, ...over,
     });
-    const [oldPending, oldConsumed, recent] = await db.insert(signInApprovals).values([
+    /* The 90-day retention boundary: 89 days stays, 91 days goes. */
+    const days = (n: number) => new Date(Date.now() - n * 86_400_000);
+    const [oldPending, oldConsumed, recent, at89, at91] = await db.insert(signInApprovals).values([
       row(longAgo),
       row(longAgo, { outcome: "approved", decidedAt: longAgo, consumedAt: longAgo }),
       row(justNow),
+      row(days(89)),
+      row(days(91)),
     ]).returning({ id: signInApprovals.id });
 
     await startSignInApproval(userId, facts, { mailer });
 
     const left = await db.select({ id: signInApprovals.id }).from(signInApprovals)
-      .where(inArray(signInApprovals.id, [oldPending.id, oldConsumed.id, recent.id]));
-    expect(left.map((r) => r.id)).toEqual([recent.id]);
+      .where(inArray(signInApprovals.id, [oldPending.id, oldConsumed.id, recent.id, at89.id, at91.id]));
+    expect(left.map((r) => r.id).sort()).toEqual([recent.id, at89.id].sort());
   });
 });
