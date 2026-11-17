@@ -21,8 +21,9 @@ export function pageTurn(page, count) {
 /**
  * The page a key turns to: ← and PageUp back one, → and PageDown forward
  * one, Home the first, End the last. `null` for a page key with nowhere to
- * go (it is still the page's key, never the belt's); `undefined` for any
- * other key.
+ * go (it is still the page's key, never the belt's), except that a key to
+ * the page already shown still answers with that page when `lost` is set, so
+ * the press tries it again; `undefined` for any other key.
  *
  * @param {string} key
  * @param {number} page
