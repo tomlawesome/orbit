@@ -367,6 +367,20 @@ describe("repair.sh's compose restore is durable and leaves no scratch file (aud
     }
   });
 
+  it("O-S2 review: on a filesystem without locks, the restore still finishes and the sweep keeps the file", () => {
+    const targetDir = makeDeployment({});
+    const leftover = join(targetDir, ".docker-compose.yml.repair.Zz9Zz9");
+    writeFileSync(leftover, "maybe another repair's\n");
+    const shimDir = scratchDir("orbit-repair-flock-enolck-");
+    // ENOLCK: flock fails with an error that is not a conflict.
+    writeFileSync(join(shimDir, "flock"), "#!/bin/sh\necho 'flock: failed to get lock: No locks available' >&2\nexit 1\n");
+    chmodSync(join(shimDir, "flock"), 0o755);
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], { pathPrefix: shimDir });
+    expect(result.stdout, result.combined).toContain("execute action=restore-compose-file resolves=compose-file-restorable result=done");
+    expect(existsSync(join(targetDir, "docker-compose.yml")), result.combined).toBe(true);
+    expect(existsSync(leftover), result.combined).toBe(true);
+  });
+
   it("O-R4 review: a failing sync does not stop the compose restore", () => {
     const targetDir = makeDeployment({});
     const shimDir = scratchDir("orbit-repair-sync-fails-");

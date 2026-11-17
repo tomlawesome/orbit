@@ -4266,14 +4266,20 @@ do_restore_compose_file() {
     done
   fi
   compose_image_tmp="$(mktemp "${scratch_prefix}XXXXXX")" || { compose_image_tmp=""; return 1; }
-  # A sweep that won the race to the lock has removed the file: give up.
   if ! { exec {compose_image_tmp_lock_fd}<"$compose_image_tmp"; } 2>/dev/null; then
     compose_image_tmp_lock_fd=""
     compose_image_tmp=""
     return 1
   fi
-  if command -v flock >/dev/null 2>&1 &&
-    { ! flock -n "$compose_image_tmp_lock_fd" 2>/dev/null || [[ ! -f "$compose_image_tmp" ]]; }; then
+  # Exit 75 only when another run holds the lock (a sweep that won the race
+  # and is removing the file): give up. Any other flock failure, such as a
+  # filesystem without locks (ENOLCK), means no lock: the restore goes ahead
+  # unlocked, and every sweep there keeps the file because it can't lock it.
+  local lock_status=0
+  if command -v flock >/dev/null 2>&1; then
+    flock -n -E 75 "$compose_image_tmp_lock_fd" 2>/dev/null || lock_status=$?
+  fi
+  if [[ "$lock_status" == 75 || ! -f "$compose_image_tmp" ]]; then
     discard_image_compose
     return 1
   fi
