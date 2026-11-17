@@ -568,6 +568,20 @@ describe("installer semantic UI", () => {
     expect(result.stdout).not.toMatch(/\x1b\[/u);
   });
 
+  it("ignores arrow keys in plain mode on a normal TERM (#1874, #1834)", async () => {
+    const result = await runPtyOpenStdin(
+      'source "$1"; exec 3<>/dev/tty; value="$(installer_ui_read_text 3 "Value: " 64)"; printf "\\nVALUE=%s\\n" "$value"',
+      "ab\x1b[DX\r",
+      { ORBIT_INSTALLER_PLAIN: "1" },
+      "Value: ",
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("VALUE=abX");
+    expect(result.stdout).not.toContain("\b");
+    expect(result.stdout).not.toMatch(/\x1b\[/u);
+  });
+
   it("consumes unsupported parameterized and SS3 escape sequences completely", () => {
     const result = runPty(
       'source "$1"; exec 3<>/dev/tty; value="$(installer_ui_read_text 3 "Value: " 64)"; printf "\\nVALUE=%s\\n" "$value"',
