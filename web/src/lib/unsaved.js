@@ -29,6 +29,11 @@ export function markLeaving() {
   return () => { leaving = false; };
 }
 
+/** Puts the page under guard again, as when it is restored from the back-forward cache. */
+export function resetLeaving() {
+  leaving = false;
+}
+
 /** @returns {boolean} true while any held isDirty() is true */
 export function anyUnsaved() {
   if (leaving) return false;

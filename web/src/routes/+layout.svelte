@@ -52,7 +52,7 @@
   import { onMount } from "svelte";
   import { page, updated } from "$app/state";
   import { beforeNavigate, goto } from "$app/navigation";
-  import { anyUnsaved, markLeaving, unsavedAsker } from "$lib/unsaved.js";
+  import { anyUnsaved, markLeaving, resetLeaving, unsavedAsker } from "$lib/unsaved.js";
   import { reloadWhenUpdated } from "$lib/reload-when-updated.js";
   import { readSession, savePreferences } from "$lib/data/workspace.js";
   import { applyTheme } from "$lib/theme-swatches.js";
@@ -103,6 +103,8 @@
 <WhatsNew />
 <Wake />
 <NavigationBusy />
+
+<svelte:window onpageshow={(event) => { if (event.persisted) resetLeaving(); }} />
 
 <style>
   /* A theme change crossfades rather than snapping, on every screen (review

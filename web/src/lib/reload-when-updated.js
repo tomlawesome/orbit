@@ -13,25 +13,33 @@
  * is awaited, and a yes goes on by a full load when an update is pending, else
  * by `goto`. The returned promise settles when that is done.
  *
- * @param {{ willUnload: boolean, to: { url: URL } | null, cancel?: () => void }} navigation
+ * @param {{ willUnload: boolean, from?: { url: URL } | null, to: { url: URL } | null, cancel?: () => void }} navigation
  * @param {{ current: boolean }} updated  kit's `updated` from `$app/state`
  * @param {(href: string) => void} go  how to load a page; `location.href = ...` in the browser
- * @param {{ isDirty: () => boolean, ask: () => boolean, holderAsk?: () => Promise<boolean>, leaving?: () => unknown }} [guard]
+ * @param {{ isDirty: () => boolean, ask: () => boolean, holderAsk?: () => Promise<boolean>, leaving?: () => (() => void) | void }} [guard]
  * @param {(href: string) => unknown} [goto]  an in-app navigation, for a holder's resumed one
  * @returns {Promise<void> | void}
  */
 export function reloadWhenUpdated(navigation, updated, go, guard, goto) {
   if (navigation.willUnload || !navigation.to?.url) return;
   const href = navigation.to.url.href;
+  /* A reload that only moves the #hash does not unload the page, so the
+     leaving mark must come off again. */
+  const from = navigation.from?.url;
+  const sameDocument = !!from && from.href.split("#")[0] === href.split("#")[0];
+  const reload = () => {
+    const undo = guard?.leaving?.();
+    go(href);
+    if (sameDocument && typeof undo === "function") undo();
+  };
   if (guard?.isDirty()) {
     if (guard.holderAsk) {
       navigation.cancel?.();
       return guard.holderAsk().then((yes) => {
         if (!yes) return;
-        if (updated.current) {
-          guard.leaving?.();
-          go(href);
-        } else return goto?.(href);
+        if (updated.current) return reload();
+        const undo = guard.leaving?.();
+        return Promise.resolve(goto?.(href)).finally(() => { if (typeof undo === "function") undo(); });
       });
     }
     if (!guard.ask()) {
@@ -39,9 +47,5 @@ export function reloadWhenUpdated(navigation, updated, go, guard, goto) {
       return;
     }
   }
-  if (updated.current) {
-    /* A yes was given (or nothing was typed): the reload must not ask again. */
-    guard?.leaving?.();
-    go(href);
-  }
+  if (updated.current) reload();
 }
