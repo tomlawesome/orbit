@@ -482,6 +482,17 @@ export async function setSendingSettings(
   await getDb().transaction(async (transaction) => {
     const [row] = await transaction.select().from(mailSending).for("update").limit(1);
     if (row ? row.version !== expectedVersion : expectedVersion !== null) throw conflict();
+    if (parsed.via === "mailbox") {
+      /* FR-3: lock the mailbox row, as removing its credential does, and look
+         again: a removal that committed after the check above must not leave
+         sending on a credential that is gone. Sending is locked first here and
+         only read there, so the two cannot deadlock. */
+      const [mailbox] = await transaction.select({ passwordSecretId: mailInMailbox.passwordSecretId })
+        .from(mailInMailbox).for("update").limit(1);
+      if (!mailbox?.passwordSecretId) {
+        throw new AppError("mailbox_not_configured", "Set up the mailbox first, or send through another account", 409);
+      }
+    }
     const secret = parsed.via === "account"
       ? await insertSendingSecret(transaction, parsed.password, { host: parsed.host, user: parsed.user }, actorUserId)
       : null;

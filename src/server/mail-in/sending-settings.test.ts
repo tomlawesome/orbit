@@ -460,7 +460,7 @@ describe("setSendingSettings", () => {
   });
 
   it("through the mailbox it stores no password and resets to the standard submission settings", async () => {
-    const script = use([[accountRow], [{ providerProfile: "gmail" }], [accountRow], [{ id: "row1" }], [mailboxRow], [], []]);
+    const script = use([[accountRow], [{ providerProfile: "gmail" }], [accountRow], [{ passwordSecretId: "box-secret" }], [{ id: "row1" }], [mailboxRow], [], []]);
     await settings.setSendingSettings("admin", 3, mailboxInput);
     const candidate = vi.mocked(verifySmtpProviderConnection).mock.calls[0]![0]!;
     const url = new URL(candidate.smtpUrl);
