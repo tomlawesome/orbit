@@ -998,7 +998,7 @@ set -Eeuo pipefail
 #   execute action=<action-class> resolves=<reason-class> result=<done|failed|skipped>
 # one line per planned finding (in the same fixed `class_order` the plan
 # uses), followed by a terminal line:
-#   execution result=<empty|complete|unactionable|declined|failed> done=<n> failed=<n>
+#   execution result=<empty|complete|unactionable|declined|failed|refused> done=<n> failed=<n> [reason=<deployment-version-unsupported|repair-running>]
 # and then the full post-execution re-diagnosis, in exactly `--check`'s own
 # format (`finding class=... target=... severity=...` lines followed by
 # `diagnosis result=... checked=... skipped=...`). `done`/`failed` count
@@ -1394,7 +1394,7 @@ set -Eeuo pipefail
 # after the safe batch's own `execution result=...` line when both batches
 # ran:
 #
-#   dangerous result=<empty|complete|refused|failed> done=<n> failed=<n> reason=<none|non-interactive|refused-by-operator|checkpoint-failed|step-failed>
+#   dangerous result=<empty|complete|refused|failed> done=<n> failed=<n> reason=<none|non-interactive|refused-by-operator|checkpoint-failed|step-failed|repair-running>
 #
 # `result=empty` (reason=none) — `--dangerous` was given but the plan
 # contained no dangerous-class entry of either kind; no prompt is shown.
