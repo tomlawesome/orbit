@@ -192,6 +192,7 @@
     if (!next) return;
     inProblem = archiveFileProblem(next, limits);
     preview = null;
+    readToken += 1;
     file = next;
     inPhase = inProblem ? "rest" : "chosen";
   }
@@ -215,12 +216,29 @@
 
   const bringCount = $derived(preview ? preview.items - preview.conflicts.length : 0);
 
-  function bringIn() {
+  /** Latest-wins token of the one-byte read: a pick or a start-over moves it on. */
+  let readToken = 0;
+
+  async function bringIn() {
     if (!preview) return;
     const skip = preview.conflicts.map((one) => one.id);
     const chosen = file;
     if (!chosen) return;
     inProblem = null;
+    /* #1605 W-R12: a file that changed on disk since the pick cannot be read;
+       say so now rather than let the upload fail as a connection error. */
+    const token = ++readToken;
+    try {
+      await chosen.slice(0, 1).arrayBuffer();
+    } catch {
+      if (token !== readToken) return;
+      file = null;
+      preview = null;
+      inPhase = "rest";
+      inProblem = "not brought in — this file changed since you chose it. choose it again";
+      return;
+    }
+    if (token !== readToken) return;
     inPhase = "bringing";
     guarded(async (proof) => {
       const result = await importPortableArchive(householdId, { file: chosen, passphrase: passIn, skip, currentPassword: proof || undefined });
@@ -235,6 +253,7 @@
   }
 
   function startOver() {
+    readToken += 1;
     file = null;
     preview = null;
     passIn = "";

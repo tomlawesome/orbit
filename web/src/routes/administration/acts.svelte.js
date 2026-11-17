@@ -463,6 +463,9 @@ export async function runMailTest(which, { card, reread }) {
   }
 }
 
+/** Jobs whose retry is out: a second press on one sends nothing (#1605 W-Q3). @type {Set<string>} */
+const retriesOut = new Set();
+
 /**
  * Retries a failed document job. The row shows queued at once (`retried`,
  * read by words.js's jobsOf); the next re-read settles it against the server.
@@ -470,6 +473,8 @@ export async function runMailTest(which, { card, reread }) {
  * @param {{ card: Card, retried: Record<string, { status: string, at: string, was: string }>, wake?: Wake }} on
  */
 export async function retryJob(job, { card, retried, wake = quiet }) {
+  if (retriesOut.has(job.id)) return;
+  retriesOut.add(job.id);
   card.problem = null;
   try {
     await retryDocumentJob(job.id, job.status);
@@ -477,5 +482,7 @@ export async function retryJob(job, { card, retried, wake = quiet }) {
     wake(`${JOB_KINDS[job.kind] ?? job.kind} is queued to try again`);
   } catch (error) {
     card.problem = wordsOf(error);
+  } finally {
+    retriesOut.delete(job.id);
   }
 }

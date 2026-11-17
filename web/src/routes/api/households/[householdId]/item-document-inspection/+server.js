@@ -1,6 +1,7 @@
 import { json } from "@sveltejs/kit";
 
 import { AppError } from "orbit/lib/app-error";
+import { safeDocumentFilenameTitle } from "orbit/server/documents/suggestions";
 import { inspectItemDocument } from "orbit/server/item-document-inspection";
 
 import { write } from "$lib/server/api.js";
@@ -39,11 +40,22 @@ export const POST = write(
        answer the engine gives when document reading is off (#1459: no
        message), so the create form's reading lane (#1245) settles in the
        fixture harness rather than bouncing a 401 into the login flow. */
-    fixture: () => json({
-      extracted: false,
-      suggestions: [],
-      attachmentDisposition: "attachable",
-      reason: "supported_structure",
-    }, { headers: { "Cache-Control": "no-store" } }),
+    fixture: (event) => {
+      /* The engine's one suggestion with reading off: the title from the file name. */
+      let filename = "";
+      try {
+        filename = decodeURIComponent(event.request.headers.get("x-orbit-filename") ?? "");
+      } catch {
+        filename = "";
+      }
+      return json({
+        extracted: false,
+        suggestions: filename
+          ? [{ field: "title", value: safeDocumentFilenameTitle(filename), source: "filename", confidence: "high" }]
+          : [],
+        attachmentDisposition: "attachable",
+        reason: "supported_structure",
+      }, { headers: { "Cache-Control": "no-store" } });
+    },
   },
 );

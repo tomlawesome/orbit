@@ -205,7 +205,7 @@
 
   /** The pager's arrows, the keys, and the reader's turns all land here. @param {number} n */
   function turn(n) {
-    if (!shown || n === pageNo) return;
+    if (!shown || (n === pageNo && !turnLost)) return;
     pageNo = n;
     problem = null;
     turnLost = false;

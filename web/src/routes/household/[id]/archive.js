@@ -48,18 +48,20 @@ export function passphraseProblem(passphrase, again, limits) {
 
 /**
  * Why a chosen file cannot be an archive, judged before it is read. The size
- * check is the engine's ceiling when the session gave one; the server still
- * refuses an oversized body whatever this says.
+ * check is the engine's ceiling; with no limits from the session the pick is
+ * refused (never a guessed number), and the server still refuses an oversized
+ * body whatever this says.
  * @param {{ size: number }} file
  * @param {EngineLimits | null | undefined} limits
  * @returns {string | null}
  */
 export function archiveFileProblem(file, limits) {
   if (file.size === 0) return "this file is empty";
+  if (!limits) return "orbit has not said how large an archive may be yet — reload the page";
   /* archiveFileBytes follows the current storage limit (maxArchiveFileBytes),
      so an archive over it is over that limit, which can be raised (#1823
      A-F11, owner answer 46a on #1799). */
-  if (limits && file.size > limits.archiveFileBytes) {
+  if (file.size > limits.archiveFileBytes) {
     return `this file is larger than ${sizeLabel(limits.archiveFileBytes)}, the most the storage limit allows; ask your administrator to raise the storage limit`;
   }
   return null;
