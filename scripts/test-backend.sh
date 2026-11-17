@@ -28,6 +28,11 @@ if [[ "$run_tests" == true ]] && { ! command -v pdfinfo > /dev/null 2>&1 || ! co
   exit 1
 fi
 
+# One line when the host is already busy (#1864); never fails the run.
+if [[ "$run_tests" == true ]]; then
+  bash "$repo_dir/scripts/test-load-warning.sh"
+fi
+
 # The lockfile guard (#901): catches the pnpm 11 -> 12.3.4 handoff writing an
 # @pnpm/exe block back into the lockfile. Runs via `node --test`, not Vitest --
 # see vitest.config.ts's exclude entry for why.
