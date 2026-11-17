@@ -404,10 +404,10 @@ function compose() {
     // #1817: orbit mail-sending-status run in the app container. FAKE_MAIL_SENDING_STATUS is its stdout line, FAKE_MAIL_SENDING_STATUS_EXIT its exit status (default 0); unset, the command does not exist (an older image) and exits 1.
     if (text.includes("mail-sending-status")) {
       if (env.FAKE_MAIL_SENDING_STATUS === undefined) exit(1);
-      // #1834: FAKE_MAIL_SENDING_STATUS_AFTER_SECRET_GONE answers instead once .orbit-secrets/smtp-password is deleted: the re-check after the retirement.
+      // #1834: FAKE_MAIL_SENDING_STATUS_AFTER_SECRET_GONE answers instead once .orbit-secrets/smtp-password is deleted: the re-check after the retirement (its exit status is FAKE_MAIL_SENDING_STATUS_AFTER_SECRET_GONE_EXIT, default 0).
       if (env.FAKE_MAIL_SENDING_STATUS_AFTER_SECRET_GONE !== undefined && !fs.existsSync(".orbit-secrets/smtp-password")) {
         out(env.FAKE_MAIL_SENDING_STATUS_AFTER_SECRET_GONE + "\\n");
-        exit(0);
+        exit(Number(env.FAKE_MAIL_SENDING_STATUS_AFTER_SECRET_GONE_EXIT ?? 0));
       }
       out(env.FAKE_MAIL_SENDING_STATUS + "\\n");
       exit(Number(env.FAKE_MAIL_SENDING_STATUS_EXIT ?? 0));

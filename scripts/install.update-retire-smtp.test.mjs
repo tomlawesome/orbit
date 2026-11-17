@@ -391,8 +391,12 @@ describe("install.sh --plain --update: the SMTP undo copy (#1834 slice 1)", () =
 
   it("a status command that fails afterwards (non-zero exit) also keeps the copy", () => {
     const targetDir = withSmtpLines(installedFolder());
-    // The first answer is good; once the secret is gone the command answers nothing usable.
-    const result = update(targetDir, line("imported", true), { FAKE_MAIL_SENDING_STATUS_AFTER_SECRET_GONE: "mail-sending source=imported" });
+    // The first answer is good; once the secret is gone the command prints an
+    // answer that would pass the gate on its own but exits non-zero.
+    const result = update(targetDir, line("imported", true), {
+      FAKE_MAIL_SENDING_STATUS_AFTER_SECRET_GONE: line("imported", true),
+      FAKE_MAIL_SENDING_STATUS_AFTER_SECRET_GONE_EXIT: "1",
+    });
     expect(result.status).toBe(0);
     expect(undoCopies(targetDir)).toHaveLength(1);
   });
