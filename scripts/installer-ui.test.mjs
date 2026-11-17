@@ -224,7 +224,7 @@ function runPtyStorm(body, marker, signals) {
  * sends a trailing carriage return terminates on its own and keeps the
  * simpler spawnSync driver.
  */
-function runPtyOpenStdin(body, input, env = {}) {
+function runPtyOpenStdin(body, input, env = {}, waitFor = null) {
   return new Promise((resolve, reject) => {
     const child = spawn(
       "script",
@@ -234,11 +234,24 @@ function runPtyOpenStdin(body, input, env = {}) {
     let stdout = "";
     child.stdout.setEncoding("utf8");
     const watchdog = ptyWatchdog({ label: "runPtyOpenStdin", kill: () => child.kill("SIGKILL") });
-    child.stdout.on("data", (chunk) => { stdout += chunk; watchdog.touch(); });
+    // Written once, then left open: never child.stdin.end(). With waitFor, the
+    // write waits until that text is on screen: a widget that prints its prompt
+    // only after switching to raw mode (#1874) would otherwise see canonical
+    // line-discipline editing of the input instead of the raw bytes.
+    let written = false;
+    const write = () => {
+      if (written) return;
+      written = true;
+      child.stdin.write(input);
+    };
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+      watchdog.touch();
+      if (waitFor !== null && stdout.includes(waitFor)) write();
+    });
     child.on("error", reject);
-    // Written once, then left open: never child.stdin.end().
     child.stdin.on("error", () => { /* child exited first; nothing to write to */ });
-    child.stdin.write(input);
+    if (waitFor === null) write();
     child.on("close", (status) => {
       watchdog.stop();
       if (watchdog.reason) {
@@ -419,11 +432,12 @@ describe("installer semantic UI", () => {
     expect(result.stdout.split("yesplease").length - 1).toBe(2);
   });
 
-  it("erases the last typed character on a dumb terminal (#1874 O-F5)", () => {
-    const result = runPty(
+  it("erases the last typed character on a dumb terminal (#1874 O-F5)", async () => {
+    const result = await runPtyOpenStdin(
       'source "$1"; exec 3<>/dev/tty; value="$(installer_ui_read_text 3 "Answer: " 64)"; printf "\\nVALUE=%s\\n" "$value"',
       "abcX\x7f\r",
       { TERM: "dumb" },
+      "Answer: ",
     );
 
     expect(result.status).toBe(0);
