@@ -80,6 +80,58 @@ function identicalFolder(bytes = "services:\n  orbit-app:\n    image: busybox\n"
   return { targetDir, state: { ...RUNNING } };
 }
 
+// --- CRC32 forging (#1875 W3): a different file with the same `cksum` -----------------------------------------------
+
+const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {
+  let c = n << 24;
+  for (let k = 0; k < 8; k += 1) c = c & 0x80000000 ? (c << 1) ^ 0x04c11db7 : c << 1;
+  return c >>> 0;
+});
+
+/** POSIX cksum's CRC: the bytes, then the length (low byte first), then the complement. */
+function cksumCrc(buf) {
+  let crc = 0;
+  const feed = (b) => {
+    crc = ((crc << 8) ^ CRC_TABLE[((crc >>> 24) ^ b) & 0xff]) >>> 0;
+  };
+  for (const b of buf) feed(b);
+  for (let len = buf.length; len > 0; len = Math.floor(len / 256)) feed(len & 0xff);
+  return ~crc >>> 0;
+}
+
+/** `head` plus four bytes chosen so the whole has the CRC32 (and, being the same length, the cksum) of `target`: the CRC is affine over GF(2) in those bytes, so solve the 32x32 system. */
+function forgeToCrc(head, target) {
+  const build = (word) => Buffer.concat([head, Buffer.from([word & 0xff, (word >>> 8) & 0xff, (word >>> 16) & 0xff, (word >>> 24) & 0xff])]);
+  const base = cksumCrc(build(0));
+  const rows = Array.from({ length: 32 }, () => 0n); // rows[out bit] = bitmask over input bits, bit 32 = right-hand side
+  const want = BigInt((cksumCrc(target) ^ base) >>> 0);
+  for (let i = 0; i < 32; i += 1) {
+    const col = BigInt((cksumCrc(build((1 << i) >>> 0)) ^ base) >>> 0);
+    for (let o = 0; o < 32; o += 1) if ((col >> BigInt(o)) & 1n) rows[o] |= 1n << BigInt(i);
+  }
+  for (let o = 0; o < 32; o += 1) if ((want >> BigInt(o)) & 1n) rows[o] |= 1n << 32n;
+  for (let col = 0, r = 0; col < 32; col += 1) {
+    const pivot = rows.findIndex((row, idx) => idx >= r && (row >> BigInt(col)) & 1n);
+    if (pivot < 0) continue;
+    [rows[r], rows[pivot]] = [rows[pivot], rows[r]];
+    for (let k = 0; k < 32; k += 1) if (k !== r && (rows[k] >> BigInt(col)) & 1n) rows[k] ^= rows[r];
+    r += 1;
+  }
+  let word = 0;
+  for (let col = 0; col < 32; col += 1) {
+    const row = rows.find((x) => (x & 0xffffffffn) === 1n << BigInt(col));
+    if (row && (row >> 32n) & 1n) word |= 1 << col;
+  }
+  const forged = build(word >>> 0);
+  if (cksumCrc(forged) !== cksumCrc(target)) throw new Error("CRC32 forge failed");
+  return forged;
+}
+
+/** A different file of the same length and the same CRC32 as `original`: some bytes changed, the last four forged. */
+const crcTwin = (original) => forgeToCrc(Buffer.concat([original.subarray(0, 30), Buffer.from("!changed bytes!"), original.subarray(45, original.length - 4)]), original);
+
+const cksumOf = (buf) => spawnSync("cksum", [], { input: buf, encoding: "utf8" }).stdout.trim();
+
 // --- W1: update-config's rename ---------------------------------------------------------------------------------------
 
 describe("#1875 W1: update-config renames the staged password as the owner, under the #1858 limits", () => {
@@ -197,6 +249,30 @@ describe("#1875 W3: root compares the folder's files only through the bounded, n
     chmodSync(join(dir, "stat"), 0o755);
     return dir;
   }
+
+  /** A restore whose live compose file differs from its saved original but has the same CRC32 and length. */
+  function sameCksumFolder() {
+    const original = Buffer.from(`services:\n  orbit-app:\n    image: busybox\n# ${"x".repeat(40)}\n`);
+    const folder = identicalFolder(original);
+    const live = join(folder.targetDir, "docker-compose.yml");
+    const forged = crcTwin(original);
+    expect(forged.length).toBe(original.length);
+    expect(forged.equals(original), "the forged file is the original").toBe(false);
+    expect(cksumOf(forged), "the forged file does not have the original's cksum").toBe(cksumOf(original));
+    writeFileSync(live, forged);
+    chmodSync(live, 0o644);
+    expect(readFileSync(join(folder.targetDir, STAGING, "rollback", "original", "docker-compose.yml")).equals(original)).toBe(true);
+    return { ...folder, original, forged };
+  }
+
+  it("a live file with the saved original's CRC32 and length is still different: the restore is not skipped (root)", () => {
+    const folder = sameCksumFolder();
+    const shims = shimsFor(folder.targetDir);
+    const result = restore(shims, folder);
+    expect(result.hung).toBe(false);
+    expect(result.stderr, "a different file with the same cksum was compared as the same").not.toMatch(SAME_LINE);
+    expect(existsSync(join(folder.targetDir, STAGING, "rollback")) || readFileSync(join(folder.targetDir, "docker-compose.yml")).equals(folder.original), "the restore neither ran nor was refused").toBe(true);
+  });
 
   it("control: identical files are 'same': the restore is skipped as changing nothing", () => {
     const folder = identicalFolder();
@@ -370,6 +446,19 @@ describe("#1875: not root, nothing changes", () => {
     const folder = identicalFolder();
     const result = runOwner(folder.targetDir, { shims: notRoot(folder.targetDir), state: folder.state, args: ["--execute", "--safe-only"], input: "y\n", capSeconds: 30 });
     expect(result.stderr, result.stdout).toMatch(/would change nothing/u);
+  });
+
+  it("a live file with the saved original's CRC32 and length is still different: the restore is not skipped", () => {
+    const original = Buffer.from(`services:\n  orbit-app:\n    image: busybox\n# ${"x".repeat(40)}\n`);
+    const folder = identicalFolder(original);
+    const live = join(folder.targetDir, "docker-compose.yml");
+    const forged = crcTwin(original);
+    expect(cksumOf(forged)).toBe(cksumOf(original));
+    expect(forged.equals(original)).toBe(false);
+    writeFileSync(live, forged);
+    chmodSync(live, 0o644);
+    const result = runOwner(folder.targetDir, { shims: notRoot(folder.targetDir), state: folder.state, args: ["--execute", "--safe-only"], input: "y\n", capSeconds: 30 });
+    expect(result.stderr, "a different file with the same cksum was compared as the same").not.toMatch(/would change nothing/u);
   });
 
   it("a compose file identical to the image's raises no drift, as before", () => {
