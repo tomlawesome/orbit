@@ -4486,12 +4486,17 @@ restore_transaction_originals_match_live() {
     [[ ! -L "$backup_path" && ! -L "$path" && ! -L "$(dirname -- "$path")" ]] || return 1
     [[ "$(stat -c %a -- "$backup_path")" == "$(stat -c %a -- "$path")" ]] || return 1
     if [[ -f "$backup_path" ]]; then
-      # #1875 W3: both sides through the bounded read; a failed read is
-      # never "the same".
+      # #1875 W3: as root, both sides through the bounded read and a
+      # SHA-256 compare (never CRC32, which the folder's owner can forge);
+      # a failed read is never "the same". Not root, an exact cmp.
       [[ -f "$path" ]] || return 1
-      backup_sum="$(folder_file_checksum "$backup_path")" || return 1
-      live_sum="$(folder_file_checksum "$path")" || return 1
-      [[ "$backup_sum" == "$live_sum" ]] || return 1
+      if [[ "$(id -u)" == 0 ]]; then
+        backup_sum="$(folder_file_checksum "$backup_path")" || return 1
+        live_sum="$(folder_file_checksum "$path")" || return 1
+        [[ -n "$backup_sum" && "$backup_sum" == "$live_sum" ]] || return 1
+      else
+        cmp -s -- "$backup_path" "$path" || return 1
+      fi
     elif [[ -d "$backup_path" ]]; then
       [[ -d "$path" ]] && diff -r --no-dereference -q -- "$backup_path" "$path" >/dev/null 2>&1 || return 1
       [[ "$(restore_transaction_tree_modes "$backup_path")" == "$(restore_transaction_tree_modes "$path")" ]] || return 1
@@ -5202,17 +5207,20 @@ case "$type" in "regular file"|"regular empty file") ;; *) exit 3;; esac
 head -c "$2" <&3 || exit 1
 size="$(stat -L -c %s /dev/fd/3)" || exit 1
 ((size <= $2)) || exit 4'
-# folder_file_checksum <path> (#1875 W3): a checksum of a file in the
-# deployment folder, for root's compares. As root through smtp_read_file
-# (no link followed, regular files only, 1 MiB, time limit); otherwise read
-# by path as before. Returns non-zero when the read fails, so a caller never
-# counts an unread file as the same.
+# folder_file_checksum <path> (#1875 W3): the SHA-256 of a file in the
+# deployment folder, for root's compares (collision-resistant: the folder's
+# owner controls the bytes, so a CRC such as cksum's could be forged). As
+# root through smtp_read_file (no link followed, regular files only, 1 MiB,
+# time limit); otherwise read by path. Returns non-zero when the read fails
+# (pipefail), so a caller never counts an unread file as the same.
 folder_file_checksum() {
+  local sum
   if [[ "$(id -u)" == 0 ]]; then
-    smtp_read_file "$1" | cksum
+    sum="$(set -o pipefail; smtp_read_file "$1" | sha256sum)" || return 1
   else
-    cksum < "$1"
+    sum="$(sha256sum < "$1")" || return 1
   fi
+  printf '%s\n' "${sum%% *}"
 }
 
 smtp_read_file() {
