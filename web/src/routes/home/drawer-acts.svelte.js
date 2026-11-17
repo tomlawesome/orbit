@@ -313,14 +313,12 @@ export function createDrawerActs({
   /** #1605 W-R7: bumped as each read starts or is superseded; a read whose
    *  number is no longer current must not land. */
   let searchReadGeneration = 0;
-  /** The newest papers read, so a superseded re-read can ask how it ended. @type {Promise<Set<string>> | null} */
-  let latestRead = null;
 
   /** #1151 W1-Q8: pocket-search.js's readSearchDocuments carries the
    *  concurrency cap (#1151 W1-R9). Answers the items whose papers could
    *  not be read (empty when nothing was read). @param {string | null} [also]
    *  @returns {Promise<Set<string>>} */
-  async function loadSearchDocuments(also = null) {
+  async function loadSearchDocuments(also = null, mustRead = null) {
     /** @type {Set<string>} */
     const failed = new Set();
     const current = view();
@@ -339,6 +337,11 @@ export function createDrawerActs({
     if (searchDocumentsFor === household && generation === searchReadGeneration) {
       searchDocuments = found;
       papersReady = true;
+    } else if (mustRead && !failed.has(mustRead)) {
+      /* #1605 W-R7: superseded, this read stopped writing results and may
+         have stopped before mustRead's item; that item is still checked, so
+         the act that asked hears of its failure whatever took over. */
+      await readItemDocuments(householdId, mustRead).catch(() => failed.add(mustRead));
     }
     return failed;
   }
@@ -351,16 +354,7 @@ export function createDrawerActs({
     searchDocumentsFor = null;
     searchReadGeneration += 1;
     papersReady = false;
-    const run = loadSearchDocuments(also);
-    latestRead = run;
-    let failed = await run;
-    /* A newer re-read took over and this one stopped early: the failure of
-       mustRead is the newer read's to report, so this call reports it. */
-    while (mustRead && latestRead !== run) {
-      const newer = latestRead;
-      failed = await newer;
-      if (latestRead === newer) break;
-    }
+    const failed = await loadSearchDocuments(also, mustRead);
     if (mustRead && failed.has(mustRead)) throw new Error(`the papers of ${mustRead} could not be read`);
   }
 
