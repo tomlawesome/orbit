@@ -1,14 +1,19 @@
-import { and, eq, gt, isNull } from "drizzle-orm";
+import { createHash } from "node:crypto";
+import { and, eq, gt, isNull, sql } from "drizzle-orm";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
-import { auditLog, credentialSetupTokens, localCredentials, signInApprovals, users } from "@/db/schema";
+import { auditLog, credentialSetupTokens, externalIdentities, localCredentials, signInApprovals, users } from "@/db/schema";
+import { ACCOUNT_LIFECYCLE_LOCK_KEY } from "@/lib/auth/authority-locks";
 import { hashPassword } from "@/lib/auth/password";
 import { sealStepUpProof, stepUpProofCookieName } from "@/lib/auth/recent-auth";
 import { getAuthConfig } from "@/lib/env";
 import { invitationSendErrors } from "@/server/invitations/send";
+import { setUserAddress } from "@/server/local-credentials/address";
 import { createLocalUserAndSendSetupLink, sendSetupLink } from "@/server/local-credentials/setup-mail";
+import { collectSignInApproval, startSignInApproval } from "@/server/sign-in-approvals";
 import type { SmtpNotification } from "@/server/notification-worker";
 import { ORIGIN } from "./support/auth";
+import { deferred } from "./support/concurrency";
 import {
   accountAddressColumns,
   cleanupIntegrationEnvironment,
@@ -519,4 +524,156 @@ describe("PUT /api/admin/users/{userId}/email: the success path", () => {
     expect(row.consumedAt).toBeNull();
     expect((await redeem(target.token)).status).toBe(200);
   }, 30_000);
+});
+
+/*
+ * Review findings on the first build (#1869): races between the address
+ * change and whatever else writes something that goes to the address. Each
+ * interleaving is driven, not hoped for: a transaction the test holds open
+ * parks one side at a known point, and the test waits until PostgreSQL shows
+ * the other side queued (or finished, which is the failure) before letting go.
+ */
+
+/** Ungranted locks in this test database: sessions queued behind somebody. */
+async function lockWaiters(): Promise<number> {
+  const rows = await getDb().execute(sql`
+    select count(*)::int as waiting from pg_locks
+    where not granted
+      and (database is null or database = (select oid from pg_database where datname = current_database()))
+  `);
+  return Number((rows[0] as { waiting: number } | undefined)?.waiting ?? 0);
+}
+
+/**
+ * Whether `work` queued behind a lock (at least `minimum` waiters showed up)
+ * or ran to the end without waiting for anything. Generous deadline: the host
+ * is shared.
+ */
+async function queuedOrFinished(work: Promise<unknown>, minimum: number): Promise<"queued" | "finished"> {
+  let finished = false;
+  work.then(() => { finished = true; }, () => { finished = true; });
+  const deadline = Date.now() + 60_000;
+  while (Date.now() < deadline) {
+    if (finished) return "finished";
+    if (await lockWaiters() >= minimum) return "queued";
+    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error("neither queued behind a lock nor finished");
+}
+
+/** Opens a transaction, runs `first` in it, and keeps it open until `release()`. */
+async function holdOpen(first: (transaction: Parameters<Parameters<ReturnType<typeof getDb>["transaction"]>[0]>[0]) => Promise<void>) {
+  const ready = deferred<void>();
+  const gate = deferred<void>();
+  const done = getDb().transaction(async (transaction) => {
+    await first(transaction);
+    ready.resolve();
+    await gate.promise;
+  });
+  done.catch(() => ready.resolve());
+  await ready.promise;
+  return { release: async () => { gate.resolve(); await done; } };
+}
+
+const quietMailer = { async sendEmail() {} };
+
+describe("PUT /api/admin/users/{userId}/email: racing what goes to the address", () => {
+  it("finding 1: a setup link mailed to the old address before the change commits is never written live", async () => {
+    const admin = await adminWithPassword();
+    const target = await localTarget("race-link-old@example.invalid");
+    const mailedTo: string[] = [];
+
+    /* The change lands while the link is in flight: after the address was
+       read and the mail sent, before the link is written. */
+    const sending = sendSetupLink(admin.userId, target.id, {
+      mailer: {
+        async sendEmail(notification: SmtpNotification) {
+          mailedTo.push(notification.to);
+          await setUserAddress(admin.userId, target.id, "race-link-new@example.invalid", { mailer: quietMailer });
+        },
+      },
+    });
+
+    await expect(sending).rejects.toMatchObject({ code: "address_changed", status: 409 });
+    expect(mailedTo).toEqual(["race-link-old@example.invalid"]);
+    const live = await getDb().select({ id: credentialSetupTokens.id }).from(credentialSetupTokens)
+      .where(and(
+        eq(credentialSetupTokens.userId, target.id),
+        isNull(credentialSetupTokens.consumedAt),
+        gt(credentialSetupTokens.expiresAt, new Date()),
+      ));
+    expect(live).toEqual([]);
+  }, 120_000);
+
+  it("finding 2: a sign-in approval opened while the change is in flight is mailed to the new address, never the old", async () => {
+    const admin = await adminWithPassword();
+    const target = await localTarget("race-approval-old@example.invalid");
+
+    /* Park the change at its last write (the audit row), after it has
+       retired every approval it can see and while it holds its locks. */
+    const auditHeld = await holdOpen(async (transaction) => {
+      await transaction.execute(sql`lock table audit_log in share mode`);
+    });
+    const change = setUserAddress(admin.userId, target.id, "race-approval-new@example.invalid", { mailer: quietMailer });
+    expect(await queuedOrFinished(change, 1)).toBe("queued");
+
+    const mailedTo: string[] = [];
+    const approval = startSignInApproval(target.id, { userAgent: null, clientAddress: null }, {
+      mailer: { async sendEmail(notification: SmtpNotification) { mailedTo.push(notification.to); } },
+    });
+    /* It must wait for the change rather than read the old address and
+       write a row the change has already gone past. */
+    expect(await queuedOrFinished(approval, 2)).toBe("queued");
+
+    await auditHeld.release();
+    await change;
+    const pending = await approval;
+
+    expect(mailedTo).toEqual(["race-approval-new@example.invalid"]);
+    expect(pending.sendError).toBeNull();
+  }, 120_000);
+
+  it("finding 3: the change waits for a provider link in progress, and then refuses address_from_provider", async () => {
+    const admin = await adminWithPassword();
+    const target = await localTarget("race-provider@example.invalid");
+
+    /* `linkIdentity` mid-flight: it holds the account-lifecycle lock and has
+       checked the account, but not yet written the identity. */
+    let linkTransaction!: Parameters<Parameters<ReturnType<typeof getDb>["transaction"]>[0]>[0];
+    const link = await holdOpen(async (transaction) => {
+      linkTransaction = transaction;
+      await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${ACCOUNT_LIFECYCLE_LOCK_KEY}, 0))`);
+    });
+    const change = setUserAddress(admin.userId, target.id, "race-provider-new@example.invalid", { mailer: quietMailer });
+    change.catch(() => {});
+    expect(await queuedOrFinished(change, 1)).toBe("queued");
+
+    await linkTransaction.insert(externalIdentities).values({
+      userId: target.id, issuer: "https://idp.example.invalid", subject: `race-${target.id}`,
+    });
+    await link.release();
+
+    await expect(change).rejects.toMatchObject({ code: "address_from_provider", status: 409 });
+    expect((await stored(target.id)).index).toBe(await indexOf("race-provider@example.invalid"));
+  }, 120_000);
+
+  it("finding 4: an approval already approved but not yet collected is retired, so the waiting tab gets no session", async () => {
+    const admin = await adminWithPassword();
+    const target = await localTarget("approved-uncollected@example.invalid");
+    const claim = crypto.randomUUID();
+    const [approval] = await getDb().insert(signInApprovals).values({
+      userId: target.id,
+      tokenHash: crypto.randomUUID(),
+      claimHash: createHash("sha256").update(claim, "utf8").digest("hex"),
+      expiresAt: new Date(Date.now() + 3_600_000),
+      outcome: "approved",
+      decidedAt: new Date(),
+    }).returning({ id: signInApprovals.id });
+
+    expect((await put(admin, target.id, { email: "approved-uncollected-new@example.invalid", currentPassword: ADMIN_PASSWORD })).status).toBe(200);
+
+    const [row] = await getDb().select().from(signInApprovals).where(eq(signInApprovals.id, approval.id));
+    expect(row.consumedAt).not.toBeNull();
+    expect(await collectSignInApproval(claim)).toEqual({ state: "unknown" });
+  }, 120_000);
 });

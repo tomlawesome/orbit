@@ -20,6 +20,7 @@ import { and, eq, gt, isNull, ne, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { auditLog, credentialSetupTokens, externalIdentities, signInApprovals, users } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
+import { ACCOUNT_LIFECYCLE_LOCK_KEY, userAddressLockKey } from "@/lib/auth/authority-locks";
 import { AuthError } from "@/lib/auth/errors";
 import { sendBoundedMail, type InvitationMailer, type InvitationSendError } from "@/server/invitations/send";
 import { emailSchema } from "@/server/local-credentials";
@@ -66,9 +67,19 @@ export async function setUserAddress(
   }
 
   const committed = await getDb().transaction(async (transaction) => {
-    /* The same per-user lock `persistSetupToken` takes, so a link being
-       written cannot slip in between the retirement below and the commit. */
-    await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`orbit:setup-token:${userId}`}, 0))`);
+    /* The account-lifecycle lock first, as `linkIdentity` and provider
+       sign-in take it, so a provider identity cannot be linked between the
+       provider check below and the commit. Then the per-user address lock
+       (lifecycle before per-user, never the reverse): it orders this change
+       against `persistSetupToken` and `startSignInApproval`. Neither of those
+       holds it across the mail it sends, so this lock alone does not stop a
+       link or approval mailed to the old address; each re-checks the address
+       under this lock before writing (a setup link refuses if the stored
+       ciphertext changed since it was mailed; an approval reads the address
+       under the lock), and anything written before this commits is retired
+       below. */
+    await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${ACCOUNT_LIFECYCLE_LOCK_KEY}, 0))`);
+    await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${userAddressLockKey(userId)}, 0))`);
     const [target] = await transaction
       .select({ id: users.id, displayName: users.displayName, emailEnc: users.emailEnc })
       .from(users)
@@ -129,15 +140,18 @@ export async function setUserAddress(
         isNull(credentialSetupTokens.consumedAt),
         gt(credentialSetupTokens.expiresAt, now),
       ));
-    /* Pending sign-in approvals: expired with no outcome. Not `denied`, so no
-       backoff count and no "wasn't me" notice; the waiting tab sees it lapse. */
+    /* Unspent sign-in approvals, open or approved but not yet collected:
+       expired (consumed, no new outcome). Not `denied`, so no backoff count
+       and no "wasn't me" notice; the waiting tab sees it lapse, and an
+       approval pressed from the old mailbox cannot be collected into a
+       session. An approved row keeps the outcome it was given: that press
+       happened. */
     await transaction
       .update(signInApprovals)
       .set({ consumedAt: now, expiresAt: now })
       .where(and(
         eq(signInApprovals.userId, userId),
         isNull(signInApprovals.consumedAt),
-        isNull(signInApprovals.outcome),
         gt(signInApprovals.expiresAt, now),
       ));
 

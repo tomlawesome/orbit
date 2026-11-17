@@ -67,3 +67,79 @@ describe("People rows offer to set or change an address (#1869)", () => {
     expect(`${page} ${acts}`).toMatch(/address is now/u);
   });
 });
+
+/*
+ * Review finding 5: back from the identity provider with an
+ * `email_address_set` proof, the phone reopens its own address sheet for the
+ * same person with what was typed, as it already does for `setup_link_issue`
+ * and as the desk does for this intent. Evaluated rather than mounted, the way
+ * administration-draft-intent.test.mjs lifts the desk's functions.
+ */
+/** @param {string} path @param {string} name @param {Record<string, unknown>} scope */
+function lift(path, name, scope) {
+  const src = readFileSync(new URL(`../../${path}`, import.meta.url), "utf8");
+  const match = new RegExp(`function ${name}\\(`).exec(src);
+  expect(match, `${path} has no \`${name}\``).not.toBeNull();
+  const start = /** @type {RegExpExecArray} */ (match).index;
+  const end = src.indexOf("\n  }\n", start);
+  const body = src.slice(start, end + "\n  }".length);
+  const sandbox = new Proxy(scope, {
+    has: (target, key) => typeof key === "string" && (key in target || !(key in globalThis)),
+  });
+  return new Function("sandbox", `with (sandbox) { return (${body}); }`)(sandbox);
+}
+
+describe("the address errand survives the provider round trip on the phone (#1869)", () => {
+  const PERSON = { id: "8d3f0c2e-0000-4000-8000-000000000001", displayName: "Target Person" };
+
+  it("the desk hands the phone the person and the typed address it restored", () => {
+    const at = Date.now();
+    /** @type {Record<string, any>} */
+    const scope = {
+      DRAFT_KEY: "draft",
+      SETUP_LINK_DAYS: { fallback: 7 },
+      sessionStorage: {
+        getItem: () => JSON.stringify({ intent: "email_address_set", address: { personId: PERSON.id, email: "new@example.invalid" }, at }),
+        removeItem: () => {},
+      },
+      localDraft: {}, systemName: "", creatingSystem: false,
+      resendFor: null, resendDays: 7, resumedResendPersonId: null,
+      addressFor: null, addressDraft: "", resumedAddress: null,
+    };
+    lift("web/src/routes/administration/+page.svelte", "restoreDraft", scope)("email_address_set");
+    expect(scope.addressFor).toBe(PERSON.id);
+    expect(scope.resumedAddress).toEqual({ personId: PERSON.id, email: "new@example.invalid" });
+  });
+
+  it("the phone reopens its address sheet for that person, with the typed address", () => {
+    /** @type {Record<string, any>} */
+    const scope = {
+      view: { users: [PERSON] },
+      provenIntent: "email_address_set",
+      resumedResendPersonId: null,
+      resumedAddress: { personId: PERSON.id, email: "new@example.invalid" },
+      SETUP_LINK_DAYS: { fallback: 7 },
+      inviteOpen: false, systemOpen: false, systemName: "",
+      resendFor: null, resendDays: 7, resendPassword: "", resendOpen: false,
+      addressFor: null, addressDraft: "", addressPassword: "left over", addressOpen: false,
+      addressCard: { busy: false, problem: "old problem" },
+    };
+    lift("web/src/routes/administration/pocket.svelte", "resumeProvenErrand", scope)();
+    expect(scope.addressOpen).toBe(true);
+    expect(scope.addressFor).toEqual(PERSON);
+    expect(scope.addressDraft).toBe("new@example.invalid");
+    expect(scope.addressPassword).toBe("");
+    expect(scope.resendOpen).toBe(false);
+  });
+});
+
+/* Review note 6: a wrong password on an address change says the address was
+   not changed, never "nothing was created". */
+describe("a refused address change in its own words (#1869)", () => {
+  it("does not say 'nothing was created' for a wrong password", async () => {
+    const { addressWords } = await import("../../web/src/routes/administration/words.js");
+    const said = addressWords({ code: "recent_authentication_required" });
+    expect(said).not.toMatch(/nothing was created/u);
+    expect(said).toMatch(/address was not changed/u);
+  });
+});

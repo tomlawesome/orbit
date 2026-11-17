@@ -19,7 +19,7 @@ import {
   testMail, wordsOf,
 } from "$lib/data/workspace.js";
 import { DONE_UNREAD, rereadAfterLanded } from "$lib/data/landed.js";
-import { JOB_KINDS, lapsesShort, megabytes, removalWords, sendWords, setupWords } from "./words.js";
+import { JOB_KINDS, addressWords, lapsesShort, megabytes, removalWords, sendWords, setupWords } from "./words.js";
 
 /** @typedef {{ busy: boolean, problem: string | null }} Card */
 /** @typedef {(message: string, options?: { failure?: boolean, undo?: () => void }) => unknown} Wake */
@@ -147,7 +147,7 @@ export async function setAddress(person, email, password, { card, actorHasPasswo
       ...(actorHasPassword ? { currentPassword: password } : {}),
     });
   } catch (error) {
-    card.problem = setupWords(error);
+    card.problem = addressWords(error);
     card.busy = false;
     return;
   }

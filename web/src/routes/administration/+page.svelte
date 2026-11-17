@@ -322,6 +322,9 @@
       phone layout's own sheet — it keeps a whole Person, not just an id,
       so it looks this up once `view` loads (#1151 A1-F2). */
   let resumedResendPersonId = $state(/** @type {string | null} */ (null));
+  /** The same for an "email_address_set" step-up (#1869): whose address,
+      and what was typed, so the phone reopens its own sheet. */
+  let resumedAddress = $state(/** @type {{ personId: string, email: string } | null} */ (null));
 
   /**
    * The typed draft, carried across a step-up (#915). Leaving for the provider
@@ -388,6 +391,7 @@
       if (draft.intent === "email_address_set" && draft.address?.personId) {
         addressFor = draft.address.personId;
         addressDraft = draft.address.email ?? "";
+        resumedAddress = { personId: draft.address.personId, email: draft.address.email ?? "" };
       }
     } catch { /* nothing held, or unreadable: the form starts empty */ }
   }
@@ -821,7 +825,7 @@
 <!-- #1123, proposal §2.12: administration on a phone, chosen by CSS. It
      shares this page's state and acts (the step-up challenge, the re-read),
      so both dialects answer the server the same way. -->
-<Pocket {view} fixtures={Boolean(data?.fixtures)} {actorHasPassword} {provenIntent} {resumedResendPersonId} bind:draft={localDraft}
+<Pocket {view} fixtures={Boolean(data?.fixtures)} {actorHasPassword} {provenIntent} {resumedResendPersonId} {resumedAddress} bind:draft={localDraft}
         challenge={challengeThen} {reread}
         spent={() => (provenIntent = "")} {screenProblem} {screenRefused} onretry={loadScreen} />
 

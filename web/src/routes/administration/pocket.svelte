@@ -58,8 +58,8 @@
   /** @typedef {NonNullable<AdminView["users"]>[number]} Person */
   /** @typedef {AdminView["households"][number]} System */
 
-  /** @type {{ view: AdminView | null, fixtures: boolean, actorHasPassword: boolean, provenIntent: string, resumedResendPersonId: string | null, draft: Draft, challenge: Challenge, reread: () => Promise<void>, spent: () => void, screenProblem: string | null, screenRefused: boolean, onretry: () => void }} */
-  let { view, fixtures, actorHasPassword, provenIntent, resumedResendPersonId, draft = $bindable(), challenge, reread, spent, screenProblem, screenRefused, onretry } = $props();
+  /** @type {{ view: AdminView | null, fixtures: boolean, actorHasPassword: boolean, provenIntent: string, resumedResendPersonId: string | null, resumedAddress?: { personId: string, email: string } | null, draft: Draft, challenge: Challenge, reread: () => Promise<void>, spent: () => void, screenProblem: string | null, screenRefused: boolean, onretry: () => void }} */
+  let { view, fixtures, actorHasPassword, provenIntent, resumedResendPersonId, resumedAddress = null, draft = $bindable(), challenge, reread, spent, screenProblem, screenRefused, onretry } = $props();
 
   /* A panel whose read failed says so with a "try again" (#1442), as
      settings does on the phone (#1195): the whole screen is re-read, and a
@@ -615,8 +615,10 @@
      typed to restore yet (the challenge fires before the name field is
      ever shown), so reopening empty is already the fix; `setup_link_issue`
      needs the person back, carried from the desk's sessionStorage draft
-     since this layout's own `resendFor` is a whole Person, not an id. */
-  $effect(() => {
+     since this layout's own `resendFor` is a whole Person, not an id.
+     `email_address_set` (#1869) is the same: the person and what was typed
+     come back from the desk's draft, and the address sheet reopens. */
+  function resumeProvenErrand() {
     if (!view) return;
     if (provenIntent === "local_user_create") inviteOpen = true;
     if (provenIntent === "system_create") { systemName = ""; systemOpen = true; }
@@ -629,7 +631,18 @@
         resendOpen = true;
       }
     }
-  });
+    if (provenIntent === "email_address_set" && resumedAddress) {
+      const person = view.users?.find((one) => one.id === resumedAddress.personId);
+      if (person) {
+        addressFor = person;
+        addressDraft = resumedAddress.email;
+        addressPassword = "";
+        addressCard.problem = null;
+        addressOpen = true;
+      }
+    }
+  }
+  $effect(() => resumeProvenErrand());
 </script>
 
 <div class="ad-pocket">
