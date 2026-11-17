@@ -340,7 +340,7 @@
         </div>
       {/if}
       {#if inPhase === "rest"}
-        <button class="p-pill act-accent wide" onclick={() => picker?.click()}>bring in an archive</button>
+        <button class="p-pill act-accent wide" onclick={() => picker?.click()}>choose a file</button>
         <p class="hh-note">an Orbit archive{limits ? `, up to ${sizeLabel(limits.archiveFileBytes)}` : ""}</p>
       {:else if inPhase === "chosen" || inPhase === "looking"}
         <div class="hh-fields">
