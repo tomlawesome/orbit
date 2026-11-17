@@ -211,6 +211,7 @@ async function requireDocumentAccess(userId: string, documentId: string) {
       lifecycle: documents.lifecycle,
       scanStatus: documents.scanStatus,
       deleteAfter: documents.deleteAfter,
+      boundAt: documents.boundAt,
       availableAt: documents.availableAt,
       uploadedByUserId: documents.uploadedByUserId,
       pageCount: documents.pageCount,
@@ -553,6 +554,7 @@ async function reserveDocumentMetadata(input: {
       itemId: input.staged ? null : input.itemId,
       sealedItemId: input.itemId,
       deleteAfter: input.staged ? new Date(Date.now() + stagedUploadHoldMs(config)) : null,
+      boundAt: input.staged ? null : new Date(),
       uploadedByUserId: input.userId,
       displayName: input.displayName,
       mediaType: input.mediaType,
@@ -1209,7 +1211,7 @@ export async function requestDocumentDeletion(
      binds that still carries its hold; the update takes it only while it
      still is one, so a bind that wins the race keeps the file. */
   const staged = options.stagedDiscard === true;
-  if (staged && (record.itemId !== null || record.deleteAfter === null)) {
+  if (staged && (record.itemId !== null || record.boundAt !== null || record.deleteAfter === null)) {
     throw new AppError("document_conflict", "That document is no longer a staged upload", 409);
   }
   const deleteAfter = staged ? new Date() : new Date(Date.now() + config.retentionDays * 86_400_000);
@@ -1226,6 +1228,7 @@ export async function requestDocumentDeletion(
       eq(documents.id, documentId),
       eq(documents.lifecycle, "available"),
       staged ? isNull(documents.itemId) : undefined,
+      staged ? isNull(documents.boundAt) : undefined,
       staged ? isNotNull(documents.deleteAfter) : undefined,
     )).returning();
     if (!changed) return undefined;
@@ -1281,7 +1284,9 @@ export async function restoreDocument(userId: string, documentId: string): Promi
     }
     const [changed] = await transaction.update(documents).set({
       lifecycle: "available",
-      deleteAfter: null,
+      // An upload no item ever claimed gets a fresh staged hold, so the sweep
+      // can still retire it; a document an item once held keeps none (#1871).
+      deleteAfter: record.boundAt === null ? new Date(Date.now() + stagedUploadHoldMs(config)) : null,
       version: sql`${documents.version} + 1`,
       updatedAt: new Date(),
     }).where(and(eq(documents.id, documentId), eq(documents.lifecycle, "pending_deletion"))).returning();

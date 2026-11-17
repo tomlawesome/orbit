@@ -475,7 +475,7 @@ async function bindStagedDocuments(householdId: string, itemId: string, document
     if (bindable.length !== documentIds.length) {
       throw new AppError("document_not_available", "That document is no longer available — pick it again", 422);
     }
-    await transaction.update(documents).set({ itemId, deleteAfter: null, updatedAt: new Date() })
+    await transaction.update(documents).set({ itemId, deleteAfter: null, boundAt: new Date(), updatedAt: new Date() })
       .where(inArray(documents.id, documentIds));
   });
 }
