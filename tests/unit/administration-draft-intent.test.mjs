@@ -118,3 +118,51 @@ describe("administration form draft in session storage", () => {
     expect(sessionStorage.getItem(DRAFT_KEY), "the draft is single-use").toBeNull();
   });
 });
+
+/*
+ * #1604 G11-FR1, owner ruling BUILD (lows-g2-rulings.md): a draft that is never
+ * read back must not sit in the tab's storage. The draft carries when it was
+ * stashed (`at`, ms since the epoch); a return older than 15 minutes is an
+ * abandoned errand, so the form stays blank and the key is removed. (A plain
+ * mount of /administration removing the draft is in
+ * administration-draft-plain-mount-1604.test.mjs.)
+ */
+describe("administration form draft ages out (#1604 G11-FR1)", () => {
+  const MINUTE = 60_000;
+  /** @param {number} ageMs */
+  const heldFor = (ageMs) => {
+    const sessionStorage = fakeStorage();
+    sessionStorage.setItem(DRAFT_KEY, JSON.stringify({
+      intent: "local_user_create", local: { ...TYPED }, systemName: "", resend: null, at: Date.now() - ageMs,
+    }));
+    const scope = desk({ startStepUp: async () => {}, sessionStorage });
+    scope.localDraft = { ...BLANK };
+    lift("restoreDraft", scope)("local_user_create");
+    return { scope, sessionStorage };
+  };
+
+  it("stashes when it was kept, as a number of milliseconds", async () => {
+    const sessionStorage = fakeStorage();
+    const scope = desk({ startStepUp: async () => {}, sessionStorage });
+    const before = Date.now();
+    await lift("challengeThen", scope)("local_user_create", () => { scope.localArmed = true; });
+    const kept = JSON.parse(sessionStorage.getItem(DRAFT_KEY) ?? "{}");
+    expect(typeof kept.at, "the stash says when").toBe("number");
+    expect(kept.at).toBeGreaterThanOrEqual(before);
+    expect(kept.at).toBeLessThanOrEqual(Date.now());
+    expect(Object.keys(kept).sort(), "still only the errand, the typed person, the system name and the resend row").toEqual(["at", "intent", "local", "resend", "systemName"]);
+  });
+
+  it("refills a return 14 minutes later", () => {
+    const { scope } = heldFor(14 * MINUTE);
+    expect(scope.localDraft.email).toBe(TYPED.email);
+    expect(scope.localDraft.displayName).toBe(TYPED.displayName);
+  });
+
+  it("leaves the form blank for a return 16 minutes later, and removes the draft", () => {
+    const { scope, sessionStorage } = heldFor(16 * MINUTE);
+    expect(scope.localDraft.email).toBe("");
+    expect(scope.localDraft.displayName).toBe("");
+    expect(sessionStorage.getItem(DRAFT_KEY), "a stale draft is removed, not kept").toBeNull();
+  });
+});

@@ -320,7 +320,9 @@
   /** @type {Awaited<ReturnType<typeof readSessions>>} */
   let sessions = $state([]);
   /** #1444: this session came through the provider, so signing out reaches it; a password session has nothing there to end. */
-  const providerSession = $derived(providerOffered && sessions.some((row) => row.current && row.viaProvider));
+  /** True once the list has answered or failed; until then the sign-out note is shown in full rather than missing its provider part. */
+  let sessionsLoaded = $state(false);
+  const providerSession = $derived(providerOffered && (!sessionsLoaded || sessions.some((row) => row.current && row.viaProvider)));
   /** @type {string | null} */
   let sessionsProblem = $state(null);
   /* One arm for the sessions list and "sign out of every device" (lib/arm.js):
@@ -424,11 +426,11 @@
   onMount(async () => {
     active = document.documentElement.dataset.theme || DEFAULT_THEME;
     await loadScreen();
-    try {
-      sessions = await readSessions();
-    } catch {
-      sessionsProblem = "not shown — Orbit could not reach your session list";
-    }
+    /* Not awaited: a slow list must not hold back the blocks below. */
+    readSessions().then(
+      (rows) => { sessions = rows; },
+      () => { sessionsProblem = "not shown — Orbit could not reach your session list"; },
+    ).finally(() => { sessionsLoaded = true; });
 
     /* Sign-in methods (#915). Additive like the cards above: a block that
        cannot be read costs the reader that block, not the helm.
@@ -483,7 +485,7 @@
      household's is. It shares what this page loads rather than reading it
      twice, and hides this page's sky and cards below the switch; the chrome
      stays, because on a phone Chrome.svelte draws the kit's top chrome. -->
-<Pocket bind:view bind:methods bind:sessions {active} {textSize} {labelDays} {skyDriver} {planetSize} onpickskydriver={pickSkyDriver} onpickplanetsize={pickPlanetSize} onpreviewlabeldays={(days) => (labelDays = days)} onpicklabeldays={pickLabelDays} onpickpack={pickPack} onpicktextsize={pickTextSize} {initials} {providerOffered} {emailApproval} {screenProblem} onretry={loadScreen}
+<Pocket bind:view bind:methods bind:sessions {sessionsLoaded} {active} {textSize} {labelDays} {skyDriver} {planetSize} onpickskydriver={pickSkyDriver} onpickplanetsize={pickPlanetSize} onpreviewlabeldays={(days) => (labelDays = days)} onpicklabeldays={pickLabelDays} onpickpack={pickPack} onpicktextsize={pickTextSize} {initials} {providerOffered} {emailApproval} {screenProblem} onretry={loadScreen}
         {methodsProblem} {sessionsProblem} resumed={resumedMethod} fixtures={Boolean(data?.fixtures)} onsignedout={descendFrom}
         relayShared={relayShared} {admin} live={pocket} {landing} />
 

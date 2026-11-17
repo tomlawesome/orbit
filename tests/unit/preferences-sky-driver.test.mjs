@@ -172,7 +172,7 @@ describe("savePreferences carries skyDriver", () => {
     const { savePreferences } = await import("../../web/src/lib/data/workspace.js");
     await savePreferences({ skyDriver: "due" });
     expect(JSON.parse(puts()[0].init.body)).toEqual({
-      theme: "dawn", textSize: "standard", emailNotifications: false, pushNotifications: true, labelDays: 120, skyDriver: "due", planetSize: "cost", importanceOfferDismissed: false,
+      theme: "dawn", textSize: "standard", labelDays: 120, skyDriver: "due", planetSize: "cost", importanceOfferDismissed: false,
     });
   });
 

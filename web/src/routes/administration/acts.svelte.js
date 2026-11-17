@@ -205,6 +205,9 @@ export async function removeProviderLinks(provider, password, { card, landed, re
   }
 }
 
+/** Systems whose restore is out, so a second press on the row sends nothing. */
+const restoring = new Set();
+
 /**
  * Restores a system on the clock (#1001, §19); `said` is the line each row
  * shows afterwards, keyed by the system's id.
@@ -212,11 +215,15 @@ export async function removeProviderLinks(provider, password, { card, landed, re
  * @param {Record<string, { ok: boolean, text: string }>} said @param {Reread} reread
  */
 export async function restoreSystem(row, said, reread) {
+  if (restoring.has(row.id)) return;
+  restoring.add(row.id);
   try {
     await restoreHousehold(row.id);
   } catch (error) {
     said[row.id] = { ok: false, text: `not restored — ${wordsOf(error)}` };
     return;
+  } finally {
+    restoring.delete(row.id);
   }
   said[row.id] = { ok: true, text: `restored · ${row.name} is back exactly as it was` };
   await rereadAfterLanded(reread, (words) => { said[row.id] = { ok: true, text: `restored · ${row.name} is back · ${words}` }; });

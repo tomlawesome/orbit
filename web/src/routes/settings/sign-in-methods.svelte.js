@@ -17,7 +17,7 @@ import {
 } from "$lib/data/workspace.js";
 import { rereadAfterLanded } from "$lib/data/landed.js";
 import { disableAlerts, enableAlerts, syncAlerts } from "$lib/push/alerts.js";
-import { alertsWords, intentOf, methodWords, stepUpReturnOf } from "./helm.js";
+import { alertsOutcomeWords, intentOf, methodWords, stepUpReturnOf } from "./helm.js";
 import { signOutOfDevice, signOutOfEveryDevice } from "./sign-out.js";
 
 /** @typedef {{ busy: boolean, problem: string | null }} Card */
@@ -141,8 +141,10 @@ export async function toggleBrowserAlerts(isOn, { card, set, wake = quiet, curly
        read does. currentSubscription() only reports whether the browser still
        holds a subscription object, which stays true even after the server has
        refused it (e.g. it belongs to another account on a shared device). */
-    set(Boolean(await syncAlerts()));
-    card.problem = alertsWords(error, { curly });
+    const now = Boolean(await syncAlerts());
+    set(now);
+    // #1604 b1 W-S1: the words follow the tap and where the switch landed.
+    card.problem = alertsOutcomeWords(error, { turningOn: !isOn, now, curly });
   } finally {
     card.busy = false;
   }

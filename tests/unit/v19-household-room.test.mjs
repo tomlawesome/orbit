@@ -17,6 +17,7 @@ import {
 } from "../../web/src/routes/household/[id]/room.js";
 import { dialPlacement } from "../../web/src/lib/data/chart.js";
 import { constellationOf } from "../../web/src/lib/data/household.js";
+import { dialPlacement, drivingDays, importanceSize } from "../../web/src/lib/data/chart.js";
 import { WORKSPACE_FIXTURE } from "../../web/src/lib/data/fixtures/workspace.js";
 
 const TODAY = "2026-08-13"; // DESIGN_TODAY: the date every mockup was drawn against
@@ -104,6 +105,29 @@ describe("the stars are the entries (the chart law, not a copy of it)", () => {
 
   it("draws no sky at all for a household with no today to measure against", () => {
     expect(constellationOf(household("hh-harlow-1"), null)).toEqual({ marks: [], figures: [] });
+  });
+});
+
+describe("#1738 W-F5: the room's stars obey the Planets settings the dial obeys", () => {
+  /* The same option names dialBodiesOf takes; a nudge seats by bearing only, so the radius is the law's. */
+  const options = { skyDriver: "warning", firstWarningDays: 14, planetSize: "importance" };
+  const byId = (marks) => new Map(marks.map((mark) => [mark.id, mark]));
+
+  it("sizes each star by importance when planets are sized by importance", () => {
+    const marks = byId(constellationOf(household("hh-harlow-1"), TODAY, options).marks);
+    expect(marks.get("i-gutter").halo).toBe(importanceSize("high", "desk"));
+    expect(marks.get("i-chimney").halo).toBe(importanceSize("low", "desk"));
+    expect(marks.get("i-svc").halo).toBe(importanceSize(null, "desk"));
+  });
+
+  it("sits each star by its warning date when planets sit by warning", () => {
+    const harlow = household("hh-harlow-1");
+    const marks = byId(constellationOf(harlow, TODAY, options).marks);
+    for (const item of harlow.items.filter((one) => one.status === "active" && one.dueDate)) {
+      const mark = marks.get(item.id);
+      const driving = drivingDays({ days: mark.days, reminderDays: item.reminderDays }, options);
+      expect(Math.hypot(mark.dx, mark.dy), item.title).toBeCloseTo(dialPlacement(driving).radius, 2);
+    }
   });
 });
 

@@ -66,6 +66,7 @@
    *   view: SettingsView | null,
    *   methods: Methods | null,
    *   sessions: Sessions,
+   *   sessionsLoaded?: boolean,
    *   active: string,
    *   textSize: string,
    *   labelDays: number,
@@ -97,6 +98,7 @@
     view = $bindable(),
     methods = $bindable(),
     sessions = $bindable(),
+    sessionsLoaded = true,
     /* The pack and the text size are the desk page's, picked through it (#1353). */
     active,
     textSize,
@@ -129,7 +131,7 @@
   } = $props();
 
   /** #1444: this session came through the provider, so signing out reaches it; a password session has nothing there to end. */
-  const providerSession = $derived(providerOffered && sessions.some((row) => row.current && row.viaProvider));
+  const providerSession = $derived(providerOffered && (!sessionsLoaded || sessions.some((row) => row.current && row.viaProvider)));
 
   /* ── reminders ────────────────────────────────────────────────────────── */
   /* #1509: the Mail card, `your relay` first, chosen when the reader came

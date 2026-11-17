@@ -70,6 +70,29 @@ describe("administration: the mail provider profile is the chooser card's, not a
   const providerOf = (layout) => [...formOf(layout)?.querySelectorAll("button[aria-haspopup]") ?? []]
     .find((one) => /mailcow/iu.test(one.textContent ?? "")) ?? null;
 
+  const chooserStands = () => [...document.querySelectorAll('[role="dialog"]')]
+    .some((one) => /^Choose provider/iu.test(one.getAttribute("aria-label") ?? ""));
+
+  it("#1738 W-R5/W-R6: cancelling the desk mailbox editor with the provider chooser open leaves it closed next time", async () => {
+    await mount();
+    await openEditor("desk");
+    /** @type {HTMLElement} */ (providerOf("desk")).click();
+    const { flushSync } = await runtime();
+    flushSync();
+    await settle(4);
+    expect(chooserStands(), "precondition: the chooser is open").toBe(true);
+
+    const cancel = [...formOf("desk")?.querySelectorAll("button") ?? []].find((one) => (one.textContent ?? "").trim() === "cancel");
+    expect(cancel, "the editor's cancel button").toBeDefined();
+    /** @type {HTMLElement} */ (cancel).click();
+    flushSync();
+    await settle(4);
+
+    await openEditor("desk");
+    expect(formOf("desk"), "the editor is open again").not.toBeNull();
+    expect(chooserStands(), "the chooser is not already open").toBe(false);
+  });
+
   describe.each(/** @type {const} */ (["desk", "phone"]))("%s", (layout) => {
     it("has no native select in the mail settings form", async () => {
       await mount();

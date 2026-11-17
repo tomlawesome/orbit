@@ -186,7 +186,7 @@ describe("savePreferences carries both", () => {
     const { savePreferences } = await import("../../web/src/lib/data/workspace.js");
     await savePreferences({ planetSize: "cost" });
     expect(bodyOf()).toEqual({
-      theme: "dawn", textSize: "standard", emailNotifications: false, pushNotifications: true, labelDays: 120, skyDriver: "warning", planetSize: "cost", importanceOfferDismissed: true,
+      theme: "dawn", textSize: "standard", labelDays: 120, skyDriver: "warning", planetSize: "cost", importanceOfferDismissed: true,
     });
   });
 
