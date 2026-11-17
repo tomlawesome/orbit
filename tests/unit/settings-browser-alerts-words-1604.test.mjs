@@ -88,3 +88,20 @@ describe("the alerts switch and its words agree when the server is unreachable (
     expect((await tap(false)).card.problem).toBe("not switched on — this Orbit has no push keys yet, which is your administrator's to set");
   });
 });
+
+describe("only the two named refusals get the alerts words (#1738 review)", () => {
+  it("another coded error is worded like an uncoded one, whichever way the person tapped", async () => {
+    alerts.syncAlerts.mockResolvedValue(SUBSCRIPTION);
+    alerts.enableAlerts.mockRejectedValue(coded("rate_limited"));
+    expect((await tap(false)).card.problem).toBe("switched on here, but Orbit could not reach your alert settings — it will try again next time you open settings");
+    alerts.syncAlerts.mockResolvedValue(null);
+    alerts.disableAlerts.mockRejectedValue(coded("rate_limited"));
+    expect((await tap(true)).card.problem).toBe("switched off on this device — Orbit could not reach your alert settings to say so");
+  });
+
+  it("another coded error with the switch left off still gets the unreachable fallback", async () => {
+    alerts.syncAlerts.mockResolvedValue(null);
+    alerts.enableAlerts.mockRejectedValue(coded("rate_limited"));
+    expect((await tap(false)).card.problem).toBe("not switched on — Orbit could not reach your alert settings");
+  });
+});
