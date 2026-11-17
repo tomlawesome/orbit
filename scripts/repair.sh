@@ -1393,7 +1393,7 @@ set -Eeuo pipefail
 # after the safe batch's own `execution result=...` line when both batches
 # ran:
 #
-#   dangerous result=<empty|complete|refused|failed> done=<n> failed=<n> reason=<none|non-interactive|refused-by-operator|checkpoint-failed|step-failed>
+#   dangerous result=<empty|complete|refused|failed> done=<n> failed=<n> reason=<none|non-interactive|refused-by-operator|repair-running|checkpoint-failed|step-failed>
 #
 # `result=empty` (reason=none) — `--dangerous` was given but the plan
 # contained no dangerous-class entry of either kind; no prompt is shown.

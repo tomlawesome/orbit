@@ -1223,7 +1223,7 @@ execution result=  empty | complete | unactionable | declined | failed
                    | refused
 dangerous result=  empty | complete | refused | failed
 dangerous reason=  none | non-interactive | refused-by-operator
-                   | checkpoint-failed | step-failed
+                   | repair-running | checkpoint-failed | step-failed
 ```
 
 `refused` is not a failure: the dangerous batch was never attempted, and
