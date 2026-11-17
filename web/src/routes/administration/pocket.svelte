@@ -23,7 +23,7 @@
     canRemove, closeConfirm, loadProviders, openConfirm, providerRows, providerState, removeNow, signedOutToo,
   } from "./providers.js";
   import {
-    card, commandMail, deleteSystemNow, inviteLocalUser, issueSetupLink, makeSystem, placePerson, restoreSystem,
+    card, commandMail, deleteSystemNow, inviteLocalUser, issueSetupLink, makeSystem, placePerson, restoreSystem, setAddress,
     runMailTest, retryJob, saveSending, setArchiveStorage, setContact, setDisabled, setMailLimit, setUploadLimit,
   } from "./acts.svelte.js";
 
@@ -54,7 +54,7 @@
 
   /** @typedef {NonNullable<Awaited<ReturnType<typeof import('$lib/data/workspace.js').readAdminScreen>>>} AdminView */
   /** @typedef {{ email: string, displayName: string, expiresInDays: number }} Draft */
-  /** @typedef {(intent: string, open: () => void, report?: (message: string) => void, about?: { resend?: { personId: string, days: number } }) => Promise<void>} Challenge */
+  /** @typedef {(intent: string, open: () => void, report?: (message: string) => void, about?: { resend?: { personId: string, days: number }, address?: { personId: string, email: string } }) => Promise<void>} Challenge */
   /** @typedef {NonNullable<AdminView["users"]>[number]} Person */
   /** @typedef {AdminView["households"][number]} System */
 
@@ -222,6 +222,35 @@
     });
   }
 
+  /* Setting a person's address (#1869): its own sheet and its own intent. */
+  /** @type {Person | null} */
+  let addressFor = $state(null);
+  let addressOpen = $state(false);
+  let addressDraft = $state("");
+  let addressPassword = $state("");
+  const addressCard = $state(card());
+
+  /** @param {Person} person */
+  function openAddress(person) {
+    peopleCard.problem = null;
+    challenge("email_address_set", () => {
+      addressFor = person;
+      addressDraft = "";
+      addressPassword = "";
+      addressCard.problem = null;
+      addressOpen = true;
+    }, (message) => (peopleCard.problem = message), { address: { personId: person.id, email: "" } });
+  }
+
+  async function saveAddress() {
+    const person = addressFor;
+    if (!person) return;
+    await setAddress(person, addressDraft, addressPassword, {
+      card: addressCard, actorHasPassword, reread, wake,
+      landed: () => { addressOpen = false; addressPassword = ""; spent(); },
+    });
+  }
+
   /* Placing a person in a system (§11, #453): the systems are the rows. */
   /** @type {Person | null} */
   let placing = $state(null);
@@ -234,6 +263,12 @@
     await placePerson(person, system, { card: peopleCard, reread, wake });
   }
 
+  /** @param {Person} person @returns {import('$lib/pocket/row.js').RowAct[]} */
+  const addressAct = (person) => view?.failed.session || view?.metadata?.locked ? [] : [
+    person.metadataStatus?.email === "metadata_integrity_failed"
+      ? { label: "set address", name: `Set the address of ${person.displayName}`, tone: "accent", onact: () => openAddress(person) }
+      : { label: "address", name: `Change the address of ${person.displayName}`, tone: "accent", onact: () => openAddress(person) },
+  ];
   /**
    * The acts behind a person's row (§2.12, review round §2.6): a tap opens
    * it. None on your own row, and none on any row while the session read
@@ -242,11 +277,13 @@
    * @param {Person} person
    * @returns {import('$lib/pocket/row.js').RowAct[]}
    */
-  const personActs = (person) => person.id === meId || view?.failed.session ? [] : [
+  const personActs = (person) => person.id === meId || view?.failed.session ? addressAct(person) : [
+    ...(person.metadataStatus?.email === "metadata_integrity_failed" ? addressAct(person) : []),
     { label: "place", name: `Place ${person.displayName} in a system`, tone: "accent",
       onact: () => { placing = person; placeOpen = true; } },
     { label: "link", name: `Send ${person.displayName} a new setup link`, tone: "accent",
       onact: () => openResend(person) },
+    ...(person.metadataStatus?.email === "metadata_integrity_failed" ? [] : addressAct(person)),
     person.disabledAt
       ? { label: "enable", name: `Enable ${person.displayName}`, tone: "ok", onact: () => disable(person, false) }
       /* §2.6: disable arms. The wake still offers undo (§1.13) once it has
@@ -695,7 +732,7 @@
                the systems they are in are the panel's first line. -->
           {#snippet personDetail()}<div class="p-kv"><span>{standing}</span></div>{/snippet}
           <Row title="{person.displayName}{person.id === meId ? ' · you' : ''}"
-               meta={person.email}
+               meta={person.email ?? (person.metadataStatus?.email === "metadata_integrity_failed" ? "address can’t be read" : undefined)}
                trail={person.isInstanceAdmin ? "admin" : "user"}
                trailTone={person.isInstanceAdmin ? "var(--accent-text)" : ""} acts={personActs(person)}
                detail={standing ? personDetail : undefined}>
@@ -1237,6 +1274,28 @@
     {#snippet foot()}
       {#if resendFor}
         <button class="p-pill filled" type="submit" form="ad-resend-form" disabled={resendCard.busy}>{resendCard.busy ? "sending…" : "send it"}</button>
+      {/if}
+    {/snippet}
+  </Sheet>
+
+  <Sheet bind:open={addressOpen} size="callout" title="Their address">
+    {#if addressFor}
+      <form id="ad-address-form" onsubmit={(event) => { event.preventDefault(); saveAddress(); }}>
+        <p class="p-prose ad-sheet-say">Sets the address {addressFor.displayName} is registered with. Their pending setup links and sign-in approvals stop working. No link is sent; send a new one afterwards.</p>
+        <label class="ad-label" for="ad-addr-email">address</label>
+        <input id="ad-addr-email" class="p-input" type="email" autocomplete="off" enterkeyhint="send"
+               bind:value={addressDraft} required>
+        {#if actorHasPassword}
+          <label class="ad-label" for="ad-addr-current">your current password</label>
+          <input id="ad-addr-current" class="p-input" type="password" autocomplete="current-password" enterkeyhint="send"
+                 bind:value={addressPassword} required>
+        {/if}
+        {#if addressCard.problem}<p class="p-error" role="alert">{addressCard.problem}</p>{/if}
+      </form>
+    {/if}
+    {#snippet foot()}
+      {#if addressFor}
+        <button class="p-pill filled" type="submit" form="ad-address-form" disabled={addressCard.busy}>{addressCard.busy ? "setting…" : "set it"}</button>
       {/if}
     {/snippet}
   </Sheet>

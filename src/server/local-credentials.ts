@@ -143,7 +143,8 @@ function isUniqueViolation(error: unknown): boolean {
   return false;
 }
 
-const emailSchema = z.email().max(MAX_EMAIL_LENGTH);
+/** The one check an address passes, for creation and for an administrator setting it (#1869). */
+export const emailSchema = z.email().max(MAX_EMAIL_LENGTH);
 
 /**
  * Creates a local user, and — when this is the claim — the whole first-run

@@ -81,6 +81,9 @@ const EXPECTED_ROUTES = [
   // re-issues a `recovery` token for a local user who has forgotten their
   // password; the initial link comes back from the plain POST above.
   "/api/admin/users/[userId]/setup-link",
+  // An administrator sets a member's registered address (#1869): the way back
+  // for an address that cannot be read or was typed wrongly.
+  "/api/admin/users/[userId]/email",
   // Deciding a pending sign-in (#1033, ADR-0027 §4): signed out by design --
   // the person reading the approval mail is not signed in, and answering does
   // not sign them in. The token in the body is its whole authorisation.
