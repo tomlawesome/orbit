@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import "../support/archive-low-disk-safe.ts";
 import { archiveForm, encodeForm } from "../integration/support/portable-archive-upload.ts";
 
 /*
