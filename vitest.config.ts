@@ -88,7 +88,7 @@ const test: TestUserConfig = {
         // this host's /tmp and started failing runs with ENOSPC.
         // The second gives every file a usable encryption key verdict (#1405);
         // a file about the key sets its own.
-        setupFiles: ["./tests/support/temp-root.ts", "./tests/support/key-usable.ts", "./tests/support/low-disk-host.ts"],
+        setupFiles: ["./tests/support/temp-root.ts", "./tests/support/key-usable.ts"],
         // Vitest's defaults (5s / 10s) already fail a hung test rather than the
         // whole job — pinned here, unchanged, so intent is explicit and can't
         // silently drift. A handful of tests that spawn real subprocesses

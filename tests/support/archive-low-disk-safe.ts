@@ -5,8 +5,8 @@
  * declared size x 1.01 + 256 MiB, and an unsized upload declares the archive
  * body limit (the household quota, 5 GiB by default). This test seam, at the
  * host boundary, makes `statfs` from node:fs/promises report a generous fixed
- * free figure for every path, whatever the runner has (and whatever
- * ORBIT_TEST_FREE_DISK_BYTES says), so the default limits stay in force and
+ * free figure for every path, whatever the runner has, so the default
+ * limits stay in force and
  * the tests' 200/413/422/500 assertions do not move with the disk.
  *
  * Import it for its side effect, before the code under test is loaded:
