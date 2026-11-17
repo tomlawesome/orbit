@@ -86,6 +86,41 @@ export function releaseBuffer(bytes: Buffer): void {
   if (bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength && bytes.buffer instanceof ArrayBuffer) bytes.buffer.transfer(0);
 }
 
+/**
+ * #1605 SEC-D2/1: an upload whose sender sends nothing for this long is ended
+ * (an idle timeout, as a socket read timeout is): a client that sends a few
+ * bytes and goes quiet no longer holds the request and its quarantine file
+ * open for ever. Measured per read, so a slow but steady upload still lands.
+ */
+export const UPLOAD_IDLE_TIMEOUT_MS = 60_000;
+
+function uploadIdleTimeoutError(): AppError {
+  return new AppError("document_upload_timeout", "The document transfer stopped; try again", 408);
+}
+
+/**
+ * Watches one upload for silence: started before the first read, touched on
+ * every chunk, and once the sender has been quiet for the idle timeout its
+ * `expired` promise rejects and stays rejected, so the read in flight (or the
+ * next one) ends the upload.
+ */
+function watchUploadIdle(): { touch(): void; expired: Promise<never>; stop(): void } {
+  let lastActivity = Date.now();
+  let fail!: (error: AppError) => void;
+  const expired = new Promise<never>((_, reject) => { fail = reject; });
+  expired.catch(() => undefined); // observed by the read race; never an unhandled rejection
+  const timer = setInterval(() => {
+    if (Date.now() - lastActivity < UPLOAD_IDLE_TIMEOUT_MS) return;
+    clearInterval(timer);
+    fail(uploadIdleTimeoutError());
+  }, UPLOAD_IDLE_TIMEOUT_MS / 4);
+  return {
+    touch: () => { lastActivity = Date.now(); },
+    expired,
+    stop: () => clearInterval(timer),
+  };
+}
+
 export class LocalDocumentStorage {
   constructor(
     private readonly storageRoot: string,
@@ -126,10 +161,12 @@ export class LocalDocumentStorage {
     let leadingLength = 0;
     let sizeBytes = 0;
     const reader = body.getReader();
+    const idle = watchUploadIdle();
     try {
       while (true) {
-        const { value, done } = await reader.read();
+        const { value, done } = await Promise.race([reader.read(), idle.expired]);
         if (done) break;
+        idle.touch();
         // A view, not a copy: the chunk is hashed and written in this iteration and never kept.
         const chunk = Buffer.from(value.buffer, value.byteOffset, value.byteLength);
         sizeBytes += chunk.length;
@@ -144,6 +181,7 @@ export class LocalDocumentStorage {
           leadingLength += prefix.length;
         }
         await handle.write(chunk);
+        idle.touch(); // a slow disk is not a silent sender
       }
       if (sizeBytes === 0) throw new AppError("document_empty", "Choose a non-empty document", 422);
       if (declaredBytes !== undefined && sizeBytes !== declaredBytes) {
@@ -161,6 +199,7 @@ export class LocalDocumentStorage {
       await rm(quarantinePath, { force: true }).catch(() => undefined);
       throw quarantineFullError(error);
     } finally {
+      idle.stop();
       await handle.close();
     }
   }
