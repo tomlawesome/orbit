@@ -1,18 +1,22 @@
 <script>
   import { addDays } from "./calendar.js";
   import { dayMonth } from "$lib/format.js";
+  import { REMINDER_PRESETS, REMINDER_REFUSAL, reminderDayOf } from "./reminder-days.js";
 
   /**
    * THE REMINDER DAYS (#1468, round 6 Q): the chooser card's body for "how
-   * many days before the date to remind". Day chips, 7 / 14 / 30 / 60 / 90,
-   * any number at once; a press turns one on or off and the card stays. The
+   * many days before the date to remind". One scale of day chips, 1 / 3 / 7 /
+   * 14 / 30 / 60 / 90 and, as its last cell, a field to type any whole number
+   * of days, 1 to 365 (#1892, design round-1 t-one-scale.html); any number
+   * at once; a press turns one on or off and the card stays. The
    * calendar's foot line says what is chosen ("14 d and 30 d before") and,
    * when the item has a date, the days they land on.
    *
-   * A saved day that is not among the chips (the default 3) stays visible
-   * and can be turned off: it stands after the chips as a chip of its own,
-   * pressed, with a cross. It is outside the labelled group so the group is
-   * the five the design draws; the row lays them out as one.
+   * A saved or typed day that is no preset (21) stands in its place on the
+   * scale, lit, with a cross: for it, off is removal. Typing a number that is
+   * already a chip presses that chip (never a twin); already on, the chip
+   * nudges and the line says so. One line under the grid carries, in turn,
+   * the add, the refusal and "already chosen".
    *
    * @typedef {{
    *   days: number[],
@@ -23,8 +27,38 @@
   /** @type {Props} */
   let { days, due, onpick } = $props();
 
-  const CHIPS = [7, 14, 30, 60, 90];
-  const extra = $derived(days.filter((day) => !CHIPS.includes(day)).sort((a, b) => a - b));
+  const extra = $derived(days.filter((day) => !REMINDER_PRESETS.includes(day)));
+  const scale = $derived([...new Set([...REMINDER_PRESETS, ...extra])].sort((a, b) => a - b));
+  /** @type {HTMLInputElement | undefined} */
+  let input = $state();
+  let typed = $state("");
+  /** @type {"none" | "add" | "refused" | "already"} */
+  let voice = $state("none");
+  let said = $state(0);
+  /** @type {number | null} */
+  let nudged = $state(null);
+  /** @param {string} text */
+  function typing(text) {
+    typed = text;
+    nudged = null;
+    voice = text === "" ? "none" : reminderDayOf(text) === null ? "refused" : "add";
+  }
+  function commit() {
+    const day = reminderDayOf(typed);
+    if (day === null) { voice = "refused"; return; }
+    typed = "";
+    said = day;
+    if (days.includes(day)) { voice = "already"; nudged = day; return; }
+    voice = "none";
+    nudged = null;
+    onpick(String(day));
+  }
+  /** @param {number} day */
+  function press(day) {
+    nudged = null;
+    if (voice === "already") voice = "none";
+    onpick(String(day));
+  }
   const chosen = $derived([...days].sort((a, b) => a - b));
   const words = $derived(
     chosen.length === 0 ? "no reminders"
@@ -34,16 +68,32 @@
     : "");
 </script>
 
-<div class="chips">
-  <div class="set" role="group" aria-label="Remind me this many days before">
-    {#each CHIPS as day, i (day)}
-      <button type="button" class="chip" aria-pressed={days.includes(day)}
-              tabindex={i === 0 ? 0 : undefined} onclick={() => onpick(String(day))}>{day}d</button>
-    {/each}
-  </div>
-  {#each extra as day (day)}
-    <button type="button" class="chip" data-extra aria-label={`${day}d, remove`} onclick={() => onpick(String(day))}>{day}d<span aria-hidden="true">&nbsp;×</span></button>
+<div class="grid" role="group" aria-label="Remind me this many days before">
+  {#each scale as day (day)}
+    {#if REMINDER_PRESETS.includes(day)}
+      <button type="button" class="chip" class:nudge={nudged === day} aria-pressed={days.includes(day)}
+              onclick={() => press(day)}>{day}d</button>
+    {:else}
+      <button type="button" class="chip" class:nudge={nudged === day} data-extra aria-label={`${day}d, remove`}
+              onclick={() => press(day)}>{day}d<span class="x" aria-hidden="true">×</span></button>
+    {/if}
   {/each}
+  <div class="own" class:has={typed !== ""} class:bad={voice === "refused"}>
+    <input bind:this={input} type="text" inputmode="numeric" maxlength="3" autocomplete="off" placeholder="other"
+           aria-label="Another number of days before" aria-invalid={voice === "refused" ? "true" : undefined}
+           value={typed} oninput={(event) => typing(event.currentTarget.value)}
+           onkeydown={(event) => { if (event.key === "Enter") { event.preventDefault(); commit(); } }}>
+    <span class="unit" aria-hidden="true">d</span>
+  </div>
+</div>
+<div class="line" class:warm={voice === "refused"} aria-live="polite">
+  {#if voice === "add"}
+    <button type="button" class="add" onclick={commit}>add {reminderDayOf(typed)} d <span class="kb">↵</span></button>
+  {:else if voice === "refused"}
+    <span class="in">{REMINDER_REFUSAL}</span>
+  {:else if voice === "already"}
+    <span class="in">{said} d is already chosen</span>
+  {/if}
 </div>
 <div class="foot">
   <span class="when"><b>{words}</b></span>
@@ -51,16 +101,40 @@
 </div>
 
 <style>
-  .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
-  .set{display:contents}
-  /* 44px targets, as the phone's chips */
-  .chip{min-height:var(--p-hit);min-width:var(--p-hit);padding:0 14px;margin:0;border-radius:22px;cursor:pointer;
+  /* the grid: four equal 44px cells (320px inside the card holds four at the floor) */
+  .grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:12px}
+  .chip{display:inline-flex;align-items:center;justify-content:center;gap:2px;min-height:var(--p-hit);min-width:0;padding:0 8px;margin:0;border-radius:22px;cursor:pointer;
         border:1px solid var(--line);background:var(--panel);color:var(--ink-mid);font:var(--p-type-meta) var(--mono);
         transition:background .15s,border-color .15s,color .15s}
   .chip:hover{color:var(--ink);border-color:var(--line)}
   .chip:focus-visible{outline:none;border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
   .chip[aria-pressed=true],.chip[data-extra]{border-color:var(--accent);color:var(--ink);
         background:color-mix(in srgb,var(--accent) 16%,var(--panel))}
+  /* a typed day is lit and carries its cross: turning it off is removing it */
+  .chip .x{color:var(--ink-quiet);margin-left:4px}
+  .chip.nudge{animation:nudge .4s ease both}
+  @keyframes nudge{30%{transform:translateX(-3px)}60%{transform:translateX(3px)}}
+  /* the field: the kit's input in chip clothes, dashed as every "add your own" target is */
+  .own{position:relative;display:flex;align-items:center;min-height:var(--p-hit);border-radius:22px;
+       border:1.5px dashed color-mix(in srgb,var(--accent) 45%,var(--line-soft));transition:border-color .15s}
+  .own:focus-within{border-color:var(--accent);border-style:solid}
+  .own.bad{border-color:color-mix(in srgb,var(--warm) 70%,var(--line))}
+  .own input{width:100%;min-width:0;height:100%;padding:0 8px;border:0;background:none;color:var(--ink);text-align:center;
+       font:var(--p-type-meta) var(--mono);outline:none;-moz-appearance:textfield;appearance:textfield}
+  .own input::-webkit-outer-spin-button,.own input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+  .own input::placeholder{color:var(--ink-quiet)}
+  .own .unit{position:absolute;right:11px;top:50%;transform:translateY(-50%);font:var(--p-type-meta) var(--mono);color:var(--ink-quiet);pointer-events:none;display:none}
+  .own.has .unit{display:block}
+  .own.has input{padding-right:22px}
+  /* one line, three voices in turn; it keeps its height so the card never jumps */
+  .line{display:flex;align-items:center;min-height:24px;margin-top:4px;font:var(--p-type-meta) var(--mono);color:var(--ink-quiet);letter-spacing:.02em}
+  .line .add{appearance:none;display:inline-flex;align-items:center;min-height:24px;padding:0 10px;margin-left:-10px;border:0;border-radius:15px;background:none;
+        cursor:pointer;font:var(--p-type-meta) var(--mono);color:var(--accent)}
+  .line .add:hover{background:color-mix(in srgb,var(--accent) 10%,transparent)}
+  .line .add .kb{color:var(--ink-quiet);margin-left:8px}
+  .line.warm{color:var(--warm)}
+  .line .in{animation:errin .35s ease both}
+  @keyframes errin{from{opacity:0;transform:translateY(-3px)}}
   /* the calendar's foot line */
   /* static: family.css, which some screens link, owns a fixed `.foot` (#1468) */
   .foot{position:static;text-align:left;letter-spacing:normal;z-index:auto;display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:4px 12px;min-height:30px;margin-top:8px;
@@ -69,6 +143,6 @@
   .when{min-width:0}
   .rel{flex:none}
   @media (prefers-reduced-motion: reduce){
-    .chip{transition:none}
+    .chip,.line .in{transition:none;animation:none}
   }
 </style>

@@ -28,7 +28,8 @@
    *   · "importance": P's three tiles with the line of why (round 7 S);
    *   · "section": the tiles, each in its colour (Tiles.svelte);
    *   · "months": the period band stood up (RepeatBand.svelte);
-   *   · "reminders": day chips 7 / 14 / 30 / 60 / 90, several at once, each
+   *   · "reminders": day chips 1 / 3 / 7 / 14 / 30 / 60 / 90 and a field for any
+   *     number of days (#1892), several at once, each
    *     press a toggle that leaves the card standing (DayChips.svelte,
    *     #1468; the `ask`'s `days` are the chosen ones, its `value` is null);
    *   · "timezone", "currency": a filter over the household's pick-list
@@ -126,7 +127,7 @@
 
 <style>
   /* the reading card's glass, wearing the item card's open outline (round 5);
-     356px wide: 320px inside for seven 45px days */
+     356px wide: 320px inside for four 44px cells across */
   .chooser{box-sizing:border-box;width:356px;max-width:100%;padding:10px 18px 14px;
            background:var(--panel-raised);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
            border:1px solid var(--accent);border-radius:18px;color:var(--ink);
@@ -167,6 +168,8 @@
      calendar's next-month arrow lay over the close's lower edge (#1319) */
   .sheet .head{margin:-6px -6px 0}
   .sheet .kb{display:none}
+  /* #1892: the typed-days field at the pocket's 16px floor, so the phone never zooms on it */
+  .sheet .body :global(.own input){font-size:var(--p-type-input)}
 
   @keyframes beside{from{opacity:0;transform:translateX(-16px)}}
   @keyframes rise{from{transform:translateY(105%)}}
