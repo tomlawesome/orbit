@@ -122,14 +122,17 @@ export function alertsWords(error, { curly = false } = {}) {
 /**
  * #1604 b1 W-S1: the words for a failed alerts toggle, which never contradict
  * where the switch landed. From which way the person tapped (`turningOn`) and
- * where the switch is now (`now`, from syncAlerts). A coded refusal, and a
- * failed switch-on that left the switch off, keep `alertsWords`. The desk and
+ * where the switch is now (`now`, from syncAlerts). Only the two named
+ * refusals (permission_denied, unconfigured), and a failed switch-on that left
+ * the switch off, keep `alertsWords`; any other error, coded or not, is worded
+ * from the tap and where the switch landed. The desk and
  * the pocket card share this one line.
  * @param {unknown} error
  * @param {{ turningOn: boolean, now: boolean, curly?: boolean }} outcome
  */
 export function alertsOutcomeWords(error, { turningOn, now, curly = false }) {
-  if (/** @type {{ code?: string }} */ (error)?.code || (turningOn && !now)) return alertsWords(error, { curly });
+  const code = /** @type {{ code?: string }} */ (error)?.code;
+  if (code === "permission_denied" || code === "unconfigured" || (turningOn && !now)) return alertsWords(error, { curly });
   if (turningOn) return "switched on here, but Orbit could not reach your alert settings — it will try again next time you open settings";
   return now
     ? "still on — Orbit could not switch alerts off on this device. try again"
