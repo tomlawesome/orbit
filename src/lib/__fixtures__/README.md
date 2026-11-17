@@ -42,9 +42,9 @@ successful non-transaction `--migrate` cases now expect no rollback copy
 file is confirmed. Refusals, failures and transaction runs are unchanged.
 
 #1847 (a commented `# ORBIT_IMAGE=` beside `ORBIT_IMAGE=` makes the migration
-write the key twice) changed "migrate: duplicate managed keys" by hand: the
-#1834 confirm step's strict parse refuses the doubled key, so the case now
-exits 1 with `configuration_migration`, the file unchanged and the copy kept.
+write the key twice) changed "migrate: duplicate managed keys" by hand: each
+managed key is now written once, at its first matching line, and later matching
+lines are dropped, so the case now exits 0 with the migrated file.
 
 #1211 captured its three directories from `6448f07e` (the scripts unchanged since
 `d6a365a3`), before backup.sh, restore.sh and the recovery-bundle scripts
