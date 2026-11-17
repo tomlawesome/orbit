@@ -785,7 +785,7 @@
 <div class="station-backdrop" bind:this={backdropRoot} aria-hidden="true"></div>
 <PageSky stars={false} />
 
-<Chrome user={view?.user ?? confirmedUser} current="administration" household={view?.household} />
+<Chrome user={view?.user ?? confirmedUser ?? data.user} current="administration" household={view?.household} />
 
 <!-- #1123, proposal §2.12: administration on a phone, chosen by CSS. It
      shares this page's state and acts (the step-up challenge, the re-read),
