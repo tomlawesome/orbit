@@ -244,12 +244,23 @@
 
   const bringCount = $derived(preview ? preview.items - preview.conflicts.length : 0);
 
-  function bringInNow() {
+  async function bringInNow() {
     if (!preview) return;
     const skip = preview.conflicts.map((one) => one.id);
     const chosen = file;
     if (!chosen) return;
     inProblem = null;
+    /* #1605 W-R12: a file that changed on disk since the pick cannot be read;
+       say so now rather than let the upload fail as a connection error. */
+    try {
+      await chosen.slice(0, 1).arrayBuffer();
+    } catch {
+      file = null;
+      preview = null;
+      inPhase = "rest";
+      inProblem = "not brought in — this file changed since you chose it. choose it again";
+      return;
+    }
     inPhase = "bringing";
     guarded(async (proof) => {
       const result = await importPortableArchive(householdId, { file: chosen, passphrase: passIn, skip, currentPassword: proof || undefined });
