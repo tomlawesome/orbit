@@ -422,3 +422,125 @@ describe("child script environment (R5)", () => {
     expect(names.has("PATH")).toBe(true);
   });
 });
+
+// --- the review's additions: extra child names, bounded waits, error wording ----
+
+describe("child environment keeps the documented overrides (R5 extras)", () => {
+  const SCOPED = {
+    base: { BASE_REPIN_TARGET_BRANCH: "fake-branch", ORBIT_BASE_IMAGE_DEV_REMOTE: "fake-remote" },
+    evidence: { ORBIT_MAX_EVIDENCE_AGE_DAYS: "3", COSIGN_PUBLIC_KEY: "fake-placeholder-value", ORBIT_COSIGN: "fake-cosign", ORBIT_POLICY_VERSION: "fake-policy" },
+    ssh: { SSH_AUTH_SOCK: "/fake/agent.sock", GIT_SSH_COMMAND: "fake-ssh -F /dev/null" },
+  };
+
+  beforeEach(() => {
+    Object.assign(process.env, SCOPED.base, SCOPED.evidence, SCOPED.ssh);
+    process.env.ORBIT_REUSE_TOKEN = FAKE_TOKEN;
+    process.env.GITLAB_TOKEN = FAKE_TOKEN;
+    process.env.CI_JOB_TOKEN = FAKE_TOKEN;
+  });
+
+  const seen = (dump) => {
+    const text = readFileSync(dump, "utf8");
+    return (name, value) => text.split("\n").includes(`${name}=${value}`);
+  };
+  const noTokens = (dump) => {
+    const names = envNames(dump);
+    for (const name of ["ORBIT_REUSE_TOKEN", "GITLAB_TOKEN", "CI_JOB_TOKEN"]) expect(names.has(name), `${name} reached the child`).toBe(false);
+  };
+
+  it("passes the base-image overrides and the ssh names to check-base-image-current.sh, and no tokens", async () => {
+    installFakeDocker();
+    const dir = newRepo();
+    const dump = join(root, `extras-base-${counter++}.txt`);
+    writeFileSync(dump, "");
+    writeExec(join(dir, "scripts", "check-base-image-current.sh"), `#!/bin/bash\nenv >> "${dump}"\n`);
+    await realLookups({ repoDir: dir, target: "preview" }).baseImageCurrent();
+    const has = seen(dump);
+    for (const [name, value] of Object.entries({ ...SCOPED.base, ...SCOPED.ssh })) expect(has(name, value), `${name} missing`).toBe(true);
+    noTokens(dump);
+  });
+
+  it("passes the evidence overrides and the ssh names to verify-validation-evidence.sh, and no tokens", async () => {
+    installFakeDocker();
+    const dir = newRepo();
+    const dump = join(root, `extras-evidence-${counter++}.txt`);
+    writeFileSync(dump, "");
+    writeExec(join(dir, "scripts", "ci", "verify-validation-evidence.sh"), `#!/bin/bash\nenv >> "${dump}"\necho "recorded at 2026-11-10T00:00:00Z"\n`);
+    await realLookups({ repoDir: dir, target: "preview" }).evidenceAgeDays();
+    const has = seen(dump);
+    for (const [name, value] of Object.entries({ ...SCOPED.evidence, ...SCOPED.ssh })) expect(has(name, value), `${name} missing`).toBe(true);
+    noTokens(dump);
+  });
+});
+
+describe("every wait is bounded (R6)", () => {
+  const never = () => new Promise(() => {});
+  const FIVE_SECONDS = 5000;
+
+  it("times out when fetch ignores the signal and never settles", async () => {
+    vi.stubGlobal("fetch", () => never());
+    const message = await messageOf(fetchJson("https://example.test/x", AUTH, "the thing", { timeoutMs: 500, maxBytes: 1024 }));
+    expect(message).toBe("the thing did not answer within 0.5s");
+  }, FIVE_SECONDS);
+
+  it("times out when a body read() never settles", async () => {
+    const body = { getReader: () => ({ read: () => never(), cancel: async () => {} }) };
+    vi.stubGlobal("fetch", async () => ({ ok: true, status: 200, headers: new Headers(), body }));
+    const message = await messageOf(fetchJson("https://example.test/x", AUTH, "the thing", { timeoutMs: 500, maxBytes: 1024 }));
+    expect(message).toBe("the thing did not answer within 0.5s");
+  }, FIVE_SECONDS);
+
+  it("times out when json() never settles", async () => {
+    vi.stubGlobal("fetch", async () => ({ ok: true, status: 200, headers: new Headers(), json: () => never() }));
+    const message = await messageOf(fetchJson("https://example.test/x", AUTH, "the thing", { timeoutMs: 500, maxBytes: 1024 }));
+    expect(message).toBe("the thing did not answer within 0.5s");
+  }, FIVE_SECONDS);
+});
+
+describe("errors name the call (R7)", () => {
+  const url = `https://example.test/x?${SECRET_QUERY}`;
+  const clean = (text) => !["fake-placeholder-query", "private_token", FAKE_TOKEN, "Bearer"].some((s) => text.includes(s));
+
+  it("names an unreadable body, with no query or header value", async () => {
+    let step = 0;
+    const body = {
+      getReader: () => ({
+        read: async () => {
+          if (step++ === 0) return { done: false, value: new TextEncoder().encode('{"a":') };
+          throw new Error("socket reset by peer");
+        },
+        cancel: async () => {},
+      }),
+    };
+    vi.stubGlobal("fetch", async () => ({ ok: true, status: 200, headers: new Headers(), body }));
+    const message = await messageOf(fetchJson(url, AUTH, "the thing", { timeoutMs: 1000, maxBytes: 1024 }));
+    expect(message).toBe("the thing could not be read: socket reset by peer");
+    expect(clean(message)).toBe(true);
+  });
+
+  it("names a body that is not JSON, with no query, header value or body text", async () => {
+    const body = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("<html>not json</html>"));
+        controller.close();
+      },
+    });
+    vi.stubGlobal("fetch", async () => ({ ok: true, status: 200, headers: new Headers(), body }));
+    const message = await messageOf(fetchJson(url, AUTH, "the thing", { timeoutMs: 1000, maxBytes: 1024 }));
+    expect(message).toBe("the thing sent a body that is not JSON");
+    expect(clean(message)).toBe(true);
+  });
+
+  it("names a json()-only response that is not JSON", async () => {
+    vi.stubGlobal("fetch", async () => ({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      json: async () => {
+        throw new SyntaxError("Unexpected token < in JSON");
+      },
+    }));
+    const message = await messageOf(fetchJson(url, AUTH, "the thing", { timeoutMs: 1000, maxBytes: 1024 }));
+    expect(message).toBe("the thing sent a body that is not JSON");
+  });
+});
