@@ -9,6 +9,7 @@ import { sealStepUpProof, stepUpProofCookieName } from "@/lib/auth/recent-auth";
 import { getAuthConfig } from "@/lib/env";
 import { invitationSendErrors } from "@/server/invitations/send";
 import { setUserAddress } from "@/server/local-credentials/address";
+import { requireInstanceMetadataWriter } from "@/server/metadata/fields";
 import { createLocalUserAndSendSetupLink, sendSetupLink } from "@/server/local-credentials/setup-mail";
 import { collectSignInApproval, startSignInApproval } from "@/server/sign-in-approvals";
 import type { SmtpNotification } from "@/server/notification-worker";
@@ -603,6 +604,35 @@ describe("PUT /api/admin/users/{userId}/email: racing what goes to the address",
         gt(credentialSetupTokens.expiresAt, new Date()),
       ));
     expect(live).toEqual([]);
+  }, 120_000);
+
+  it("a same-address re-encryption mid-send (as a provider sign-in does) is no change: the link is written live", async () => {
+    const admin = await adminWithPassword();
+    const target = await localTarget("race-reencrypt@example.invalid");
+    const before = await stored(target.id);
+
+    const delivery = await sendSetupLink(admin.userId, target.id, {
+      mailer: {
+        async sendEmail() {
+          const cipher = await requireInstanceMetadataWriter(getDb());
+          await getDb().update(users)
+            .set({ emailEnc: cipher.encryptText("users.email", target.id, "race-reencrypt@example.invalid") })
+            .where(eq(users.id, target.id));
+        },
+      },
+    });
+
+    const after = await stored(target.id);
+    expect(after.enc).not.toBe(before.enc);
+    expect(after.index).toBe(before.index);
+    expect(delivery.sendError).toBeNull();
+    const live = await getDb().select({ id: credentialSetupTokens.id }).from(credentialSetupTokens)
+      .where(and(
+        eq(credentialSetupTokens.userId, target.id),
+        isNull(credentialSetupTokens.consumedAt),
+        gt(credentialSetupTokens.expiresAt, new Date()),
+      ));
+    expect(live).toHaveLength(1);
   }, 120_000);
 
   it("finding 2: a sign-in approval opened while the change is in flight is mailed to the new address, never the old", async () => {

@@ -25,7 +25,8 @@ describe("the new step-up intent (#1869)", () => {
     // Fails if the intent is missing: a proof for one act must not pay for another.
     expect(stepUpIntents).toContain("email_address_set");
     expect(stepUpIntents).toContain("setup_link_issue");
-  });
+    /* The first import of the server module is slow on a loaded host. */
+  }, 120_000);
 });
 
 describe("People rows offer to set or change an address (#1869)", () => {

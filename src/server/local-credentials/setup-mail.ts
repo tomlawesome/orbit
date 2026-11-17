@@ -92,10 +92,10 @@ interface Recipient {
   email: string | null;
   displayName: string;
   /**
-   * The stored ciphertext `email` was read from. The link is written only
-   * while the account still holds exactly this (#1869): see `issueAndSend`.
+   * The stored blind index of `email`. The link is written only while the
+   * account still holds this index (#1869): see `issueAndSend`.
    */
-  emailEnc: string | null;
+  emailIndex: string | null;
 }
 
 /**
@@ -145,7 +145,7 @@ export function unreadableAddressError(state: MetadataFieldState | undefined): A
  * administrator can set a new address in between (#1869). Holding the
  * per-user lock across an SMTP exchange is not an option, so the write is
  * optimistic instead: `persistSetupToken` writes only while the account still
- * holds the ciphertext read here, and otherwise refuses 409
+ * holds the address index read here, and otherwise refuses 409
  * `address_changed`, leaving the link that went to the old mailbox dead.
  */
 async function issueAndSend(
@@ -199,7 +199,7 @@ async function issueAndSend(
      link is never superseded by this one that went nowhere. */
   await persistSetupToken(recipient.id, minted, actorUserId, {
     onlyIfNoLiveLink: Boolean(outcome.sendError),
-    sentToAddress: recipient.emailEnc,
+    sentToAddressIndex: recipient.emailIndex,
   });
 
   return { sentTo: email, expiresAt: minted.expiresAt, sendError: outcome.sendError };
@@ -256,7 +256,7 @@ export async function sendSetupLink(
   return issueAndSend(recipient, hasCredential ? "recovery" : "setup", actorUserId, options, addressState);
 }
 
-/** The account as a link is sent to it: its address decrypted, with the ciphertext it came from. */
+/** The account as a link is sent to it: its address decrypted, with its blind index. */
 async function readRecipient(userId: string): Promise<{
   recipient: Recipient;
   addressState: MetadataFieldState | undefined;
@@ -268,6 +268,7 @@ async function readRecipient(userId: string): Promise<{
       id: users.id,
       /* Read from `email_enc` only (#1403 Q3). */
       emailEnc: users.emailEnc,
+      emailIndex: users.emailIndex,
       displayName: users.displayName,
       credential: localCredentials.userId,
     })
@@ -282,7 +283,7 @@ async function readRecipient(userId: string): Promise<{
   const address = (await openInstanceMetadataReader(db))
     .text("users.email", row.id, { encrypted: row.emailEnc });
   return {
-    recipient: { id: row.id, displayName: row.displayName, email: address.value, emailEnc: row.emailEnc },
+    recipient: { id: row.id, displayName: row.displayName, email: address.value, emailIndex: row.emailIndex },
     addressState: address.state,
     hasCredential: Boolean(row.credential),
   };

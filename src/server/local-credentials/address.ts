@@ -75,7 +75,7 @@ export async function setUserAddress(
        holds it across the mail it sends, so this lock alone does not stop a
        link or approval mailed to the old address; each re-checks the address
        under this lock before writing (a setup link refuses if the stored
-       ciphertext changed since it was mailed; an approval reads the address
+       address index changed since it was mailed; an approval reads the address
        under the lock), and anything written before this commits is retired
        below. */
     await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${ACCOUNT_LIFECYCLE_LOCK_KEY}, 0))`);

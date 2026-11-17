@@ -624,12 +624,13 @@ export function mintSetupToken(
  * lock serializes them, same as `acquireActiveHouseholdLock` does for a
  * household.
  *
- * `sentToAddress`, when given, is the stored address ciphertext the link was
- * mailed against, read before the send. The link is written only if the
- * account still holds exactly that ciphertext under the lock (optimistic
- * concurrency, #1869): an administrator who set a new address meanwhile has
- * already retired the account's links under this same lock, and a link
- * written now would be live in the OLD mailbox. That refuses 409
+ * `sentToAddressIndex`, when given, is the blind index of the address the
+ * link was mailed to, read before the send. The link is written only if the
+ * account still holds that index under the lock (optimistic concurrency,
+ * #1869): an administrator who set a new address meanwhile has already
+ * retired the account's links under this same lock, and a link written now
+ * would be live in the OLD mailbox. The index, not the ciphertext: a
+ * provider sign-in re-encrypts an unchanged address, which is no change. That refuses 409
  * `address_changed` and writes nothing; the mail that went carries a link
  * that never works.
  */
@@ -637,14 +638,14 @@ export async function persistSetupToken(
   userId: string,
   minted: MintedSetupToken,
   createdByUserId: string | null,
-  options: { onlyIfNoLiveLink?: boolean; sentToAddress?: string | null } = {},
+  options: { onlyIfNoLiveLink?: boolean; sentToAddressIndex?: string | null } = {},
 ): Promise<boolean> {
   return await getDb().transaction(async (transaction) => {
     await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${userAddressLockKey(userId)}, 0))`);
-    const [target] = await transaction.select({ id: users.id, emailEnc: users.emailEnc })
+    const [target] = await transaction.select({ id: users.id, emailIndex: users.emailIndex })
       .from(users).where(eq(users.id, userId)).limit(1);
     if (!target) throw new AppError("user_not_found", "That registered Orbit user is no longer available", 404);
-    if (options.sentToAddress !== undefined && target.emailEnc !== options.sentToAddress) {
+    if (options.sentToAddressIndex !== undefined && target.emailIndex !== options.sentToAddressIndex) {
       throw new AppError(
         "address_changed",
         "This account's address changed while the link was being sent, so that link will not work; send a new one",
