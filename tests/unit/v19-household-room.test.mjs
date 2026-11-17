@@ -15,7 +15,6 @@ import {
   skyMap,
   toField,
 } from "../../web/src/routes/household/[id]/room.js";
-import { dialPlacement } from "../../web/src/lib/data/chart.js";
 import { constellationOf } from "../../web/src/lib/data/household.js";
 import { dialPlacement, drivingDays, importanceSize } from "../../web/src/lib/data/chart.js";
 import { WORKSPACE_FIXTURE } from "../../web/src/lib/data/fixtures/workspace.js";
