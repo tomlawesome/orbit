@@ -482,8 +482,9 @@ export const signInApprovals = pgTable("sign_in_approvals", {
   decidedAt: timestamp("decided_at", { withTimezone: true }),
   /* The send limits of ADR-0027 §8, counted where they cannot be forgotten by
      a restart: how many links this pending sign-in has put in the post, and
-     when the last one went. "Five per account per hour" is these counts summed
-     across the account's rows, and "resend after 60 s" is this timestamp. */
+     when the last one went. "Resend after 60 s" is this timestamp; "five per
+     account per hour" is counted from sign_in_approval_sends, one row per
+     mail (#1604 P-20). */
   sendCount: integer("send_count").notNull().default(0),
   lastSentAt: timestamp("last_sent_at", { withTimezone: true }),
   noticeShownAt: timestamp("notice_shown_at", { withTimezone: true }),
@@ -491,6 +492,22 @@ export const signInApprovals = pgTable("sign_in_approvals", {
 }, (table) => [
   index("sign_in_approvals_user_idx").on(table.userId),
   check("sign_in_approvals_outcome", sql`${table.outcome} IS NULL OR ${table.outcome} IN ('approved','denied')`),
+]);
+
+/**
+ * One row per approval mail actually sent, so "five per account per hour"
+ * counts the sends inside the hour and nothing older (#1604 P-20). The
+ * approval's own send_count and last_sent_at stay what they were; this table
+ * is only the hour's tally, swept with the approvals it belongs to.
+ */
+export const signInApprovalSends = pgTable("sign_in_approval_sends", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  approvalId: uuid("approval_id").notNull().references(() => signInApprovals.id, { onDelete: "cascade" }),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  sentAt: timestamp("sent_at", { withTimezone: true }).notNull(),
+}, (table) => [
+  index("sign_in_approval_sends_user_sent_idx").on(table.userId, table.sentAt),
+  index("sign_in_approval_sends_approval_idx").on(table.approvalId),
 ]);
 
 /**

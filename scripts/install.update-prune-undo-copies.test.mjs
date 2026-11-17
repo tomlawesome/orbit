@@ -45,11 +45,12 @@ import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 
 import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "./process-budget.mjs";
 import {
   baseEnvironment,
+  copyInstalledFolder,
   installScript,
   makeFakeBin,
   makePreprovisionedDeployment,
@@ -59,7 +60,7 @@ import {
   runInstallOnTerminal,
 } from "./install-test-support.mjs";
 
-vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS * 2 });
+vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS * 2, hookTimeout: PROCESS_TEST_TIMEOUT_MS * 2 });
 
 const FLAG = "--remove-old-undo-copies";
 const ENV_FORM = "ORBIT_REMOVE_OLD_UNDO_COPIES";
@@ -109,12 +110,17 @@ const writeFolder = (dir, files) => {
   for (const [name, content] of Object.entries(files)) writeFileSync(join(dir, name), content, { mode: 0o600 });
 };
 
+/** A real plain install, made once for the file (#1861) and copied per test: the tests only need it as their starting state. */
+let installedTemplate;
+beforeAll(() => {
+  installedTemplate = makeTarget();
+  makePreprovisionedDeployment(installedTemplate);
+  expect(runDetached(installedTemplate, {}, ["--plain", "--install"]).status).toBe(0);
+});
+
 /** A deployment made by a real plain install, ready to be updated. */
 function installedFolder() {
-  const targetDir = makeTarget();
-  makePreprovisionedDeployment(targetDir);
-  expect(runDetached(targetDir, {}, ["--plain", "--install"]).status).toBe(0);
-  return targetDir;
+  return copyInstalledFolder(installedTemplate);
 }
 
 /** What earlier releases and the operator left: every case the clean-up must sort. */
