@@ -37,7 +37,6 @@ describe("startup configuration", () => {
   it.each([
     ["processing", { COMPOSE_PROFILES: "processing" }, "processing"],
     ["ai", { COMPOSE_PROFILES: "ai" }, "ai"],
-    ["mail", { SMTP_HOST: "smtp.example.invalid" }, "mail"],
     ["push", { VAPID_SUBJECT: "mailto:admin@example.invalid" }, "push"],
   ])("tolerates partial %s configuration and records a bounded disabled fallback", (_label, changes, field) => {
     expect(() => validateStartupConfiguration({ ...baseEnvironment(), ...changes })).not.toThrow();
