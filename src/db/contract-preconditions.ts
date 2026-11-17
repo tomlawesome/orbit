@@ -30,8 +30,12 @@ export const CONTRACT_PRECONDITIONS: readonly ContractPrecondition[] = [
   {
     // The drop ships later (note 58520 decision 3, build note C). Until then
     // its tag is in no journal, so this runs against today's column and
-    // passes once the backfill has sealed every row. The drop migration must
-    // be generated under exactly this tag.
+    // passes once the backfill has sealed every row. The number 0017 is
+    // already taken (0017_imap_attachment_hash_sealed), so this tag must be
+    // changed to the next free number when the drop is written, and the drop
+    // must be generated under whatever tag this entry holds at that time. A
+    // gate whose tag matches no migration is skipped silently; the guard test
+    // in contract-preconditions.test.ts enforces the match.
     migrationTag: "0017_drop_document_content_sha256",
     column: "documents.content_sha256",
     description: "documents whose content hash is still stored in plain form, not yet sealed under the household key",
