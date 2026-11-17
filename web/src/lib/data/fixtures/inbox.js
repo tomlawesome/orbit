@@ -92,6 +92,8 @@ export const INBOX_FIXTURE = {
       classification: "unavailable",
       canApprove: false,
       canDiscard: true,
+      message: "no PDF attached",
+      failureCode: "no_supported_pdf",
       reason: "no_document",
       proposal: {},
       fieldEvidence: {},
