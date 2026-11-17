@@ -352,20 +352,38 @@ describe("sendBoundedMail reads the sending row, not SMTP_*", () => {
     const url = process.env.DATABASE_URL;
     if (!url) throw new Error("DATABASE_URL is required");
     const other = postgres(url, { max: 1, prepare: false });
+    let refusal: unknown = null;
     try {
       /* Another administrator is mid-removal: holding the mailbox row. */
       await other`begin`;
       await other`select id from mail_in_mailbox for update`;
-      const choosing = setSendingSettings(admin, null, viaMailbox).then(() => null, (error: unknown) => error);
-      await new Promise((resolve) => setTimeout(resolve, 750));
+      let settled = false;
+      const choosing = setSendingSettings(admin, null, viaMailbox).then(
+        () => { settled = true; return null; },
+        (error: unknown) => { settled = true; return error; },
+      );
+      /* Wait until the choose call is really queued on a row lock (not a fixed
+         sleep), so the test cannot pass on a call that never reached the lock. */
+      const deadline = Date.now() + 15_000;
+      for (;;) {
+        const [{ waiting }] = await other<{ waiting: number }[]>`
+          select count(*)::int as waiting from pg_stat_activity
+          where datname = current_database() and wait_event_type = 'Lock' and pid <> pg_backend_pid()`;
+        if (waiting > 0) break;
+        if (settled || Date.now() > deadline) throw new Error("the choose call never waited on the mailbox row lock");
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      expect(settled, "the choose call waits for the removal").toBe(false);
       await other`update mail_in_mailbox set password_secret_id = null, enabled = false`;
       await other`commit`;
-      await choosing;
+      refusal = await choosing;
     } finally {
       await other`rollback`.catch(() => undefined);
       await other.end();
     }
 
+    /* Refused because the credential is gone, not for any other reason. */
+    expect(refusal, "choosing mailbox was refused").toMatchObject({ code: "mailbox_not_configured", status: 409 });
     expect((await readSendingSettings(admin)).via).not.toBe("mailbox");
   });
 
