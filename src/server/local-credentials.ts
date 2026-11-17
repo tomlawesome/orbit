@@ -1448,9 +1448,15 @@ export async function removeProviderLinks(
        APP_URL, cannot be unusable here: Orbit does not start without an
        https one, src/lib/env.ts.) */
     if (!(await outgoingMailReady(options.mailer))) {
+      /* Sending can be set up while its password cannot be read (key missing
+         or wrong): that is not "not set up", and the fix is different. */
+      const { sendingConfigured } = await import("@/server/mail-in/sending-settings");
+      const locked = await sendingConfigured().catch(() => false);
       throw new AppError(
         "mail_not_ready",
-        "Not removed: outgoing mail is not set up, so members left without a password could not be sent a setup link",
+        locked
+          ? "Not removed: outgoing mail is set up but its password cannot be read right now, so members left without a password could not be sent a setup link"
+          : "Not removed: outgoing mail is not set up, so members left without a password could not be sent a setup link",
         409,
       );
     }

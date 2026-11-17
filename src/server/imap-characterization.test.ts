@@ -424,8 +424,8 @@ describe("reviewInboxState — status/failure to UI classification mapping", () 
     expect(safeAttachmentFailure(new Error("mime_structure_invalid"))).toBe("mime_structure_invalid");
   });
 
-  it("shows the member 'interrupted' for a structure check that could not run (D-S1)", () => {
-    expect(failureReasonOf("structure_check_unavailable")).toBe("interrupted");
+  it("shows the member 'check_unavailable', not 'interrupted', for a structure check that could not run (D-S1, r2-documents-2)", () => {
+    expect(failureReasonOf("structure_check_unavailable")).toBe("check_unavailable");
   });
 
   it("carries the derived reason on reviewInboxState's return alongside message", () => {

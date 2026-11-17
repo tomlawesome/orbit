@@ -1,5 +1,6 @@
 import { senderDaysShown } from "$lib/data/inbox.js";
 import { WorkspaceError } from "$lib/data/workspace.js";
+import { relayShape } from "../relay-shape.js";
 import { clockOf, dayMonth, localZone, plural } from "$lib/format.js";
 
 /*
@@ -56,6 +57,15 @@ export const sentWords = (/** @type {string} */ address) =>
 export const SENT_WAKE = "check email sent · open the link within 24 hours";
 export const ALREADY_CHECKED = "already checked — nothing to send";
 export const LINK_CHECKED = "address checked · your relay is listening";
+export const LINK_CHECKED_PAUSED = "address checked · your relay is paused, so nothing is collected yet";
+/** What the verified landing says, by the relay's state (ST-26): "listening" only when it is.
+ *  @param {{ address: string, status: string, ingest: string, unavailable?: boolean }} relay
+ *  @returns {string} */
+export function linkCheckedWords(relay) {
+  const shape = relayShape(relay);
+  if (shape.tone === "on") return LINK_CHECKED;
+  return relay.ingest === "paused" && shape.mailbox ? LINK_CHECKED_PAUSED : "address checked";
+}
 export const LINK_FAILED =
   "that link didn't work — it may have lapsed, been used already, or belong to another sign-in. send a new check email";
 

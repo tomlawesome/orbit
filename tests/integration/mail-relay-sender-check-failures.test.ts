@@ -399,6 +399,18 @@ describe("ADR-0034 decision 4: the engine words every refusal of the check", () 
     expect(await envelopeOf(response)).toEqual({ code: "app_url_not_configured", message: WORDS.noAppUrl });
   });
 
+  it("ST-24: a web address with the wrong scheme is worded like the other refusals: starts 'not sent' and says whom to ask", async () => {
+    const session = await fixture.session("member");
+    process.env.APP_URL = "ftp://orbit.example.test";
+
+    const response = await send(session);
+
+    expect(response.status).toBe(503);
+    const { message } = await envelopeOf(response);
+    expect(message).toMatch(/^not sent — /u);
+    expect(message).toMatch(/ask your administrator/u);
+  });
+
   it("503 metadata_locked, when the key is gone after the member is signed in", async () => {
     await seedSenderAddress(fixture.users.member.id);
     const session = await fixture.session("member");

@@ -37,7 +37,6 @@ describe("startup configuration", () => {
   it.each([
     ["processing", { COMPOSE_PROFILES: "processing" }, "processing"],
     ["ai", { COMPOSE_PROFILES: "ai" }, "ai"],
-    ["mail", { SMTP_HOST: "smtp.example.invalid" }, "mail"],
     ["push", { VAPID_SUBJECT: "mailto:admin@example.invalid" }, "push"],
   ])("tolerates partial %s configuration and records a bounded disabled fallback", (_label, changes, field) => {
     expect(() => validateStartupConfiguration({ ...baseEnvironment(), ...changes })).not.toThrow();
@@ -48,6 +47,11 @@ describe("startup configuration", () => {
       fallback: "feature_disabled",
     }));
     expect(JSON.stringify(getConfigurationProblems())).not.toContain("example.invalid");
+  });
+
+  it("A-F13: a leftover SMTP_* line is not a mail problem: outgoing mail is the Mail card's sending row, not these lines", () => {
+    expect(() => validateStartupConfiguration({ ...baseEnvironment(), SMTP_HOST: "smtp.example.invalid" })).not.toThrow();
+    expect(getConfigurationProblems().map((problem) => problem.setting)).not.toContain("mail");
   });
 
   it.each([

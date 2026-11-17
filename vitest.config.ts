@@ -145,6 +145,8 @@ const test: TestUserConfig = {
           "scripts/corpus/stages-rerun.test.mjs",
           // Same reason: uses node:test. Run by scripts/test-backend.sh.
           "scripts/read-environment-value.test.mjs",
+          // Same reason (A-F4, #1789): uses node:test. Run by scripts/test-backend.sh.
+          "scripts/read-environment-value-blanks.test.mjs",
           // Same reason (#1557): uses node:test. Run by scripts/test-backend.sh.
           "scripts/test-backend-build-path.test.mjs",
           // Same reason (#1793): uses node:test. Run by scripts/test-backend.sh.
