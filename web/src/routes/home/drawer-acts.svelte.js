@@ -313,6 +313,8 @@ export function createDrawerActs({
   /** #1605 W-R7: bumped as each read starts or is superseded; a read whose
    *  number is no longer current must not land. */
   let searchReadGeneration = 0;
+  /** The newest papers read, so a superseded re-read can ask how it ended. @type {Promise<Set<string>> | null} */
+  let latestRead = null;
 
   /** #1151 W1-Q8: pocket-search.js's readSearchDocuments carries the
    *  concurrency cap (#1151 W1-R9). Answers the items whose papers could
@@ -349,7 +351,16 @@ export function createDrawerActs({
     searchDocumentsFor = null;
     searchReadGeneration += 1;
     papersReady = false;
-    const failed = await loadSearchDocuments(also);
+    const run = loadSearchDocuments(also);
+    latestRead = run;
+    let failed = await run;
+    /* A newer re-read took over and this one stopped early: the failure of
+       mustRead is the newer read's to report, so this call reports it. */
+    while (mustRead && latestRead !== run) {
+      const newer = latestRead;
+      failed = await newer;
+      if (latestRead === newer) break;
+    }
     if (mustRead && failed.has(mustRead)) throw new Error(`the papers of ${mustRead} could not be read`);
   }
 
