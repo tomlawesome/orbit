@@ -21,7 +21,7 @@ import { purgeExpiredRejectedDocuments } from "@/server/document-maintenance/rej
 import { runScannerHealthCheck, SCANNER_HEALTH_CHECK_INTERVAL_MS } from "@/server/document-maintenance/scanner-health";
 import { getDocumentConfig } from "@/server/documents/config";
 import { pingClamAv } from "@/server/documents/scanner";
-import { claimExpiredPurgeJobs, failPurgeJob, processPurgeJob, PURGE_BATCH_SIZE } from "@/server/document-maintenance/purge-jobs";
+import { claimExpiredPurgeJobs, failPurgeJob, processPurgeJob, PURGE_BATCH_SIZE, releasePurgeClaim } from "@/server/document-maintenance/purge-jobs";
 import { reconcileDocumentStorage, rejectInterruptedDocuments } from "@/server/document-maintenance/storage-reconciliation";
 import { backfillDocumentContentIndexes } from "@/server/document-maintenance/content-index-backfill";
 import { backfillImapAttachmentHashes } from "@/server/document-maintenance/imap-attachment-hash-backfill";
@@ -94,24 +94,35 @@ export async function runDocumentMaintenanceCycle(): Promise<void> {
   await drainExpiredPurges();
 }
 
+/** Failed purges in a row that end a cycle: the breaker's threshold (#1605 P-1). */
+const PURGE_BREAKER_THRESHOLD = 3;
+
 /**
  * #1605 P-1: the retention purge drains its whole backlog each cycle, a batch
  * of PURGE_BATCH_SIZE at a time, paging by job id (a keyset cursor) until a
- * claim comes back short. The cursor also means each job is tried at most
- * once a cycle: a failed purge goes back to `retry`, and its five attempts
- * are spread over five cycles.
+ * claim comes back short, so each job is tried at most once a cycle. A
+ * circuit breaker: PURGE_BREAKER_THRESHOLD failed purges in a row end the
+ * cycle and the rest of the batch is given back unclaimed; any success resets
+ * the count. A storage outage costs three attempts a cycle, not one per job.
  */
 async function drainExpiredPurges(): Promise<void> {
   let after: string | undefined;
+  let failuresInARow = 0;
   while (true) {
     const jobs = await claimExpiredPurgeJobs(PURGE_BATCH_SIZE, after);
-    for (const job of jobs) {
+    for (const [index, job] of jobs.entries()) {
       log.info({ event: "document.job", state: "starting", action: "retry_job" });
       try {
         const outcome = await processPurgeJob(job);
+        failuresInARow = 0;
         if (outcome === "completed") log.info({ event: "document.job", state: "ready", action: "none" });
       } catch (error) {
         await failPurgeJob(job, error);
+        failuresInARow += 1;
+        if (failuresInARow >= PURGE_BREAKER_THRESHOLD) {
+          for (const untried of jobs.slice(index + 1)) await releasePurgeClaim(untried);
+          return;
+        }
       }
     }
     if (jobs.length < PURGE_BATCH_SIZE) return;

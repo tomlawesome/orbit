@@ -235,6 +235,22 @@ async function completeStalePurgeClaim(job: ClaimedDocumentJob): Promise<void> {
   });
 }
 
+/**
+ * Gives a claim back untouched (#1605 P-1): the job returns to the status it
+ * was claimed from (an expired lease's reclaim to `retry`), with the attempt
+ * the claim took and no lease, as if this cycle never reached it.
+ */
+export async function releasePurgeClaim(job: ClaimedDocumentJob): Promise<void> {
+  await getDb().update(documentJobs).set({
+    status: job.previousStatus === "processing" ? "retry" : job.previousStatus,
+    attempts: sql`greatest(${documentJobs.attempts} - 1, 0)`,
+    lockedAt: null,
+    leaseExpiresAt: null,
+    leaseToken: null,
+    updatedAt: new Date(),
+  }).where(holdsJobLease(job));
+}
+
 export async function failPurgeJob(job: ClaimedDocumentJob, error: unknown): Promise<void> {
   await failJob({
     db: getDb(),
