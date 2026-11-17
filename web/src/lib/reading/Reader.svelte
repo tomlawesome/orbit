@@ -154,7 +154,7 @@
     }
   }
 
-  /* #1870: ask again for the lost page; focus returns to the panel once drawn. */
+  /* #1870: ask again for the lost page; focus returns to the stage once drawn. */
   function retry() {
     if (retrying) return;
     brokenSrc = "";
@@ -164,7 +164,7 @@
   }
   let wasRetrying = false;
   $effect(() => {
-    if (!lost && !retrying && wasRetrying) { wasRetrying = false; tick().then(() => panel?.focus({ preventScroll: true })); }
+    if (!lost && !retrying && wasRetrying) { wasRetrying = false; tick().then(() => stage?.focus({ preventScroll: true })); }
     else if (lost && !retrying) wasRetrying = false;
   });
 
@@ -357,7 +357,7 @@
     </div>
     <div class="rd-room">
       <!-- svelte-ignore a11y_no_static_element_interactions -->
-      <div class="rd-stage" class:zoomed={scale !== null} bind:this={stage} onwheel={onWheel}
+      <div class="rd-stage" class:zoomed={scale !== null} bind:this={stage} tabindex="-1" onwheel={onWheel}
            onpointerdown={down} onpointermove={move} onpointerup={up} onpointercancel={up}>
         {#if lost}
           <!-- #1501: a page that could not be loaded says so where the page
@@ -428,6 +428,7 @@
   .rd-room{position:relative;flex:1;min-height:0;display:flex;flex-direction:column}
   .rd-stage{flex:1;min-height:0;overflow:hidden;display:grid;place-items:center;padding:12px;
     touch-action:pan-x pan-y}
+  .rd-stage:focus{outline:none}
   .rd-stage.zoomed{overflow:auto;place-items:start center}
   .rd-stage img{display:block;max-width:100%;max-height:100%;border-radius:2px;background:#fff;
     box-shadow:0 18px 44px rgba(0,0,0,.45)}
