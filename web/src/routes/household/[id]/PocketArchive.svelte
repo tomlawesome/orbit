@@ -13,7 +13,7 @@
     wordsOf,
     writePortableArchive,
   } from "$lib/data/workspace.js";
-  import { archiveFileProblem, exportFileName, passphraseFloor, passphraseLength, passphraseProblem, previewSlice } from "./archive.js";
+  import { archiveFileProblem, exportFileName, FILE_CHANGED_WORDS, fileChangedSincePicked, passphraseFloor, passphraseLength, passphraseProblem, previewSlice } from "./archive.js";
   import { tabArrows } from "$lib/tabs.js";
 
   /*
@@ -87,10 +87,13 @@
 
   /** @param {unknown} error */
   const needsProof = (error) => /** @type {{ code?: string }} */ (error)?.code === "recent_authentication_required";
-  /** A refusal in the server's words, but a file that is not an archive in the card's own (#1566). @param {unknown} error */
-  const refusalWords = (error) => /** @type {{ code?: string }} */ (error)?.code === "archive_invalid"
-    ? "this file is not an Orbit archive"
-    : wordsOf(error);
+  /** A refusal in the server's words, but a file that is not an archive (#1566), or one that changed
+      after it was chosen (#1605 W-R12), in the card's own. @param {unknown} error */
+  const refusalWords = (error) => fileChangedSincePicked(error)
+    ? FILE_CHANGED_WORDS
+    : /** @type {{ code?: string }} */ (error)?.code === "archive_invalid"
+      ? "this file is not an Orbit archive"
+      : wordsOf(error);
 
   /**
    * Run an archive act; if the server wants proof first, hold the act and

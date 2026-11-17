@@ -65,6 +65,20 @@ export function archiveFileProblem(file, limits) {
   return null;
 }
 
+/**
+ * Whether a refusal is the browser's for a file that changed on disk after it
+ * was picked (#1605 W-R12): a picked File is a snapshot, and once its disk
+ * copy changes the browser will not read it (NotReadableError). Only choosing
+ * the file again reads the new copy.
+ * @param {unknown} error
+ */
+export function fileChangedSincePicked(error) {
+  return /** @type {{ name?: unknown } | null | undefined} */ (error)?.name === "NotReadableError";
+}
+
+/** The card's words for that refusal. */
+export const FILE_CHANGED_WORDS = "the file changed after it was chosen — choose it again";
+
 /** The v2 archive header (#1390, ADR-0045): "ORBITARC", then format version 2. */
 const V2_MAGIC = [0x4f, 0x52, 0x42, 0x49, 0x54, 0x41, 0x52, 0x43];
 const V2_HEADER_BYTES = 64;
