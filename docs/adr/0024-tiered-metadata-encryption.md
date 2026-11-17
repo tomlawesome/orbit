@@ -308,11 +308,10 @@ shown on the signed-out door *and on the locked screen*: the one address Orbit
 can still read is the one a member needs when nobody can sign in.
 
 **Alerting.** Administrators' addresses are under the missing key, so the
-notice goes to `OPERATOR_ALERT_ADDRESS`, a server setting, and never to the
-public contact address (owner, #1405). Since #1629 the locked alert is not
-mailed (the sending password is under the same key): it is logged and shown
-on Administration, and one "working again" mail follows the first clean
-start after it.
+alert goes to `OPERATOR_ALERT_ADDRESS`, a server setting, and never to the
+public contact address (owner, #1405); "already sent" is an `audit_log` row,
+repeat interval 24 h, and one "working again" mail follows the first clean
+start after an alert.
 
 ## Amendment (#1437, 2026-11-07)
 

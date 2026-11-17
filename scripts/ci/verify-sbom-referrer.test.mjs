@@ -91,4 +91,15 @@ describe("publish-from-gitlab copies an SBOM referrer only after it is verified 
     expect(verify).toBeGreaterThan(-1);
     expect(copy).toBeGreaterThan(verify);
   });
+
+  it("copies only the referrers it has proven, never the raw list", () => {
+    const copy = step.indexOf('crane copy "${THROWAWAY_IMAGE}@${referrer}"');
+    const loop = step.lastIndexOf("for referrer in", copy);
+    expect(step.slice(loop, copy)).toContain('"${to_copy[@]}"');
+    expect(step.slice(loop, copy)).not.toContain("${referrers}");
+    // An SPDX referrer joins the list only after the verifier passed.
+    const verify = step.indexOf("verify-sbom-referrer.mjs");
+    const add = step.indexOf('to_copy+=("${referrer}")', step.indexOf("not verified by the committed key"));
+    expect(add).toBeGreaterThan(verify);
+  });
 });

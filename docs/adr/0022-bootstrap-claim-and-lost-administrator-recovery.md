@@ -30,7 +30,7 @@ address yet" is not a control.
 
 The 2026-08-16 ruling chose an installer-generated secret file in
 `.orbit-secrets`. On 2026-09-09 the owner replaced it: the claim is
-**printed in the container's start-up log, near its end**, as a clickable
+**printed as the last line of the container's start-up log**, as a clickable
 link and as a plain code, and lives nowhere else. The owner heard that this
 reverses #259's original acceptance line ("displayed/stored without entering
 shell history or ordinary logs") and that shipped container logs would carry
@@ -48,7 +48,7 @@ Facts the design rests on:
 - Start-up ends in `registerNode` (`src/server/boot.ts:153`): configuration
   validated, migrations applied, workers started. Anything printed after
   its last record is the last line of `docker logs orbit-app` until the first
-  request arrives (later lines, such as a scanner retry, can follow the notice).
+  request arrives.
 - The operational logger (`src/lib/logger.ts`) refuses to interpolate values:
   `operationalDetail` renders anything that is not a bounded identifier as
   `[unavailable]`. A URL and a secret are values, so the claim notice cannot
@@ -195,7 +195,7 @@ readers could have claimed first.
   shipped application records."
 - The installer's contract changes: a fresh install is secure with no
   provider configured; its completion screen tells the operator to run
-  `docker compose logs orbit-app` and look for the claim link in the log. No new secret file,
+  `docker compose logs orbit-app` and open the last line. No new secret file,
   Compose secret or configuration key.
 - The claim never being in the database means a database backup never
   contains a live claim, and restoring a backup into another deployment does
