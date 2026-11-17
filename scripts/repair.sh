@@ -1622,6 +1622,7 @@ cleanup() {
   local exit_status=$?
 
   [[ -z "${compose_image_tmp:-}" ]] || rm -f -- "$compose_image_tmp" 2>/dev/null || true
+  [[ -z "${compose_live_tmp:-}" ]] || rm -f -- "$compose_live_tmp" 2>/dev/null || true
   # #1848 FR-S1b: retire-smtp-lines's mktemp names, held while they exist,
   # removed as the folder's owner (#1848 FIX-S1).
   [[ -z "${smtp_rewrite_tmp:-}" ]] || as_folder_owner rm -f -- "$smtp_rewrite_tmp" 2>/dev/null || true
@@ -2279,6 +2280,27 @@ fetch_image_compose() {
 discard_image_compose() {
   [[ -z "$compose_image_tmp" ]] || rm -f -- "$compose_image_tmp"
   compose_image_tmp=""
+  [[ -z "$compose_live_tmp" ]] || rm -f -- "$compose_live_tmp"
+  compose_live_tmp=""
+}
+
+# #1875 W3: what the compare and the drift detail read for the folder's
+# docker-compose.yml ($compose_compared). As root, a copy in a temporary
+# file root owns ($compose_live_tmp), made through the bounded read; returns
+# 1 (and leaves no temporary file) when that read fails. Otherwise the file
+# itself, as before.
+compose_live_tmp=""
+compose_compared=""
+fetch_live_compose() {
+  compose_compared="$compose_file"
+  [[ "$(id -u)" == 0 ]] || return 0
+  compose_live_tmp="$(mktemp "${TMPDIR:-/tmp}/orbit-repair-compose-live.XXXXXX")" || { compose_live_tmp=""; return 1; }
+  compose_compared="$compose_live_tmp"
+  if ! smtp_read_file "$compose_file" > "$compose_live_tmp"; then
+    rm -f -- "$compose_live_tmp"
+    compose_live_tmp=""
+    return 1
+  fi
 }
 
 # Removes the managed-file-missing finding for the Compose file; the caller
@@ -2294,7 +2316,7 @@ drop_compose_missing_finding() {
 }
 
 # Sets $compose_drift_detail to the differing lines between the folder's
-# docker-compose.yml and the image's copy in $compose_image_tmp: at most 20,
+# docker-compose.yml ($compose_compared, fetch_live_compose) and the image's copy in $compose_image_tmp: at most 20,
 # each cut to 200 bytes, '<' for the folder's file and '>' for the image's.
 # Deny by default (#1607): this text reaches a terminal or log, and an
 # operator may have put a credential inline under any name, so a keyword list
@@ -2314,7 +2336,7 @@ describe_compose_drift() {
   # an allow-listed line such as 'restart:' could otherwise carry escape
   # sequences or a carriage return to the operator's terminal. tr's octal
   # set is every C0 control except tab (\011) and newline (\012), plus DEL.
-  all="$(diff -- "$compose_file" "$compose_image_tmp" 2>/dev/null | LC_ALL=C tr -d '\000-\010\013-\037\177' |
+  all="$(diff -- "$compose_compared" "$compose_image_tmp" 2>/dev/null | LC_ALL=C tr -d '\000-\010\013-\037\177' |
     grep -E '^[<>] ' | cut -c1-200 |
     sed -E -e 's/^([<>] [[:space:]]*)#.*/\1# (comment hidden)/' -e t \
       -e '/^[<>] [[:space:]]*(image|restart|mem_limit|container_name|pull_policy|read_only|init|user|cpus|name|profiles|stop_grace_period):/ b' \
@@ -3057,8 +3079,11 @@ run_diagnosis() {
         add_finding compose-file-restorable compose-file fail
       fi
     elif [[ "$compose_status" == ok ]]; then
-      if fetch_image_compose; then
-        if ! cmp -s -- "$compose_file" "$compose_image_tmp"; then
+      # #1875 W3: the folder's file is compared through the bounded read
+      # (a copy root owns); one that can't be read is not checked, and the
+      # read says why on an "Orbit repair:" line.
+      if fetch_image_compose && fetch_live_compose; then
+        if ! cmp -s -- "$compose_compared" "$compose_image_tmp"; then
           describe_compose_drift
           add_finding compose-file-drift compose-file info
         fi
@@ -4445,7 +4470,7 @@ restore_transaction_tree_modes() {
 # was created by the transaction, so it is not a match. Symlinks on either
 # side, or a symlinked parent, never match.
 restore_transaction_originals_match_live() {
-  local staging_root="$1" path backup_path saved=0 had_backup have_live
+  local staging_root="$1" path backup_path saved=0 had_backup have_live backup_sum live_sum
   for path in "${restore_transaction_paths[@]}"; do
     backup_path="$staging_root/rollback/original/$path"
     had_backup=0
@@ -4458,7 +4483,12 @@ restore_transaction_originals_match_live() {
     [[ ! -L "$backup_path" && ! -L "$path" && ! -L "$(dirname -- "$path")" ]] || return 1
     [[ "$(stat -c %a -- "$backup_path")" == "$(stat -c %a -- "$path")" ]] || return 1
     if [[ -f "$backup_path" ]]; then
-      [[ -f "$path" ]] && cmp -s -- "$backup_path" "$path" || return 1
+      # #1875 W3: both sides through the bounded read; a failed read is
+      # never "the same".
+      [[ -f "$path" ]] || return 1
+      backup_sum="$(folder_file_checksum "$backup_path")" || return 1
+      live_sum="$(folder_file_checksum "$path")" || return 1
+      [[ "$backup_sum" == "$live_sum" ]] || return 1
     elif [[ -d "$backup_path" ]]; then
       [[ -d "$path" ]] && diff -r --no-dereference -q -- "$backup_path" "$path" >/dev/null 2>&1 || return 1
       [[ "$(restore_transaction_tree_modes "$backup_path")" == "$(restore_transaction_tree_modes "$path")" ]] || return 1
@@ -5158,6 +5188,19 @@ case "$type" in "regular file"|"regular empty file") ;; *) exit 3;; esac
 head -c "$2" <&3 || exit 1
 size="$(stat -L -c %s /dev/fd/3)" || exit 1
 ((size <= $2)) || exit 4'
+# folder_file_checksum <path> (#1875 W3): a checksum of a file in the
+# deployment folder, for root's compares. As root through smtp_read_file
+# (no link followed, regular files only, 1 MiB, time limit); otherwise read
+# by path as before. Returns non-zero when the read fails, so a caller never
+# counts an unread file as the same.
+folder_file_checksum() {
+  if [[ "$(id -u)" == 0 ]]; then
+    smtp_read_file "$1" | cksum
+  else
+    cksum < "$1"
+  fi
+}
+
 smtp_read_file() {
   local status=0 reason
   LC_ALL=C timeout -k "$owner_step_grace" "$owner_step_timeout" bash -c "$owner_read_script" owner-read "$1" "$owner_read_cap" || status=$?
@@ -6179,7 +6222,11 @@ do_update_config_step() {
   [[ -f "$staged_postgres_password_path" && ! -L "$staged_postgres_password_path" ]] || return 1
   is_real_non_symlink_directory "$secrets_directory" || return 1
   has_mode "$secrets_directory" 700 || return 1
-  mv -- "$staged_postgres_password_path" "$secrets_directory/postgres-password"
+  # #1875 W1: as root in a folder another user owns, the rename is that
+  # owner's (as_folder_owner, under the #1858 limits; the owner check ran
+  # before the rotation), with -T so a folder planted at the name is never
+  # renamed into. On failure the staged file stays for the guidance line.
+  as_folder_owner mv -T -- "$staged_postgres_password_path" "$secrets_directory/postgres-password"
 }
 
 # Step 4 of the rotation, and the reason it is not do_restart_services itself.
@@ -6766,11 +6813,18 @@ run_safe_batch() {
 # the operator.
 settle_credential_checkpoints() {
   local clean="$1" reason="${2:-}" dir
+  # #1875 W2: as root the removal is the deployment folder's owner's
+  # (as_folder_owner, under the #1858 limits); the owner globals are read
+  # here when no action read them. A refused, failed or timed-out removal
+  # keeps the folder and names it below.
+  if [[ "$(id -u)" == 0 && -z "$smtp_folder_uid" ]]; then
+    check_folder_owner || true
+  fi
   for dir in "${run_checkpoint_dirs[@]:-}"; do
     [[ -n "$dir" ]] || continue
     [[ -e "$dir" || -L "$dir" ]] || continue
     if [[ "$clean" == 1 ]] && is_real_non_symlink_directory "$dir" && is_removable_checkpoint_dir "$dir"; then
-      if rm -rf -- "$dir"; then
+      if as_folder_owner rm -rf -- "$dir"; then
         printf 'Orbit repair: the re-check is clean, so the pre-rotation credential checkpoint %s (the old database password) was removed.\n' "$dir" >&2
         continue
       fi
