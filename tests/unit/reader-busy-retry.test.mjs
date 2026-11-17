@@ -31,6 +31,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   page.unmount();
+  document.body.replaceChildren();
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
@@ -64,7 +65,8 @@ async function mountReader(plan) {
     onremove: async () => {},
   });
   await quiet();
-  return { ...mounted, asked };
+  /* use:portal moves the reader's layer to <body>, so that is where it is read. */
+  return { ...mounted, target: document.body, asked };
 }
 
 /** @param {HTMLElement} target @param {() => void} flushSync @param {string} label */
