@@ -147,7 +147,10 @@ export function prepareRepair(
 export function runRepair(targetDir, args, options = {}) {
   const { merged, decorate } = prepareRepair(targetDir, options);
   const result = failOnProcessDeadline(
-    spawnSync("bash", [join(targetDir, "scripts", "repair.sh"), ...args], {
+    // `interleave` sends stderr into stdout's pipe, so one capture keeps the order of the two (#1878 L-F6).
+    spawnSync("bash", options.interleave
+      ? ["-c", 'exec bash "$@" 2>&1', "repair", join(targetDir, "scripts", "repair.sh"), ...args]
+      : [join(targetDir, "scripts", "repair.sh"), ...args], {
       cwd: targetDir,
       encoding: "utf8",
       input: options.input,
