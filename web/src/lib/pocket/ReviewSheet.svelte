@@ -108,7 +108,10 @@
   });
   /* #1795: the flagged papers, as ReviewCard counts them: the add button says the file is left out. */
   const flaggedIds = $derived(papers.flatMap((paper, i) => (paper.flagged ? [`${uid}-flag-${i}`] : [])));
-  const without = $derived(flaggedIds.length > 1 ? "add without them" : "add without it");
+  /* The blocks are drawn only with the form (below: entry && checked && !pending), so the label and the tie follow that. */
+  const formDrawn = $derived(Boolean(entry && checked && !pending));
+  const shownFlags = $derived(formDrawn ? flaggedIds : []);
+  const without = $derived(shownFlags.length > 1 ? "add without them" : "add without it");
   const household = $derived(households.find((one) => one.id === entry?.householdId) ?? null);
   const dirty = () => Boolean(entry && start && entryChanged(entry, start));
 
@@ -167,11 +170,11 @@
     </form>
   {/if}
   {#snippet foot()}
-    {@const describers = [...(!pending && checked ? flaggedIds : []), ...(!pending && refusal ? [`${uid}-refusal`] : [])].join(" ") || undefined}
+    {@const describers = [...shownFlags, ...(!pending && refusal ? [`${uid}-refusal`] : [])].join(" ") || undefined}
     {@const held = busy || !checked || (!pending && refusal !== null)}
     <button type="submit" form="{uid}-form" class="p-pill filled rv-go" aria-disabled={held ? "true" : undefined}
             aria-describedby={describers}>
-      {busy ? "adding…" : flaggedIds.length ? without : "add to orbit"}
+      {busy ? "adding…" : shownFlags.length ? without : "add to orbit"}
     </button>
   {/snippet}
 </Sheet>

@@ -18,7 +18,7 @@
    *   - `review & amend →` puts the drawer's own rows into editing
    *     (EditRows.svelte, the item drawer's grammar: the labels stay, only
    *     the value is live, the choosers stand beside), the proposal standing
-   *     in for the item it would become; `add to orbit` and `cancel` take
+   *     in for the item it would become; the amend button (`add to orbit`, or `add without it` when a file was flagged) and `cancel` take
    *     the decisions' place, and the title edits in the row's head;
    *   - a locked proposal (#941) cannot be amended, only dismissed.
    *
@@ -119,7 +119,7 @@
     <p class="unread">{unreadable}</p>
   {/if}
   {#if decidable && amending}
-    <!-- #1319: while the rows are amended, `add to orbit` and `cancel` take
+    <!-- #1319: while the rows are amended, the amend button (`add to orbit`, or `add without it` when a file was flagged) and `cancel` take
          the decisions' place, as save and cancel take the pills' in a filed
          item's drawer. -->
     <div class="actions" role="group" aria-label="Amending {row.title}">

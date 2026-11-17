@@ -58,7 +58,7 @@
  * the drawer opens any item, and offers what fits its state).
  *
  * `onamend` and `onaccept` are a suggestion's (SuggestionView.svelte, #1319):
- * `review & amend →` puts its rows into editing, and `add to orbit` approves
+ * `review & amend →` puts its rows into editing, and the amend button (`add to orbit`, or `add without it` when a file is flagged) approves
  * what they hold.
  *
  * @typedef {"snooze" | "complete" | "attach" | "retire" | "restore"} FootKind
@@ -163,7 +163,7 @@ export function createDrawerActs({
      owner-decisions §34; on the phone too (owner, 2026-10-08). `review &
      amend →` puts the suggestion's rows into editing (EditRows), the relay's
      proposal standing in for the item it would become (proposedItemOf); the
-     choosers are a filed item's. `add to orbit` sends the rows as the
+     choosers are a filed item's. The amend button (`add to orbit`, or `add without it` when a file is flagged) sends the rows as the
      amended item on the two-tap decision's own operation id (`amend`), into
      the section the rows chose; `cancel` puts the readings back. */
   /* #1316: the latest review & amend press still waiting on the reminder

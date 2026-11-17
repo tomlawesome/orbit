@@ -144,18 +144,19 @@ describe("phone sheet: the add button says the flagged file is left out (#1795)"
   afterEach(() => { loader.unmount(); vi.unstubAllGlobals(); });
 
   const json = (/** @type {unknown} */ body, status = 200) => new Response(JSON.stringify(body), { status });
-  /** @param {any[]} papers */
-  async function openSheet(papers) {
+  /** @param {any[]} papers @param {{ hang?: boolean, approval?: any, open?: boolean }} [o] */
+  async function openSheet(papers, o = {}) {
     vi.stubGlobal("matchMedia", matchMedia);
     vi.stubGlobal("fetch", vi.fn(async (/** @type {string} */ url) => {
       const href = String(url);
       if (href.includes("/api/auth/session")) return json({ user: { id: "u1" }, csrfToken: "t1" });
+      if (href.includes("/api/imap-inbox/r-1") && o.hang) return new Promise(() => {});
       if (href.includes("/api/imap-inbox/r-1")) return json({ receipt: { id: "r-1", draftVersion: 2, proposal: { title: "Boiler cover" } }, sections: households[0].sections, attachments: [] });
       if (href.includes("/api/settings/reminders")) return json({ reminders: { emailEnabled: true, firstWarningDays: 14, finalWarningDays: 3, firstWarning: "", finalWarning: "", outboundMail: "configured" } });
       return json({ error: { code: "unavailable", message: "not today" } }, 503);
     }));
     await loader.mount("lib/pocket/ReviewSheet.svelte", {
-      open: true, title: "Boiler cover", proposal: { title: "Boiler cover" }, householdId: "hh-1", households,
+      open: o.open ?? true, approval: o.approval ?? null, title: "Boiler cover", proposal: { title: "Boiler cover" }, householdId: "hh-1", households,
       receiptId: "r-1", papers, readings: [], onsave: async () => true,
     });
     await settle(12);
@@ -180,6 +181,28 @@ describe("phone sheet: the add button says the flagged file is left out (#1795)"
     await openSheet([BAD]);
     expect(document.querySelector(".pc-flag"), "the block is drawn").not.toBeNull();
     expect(document.querySelector('.pc-flag [role="alert"], .pc-flag[role="alert"]')).toBeNull();
+  });
+
+  /* The label and the describedby follow the blocks: only while the form (and so its flag blocks) is drawn. */
+  it("while the sheet still checks for an earlier approval the form is not drawn, so the button keeps `add to orbit` and points at nothing", async () => {
+    await openSheet([CLEAN, BAD], { hang: true });
+    expect(document.querySelector(".pc-flag"), "no block yet").toBeNull();
+    expect(words(go())).toBe("add to orbit");
+    expect(go().hasAttribute("aria-describedby")).toBe(false);
+  });
+
+  it("with an earlier approval pending the form is not drawn: `add to orbit`, no describedby", async () => {
+    await openSheet([CLEAN, BAD], { approval: { operationId: "op-1", request: {} } });
+    expect(document.querySelector(".pc-flag")).toBeNull();
+    expect(words(go())).toBe("add to orbit");
+    expect(go().hasAttribute("aria-describedby")).toBe(false);
+  });
+
+  it("closed (no entry yet): `add to orbit`, no describedby", async () => {
+    await openSheet([CLEAN, BAD], { open: false });
+    expect(document.querySelector(".pc-flag")).toBeNull();
+    expect(words(go())).toBe("add to orbit");
+    expect(go().hasAttribute("aria-describedby")).toBe(false);
   });
 
   it("not flagged: the button still reads `add to orbit` and points at no flag", async () => {

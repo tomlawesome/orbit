@@ -874,7 +874,7 @@
      superseding §27's belt card). `review & amend →` puts the suggestion's
      drawer into the rows' own editing (EditRows.svelte), the relay's
      proposal standing in for the item it would become (proposedItemOf); the
-     choosers stand beside it as a filed item's do. `add to orbit` sends the
+     choosers stand beside it as a filed item's do. The amend button (`add to orbit`, or `add without it` when a file is flagged) sends the
      rows as the amended item on the two-tap decision's own operation id
      (amendReceipt), into the section the rows chose. */
   /* drawer-acts.svelte.js holds the amend itself (startAmend, the rows'

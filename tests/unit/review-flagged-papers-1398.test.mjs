@@ -49,6 +49,7 @@ describe("a flagged attachment is not offered (#1398 review findings)", () => {
     const rows = suggestionPapersOf(/** @type {any} */ (mail([pdf("a-ok", "clean"), pdf("a-bad", "flagged")])));
     expect(rows.map((row) => row.name)).toEqual(["a-ok.pdf", "a-bad.pdf"]);
     expect(rows[0].meta).toBe("attached on acceptance");
+    expect(rows[1].meta, "the flagged row keeps the drawer's meta word").toBe("attached on acceptance");
     expect(rows[1]).toMatchObject({ flagged: true, previewHref: "" });
   });
 

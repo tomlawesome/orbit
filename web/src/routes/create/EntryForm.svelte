@@ -671,13 +671,13 @@
   .pc-bead{display:inline-block;width:10px;height:10px;border-radius:50%;flex:none;background:var(--warm);
     box-shadow:inset -2px 2px 0 rgba(255,255,255,.28)}
   /* #1795: the card's .rv-dup.flag, in the form */
-  /* :global so the block keeps the bare class name `pc-flag` (the sheet and tests name it) */
-  :global(.pc-flag){display:grid;grid-template-columns:10px 1fr;gap:4px 10px;align-items:start;margin:4px 0 8px;padding:12px;
+  /* :global under .pc-form so the block keeps the bare class name `pc-flag` (the sheet and tests name it) */
+  .pc-form :global(.pc-flag){display:grid;grid-template-columns:10px 1fr;gap:4px 10px;align-items:start;margin:4px 0 8px;padding:12px;
     border:1px solid var(--line-soft);border-radius:12px}
-  :global(.pc-flag .pc-bead){display:inline-block;width:10px;height:10px;border-radius:50%;margin-top:6px;background:var(--overdue)}
-  :global(.pc-flag p){margin:0;font:var(--p-type-meta)/1.5 var(--ui);color:var(--ink-mid)}
-  :global(.pc-flag p + p){grid-column:2}
-  :global(.pc-flag p b){color:var(--ink);font-weight:500}
+  .pc-form :global(.pc-flag .pc-bead){display:inline-block;width:10px;height:10px;border-radius:50%;margin-top:6px;background:var(--overdue)}
+  .pc-form :global(.pc-flag p){margin:0;font:var(--p-type-meta)/1.5 var(--ui);color:var(--ink-mid)}
+  .pc-form :global(.pc-flag p + p){grid-column:2}
+  .pc-form :global(.pc-flag p b){color:var(--ink);font-weight:500}
   .pc-dup{display:flex;flex-direction:column;align-items:center;text-align:center;margin-top:16px}
   .pc-dup-line{display:flex;align-items:center;gap:9px;margin:0;font:600 var(--p-type-body)/1.35 var(--display);letter-spacing:.01em;color:var(--ink)}
   .pc-dup-why{margin:8px 0 0;font:var(--p-type-meta)/1.5 var(--ui);color:var(--ink-mid);text-wrap:pretty}
