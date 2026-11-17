@@ -3113,6 +3113,31 @@ smtp_overlay_listed() {
   grep -qE '^COMPOSE_FILE=.*docker-compose\.mail\.yml' "$environment_file" 2>/dev/null
 }
 
+# ensure_smtp_secret_placeholder (#1789 D-S3)
+#
+# The retired mail overlay still declares .orbit-secrets/smtp-password as a
+# Compose secret file, so while COMPOSE_FILE lists it Compose refuses to
+# start without that file. Dropping the secret from the overlay would lose
+# the password on Orbit's one-time import, so instead a missing file is made
+# again, empty, mode 0600 and owned like its folder (Orbit reads an empty
+# password as unusable, as it did a missing one). An existing file, or
+# anything at the path, is never touched: the create is exclusive.
+ensure_smtp_secret_placeholder() {
+  local secrets_folder="${smtp_secret_file%/*}"
+  smtp_overlay_listed || return 0
+  [[ ! -e "$smtp_secret_file" && ! -L "$smtp_secret_file" ]] || return 0
+  [[ -d "$secrets_folder" && ! -L "$secrets_folder" ]] || return 0
+  if ! ( set -C; umask 077; : > "$smtp_secret_file" ) 2>/dev/null; then
+    [[ -e "$smtp_secret_file" || -L "$smtp_secret_file" ]] ||
+      printf 'Orbit installer: %s is missing and could not be made again (empty); Compose may refuse to start while COMPOSE_FILE lists docker-compose.mail.yml.\n' "$smtp_secret_file" >&2 || true
+    return 0
+  fi
+  chmod 600 -- "$smtp_secret_file" 2>/dev/null || true
+  if ((EUID == 0)); then
+    chown --reference="$secrets_folder" -- "$smtp_secret_file" 2>/dev/null || true
+  fi
+}
+
 # What an update retires. The overlay file alone does not count: it is a
 # deployment asset this update has just laid again, and with nothing naming it
 # it is inert, so a retired deployment's next update changes nothing.
@@ -3548,6 +3573,7 @@ export ORBIT_IMAGE="$resolved_reference"
 installer_ui_phase=compose
 installer_ui_component=compose
 stop_point
+ensure_smtp_secret_placeholder
 if ! compose config --quiet >/dev/null 2>&1; then
   fail_with failure retry "Docker Compose configuration is invalid; review the named configuration fields and rerun."
 fi
