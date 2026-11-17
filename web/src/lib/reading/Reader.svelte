@@ -121,7 +121,10 @@
   const count = $derived(picture ? picture.count : (pageCount ?? (typeof doc.pageCount === "number" ? doc.pageCount : null)));
   const lost = $derived((picture ? picture.failed : ownLost) || (brokenSrc !== "" && brokenSrc === shownSrc));
   const turn = $derived(pageTurn(pageNo, count));
-  const UNDRAWN = "this page could not be drawn";
+  const UNDRAWN = "this page could not be drawn — try again";
+  const BUSY = "busy — trying this page again";
+  /* #1446: the server said busy for the page asked for; it is asked once more. */
+  let busy = $state(false);
 
   /** @param {number} next */
   function turnTo(next) {
@@ -159,21 +162,38 @@
     if (!open || !source || picture) return;
     const wanted = pageNo;
     const controller = new AbortController();
-    loadStagedPage(previewPageHref(source, wanted), controller.signal).then((result) => {
-      if (controller.signal.aborted) {
-        if (result.kind === "page") URL.revokeObjectURL(result.url);
-        return;
-      }
-      if (result.kind !== "page") { ownLost = true; return; }
-      showPage(result.url);
-      ownLost = false;
-      shownPage = wanted;
-      if (result.pageCount !== null) pageCount = result.pageCount;
-    }).catch((error) => {
-      if (error instanceof DOMException && error.name === "AbortError") return;
-      ownLost = true;
-    });
-    return () => controller.abort();
+    /** @type {ReturnType<typeof setTimeout> | undefined} */
+    let timer;
+    /** @param {boolean} again */
+    function ask(again) {
+      loadStagedPage(previewPageHref(source, wanted), controller.signal).then((result) => {
+        if (controller.signal.aborted) {
+          if (result.kind === "page") URL.revokeObjectURL(result.url);
+          return;
+        }
+        if (result.kind === "busy" && !again) {
+          /* The page on show stays; one quiet retry after Retry-After. */
+          busy = true;
+          timer = setTimeout(() => { busy = false; ask(true); }, result.retryAfterSeconds * 1000);
+          return;
+        }
+        if (result.kind !== "page") { busy = false; ownLost = true; return; }
+        showPage(result.url);
+        ownLost = false;
+        shownPage = wanted;
+        if (result.pageCount !== null) pageCount = result.pageCount;
+      }).catch((error) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        busy = false;
+        ownLost = true;
+      });
+    }
+    ask(false);
+    return () => {
+      controller.abort();
+      clearTimeout(timer);
+      busy = false;
+    };
   });
 
   const fitScale = $derived(
@@ -347,6 +367,9 @@
                brokenSrc = shownSrc;
              }} />
         {/if}
+        {#if busy && !lost}
+          <p class="rd-busy" role="alert">{BUSY}</p>
+        {/if}
       </div>
       <!-- #1300: either side of the page, only where there is a page that way. -->
       {#if turn.back}
@@ -404,6 +427,7 @@
     box-shadow:0 18px 44px rgba(0,0,0,.45)}
   .rd-stage.zoomed img{max-width:none;max-height:none}
   .rd-lost{margin:0;text-align:center}
+  .rd-busy{margin:0;text-align:center;opacity:.7}
   /* round-6's round glass arrows: 44px at the page's edges on a phone, 48px
      and further in on the desk. */
   .rd-arrow{position:absolute;top:50%;transform:translateY(-50%);z-index:1;width:44px;height:44px;

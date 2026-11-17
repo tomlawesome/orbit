@@ -101,7 +101,7 @@ export async function readDocumentPagePreview(
     const draw = await drawDocumentPage(plaintext, record.mediaType, page, "view", { pageCount: storedCount === undefined });
     // Orbit's own side could not draw (a full quarantine, no renderer): a
     // 503 to retry, and nothing remembered about the page (D20).
-    if (draw.outcome === "busy") throw previewBusyError();
+    if (draw.outcome === "busy") throw previewBusyError(draw.retryAfterSeconds);
     if (draw.outcome === "page_not_found") {
       if (storedCount === undefined) await fillPageCount(documentId, draw.pageCount);
       throw documentPreviewPageNotFound();
