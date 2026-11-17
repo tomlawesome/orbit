@@ -10,8 +10,9 @@ import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./suppo
 /* #1605 P-1, ruled 2026-11-17: the retention purge claimed 25 expired
    documents a cycle (one cycle a minute), so a large deletion queued behind
    itself for hours. Each cycle now drains the whole backlog in batches of 25
-   until it is empty. A purge that fails is still tried once a cycle, not
-   again and again in the same one (its five attempts are its back-off). */
+   until it is empty, paging by job id. In a storage outage three failed
+   purges in a row end the cycle (a circuit breaker; a success resets the
+   count), so the outage costs three attempts a cycle rather than one per job. */
 
 vi.mock("@/server/documents/scanner", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/server/documents/scanner")>(),
@@ -26,8 +27,8 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-/** Seeds `count` documents `expiredMs` past their retention, each with its purge job. */
-async function seedExpiredPurges(label: string, count: number, expiredMs = 60_000): Promise<string[]> {
+/** Seeds `count` documents past their retention, each with its purge job. */
+async function seedExpiredPurges(label: string, count: number): Promise<string[]> {
   const fixture = await createIntegrationFixture(label);
   const db = getDb();
   const ids: string[] = [];
@@ -43,7 +44,7 @@ async function seedExpiredPurges(label: string, count: number, expiredMs = 60_00
       sizeBytes: 10,
       lifecycle: "pending_deletion",
       scanStatus: "clean",
-      deleteAfter: new Date(Date.now() - expiredMs),
+      deleteAfter: new Date(Date.now() - 60_000),
     }).returning({ version: documents.version });
     await db.insert(documentCrypto).values({
       documentId: id,
@@ -75,17 +76,44 @@ describe("the retention purge drains its backlog each cycle (#1605 P-1)", () => 
     expect(rows.filter((row) => row.lifecycle !== "deleted")).toEqual([]);
   });
 
-  it("tries each failing purge once in the cycle, all of them, and none twice", async () => {
+  it("in a storage outage spends three attempts a cycle, not one per job, and holds no other claim", async () => {
     vi.spyOn(LocalDocumentStorage.prototype, "deleteCiphertext").mockRejectedValue(new Error("storage outage"));
     vi.spyOn(LocalDocumentStorage.prototype, "deletePreviewCiphertext").mockResolvedValue(undefined);
-    // Older than anything else here, so the claim (oldest first) reaches these first.
-    const ids = await seedExpiredPurges("p1-drain-failing", 30, 86_400_000);
+    const ids = await seedExpiredPurges("p1-drain-outage", 30);
+
+    await runDocumentMaintenanceCycle();
+
+    const jobs = await getDb().select({ status: documentJobs.status, attempts: documentJobs.attempts, leaseToken: documentJobs.leaseToken })
+      .from(documentJobs).where(and(inArray(documentJobs.documentId, ids), eq(documentJobs.kind, "purge")));
+    expect(jobs).toHaveLength(30);
+    // Three failures in a row stop the cycle (a circuit breaker): three purges tried and failed ...
+    const tried = jobs.filter((job) => job.attempts > 0);
+    expect(tried).toHaveLength(3);
+    expect(tried.every((job) => job.status === "retry" && job.attempts === 1 && job.leaseToken === null)).toBe(true);
+    // ... and every other one is as it was: unclaimed, its attempts untouched.
+    expect(jobs.filter((job) => job.attempts === 0 && job.status === "pending" && job.leaseToken === null)).toHaveLength(27);
+  });
+
+
+  it("a success between failures resets the count, so two failures at a time never stop the cycle", async () => {
+    const ids = await seedExpiredPurges("p1-drain-reset", 12);
+    // In the drain's order (job id), every third purge succeeds: fail, fail, succeed, ...
+    const ordered = await getDb().select({ storageKey: documentCrypto.storageKey })
+      .from(documentJobs)
+      .innerJoin(documentCrypto, eq(documentCrypto.documentId, documentJobs.documentId))
+      .where(and(inArray(documentJobs.documentId, ids), eq(documentJobs.kind, "purge")))
+      .orderBy(documentJobs.id);
+    const failing = new Set(ordered.filter((_, index) => index % 3 !== 2).map((row) => row.storageKey));
+    vi.spyOn(LocalDocumentStorage.prototype, "deleteCiphertext").mockImplementation(async (storageKey: string) => {
+      if (failing.has(storageKey)) throw new Error("storage hiccup");
+    });
+    vi.spyOn(LocalDocumentStorage.prototype, "deletePreviewCiphertext").mockResolvedValue(undefined);
 
     await runDocumentMaintenanceCycle();
 
     const jobs = await getDb().select({ status: documentJobs.status, attempts: documentJobs.attempts })
       .from(documentJobs).where(and(inArray(documentJobs.documentId, ids), eq(documentJobs.kind, "purge")));
-    expect(jobs).toHaveLength(30);
-    expect(jobs.filter((job) => job.status !== "retry" || job.attempts !== 1)).toEqual([]);
+    expect(jobs.filter((job) => job.attempts === 0)).toEqual([]);
+    expect(jobs.filter((job) => job.status === "completed")).toHaveLength(4);
   });
 });
