@@ -109,10 +109,12 @@ v0.3.0 (owner decision, 2026-10-04, #1213). Those three tags are retracted
 mislabelled alphas. They cannot be removed from the GitHub mirror or the
 registries, so they stay visible as audit evidence (ADR-0003), but nothing
 is ever built on them: the version calculation ignores them and the
-operator tooling refuses them. The supported-install floor is v0.3.0, and
-backward compatibility is required from v0.3.0 onward. The major-0
-development exemption in `repair.sh` is withdrawn, because releases are
-now numbered 0.x and a major-0 version is no longer a sign of a
-development build. The retracted list lives in one place,
+release-readiness check reads the same list. The supported-install floor is
+v0.3.0, and backward compatibility is required from v0.3.0 onward. The
+major-0 development exemption is withdrawn, because releases are now
+numbered 0.x and a major-0 version is no longer a sign of a development
+build; `install.sh` and `repair.sh` carry no floor or retracted-tag check of
+their own, so the floor is a support commitment, not a refusal in the
+operator tooling. The retracted list lives in one place,
 `scripts/retracted-tags.json`; this follows the standard "retract a
 published version" pattern, as Go modules do it.

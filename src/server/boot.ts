@@ -685,8 +685,8 @@ export async function registerNode(): Promise<void> {
 
   /* The last act of start-up (ADR-0022 §1). On an unclaimed instance this
      prints the claim notice, after the start-up reports above, so it lands
-     last in `docker logs orbit-app` until the first request arrives and the
-     operator can find it by reading the logs. On a claimed instance it generates nothing and
+     after them in `docker logs orbit-app`; later lines (a scanner retry, say)
+     can follow it, so the operator looks for the claim link in the log. On a claimed instance it generates nothing and
      prints nothing. It throws only when no code can be produced at all, which
      is a start-up fault like any other: an instance that is up and unclaimed
      always has a live code (ADR-0022 §3). */
