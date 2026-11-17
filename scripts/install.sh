@@ -3590,11 +3590,20 @@ prune_old_undo_copies || true
 
 # Installed and ready: nothing after this is a reason to undo it.
 rollback_armed=0
+emit_completion_event() {
+  installer_ui_phase=complete
+  installer_ui_component=installer
+  installer_ui_event complete installer completed deployment-ready complete
+}
 # Installed: a closed stdout only loses the screen, not the result. The
-# screen comes before the model download (O-R2); the run still ends with
-# the complete event (docs/engine-events.md).
-print_completion_screen || true
-run_deferred_model_pull
-installer_ui_phase=complete
-installer_ui_component=installer
-installer_ui_event complete installer completed deployment-ready complete
+# screen comes before a model download (O-R2), and the run still ends with
+# the complete event (docs/engine-events.md): after the download when there
+# is one, else before the screen as always.
+if [[ "$model_pull_deferred" == 1 ]]; then
+  print_completion_screen || true
+  run_deferred_model_pull
+  emit_completion_event
+else
+  emit_completion_event
+  print_completion_screen || true
+fi
