@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -1213,3 +1213,30 @@ describe("scripts/ci/promote-stable.sh update-path cross-check (#1667)", () => {
   });
 });
 
+
+describe("scripts/ci/promote-stable.sh tells an unreachable registry from a missing tag (group 6 D-S1)", () => {
+  it("says GHCR is unreachable when inspect fails for a network reason", () => {
+    const dir = mkdtempSync(join(tmpdir(), "promote-stable-unreachable-"));
+    const bashEnv = join(dir, "bash-env.sh");
+    writeFileSync(
+      bashEnv,
+      [
+        "docker() {",
+        '  if [ "$1" = buildx ] && [ "$2" = imagetools ] && [ "$3" = inspect ]; then',
+        '    echo "ERROR: failed to do request: Head \"https://ghcr.io/v2/x/manifests/y\": dial tcp: lookup ghcr.io: no such host" >&2',
+        "    return 1",
+        "  fi",
+        '  command docker "$@"',
+        "}",
+        "",
+      ].join("\n"),
+    );
+    try {
+      const { result } = run({ env: { BASH_ENV: bashEnv } });
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toMatch(/unreachable/iu);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

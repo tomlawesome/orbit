@@ -563,3 +563,11 @@ describe("command line (#1510)", () => {
     expect(run(root).status).toBe(0);
   });
 });
+
+describe("an unknown registry finding names where to record an exception (group 6 L-S3)", () => {
+  it("the reason names .github/image-cache-exceptions.json", () => {
+    const findings = ci("job:\n  image: lscr.io/x/y:1\n");
+    expect(findings).toHaveLength(1);
+    expect(findings[0].reason).toContain(".github/image-cache-exceptions.json");
+  });
+});

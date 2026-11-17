@@ -764,3 +764,21 @@ describe("helpers", () => {
     expect((await run(["frobnicate"], {})).code).toBe(2);
   });
 });
+
+// Group 6 ci-nightly-1: `moved` only needs the newest counted nightly, so it
+// stops reading jobs and traces at the first one.
+describe("moved reads no further than the newest counted nightly (group 6)", () => {
+  it("lists the jobs of the first counted pipeline only", async () => {
+    const api = await start({
+      pipelines: [
+        { id: 90, sha: SHA, status: "success" },
+        { id: 80, sha: OTHER_SHA, status: "success" },
+        { id: 70, sha: OTHER_SHA, status: "success" },
+      ],
+    });
+    expect((await run(["moved"], base(api))).out).toBe("idle");
+    const jobLists = seen.requests.filter((request) => /\/pipelines\/\d+\/jobs/u.test(request));
+    expect(jobLists).toHaveLength(1);
+    expect(jobLists[0]).toContain("/pipelines/90/jobs");
+  });
+});

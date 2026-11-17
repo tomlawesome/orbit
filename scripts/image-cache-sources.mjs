@@ -154,7 +154,7 @@ function hostFindings(lines) {
       found.push({
         line: index + 1,
         reference: trimTrailingPunctuation(match[0]),
-        reason: `pulled from ${known ?? host} directly, not through the image cache${hint}`,
+        reason: `pulled from ${known ?? host} directly, not through the image cache${hint}${known ? "" : "; to allow it, record it in .github/image-cache-exceptions.json"}`,
       });
     }
     for (const match of line.matchAll(DEPENDENCY_PROXY_PATTERN)) {

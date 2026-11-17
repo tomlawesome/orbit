@@ -239,7 +239,35 @@ jobs:
             printf '%s:%s resolved to %s after the copy, expected %s.\n' "${image}" "${tag}" "${published}" "${DIGEST}" >&2
             exit 1
           }
+          # Each SBOM referrer is verified by the committed key first, as the
+          # image's signed evidence is (#1848 D-S2): the annotation alone is
+          # not trusted. The validation ones were proven by the verifier above.
+          bundles="${RUNNER_TEMP}/referrer-bundles"
+          mkdir -p "${bundles}"
+          to_copy=()
           for referrer in ${referrers}; do
+            manifest="$(crane manifest "${THROWAWAY_IMAGE}@${referrer}")"
+            kind="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).annotations?.["dev.sigstore.bundle.predicateType"] ?? "")' "${manifest}")"
+            if [[ "${kind}" != "https://spdx.dev/Document"* ]]; then
+              # A validation referrer: the verifier above proved this digest's
+              # validation attestation under the committed key.
+              to_copy+=("${referrer}")
+              continue
+            fi
+            layer="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).layers?.[0]?.digest ?? "")' "${manifest}")"
+            [[ "${layer}" =~ ${ORBIT_DIGEST_PATTERN} ]] || {
+              printf 'The SBOM attestation %s has no readable bundle layer.\n' "${referrer}" >&2
+              exit 1
+            }
+            crane blob "${THROWAWAY_IMAGE}@${layer}" > "${bundles}/${layer#sha256:}.json"
+            node scripts/ci/verify-sbom-referrer.mjs "${bundles}/${layer#sha256:}.json" cosign.pub "${DIGEST}" || {
+              printf 'The SBOM attestation %s is not verified by the committed key; not copying it.\n' "${referrer}" >&2
+              exit 1
+            }
+            to_copy+=("${referrer}")
+          done
+          # Only referrers proven above are copied.
+          for referrer in "${to_copy[@]}"; do
             crane copy "${THROWAWAY_IMAGE}@${referrer}" "${image}@${referrer}"
           done
           printf 'image=%s\n' "${image}" >> "${GITHUB_OUTPUT}"

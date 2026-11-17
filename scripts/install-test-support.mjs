@@ -12,10 +12,11 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
-  mkdtempSync,
+  mkdtempSync as makeTempDir,
   readFileSync,
   readdirSync,
   readlinkSync,
+  rmSync,
   statSync,
   watch,
   writeFileSync,
@@ -58,6 +59,18 @@ export const repository = "example/orbit-fixture";
 export const registry = "fake-registry.example";
 export const imageRepository = `${registry}/${repository}`;
 export const digest = "a".repeat(64);
+// Every folder this module makes is removed when the process exits (group 6
+// L-S1); before, each run left more orbit-install-* folders behind.
+const madeFolders = [];
+process.on("exit", () => {
+  for (const folder of madeFolders) rmSync(folder, { recursive: true, force: true });
+});
+function mkdtempSync(prefix) {
+  const folder = makeTempDir(prefix);
+  madeFolders.push(folder);
+  return folder;
+}
+
 export const revision = "b".repeat(40);
 export const resolvedReference = `${imageRepository}@sha256:${digest}`;
 export const preflightSuccessLine =

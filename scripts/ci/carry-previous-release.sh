@@ -298,12 +298,14 @@ fi
 # The token goes to curl through a header file made outside the working
 # directory, readable only by us, and removed on exit (trap above).
 umask 077
-header_file="$(mktemp "${TMPDIR:-/tmp}/carry-previous-header.XXXXXX")"
-printf 'JOB-TOKEN: %s\n' "$CI_JOB_TOKEN" > "$header_file"
+header_file="$(mktemp "${TMPDIR:-/tmp}/carry-previous-header.XXXXXX")" ||
+  fail "cannot make the token header file under ${TMPDIR:-/tmp}"
+printf 'JOB-TOKEN: %s\n' "$CI_JOB_TOKEN" > "$header_file" ||
+  fail "cannot write the token header file ${header_file}"
 
-mkdir -p .orbit-supply-chain
-rm -rf -- "$stage"
-mkdir -p -- "$stage/predecessor" "$stage/carried"
+mkdir -p .orbit-supply-chain || fail "cannot make the .orbit-supply-chain folder"
+rm -rf -- "$stage" || fail "cannot clear the staging folder ${stage}"
+mkdir -p -- "$stage/predecessor" "$stage/carried" || fail "cannot make the staging folders under ${stage}"
 stage_abs="$(pwd -P)/$stage"
 
 ref="$(jq -rn --arg ref "$CI_COMMIT_REF_NAME" '$ref | @uri')"
