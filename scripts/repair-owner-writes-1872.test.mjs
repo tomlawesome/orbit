@@ -396,7 +396,13 @@ describe("#1872 V7: each owner step is time- and size-bounded; a failure release
     expect(named, `no 'Orbit repair:' line gives the reason ${reason}:\n${result.stderr.slice(0, 1500)}`).not.toEqual([]);
     expect(named.every((line) => line.length < 5000), "a line over the 4096-byte cap").toBe(true);
     expect(result.stderr.length, "the child's words were not capped").toBeLessThan(40_000);
-    expect(leftovers(folder.targetDir), "a temp file or folder was left behind").toEqual([]);
+    // After a failed rotate step the checkpoint of the old credential is kept on purpose (#1834); the owner made it.
+    const kept = name === "rotate-credential" ? readdirSync(folder.targetDir).filter((entry) => entry.startsWith(".orbit-repair-checkpoint.")) : [];
+    for (const entry of kept) {
+      expect(statSync(join(folder.targetDir, entry)).uid, "the kept checkpoint is not the owner's").toBe(UID);
+      expect(modeOf(join(folder.targetDir, entry)), "the kept checkpoint is not mode 700").toBe("700");
+    }
+    expect(leftovers(folder.targetDir).filter((entry) => !kept.includes(entry)), "a temp file or folder was left behind").toEqual([]);
     expect(rootWrites(shims)).toEqual([]);
     expect(lockFree(folder.targetDir), "the backup/restore lock is still held").toBe(true);
   }
