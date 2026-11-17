@@ -45,7 +45,7 @@ function archiveFile(name, { changed }) {
 
 const CARDS = [
   { name: "DeskArchive", path: "routes/household/[id]/DeskArchive.svelte", pass: "#arch-pp-in", restWords: "bring in an archive" },
-  { name: "PocketArchive", path: "routes/household/[id]/PocketArchive.svelte", pass: "#hh-pass-in", restWords: "bring in an archive" },
+  { name: "PocketArchive", path: "routes/household/[id]/PocketArchive.svelte", pass: "#hh-pass-in", restWords: "choose a file" },
 ];
 
 describe.each(CARDS)("$name: a chosen file that changed since it was chosen", ({ path, pass, restWords }) => {
