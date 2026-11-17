@@ -213,6 +213,42 @@ describe("#1873 X2: the compose restore never lands inside a directory", () => {
   });
 });
 
+describe("#1873 X2: a rename that timed out but landed is done", () => {
+  const compose = ACTIONS["restore-compose-file"];
+
+  it("the owner's mv renames and then stalls past the limit: the restore is not reported failed and the file holds the restored content", () => {
+    const { targetDir, state, fakeBin } = compose.make();
+    const shims = privShims(targetDir, { variant: { kind: "run-then-stop", match: "*mv*-nT*" } });
+    try {
+      const result = runOwner(targetDir, { shims, state, fakeBin, env: LIMIT, capSeconds: 40 });
+      expect(shims.setprivCalls().some((line) => /mv\s+-nT/u.test(line)), `the owner's mv was never run:\n${shims.setprivCalls().join("\n")}`).toBe(true);
+      expect(result.hung, result.stderr.slice(0, 600)).toBe(false);
+      expect(result.stdout, `the landed restore was reported failed:\n${result.stderr.slice(0, 1500)}`).not.toContain(REAL_FAILED(compose));
+      expect(result.stdout, result.stderr.slice(0, 1500)).toContain(compose.done);
+      expect(readFileSync(join(targetDir, "docker-compose.yml")).equals(IMAGE_COMPOSE)).toBe(true);
+      expect(leftovers(targetDir)).toEqual([]);
+    } finally {
+      shims.cleanup();
+    }
+  });
+
+  it("pin: the rename timed out and the target was not replaced: still reported failed, nothing left", () => {
+    const { targetDir, state, fakeBin } = compose.make();
+    const shims = privShims(targetDir, { variant: { kind: "stop", match: "*mv*-nT*" } });
+    try {
+      const result = runOwner(targetDir, { shims, state, fakeBin, env: LIMIT, capSeconds: 40 });
+      expect(shims.setprivCalls().some((line) => /mv\s+-nT/u.test(line)), "the owner's mv was never run").toBe(true);
+      expect(result.hung, result.stderr.slice(0, 600)).toBe(false);
+      expect(result.stdout).not.toContain(compose.done);
+      expect(result.stdout).toContain(REAL_FAILED(compose));
+      expect(existsSync(join(targetDir, "docker-compose.yml"))).toBe(false);
+      expect(leftovers(targetDir)).toEqual([]);
+    } finally {
+      shims.cleanup();
+    }
+  });
+});
+
 describe("#1873 X3: opening the backup/restore lock never blocks and never follows a swapped link", () => {
   const start = ACTIONS["start-services"];
   const lockPathOf = (targetDir) => join(targetDir, ...LOCK);
@@ -311,6 +347,46 @@ trap __orbit_lock_swap DEBUG
         expect(orbitLines(result).some((line) => /the lock at .*can't be read/u.test(line)), result.stderr.slice(0, 1500)).toBe(true);
       } finally {
         release(lockPathOf(targetDir));
+      }
+    });
+  }
+
+  for (const [who, shimOptions] of [
+    ["root", {}],
+    ["not root", { root: false, setpriv: false }],
+  ]) {
+    it(`${who}: a lock that -w says is writable but will not open read-write is refused, and the line says it could not be opened for writing`, () => {
+      const { targetDir, state } = start.make();
+      mkdirSync(join(targetDir, LOCK[0]), { mode: 0o700 });
+      writeFileSync(lockPathOf(targetDir), "", { mode: 0o600 });
+      const hook = scratchDir("orbit-lows-hook-");
+      const flag = join(hook, "denied");
+      // Just before repair's read-write open (after its -w test), take every permission off the lock, as NFS root_squash does.
+      writeFileSync(
+        join(hook, "env.sh"),
+        `set -T
+__orbit_lock_deny() {
+  case "\${BASH_COMMAND-}" in *'<>'*) ;; *) return 0;; esac
+  [[ " \${FUNCNAME[*]-} " == *" probe_backup_restore_lock "* ]] || return 0
+  [[ -e '${flag}' ]] && return 0
+  : > '${flag}'
+  ${realTool("chmod")} 000 '${lockPathOf(targetDir)}'
+  return 0
+}
+trap __orbit_lock_deny DEBUG
+`,
+      );
+      const shims = privShims(targetDir, shimOptions);
+      try {
+        const result = runOwner(targetDir, { shims, state, env: { BASH_ENV: join(hook, "env.sh") }, capSeconds: 30 });
+        expect(existsSync(flag), "the read-write open was never reached, so the test proves nothing").toBe(true);
+        expect(result.hung).toBe(false);
+        expect(result.stdout, "repair went on without the lock").not.toContain(start.done);
+        expect(result.status).not.toBe(0);
+        expect(composeUpCalls(result)).toEqual([]);
+        expect(orbitLines(result).some((line) => /could not be opened for writing/u.test(line)), `no line says the lock could not be opened for writing:\n${result.stderr.slice(0, 1500)}`).toBe(true);
+      } finally {
+        shims.cleanup();
       }
     });
   }
