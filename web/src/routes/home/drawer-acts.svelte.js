@@ -310,6 +310,10 @@ export function createDrawerActs({
   let papersReady = $state(false);
   /** @type {object | null} */
   let searchDocumentsFor = null;
+  /* #1605 W-R7: each read takes a token and only the newest one lands, so a
+     read a re-read overtook never writes its older papers over the newer
+     (the same household object no longer tells the two reads apart). */
+  let searchReads = 0;
 
   /** #1151 W1-Q8: pocket-search.js's readSearchDocuments carries the
    *  concurrency cap (#1151 W1-R9). Answers the items whose papers could
@@ -323,6 +327,7 @@ export function createDrawerActs({
     const householdId = current?.primary;
     if (!household || !householdId || searchDocumentsFor === household) return failed;
     searchDocumentsFor = household;
+    const read = ++searchReads;
     const carrying = (household.items ?? []).filter((item) => (item.status === "active" || item.id === also) && (item.documentCount ?? 0) > 0);
     // Additive: an item whose papers cannot be read loses its papers from the
     // results, not the search. Which items those were is answered, for the
@@ -330,7 +335,7 @@ export function createDrawerActs({
     const found = await readSearchDocuments(
       carrying, readItemDocuments, householdId, () => searchDocumentsFor !== household, (id) => failed.add(id),
     );
-    if (searchDocumentsFor === household) {
+    if (searchDocumentsFor === household && searchReads === read) {
       searchDocuments = found;
       papersReady = true;
     }
