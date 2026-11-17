@@ -481,6 +481,30 @@ installer_ui_select() {
   done
 }
 
+# Cursor echo for a terminal that cannot repaint (TERM=dumb), without escape
+# sequences, as readline does: \b to move left, reprint to move right, and an
+# edit reprints the tail then backs over it. No-op unless plain_echo is set.
+installer_ui_plain_move() {
+  [[ "$2" == 1 ]] || return 0
+  if [[ "$3" == back ]]; then
+    local n
+    for ((n = 0; n < $4; n++)); do printf '\b' >&"$1"; done
+  else
+    printf '%s' "$4" >&"$1"
+  fi
+}
+
+# $3 leading backspaces, $4 inserted text, $5 tail after the cursor, $6 1 to
+# blank one trailing cell (a character was removed).
+installer_ui_plain_edit() {
+  [[ "$2" == 1 ]] || return 0
+  local n
+  for ((n = 0; n < $3; n++)); do printf '\b' >&"$1"; done
+  printf '%s' "$4$5" >&"$1"
+  ((${6:-0} == 0)) || printf ' ' >&"$1"
+  for ((n = 0; n < ${#5} + ${6:-0}; n++)); do printf '\b' >&"$1"; done
+}
+
 installer_ui_read_value() {
   [[ $# -eq 4 ]] || return 2
   local terminal_fd="$1" prompt="$2" maximum="$3" visibility="$4"
@@ -491,7 +515,7 @@ installer_ui_read_value() {
   # Plain mode does not repaint, so visible text is echoed as typed, with no
   # escape sequences: the cursor stays at the end (arrow keys are ignored),
   # and a backspace erases the last character (#1834).
-  [[ "$visibility" != text || "${ORBIT_INSTALLER_PLAIN:-0}" != 1 ]] || plain_echo=1
+  [[ "$visibility" != text ]] || ((repaint == 1)) || plain_echo=1
 
   saved_state="$(stty -g <&"$terminal_fd" 2>/dev/null)" || return 1
   # Trap before raw mode, as in installer_ui_select: a signal landing between
@@ -521,21 +545,21 @@ installer_ui_read_value() {
         status=130
         break
         ;;
-      left | right | home | end | delete) ((plain_echo == 0)) || continue ;;&
-      left) ((cursor > 0)) && cursor=$((cursor - 1)) ;;
-      right) ((cursor < ${#value})) && cursor=$((cursor + 1)) ;;
-      home) cursor=0 ;;
-      end) cursor=${#value} ;;
+      left) ((cursor > 0)) && { cursor=$((cursor - 1)); installer_ui_plain_move "$terminal_fd" "$plain_echo" back 1; } ;;
+      right) ((cursor < ${#value})) && { installer_ui_plain_move "$terminal_fd" "$plain_echo" fwd "${value:cursor:1}"; cursor=$((cursor + 1)); } ;;
+      home) installer_ui_plain_move "$terminal_fd" "$plain_echo" back "$cursor"; cursor=0 ;;
+      end) installer_ui_plain_move "$terminal_fd" "$plain_echo" fwd "${value:cursor}"; cursor=${#value} ;;
       backspace)
         if ((cursor > 0)); then
           value="${value:0:cursor-1}${value:cursor}"
           cursor=$((cursor - 1))
-          ((plain_echo == 0)) || printf '\b \b' >&"$terminal_fd"
+          installer_ui_plain_edit "$terminal_fd" "$plain_echo" 1 "" "${value:cursor}" 1
         fi
         ;;
       delete)
         if ((cursor < ${#value})); then
           value="${value:0:cursor}${value:cursor+1}"
+          installer_ui_plain_edit "$terminal_fd" "$plain_echo" 0 "" "${value:cursor}" 1
         fi
         ;;
       paste-start)
@@ -545,7 +569,7 @@ installer_ui_read_value() {
         }
         value="${value:0:cursor}${insert}${value:cursor}"
         cursor=$((cursor + ${#insert}))
-        ((plain_echo == 0)) || printf '%s' "$insert" >&"$terminal_fd"
+        installer_ui_plain_edit "$terminal_fd" "$plain_echo" 0 "$insert" "${value:cursor}" 0
         ;;
       char:*)
         insert="${key#char:}"
@@ -555,7 +579,7 @@ installer_ui_read_value() {
         }
         value="${value:0:cursor}${insert}${value:cursor}"
         cursor=$((cursor + ${#insert}))
-        ((plain_echo == 0)) || printf '%s' "$insert" >&"$terminal_fd"
+        installer_ui_plain_edit "$terminal_fd" "$plain_echo" 0 "$insert" "${value:cursor}" 0
         ;;
       *) ;;
     esac
