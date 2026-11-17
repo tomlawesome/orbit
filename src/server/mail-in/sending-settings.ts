@@ -541,7 +541,7 @@ function senderOf(from: string, user: string): { senderName: string; senderAddre
   const address = first?.address?.trim() ?? "";
   if (address && noControl(address) && !/[<>\s]/u.test(address)) {
     const name = (first?.name ?? "").trim();
-    return { senderName: noControl(name) ? name.slice(0, 200) : "", senderAddress: address };
+    return { senderName: noControl(name) ? name.slice(0, 80) : "", senderAddress: address };
   }
   if (senderAddressSchema.safeParse(user).success) return { senderName: "Orbit", senderAddress: user };
   return LEGACY_DEFAULT_SENDER;
@@ -552,7 +552,8 @@ function senderOf(from: string, user: string): { senderName: string; senderAddre
  * `unusable` when the old code could not have sent with them either (half
  * written, a port out of range, an unreadable password file), else the
  * account. No stricter than before: whatever `getNotificationWorkerConfig`
- * took, this takes.
+ * took, this takes, bar the host, which only gains the shape check the transport
+ * URL needs (a trailing dot is dropped first).
  */
 function smtpEnvironment(environment: NodeJS.ProcessEnv):
   | { state: "absent" }
@@ -576,12 +577,15 @@ function smtpEnvironment(environment: NodeJS.ProcessEnv):
   } catch {
     return { state: "unusable" };
   }
-  const host = environment.SMTP_HOST?.trim() ?? "";
+  /* A fully qualified name written with its final dot connected before; stored without it. */
+  const host = (environment.SMTP_HOST?.trim() ?? "").replace(/\.$/u, "");
   const user = environment.SMTP_USER?.trim() ?? "";
   const security: SendingSecurity = config.smtpSecurity === "implicit_tls" ? "implicit_tls" : "starttls";
   const port = environment.SMTP_PORT?.trim() ? Number(environment.SMTP_PORT) : security === "implicit_tls" ? 465 : 587;
   if (!password || !hostSchema.safeParse(host).success || !Number.isInteger(port) || port < 1 || port > 65_535) return { state: "unusable" };
-  if (!userSchema.safeParse(user).success || !passwordSchema.safeParse(password).success) return { state: "unusable" };
+  /* The old reader took any non-empty user and password (user to 320 characters,
+     as its own schema bounded it), so no control-character or length check here. */
+  if (user.length > 320) return { state: "unusable" };
   return { state: "present", host, port, security, user, password, ...senderOf(config.smtpFrom, user) };
 }
 
