@@ -27,9 +27,10 @@ export function pageTurn(page, count) {
  * @param {string} key
  * @param {number} page
  * @param {number | null} count
+ * @param {boolean} [lost] the page failed to draw, so a press on it goes again (#1605 W-R10)
  * @returns {number | null | undefined}
  */
-export function pageKeyTarget(key, page, count) {
+export function pageKeyTarget(key, page, count, lost = false) {
   const wanted = key === "ArrowLeft" || key === "PageUp" ? page - 1
     : key === "ArrowRight" || key === "PageDown" ? page + 1
       : key === "Home" ? 1
@@ -38,5 +39,5 @@ export function pageKeyTarget(key, page, count) {
   if (wanted === undefined) return undefined;
   if (!count || count < 2) return null;
   const target = Math.min(count, Math.max(1, wanted));
-  return target === page ? null : target;
+  return target === page && !lost ? null : target;
 }

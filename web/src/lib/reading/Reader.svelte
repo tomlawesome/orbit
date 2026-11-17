@@ -113,6 +113,8 @@
   /* #1501: the reader's own fetch failed for the page asked for, or the
      picture it was handed would not draw. */
   let ownLost = $state(false);
+  /** Bumped by a repeat press on a lost page, so the own fetch runs again. */
+  let refetch = $state(0);
   let brokenSrc = $state("");
   /* What is drawn: the host's page (`picture`) or the reader's own. */
   const shownSrc = $derived(picture ? picture.src : source ? pageUrl : previewSrc);
@@ -133,6 +135,7 @@
     const active = document.activeElement;
     const leaving = (active === nextArrow && target === count) ? "next"
       : (active === prevArrow && target === 1) ? "prev" : null;
+    if (target === pageNo) refetch += 1;
     pageNo = target;
     problem = null;
     ownLost = false;
@@ -158,6 +161,7 @@
   $effect(() => {
     if (!open || !source || picture) return;
     const wanted = pageNo;
+    void refetch;
     const controller = new AbortController();
     loadStagedPage(previewPageHref(source, wanted), controller.signal).then((result) => {
       if (controller.signal.aborted) {
@@ -209,7 +213,7 @@
       event.stopPropagation();
       if (event.key === "Escape") { event.preventDefault(); close(); return; }
       if (event.target instanceof Element && event.target.closest("input, textarea")) return;
-      const target = pageKeyTarget(event.key, pageNo, count);
+      const target = pageKeyTarget(event.key, pageNo, count, lost);
       if (target !== undefined) { event.preventDefault(); if (target !== null) turnTo(target); }
       else if (event.key === "+" || event.key === "=") { event.preventDefault(); zoomIn(); }
       else if (event.key === "-" || event.key === "_") { event.preventDefault(); zoomOut(); }
