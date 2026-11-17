@@ -9,6 +9,7 @@
   import Reticle from "$lib/reading/Reticle.svelte";
   import Sheet from "$lib/pocket/Sheet.svelte";
   import StagedPage from "$lib/pocket/StagedPage.svelte";
+  import FlaggedLine from "./FlaggedLine.svelte";
   import { stagedPreviewHref } from "$lib/pocket/review.js";
   import { DAMAGED, DAMAGED_PLACEHOLDER } from "$lib/data/metadata-status.js";
   import { DOCUMENT_ACCEPT, PAGE_HEAD, READING_HEAD, whyLines } from "$lib/data/document-read.js";
@@ -68,6 +69,7 @@
    *   readings?: Reading[],
    *   papers?: { id?: string | null, name: string, meta: string, drawable?: boolean, flagged?: true }[],
    *   receiptId?: string | null,
+   *   flagBase?: string,
    * }} Props
    */
   /** @type {Props} */
@@ -89,7 +91,10 @@
     readings = [],
     papers = [],
     receiptId = null,
+    flagBase = undefined,
   } = $props();
+  /* #1795: how many papers the scanner flagged, for the block's plural. */
+  const flaggedCount = $derived(papers.filter((paper) => paper.flagged).length);
 
   /* #1155: the review row unfolds its page in place -- only one at a time,
      and `reader={false}` on purpose: a reader over a full sheet is a third
@@ -415,14 +420,19 @@
     <!-- Review mode: what the relay read, below the fields (§2.5, §2.6). -->
     <section class="p-card proposed pc-card pc-reading" style:--i="2" aria-labelledby="{uid}-reading">
       <h2 class="p-caps" id="{uid}-reading">what the relay read</h2>
-      {#each papers as paper (paper.name)}
+      {#each papers as paper, i (paper.name)}
         <button type="button" class="pc-paper" disabled={!paper.id || paper.flagged}
+                aria-describedby={paper.flagged ? `${flagBase ?? uid}-flag-${i}` : undefined}
                 aria-expanded={openPaperName === paper.name}
                 onclick={() => { openPaperName = openPaperName === paper.name ? null : paper.name; }}>
           <span class="p-paper pc-doc-mark" aria-hidden="true">◆</span>
           <span class="pc-paper-words"><b>{paper.name}</b><span>{paper.meta}</span></span>
           {#if paper.id && !paper.flagged}<span class="pc-chev" aria-hidden="true">{openPaperName === paper.name ? "⌄" : "›"}</span>{/if}
         </button>
+        {#if paper.flagged}
+          <!-- #1795 (note 63499): the card's own block, under the paper it is about. -->
+          <FlaggedLine id="{flagBase ?? uid}-flag-{i}" name={paper.name} many={flaggedCount > 1} />
+        {/if}
         {#if openPaperName === paper.name && paper.id && !paper.flagged}
           <StagedPage href={receiptId ? stagedPreviewHref(receiptId, paper.id) : ""} name={paper.name}
                       drawable={Boolean(paper.drawable)} reader={false} />
@@ -660,6 +670,14 @@
   .pc-alert{color:var(--warm-text)}
   .pc-bead{display:inline-block;width:10px;height:10px;border-radius:50%;flex:none;background:var(--warm);
     box-shadow:inset -2px 2px 0 rgba(255,255,255,.28)}
+  /* #1795: the card's .rv-dup.flag, in the form */
+  /* :global so the block keeps the bare class name `pc-flag` (the sheet and tests name it) */
+  :global(.pc-flag){display:grid;grid-template-columns:10px 1fr;gap:4px 10px;align-items:start;margin:4px 0 8px;padding:12px;
+    border:1px solid var(--line-soft);border-radius:12px}
+  :global(.pc-flag .pc-bead){display:inline-block;width:10px;height:10px;border-radius:50%;margin-top:6px;background:var(--overdue)}
+  :global(.pc-flag p){margin:0;font:var(--p-type-meta)/1.5 var(--ui);color:var(--ink-mid)}
+  :global(.pc-flag p + p){grid-column:2}
+  :global(.pc-flag p b){color:var(--ink);font-weight:500}
   .pc-dup{display:flex;flex-direction:column;align-items:center;text-align:center;margin-top:16px}
   .pc-dup-line{display:flex;align-items:center;gap:9px;margin:0;font:600 var(--p-type-body)/1.35 var(--display);letter-spacing:.01em;color:var(--ink)}
   .pc-dup-why{margin:8px 0 0;font:var(--p-type-meta)/1.5 var(--ui);color:var(--ink-mid);text-wrap:pretty}
