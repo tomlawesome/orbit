@@ -42,6 +42,7 @@ import * as oidc from "@/lib/auth/oidc";
 import type { OidcMetadata, VerifiedIdentity } from "@/lib/auth/oidc";
 import { hashPassword } from "@/lib/auth/password";
 import { getAuthConfig, resetAuthConfigForTests } from "@/lib/env";
+import { createSession } from "@/lib/auth/session";
 import { createLocalUser, issueSetupToken, linkIdentity } from "@/server/local-credentials";
 import { SIGN_IN_APPROVAL_TTL_MS } from "@/server/sign-in-approvals";
 import { ORIGIN } from "./support/auth";
@@ -543,6 +544,52 @@ describe("saving a new password (#1881)", () => {
     // And the password stayed the one saved first.
     mail.sent.length = 0;
     expect(await (await signInByPassword(account.email, NEW_PASSWORD)).json()).toEqual({ state: "approved", authenticated: true });
+  });
+
+  it("revokes every other open session of the account (OWASP session management), and keeps only the new one", async () => {
+    const account = await seedAccount("revokes-others");
+    // A session opened before the refusal, on another device.
+    const other = await createSession(account.id, getAuthConfig(), "another-device");
+    const cookieName = sessionCookieName(getAuthConfig());
+    const ask = (token: string) =>
+      callRoute(sessionStatus, { url: `${ORIGIN}/api/auth/session`, headers: { cookie: `${cookieName}=${token}` } });
+    expect((await ask(other.token)).status).toBe(200);
+
+    await refuseASignIn(account.email);
+    mail.sent.length = 0;
+    // The older session exists, so the no-session-rows check of expectForced does not apply here.
+    const landed = await signInByPassword(account.email);
+    expect(((await landed.clone().json()) as { state?: string }).state).toBe("password_change_required");
+    expect(sessionCookieOf(landed)).toBeUndefined();
+    const forced = { hold: replayCookies(landed) };
+    const saved = await save({ password: NEW_PASSWORD, passwordAgain: NEW_PASSWORD }, forced.hold);
+    await expectSavedAndSignedIn(saved, account.id);
+
+    expect((await ask(other.token)).status, "the older session still works after the password changed").toBe(401);
+    expect((await ask(sessionCookieOf(saved)!)).status).toBe(200);
+    expect(await sessionCount(account.id)).toBe(1);
+  });
+
+  it("writes one password_changed audit row for the save, holding no password material", async () => {
+    const { account, hold } = await landOnTheStep("audited");
+    await expectSavedAndSignedIn(await save({ password: NEW_PASSWORD, passwordAgain: NEW_PASSWORD }, hold), account.id);
+
+    const rows = await getDb().select({ action: auditLog.action, actor: auditLog.actorUserId, changes: auditLog.changes })
+      .from(auditLog).where(and(eq(auditLog.entityId, account.id), eq(auditLog.action, "password_changed")));
+    expect(rows, "saving wrote no password_changed row").toHaveLength(1);
+    expect(rows[0].actor).toBe(account.id);
+    const written = JSON.stringify(rows[0]);
+    for (const secret of [NEW_PASSWORD, OLD_PASSWORD, "$argon2", "passwordHash", "password_hash"]) {
+      expect(written).not.toContain(secret);
+    }
+  });
+
+  it("writes no password_changed row for a save that was refused", async () => {
+    const { account, hold } = await landOnTheStep("no-audit-on-refusal");
+    await save({ password: OLD_PASSWORD, passwordAgain: OLD_PASSWORD }, hold);
+    const rows = await getDb().select({ id: auditLog.id }).from(auditLog)
+      .where(and(eq(auditLog.entityId, account.id), eq(auditLog.action, "password_changed")));
+    expect(rows).toHaveLength(0);
   });
 
   it("folds the one-time notice into the step: after saving, the sign-in notice has nothing to say", async () => {
