@@ -10,7 +10,7 @@ import { createMigrationTestDatabase, runMigrations } from "./support/migration-
    database whether the release's contract migrations would refuse. The engine
    command calls `runUpdatePreflight` from src/db/contract-preconditions.ts with
    a query port (SQL in, rows of text cells out) and the migrations folder. A
-   precondition is checked only while its migration tag is not in the journal.
+   precondition is checked only when its migration ships in the image's folder and is not applied (#1854 A-R1).
    No drop migration exists in this change, so the "already applied" case is
    shown with a fake entry whose tag IS applied and whose SQL would fail. */
 
@@ -50,13 +50,29 @@ async function document(database: Database, householdId: string, plain: string |
   );
 }
 
+async function folderWithExtraMigration(tag: string): Promise<string> {
+  const folder = await mkdtemp(join(tmpdir(), "orbit-preflight-extra-"));
+  cleanups.push(() => rm(folder, { recursive: true, force: true }));
+  await cp(MIGRATIONS, folder, { recursive: true });
+  const journalPath = join(folder, "meta", "_journal.json");
+  const journal = JSON.parse(await readFile(journalPath, "utf8")) as { entries: Array<{ idx: number; when: number; tag: string; version?: string; breakpoints?: boolean }> };
+  const last = journal.entries[journal.entries.length - 1];
+  journal.entries.push({ ...last, idx: last.idx + 1, when: last.when + 1000, tag });
+  await writeFile(journalPath, JSON.stringify(journal));
+  await writeFile(join(folder, `${tag}.sql`), "SELECT 1;\n");
+  return folder;
+}
+
+/** A folder that ships the real contract's migration, as the release carrying the drop would. */
+const shippedContractFolder = () => folderWithExtraMigration(CONTRACT_PRECONDITIONS[0].migrationTag);
+
 describe("runUpdatePreflight on a real database (#1779)", () => {
   it("is blocked, rows=1, for a migrated database holding one plain-hashed document", async () => {
     const database = await migrated("preflight_plain");
     const home = await household(database);
     await document(database, home, "a".repeat(64), null);
     await document(database, home, null, "mdv1.a.b.c");
-    const result = await runUpdatePreflight({ query: portOf(database), migrationsFolder: MIGRATIONS });
+    const result = await runUpdatePreflight({ query: portOf(database), migrationsFolder: await shippedContractFolder() });
     expect(result.ready).toBe(false);
     expect(result.exitCode).toBe(1);
     expect(result.lines[0]).toBe("update-preflight: blocked documents.content_sha256 rows=1");
@@ -67,7 +83,7 @@ describe("runUpdatePreflight on a real database (#1779)", () => {
     const database = await migrated("preflight_plain_many");
     const home = await household(database);
     for (let index = 0; index < 3; index += 1) await document(database, home, `${index}`.repeat(64).slice(0, 64), null);
-    const result = await runUpdatePreflight({ query: portOf(database), migrationsFolder: MIGRATIONS });
+    const result = await runUpdatePreflight({ query: portOf(database), migrationsFolder: await shippedContractFolder() });
     expect(result.lines[0]).toBe("update-preflight: blocked documents.content_sha256 rows=3");
   });
 
@@ -106,8 +122,8 @@ describe("runUpdatePreflight on a real database (#1779)", () => {
     const home = await household(database);
     await document(database, home, "c".repeat(64), null);
     const issued: string[] = [];
-    await runUpdatePreflight({ query: portOf(database, issued), migrationsFolder: MIGRATIONS });
-    expect(issued.length).toBeGreaterThan(0);
+    await runUpdatePreflight({ query: portOf(database, issued), migrationsFolder: await shippedContractFolder() });
+    expect(issued.some((sql) => sql.includes("content_sha256"))).toBe(true);
     for (const sql of issued) expect(sql.trim()).toMatch(/^(SELECT|WITH|SHOW)\b/iu);
     for (const sql of issued) expect(sql).not.toMatch(/\b(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|CREATE)\b/iu);
     const [row] = await database.client.unsafe(`SELECT content_sha256 FROM documents`);
@@ -130,20 +146,37 @@ describe("runUpdatePreflight on a real database (#1779)", () => {
     expect(issued.some((sql) => sql.includes("gone_table"))).toBe(false);
   });
 
-  it("still checks a precondition whose tag is not in the journal, and blocks on its count", async () => {
+  const plainHashPrecondition = (migrationTag: string): ContractPrecondition => ({
+    migrationTag,
+    column: "documents.content_sha256",
+    description: "plain hashes",
+    pendingSql: "SELECT count(*) FROM documents WHERE content_sha256 IS NOT NULL",
+    remedy: ["wait for the running version to finish"],
+  });
+
+  it("checks a precondition whose migration ships in this image but is not applied yet, and blocks on its count", async () => {
     const database = await migrated("preflight_pending_tag");
     const home = await household(database);
     await document(database, home, "d".repeat(64), null);
-    const pending: ContractPrecondition = {
-      migrationTag: "9999_not_yet_applied",
-      column: "documents.content_sha256",
-      description: "plain hashes",
-      pendingSql: "SELECT count(*) FROM documents WHERE content_sha256 IS NOT NULL",
-      remedy: ["wait for the running version to finish"],
-    };
-    const result = await runUpdatePreflight({ query: portOf(database), migrationsFolder: MIGRATIONS, preconditions: [pending] });
+    const tag = "9999_pending_contract";
+    const folder = await folderWithExtraMigration(tag);
+    const result = await runUpdatePreflight({ query: portOf(database), migrationsFolder: folder, preconditions: [plainHashPrecondition(tag)] });
     expect(result.lines[0]).toBe("update-preflight: blocked documents.content_sha256 rows=1");
     expect(result.lines).toContain("wait for the running version to finish");
+  });
+
+  it("skips a precondition whose tag is in no migration in the folder, even with pending rows, and never issues its SQL", async () => {
+    const database = await migrated("preflight_unshipped_tag");
+    const home = await household(database);
+    await document(database, home, "e".repeat(64), null);
+    const issued: string[] = [];
+    const result = await runUpdatePreflight({
+      query: portOf(database, issued),
+      migrationsFolder: MIGRATIONS,
+      preconditions: [plainHashPrecondition("9999_not_in_this_image")],
+    });
+    expect(result.lines).toEqual(["update-preflight: ready"]);
+    expect(issued.some((sql) => sql.includes("content_sha256"))).toBe(false);
   });
 
   it("ships a precondition for documents.content_sha256", () => {
