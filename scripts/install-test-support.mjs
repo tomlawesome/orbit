@@ -24,6 +24,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect } from "vitest";
+import { testCliBundle } from "./test-cli-bundle.mjs";
 import { ptyWatchdog } from "./pty-deadline.mjs";
 import { failOnProcessDeadline, processGuard, processWatchdog } from "./process-budget.mjs";
 import { DEPLOYMENT_ASSETS, deploymentAssetSource } from "../src/lib/deployment-assets.ts";
@@ -43,15 +44,15 @@ import { DEPLOYMENT_ASSETS, deploymentAssetSource } from "../src/lib/deployment-
 // docs/adr-notes/1212-bash-test-retirement.md.
 //
 // Fully mocked: a fake `docker` first on PATH answers the bootstrap's calls
-// from FAKE_* settings and runs the real engine from this checkout (through
-// tsx) for the one `docker run ... /opt/orbit/cli/orbit.js install`, with
+// from FAKE_* settings and runs the real engine from this checkout (the bundle the
+// Vitest globalSetup builds once per run) for the one `docker run ... /opt/orbit/cli/orbit.js install`, with
 // the bind mounts translated back to host paths -- so the shell and the
 // engine are exercised together without a daemon, an image or a network.
 
 export const installScript = fileURLToPath(new URL("./install.sh", import.meta.url));
 export const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
-export const engineTsx = join(repositoryRoot, "node_modules", "tsx", "dist", "cli.mjs");
-export const engineCli = join(repositoryRoot, "src", "cli", "orbit.ts");
+const engineCli = testCliBundle();
+const engineStdio = fileURLToPath(new URL("./test-engine-container-stdio.cjs", import.meta.url));
 
 export const repository = "example/orbit-fixture";
 export const registry = "fake-registry.example";
@@ -217,7 +218,7 @@ function runEngine() {
     if (env.FAKE_ENGINE_HANG_AFTER === "1") hang("engine");
     exit(Number(env.FAKE_ENGINE_EXIT));
   }
-  const result = spawnSync("node", [${JSON.stringify(engineTsx)}, ${JSON.stringify(engineCli)}, ...rest.slice(1).map(translate)], { stdio: "inherit", env: engineEnv });
+  const result = spawnSync("node", ["--require", ${JSON.stringify(engineStdio)}, ${JSON.stringify(engineCli)}, ...rest.slice(1).map(translate)], { stdio: "inherit", env: engineEnv });
   if (env.FAKE_OUTCOME_PATCH) {
     // Make the real engine's outcome name another profile / ask for the model download.
     const outcomeAt = rest.indexOf("--outcome");
@@ -629,6 +630,17 @@ export function makeFakeBin() {
 
 export function makeTarget() {
   return mkdtempSync(join(tmpdir(), "orbit-install-target-"));
+}
+
+/**
+ * A copy of an already-installed folder, for a test that needs it only as its
+ * starting state (#1861): `cp -a` keeps modes, ownership, links and times, and
+ * the copy gets a fresh target of its own, so tests never share state.
+ */
+export function copyInstalledFolder(template) {
+  const targetDir = makeTarget();
+  execFileSync("cp", ["-a", `${template}/.`, targetDir]);
+  return targetDir;
 }
 
 /** A local-only pre-provisioned target (guarantee #6): the unattended install path. */
