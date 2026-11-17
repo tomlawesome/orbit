@@ -186,11 +186,15 @@ jobs:
         run: printf '%s' "${GITHUB_TOKEN}" | crane auth login "${REGISTRY}" --username "${GITHUB_ACTOR}" --password-stdin
 
       # From the throwaway registry, the one the verifier just checked: the
-      # image under its sha- tag only, then GitLab's attestation (the
-      # referrers of the validation type, copied by digest, so crane adds each
-      # to GHCR's referrer list without dropping what is already there). The
-      # channel tag moves in a later step, once the attestation is proven to
-      # be on GHCR.
+      # image under its sha- tag only, then GitLab's attestations (the
+      # referrers of the validation and SPDX types, copied by digest, so crane
+      # adds each to GHCR's referrer list without dropping what is already
+      # there). The label only shortlists (#1862): each referrer is verified
+      # on its own before any copy -- its sigstore bundle under the committed
+      # cosign.pub, for subject ${DIGEST}, with the predicate type its label
+      # claims. One that does not verify stops everything: nothing is copied,
+      # not even the image. The channel tag moves in a later step, once the
+      # attestation is proven to be on GHCR.
       - name: Copy the exact tested digest
         id: publish
         env:
@@ -207,7 +211,8 @@ jobs:
             exit 1
           }
           predicate_type="$(sed -n 's/^readonly PREDICATE_TYPE="\(.*\)"$/\1/p' scripts/ci/verify-validation-evidence.sh)"
-          referrers="$(crane manifest "${THROWAWAY_IMAGE}:sha256-${DIGEST#sha256:}" | node -e '
+          index="$(crane manifest "${THROWAWAY_IMAGE}:sha256-${DIGEST#sha256:}")"
+          referrers="$(printf '%s' "${index}" | node -e '
             let raw = "";
             process.stdin.on("data", (c) => { raw += c; }).on("end", () => {
               const index = JSON.parse(raw);
@@ -226,11 +231,72 @@ jobs:
             printf 'The handoff carries no attestation of type %s to copy.\n' "${predicate_type}" >&2
             exit 1
           }
-          for referrer in ${referrers}; do
+          mapfile -t referrers <<< "${referrers}"
+          for referrer in "${referrers[@]}"; do
             [[ "${referrer}" =~ ${ORBIT_DIGEST_PATTERN} ]] || {
               printf 'The handoff names an attestation with a malformed digest: %s\n' "${referrer}" >&2
               exit 1
             }
+          done
+          # Each referrer on its own, before any copy. verify-blob-attestation
+          # checks the bundle signature against cosign.pub, that ${DIGEST} is
+          # a subject of its in-toto statement (--digest; --check-claims is on
+          # by default) and that its predicate type is exactly the label
+          # (--type). Key-based trust with no transparency log, as in
+          # verify-validation-evidence.sh: --insecure-ignore-tlog=true.
+          [[ -f cosign.pub ]] || {
+            printf 'The committed cosign.pub is missing, so nothing can be verified.\n' >&2
+            exit 1
+          }
+          cosign_cmd="$(bash scripts/ci/ensure-cosign.sh)"
+          bundles="$(mktemp -d)"
+          trap 'rm -rf "${bundles}"' EXIT
+          label=""
+          readonly MAX_BUNDLE_BYTES=$((16 * 1024 * 1024))
+          refuse() {
+            printf 'Attestation %s did not verify under cosign.pub as %s for %s (%s); copying nothing.\n' \
+              "${referrer}" "${label:-<unlabelled>}" "${DIGEST}" "$1" >&2
+            exit 1
+          }
+          for referrer in "${referrers[@]}"; do
+            label="$(printf '%s' "${index}" | node -e '
+              let raw = "";
+              process.stdin.on("data", (c) => { raw += c; }).on("end", () => {
+                const found = (JSON.parse(raw).manifests ?? []).filter((m) => m.digest === process.argv[1]);
+                const labels = [...new Set(found.map((m) => m.annotations?.["dev.sigstore.bundle.predicateType"]))];
+                if (labels.length === 1 && typeof labels[0] === "string") process.stdout.write(labels[0]);
+              });
+            ' -- "${referrer}")"
+            [[ -n "${label}" ]] || refuse "it has no single predicate type label"
+            layer="$(crane manifest "${THROWAWAY_IMAGE}@${referrer}" < /dev/null | node -e '
+              let raw = "";
+              process.stdin.on("data", (c) => { raw += c; }).on("end", () => {
+                const m = JSON.parse(raw);
+                const layers = Array.isArray(m.layers) ? m.layers : [];
+                if (m.subject?.digest !== process.argv[1] || layers.length !== 1 ||
+                    layers[0].mediaType !== "application/vnd.dev.sigstore.bundle.v0.3+json") return;
+                process.stdout.write(String(layers[0].digest) + " " + String(layers[0].size));
+              });
+            ' -- "${DIGEST}")" || refuse "its manifest is unreadable"
+            read -r layer layer_size <<< "${layer}"
+            [[ "${layer}" =~ ${ORBIT_DIGEST_PATTERN} ]] ||
+              refuse "it is not one sigstore bundle attached to this digest"
+            # Bounded fetch: the declared size is checked before a byte is pulled.
+            if ! [[ "${layer_size}" =~ ^[0-9]{1,8}$ ]] || (( 10#${layer_size} > MAX_BUNDLE_BYTES )); then
+              refuse "its bundle is declared as ${layer_size:-no} bytes, not a size within the 16 MiB limit"
+            fi
+            bundle="${bundles}/${referrer#sha256:}.json"
+            crane blob "${THROWAWAY_IMAGE}@${layer}" > "${bundle}" < /dev/null ||
+              refuse "its bundle is unreadable"
+            "${cosign_cmd}" verify-blob-attestation \
+              --bundle "${bundle}" \
+              --key cosign.pub \
+              --type "${label}" \
+              --insecure-ignore-tlog=true \
+              --digest "${DIGEST#sha256:}" \
+              --digestAlg sha256 \
+              < /dev/null > /dev/null 2> "${bundles}/cosign.err" ||
+              refuse "$(head -c 300 -- "${bundles}/cosign.err" | tr '\n' ' ')"
           done
           tag="sha-${GITHUB_SHA}"
           crane copy "${SOURCE}" "${image}:${tag}"
@@ -239,7 +305,7 @@ jobs:
             printf '%s:%s resolved to %s after the copy, expected %s.\n' "${image}" "${tag}" "${published}" "${DIGEST}" >&2
             exit 1
           }
-          for referrer in ${referrers}; do
+          for referrer in "${referrers[@]}"; do
             crane copy "${THROWAWAY_IMAGE}@${referrer}" "${image}@${referrer}"
           done
           printf 'image=%s\n' "${image}" >> "${GITHUB_OUTPUT}"
