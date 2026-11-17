@@ -79,4 +79,64 @@ describe("unsaved registry (#1879 W-S1)", () => {
     expect(anyUnsaved()).toBe(true);
     release();
   });
+
+  /* #1883: only a visible form may ask; a hidden one still counts as unsaved. */
+  it("#1883: a hidden dirty holder still counts as unsaved but is never the asker", () => {
+    const ask = async () => true;
+    const hidden = holdUnsaved(() => true, { ask, visible: () => false });
+    expect(anyUnsaved()).toBe(true);
+    expect(unsavedAsker()).toBeUndefined();
+    hidden();
+  });
+
+  it("#1883: a dirty visible holder's ask is given, read live", () => {
+    const ask = async () => true;
+    let shown = true;
+    const holder = holdUnsaved(() => true, { ask, visible: () => shown });
+    expect(unsavedAsker()).toBe(ask);
+    shown = false;
+    expect(unsavedAsker()).toBeUndefined();
+    shown = true;
+    expect(unsavedAsker()).toBe(ask);
+    holder();
+  });
+
+  it("#1883: with two dirty holders and only the second visible, the second's ask is given", () => {
+    const first = async () => true;
+    const second = async () => false;
+    const a = holdUnsaved(() => true, { ask: first, visible: () => false });
+    const b = holdUnsaved(() => true, { ask: second, visible: () => true });
+    expect(unsavedAsker()).toBe(second);
+    a();
+    b();
+  });
+
+  it("#1883: visible defaults to true when not given", () => {
+    const ask = async () => true;
+    const holder = holdUnsaved(() => true, { ask });
+    expect(unsavedAsker()).toBe(ask);
+    holder();
+  });
+
+  it("#1883: a visible dirty holder without an ask gives no asker, so the layout's confirm runs", () => {
+    const hiddenWithAsk = holdUnsaved(() => true, { ask: async () => true, visible: () => false });
+    const desk = holdUnsaved(() => true, { visible: () => true });
+    expect(anyUnsaved()).toBe(true);
+    expect(unsavedAsker()).toBeUndefined();
+    hiddenWithAsk();
+    desk();
+  });
+
+  it("#1883: markLeaving() still clears both the count and the asker for a hidden and a visible holder", () => {
+    const ask = async () => true;
+    const a = holdUnsaved(() => true, { ask, visible: () => false });
+    const b = holdUnsaved(() => true, { ask, visible: () => true });
+    const undo = markLeaving();
+    expect(anyUnsaved()).toBe(false);
+    expect(unsavedAsker()).toBeUndefined();
+    undo();
+    expect(anyUnsaved()).toBe(true);
+    a();
+    b();
+  });
 });
