@@ -94,7 +94,7 @@
   })();
   const zoneHelper = zoneOnList
     ? "Read off your browser. It moves to settings afterwards, and dates read by it."
-    : "your browser's zone isn't on this short list — change it in settings";
+    : "your browser's zone isn't one of these — pick yours here";
   /* The same honesty for the currency: read off the browser only when its
      language names a region Orbit maps to an offered currency (#1316). */
   const browserCurrencyFound = (() => {

@@ -3,7 +3,6 @@ import { getAuthConfig } from "@/lib/env";
 import { databaseConnectionString } from "@/db";
 import { readRuntimeSecret } from "@/lib/runtime-secret";
 import { documentKeyProblem, getDocumentConfig } from "@/server/documents/config";
-import { getNotificationWorkerConfig } from "@/server/notification-worker";
 import { setConfigurationProblems } from "@/lib/configuration-problems";
 import {
   logFormats,
@@ -168,18 +167,8 @@ export function validateStartupConfiguration(environment: NodeJS.ProcessEnv = pr
   if (alertAddress && !z.email().safeParse(alertAddress).success) {
     issues.push({ field: "alerts", code: "configuration_optional" });
   }
-  const notificationEnvironment = {
-    ...environment,
-    VAPID_SUBJECT: undefined,
-    VAPID_PUBLIC_KEY: undefined,
-    VAPID_PRIVATE_KEY: undefined,
-    VAPID_PRIVATE_KEY_FILE: undefined,
-  };
-  try {
-    getNotificationWorkerConfig(notificationEnvironment);
-  } catch (error) {
-    issues.push({ field: "mail", code: "configuration_optional", detail: detailFromCaughtError(error) });
-  }
+  /* Outgoing mail is the Mail card's sending row (#1629); a leftover SMTP_*
+     line is only read once, by the import, so it is not checked here. */
   if (environment.ORBIT_LOG_LEVEL !== undefined && !(logLevels as readonly string[]).includes(environment.ORBIT_LOG_LEVEL)) {
     issues.push({ field: "logging", code: "configuration_optional" });
   }

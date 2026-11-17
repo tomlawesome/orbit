@@ -278,6 +278,15 @@ describe("the claim code in the address fragment (ADR-0022 §1)", () => {
   });
 });
 
+describe("#1789 FR-S1: sign-in briefly unavailable", () => {
+  it("says to try again shortly, not the generic 'didn't work'", () => {
+    const words = cardMessageFor("sign_in_unavailable");
+    expect(words).not.toBe(cardMessageFor("some_unknown_code"));
+    expect(words).toMatch(/shortly/i);
+    expect(words).not.toContain("_");
+  });
+});
+
 describe("what a refused card says", () => {
   it("speaks Orbit's own words for every code the four routes answer with", () => {
     for (const code of ["bootstrap_invalid", "bootstrap_claimed", "bootstrap_unavailable",

@@ -878,6 +878,41 @@ describe("notification worker PostgreSQL contracts", () => {
   const pairDueDate = "2026-04-12";
   const defaultFinalWarningTime = new Date("2026-04-09T08:00:00.000Z");
 
+  it("RANGE-F14: an item with two reminder rules that were both missed gets one catch-up mail, not one per rule", async () => {
+    const fixture = await ownerOnlyFixture("worker-two-rules-missed");
+    const db = getDb();
+    const [event] = await db.insert(dueEvents).values({
+      householdId: fixture.household.id,
+      itemId: fixture.item.id,
+      kind: "renewal",
+      dueDate: "2026-03-31",
+      createdAt: new Date("2026-03-20T00:00:00.000Z"),
+    }).returning({ id: dueEvents.id });
+    /* Two reminders, 4 and 3 days out (27 and 28 March, 09:00): both fell in an outage, the later one still inside the cycle's date window. */
+    await db.insert(reminderRules).values([
+      { itemId: fixture.item.id, daysBefore: 4, emailEnabled: true, pushEnabled: false },
+      { itemId: fixture.item.id, daysBefore: 3, emailEnabled: true, pushEnabled: false },
+    ]);
+    const recipients: string[] = [];
+
+    try {
+      await runNotificationCycle(workerConfig(), {
+        now: () => new Date("2026-03-29T23:00:00.000Z"),
+        providers: fakeProviders((notification) => { recipients.push(notification.to); }),
+        nextLeaseToken: () => deterministicLeaseToken(70),
+      });
+
+      expect((await deliveriesForEvent(event.id)).filter((delivery) => delivery.channel === "email")).toHaveLength(1);
+      expect(recipients.filter((to) => to === fixture.users.owner.email)).toHaveLength(1);
+    } finally {
+      /* This test runs the worker at a later clock than its neighbours; its event
+         and rules must not stay behind for their cycles to pick up. */
+      await db.delete(schema.notificationDeliveries).where(eq(schema.notificationDeliveries.eventId, event.id));
+      await db.delete(dueEvents).where(eq(dueEvents.id, event.id));
+      await db.delete(reminderRules).where(eq(reminderRules.itemId, fixture.item.id));
+    }
+  });
+
   it("#479: raises the recipient's own first and final warnings for an item that set no rules of its own", async () => {
     const fixture = await ownerOnlyFixture("worker-pair-fallback");
     const eventId = await seedEvent(fixture, { dueDate: pairDueDate, daysBefore: null });

@@ -171,11 +171,19 @@ describe("#1848 O-F10: --execute --dangerous says it did not run retire-smtp-lin
     expect(composeUpCalls(result)).toEqual([]);
   });
 
-  it("the new line comes before the final re-diagnosis (it is not the last stderr output after the diagnosis lines)", () => {
+  it("the new line comes after the execution lines and before the final re-diagnosis (one interleaved capture)", () => {
     const targetDir = withMail();
-    const result = runRepair(targetDir, ["--execute", "--dangerous"], { ...IMPORTED, ...MACHINE });
-    expect(result.stderr).toContain(PLANNED_LINE);
-    expect(result.stdout.split("\n").some((line) => line.startsWith("diagnosis "))).toBe(true);
+    const result = runRepair(targetDir, ["--execute", "--dangerous"], { ...IMPORTED, ...MACHINE, interleave: true });
+    const lines = result.stdout.split("\n");
+    const at = lines.indexOf(PLANNED_LINE);
+    expect(at, "the planned line is in the output").toBeGreaterThan(-1);
+    const lastIndexWhere = (test) => lines.reduce((found, line, index) => (test(line) ? index : found), -1);
+    const lastDiagnosis = lastIndexWhere((line) => line.startsWith("diagnosis "));
+    const execution = lastIndexWhere((line) => line.startsWith("execution ") || line.startsWith("dangerous "));
+    expect(lastDiagnosis, "a final diagnosis line").toBeGreaterThan(-1);
+    expect(execution, "an execution line").toBeGreaterThan(-1);
+    expect(at).toBeGreaterThan(execution);
+    expect(at).toBeLessThan(lastDiagnosis);
   });
 
   it("the exit code is the one this run already gave (pinned)", () => {

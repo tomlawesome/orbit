@@ -630,6 +630,8 @@ export async function json(response) {
  */
 /** @type {?Promise<Session>} */
 let sessionPromise = null;
+/** Counts the cached session reads started, so a slower older read can tell a newer one has been cached since. */
+let sessionReads = 0;
 
 /**
  * `fetch` is a parameter throughout this seam so a SvelteKit server `load` can
@@ -660,6 +662,7 @@ export function readSession({ refresh = false } = {}, fetchImpl) {
     /* The route this chain asks is the one that answers a Session; `json` is
        generic and has nothing to infer that from when it is handed over
        point-free, so the shape is named here instead. */
+    sessionReads += 1;
     sessionPromise = /** @type {Promise<Session>} */ (
       fetch("/api/auth/session", { credentials: "same-origin" })
         .then(json)
@@ -701,7 +704,7 @@ function workspaceOf(body) {
 export async function readWorkspace(fetchImpl = globalThis.fetch) {
   /** @type {WorkspaceAnswer} */
   const body = await json(
-    await fetchImpl("/api/workspace", { credentials: "same-origin" }),
+    await fetchImpl("/api/workspace", { credentials: "same-origin", signal: AbortSignal.timeout(STAGED_PAGE_TIMEOUT_MS) }),
   );
   return workspaceOf(body);
 }
@@ -890,9 +893,9 @@ async function csrfFetch(path, { method = "POST", body, signal, headers = {} } =
 /**
  * Saves a theme and/or a text size (#1180), PUT /api/preferences.
  *
- * The route replaces all four preference fields at once -- and cancels
- * pending deliveries for any channel sent as false -- so the body is always
- * whole: the picked field(s), and everything else taken fresh from the
+ * The route writes only the fields the body carries (#1738) -- and cancels
+ * pending deliveries for any channel sent as false -- yet the body is still
+ * built whole here: the picked field(s), and everything else taken fresh from the
  * server's session (`refresh: true`), never from a cache that another tab or
  * the notifications panel may have outdated.
  *
@@ -921,8 +924,6 @@ async function sendPicked() {
   const body = {
     theme: themeOrDefault(sent.theme ?? user.themeId),
     textSize: textSizeOrDefault(sent.textSize ?? user.textSize),
-    emailNotifications: user.emailNotifications,
-    pushNotifications: user.pushNotifications,
     labelDays: sent.labelDays ?? user.labelDays ?? 30,
     skyDriver: sent.skyDriver ?? user.skyDriver ?? "due",
     planetSize: sent.planetSize ?? user.planetSize ?? "cost",
@@ -1905,6 +1906,7 @@ export async function commandArchiveStorage(command) {
 export async function readAdminScreen() {
   /** @type {AdminTally} */
   const tally = { ok: 0, forbidden: 0 };
+  const readsBefore = sessionReads;
   const [workspace, session, users, mailbox, sending, contact, uploadLimit, mailLimit, rotation, metadata, recoveryBundle, health, operations, archiveStorage] =
     await Promise.all([
     readWorkspace(adminFetch),
@@ -1915,7 +1917,7 @@ export async function readAdminScreen() {
        `failed.session` below: not knowing who is signed in is not "signed
        out". */
     readSession({}, adminFetch).then((answer) => {
-      sessionPromise = Promise.resolve(answer);
+      if (sessionReads === readsBefore) sessionPromise = Promise.resolve(answer);
       return answer;
     }, () => null),
     adminRead("/api/admin/users", tally).then((response) => json(response))

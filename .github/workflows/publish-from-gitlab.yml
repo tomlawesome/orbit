@@ -212,7 +212,7 @@ jobs:
             process.stdin.on("data", (c) => { raw += c; }).on("end", () => {
               const index = JSON.parse(raw);
               // The validation attestations and the SBOM ones (D-S6 43a), so
-              // GHCR keeps GitLab's key-bound SBOM too. No validation one
+              // GHCR keeps the key-bound SBOM from GitLab too. No validation one
               // means nothing is copied: the check below refuses.
               const typeOf = (m) => m.annotations?.["dev.sigstore.bundle.predicateType"];
               const wanted = (index.manifests ?? []).filter((m) =>

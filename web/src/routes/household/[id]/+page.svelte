@@ -2,6 +2,7 @@
   import { uuid } from "$lib/uuid.js";
   import { plural } from "$lib/format.js";
   import { onMount, tick, untrack } from "svelte";
+  import { SvelteMap } from "svelte/reactivity";
   import { invalidateAll } from "$app/navigation";
   import Chrome from "$lib/Chrome.svelte";
   import Mark from "$lib/Mark.svelte";
@@ -421,18 +422,30 @@
      pending. The pick is merged into the draft and its baseline so the next
      whole-list save does not undo it. A section not yet saved (still being
      named) keeps the pick with the list. */
+  /** Colour picks sent and not yet seen back in the saved list, by section id; each send carries them all, so a quick second pick keeps the first. */
+  const pickedColours = /** @type {SvelteMap<string, string>} */ (new SvelteMap());
+  /** Colour saves run one at a time, so a later list never lands before an earlier one. */
+  let colourChain = /** @type {Promise<void>} */ (Promise.resolve());
   /** @param {EditorRow} row @param {string} colour */
-  async function pickColour(row, colour) {
+  function pickColour(row, colour) {
     row.colour = colour;
-    if (row.fresh) return;
+    if (row.fresh) return Promise.resolve();
+    if (!data.household.sections.some((one) => one.id === row.id)) return Promise.resolve();
+    pickedColours.set(row.id, colour);
+    colourChain = colourChain.then(() => saveColours(row.id, colour));
+    return colourChain;
+  }
+  /** @param {string} id @param {string} colour */
+  async function saveColours(id, colour) {
     const savedRows = data.household.sections.map(editorRowOf);
-    if (!savedRows.some((one) => one.id === row.id)) return;
     sectionsProblem = null;
     try {
-      await writeSections(v.id, savedRows.map((one) => (one.id === row.id ? { ...one, colour } : one)));
-      sectionsBaseline = JSON.stringify(JSON.parse(sectionsBaseline).map((/** @type {{ id: string }} */ one) => (one.id === row.id ? { ...one, colour } : one)));
+      await writeSections(v.id, savedRows.map((one) => (pickedColours.has(one.id) ? { ...one, colour: pickedColours.get(one.id) } : one)));
+      sectionsBaseline = JSON.stringify(JSON.parse(sectionsBaseline).map((/** @type {{ id: string }} */ one) => (one.id === id ? { ...one, colour } : one)));
       await invalidateAll();
+      for (const one of data.household.sections) if (pickedColours.get(one.id) === one.colour) pickedColours.delete(one.id);
     } catch (error) {
+      if (pickedColours.get(id) === colour) pickedColours.delete(id);
       sectionsProblem = wordsOf(error);
     }
   }

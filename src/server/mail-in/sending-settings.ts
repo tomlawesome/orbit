@@ -482,6 +482,17 @@ export async function setSendingSettings(
   await getDb().transaction(async (transaction) => {
     const [row] = await transaction.select().from(mailSending).for("update").limit(1);
     if (row ? row.version !== expectedVersion : expectedVersion !== null) throw conflict();
+    if (parsed.via === "mailbox") {
+      /* FR-3: lock the mailbox row, as removing its credential does, and look
+         again: a removal that committed after the check above must not leave
+         sending on a credential that is gone. Sending is locked first here and
+         only read there, so the two cannot deadlock. */
+      const [mailbox] = await transaction.select({ passwordSecretId: mailInMailbox.passwordSecretId })
+        .from(mailInMailbox).for("update").limit(1);
+      if (!mailbox?.passwordSecretId) {
+        throw new AppError("mailbox_not_configured", "Set up the mailbox first, or send through another account", 409);
+      }
+    }
     const secret = parsed.via === "account"
       ? await insertSendingSecret(transaction, parsed.password, { host: parsed.host, user: parsed.user }, actorUserId)
       : null;
@@ -541,7 +552,7 @@ function senderOf(from: string, user: string): { senderName: string; senderAddre
   const address = first?.address?.trim() ?? "";
   if (address && noControl(address) && !/[<>\s]/u.test(address)) {
     const name = (first?.name ?? "").trim();
-    return { senderName: noControl(name) ? name.slice(0, 200) : "", senderAddress: address };
+    return { senderName: noControl(name) ? name.slice(0, 80) : "", senderAddress: address };
   }
   if (senderAddressSchema.safeParse(user).success) return { senderName: "Orbit", senderAddress: user };
   return LEGACY_DEFAULT_SENDER;
@@ -552,7 +563,8 @@ function senderOf(from: string, user: string): { senderName: string; senderAddre
  * `unusable` when the old code could not have sent with them either (half
  * written, a port out of range, an unreadable password file), else the
  * account. No stricter than before: whatever `getNotificationWorkerConfig`
- * took, this takes.
+ * took, this takes, bar the host, which only gains the shape check the transport
+ * URL needs (a trailing dot is dropped first).
  */
 function smtpEnvironment(environment: NodeJS.ProcessEnv):
   | { state: "absent" }
@@ -576,12 +588,15 @@ function smtpEnvironment(environment: NodeJS.ProcessEnv):
   } catch {
     return { state: "unusable" };
   }
-  const host = environment.SMTP_HOST?.trim() ?? "";
+  /* A fully qualified name written with its final dot connected before; stored without it. */
+  const host = (environment.SMTP_HOST?.trim() ?? "").replace(/\.$/u, "");
   const user = environment.SMTP_USER?.trim() ?? "";
   const security: SendingSecurity = config.smtpSecurity === "implicit_tls" ? "implicit_tls" : "starttls";
   const port = environment.SMTP_PORT?.trim() ? Number(environment.SMTP_PORT) : security === "implicit_tls" ? 465 : 587;
   if (!password || !hostSchema.safeParse(host).success || !Number.isInteger(port) || port < 1 || port > 65_535) return { state: "unusable" };
-  if (!userSchema.safeParse(user).success || !passwordSchema.safeParse(password).success) return { state: "unusable" };
+  /* The old reader took any non-empty user and password (user to 320 characters,
+     as its own schema bounded it), so no control-character or length check here. */
+  if (user.length > 320) return { state: "unusable" };
   return { state: "present", host, port, security, user, password, ...senderOf(config.smtpFrom, user) };
 }
 

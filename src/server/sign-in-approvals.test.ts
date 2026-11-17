@@ -35,6 +35,7 @@ const testKey = vi.hoisted(() => ({
 
 const store = vi.hoisted(() => ({
   approvals: [] as Row[],
+  sends: [] as Row[],
   credentials: [] as Row[],
   users: [] as Row[],
   audit: [] as Row[],
@@ -82,6 +83,7 @@ vi.mock("@/db", async () => {
   /** Which of the three tables a builder was pointed at. */
   function rowsFor(table: unknown): Row[] {
     if (table === schema.signInApprovals) return store.approvals;
+    if (table === schema.signInApprovalSends) return store.sends;
     if (table === schema.localCredentials) return store.credentials;
     if (table === schema.users) return store.users;
     if (table === schema.auditLog) return store.audit;
@@ -125,6 +127,8 @@ vi.mock("@/db", async () => {
       else if (operator === "=") verdict &&= String(held) === String(stream[at + 2]?.value);
       else if (operator === ">") verdict &&= held instanceof Date
         && held.getTime() > new Date(stream[at + 2]?.value as string).getTime();
+      else if (operator === "<") verdict &&= held instanceof Date
+        && held.getTime() < new Date(stream[at + 2]?.value as string).getTime();
       else throw new Error(`the fake database does not implement "${operator}"`);
     }
     return verdict;
@@ -140,7 +144,7 @@ vi.mock("@/db", async () => {
     return out;
   }
 
-  /** The one aggregate this module asks for: ADR-0027 §8's hourly send count. */
+  /** The one aggregate this module asks for: ADR-0027 §8's hourly send count, one row per send. */
   function isSendCount(selection: Record<string, unknown>): boolean {
     return Object.keys(selection).length === 1 && "sends" in selection;
   }
@@ -161,7 +165,7 @@ vi.mock("@/db", async () => {
           const keys = columnKeys(table as Record<string, { name?: string }>);
           const found = rows.filter((row) => condition === null || matches(row, condition, keys));
           if (isSendCount(selection)) {
-            const sends = found.reduce((total, row) => total + Number(row.sendCount ?? 0), 0);
+            const sends = found.length;
             return Promise.resolve([{ sends }]).then(resolve, reject);
           }
           return Promise.resolve(found.map((row) => project(row, selection, keys))).then(resolve, reject);
@@ -237,10 +241,37 @@ vi.mock("@/db", async () => {
     return builder;
   }
 
+  /** The retention sweep: removes the matching approvals and, as the cascade does, their sends. */
+  function remove(table: unknown) {
+    let condition: unknown = null;
+    const builder = {
+      where(where: unknown) { condition = where; return builder; },
+      then(resolve: (value: unknown) => unknown, reject?: (reason: unknown) => unknown) {
+        try {
+          const rows = rowsFor(table);
+          const keys = columnKeys(table as Record<string, { name?: string }>);
+          const gone = rows.filter((row) => condition === null || matches(row, condition, keys));
+          for (const row of gone) rows.splice(rows.indexOf(row), 1);
+          if (table === schema.signInApprovals) {
+            const ids = new Set(gone.map((row) => row.id));
+            for (let at = store.sends.length - 1; at >= 0; at -= 1) {
+              if (ids.has(store.sends[at].approvalId)) store.sends.splice(at, 1);
+            }
+          }
+          return Promise.resolve([]).then(resolve, reject);
+        } catch (error) {
+          return Promise.resolve().then(() => { throw error; }).then(resolve, reject);
+        }
+      },
+    };
+    return builder;
+  }
+
   const db = {
     select,
     insert,
     update,
+    delete: remove,
     /* One process, one store: a transaction here is the rules running in
        order, which is what these tests are about. Rollback is PostgreSQL's
        to prove, and the integration suite's to check. */
@@ -301,6 +332,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(NINE);
   store.approvals.length = 0;
+  store.sends.length = 0;
   store.credentials.length = 0;
   store.users.length = 0;
   store.audit.length = 0;

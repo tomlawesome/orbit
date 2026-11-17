@@ -477,3 +477,18 @@ describe("disable and hard delete: a failed re-read after a landed command is sa
     expect(names(desk, acts)).toContain("deleteSystemNow");
   });
 });
+
+describe("#1604 b1 W-R4: restoreSystem has an in-flight guard per row", () => {
+  it("a second press on the same row while the first is out sends no second restore", async () => {
+    /** @type {Array<() => void>} */
+    const finishes = [];
+    const calls = vi.fn(() => new Promise((resolve) => { finishes.push(() => resolve({})); }));
+    server.restoreHousehold = calls;
+    const said = /** @type {Record<string, { ok: boolean, text: string }>} */ ({});
+    const first = restoreSystem({ id: "s1", name: "Home" }, said, vi.fn(async () => {}));
+    const second = restoreSystem({ id: "s1", name: "Home" }, said, vi.fn(async () => {}));
+    for (const finish of finishes) finish();
+    await Promise.all([first, second]);
+    expect(calls).toHaveBeenCalledTimes(1);
+  });
+});

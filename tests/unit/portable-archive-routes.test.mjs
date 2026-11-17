@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import "../support/archive-low-disk-safe.ts";
 import { archiveForm, encodeForm, readStream } from "../integration/support/portable-archive-upload.ts";
 
 /*

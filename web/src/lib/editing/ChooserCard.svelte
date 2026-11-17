@@ -52,10 +52,11 @@
    *   layout: "beside" | "sheet",
    *   onpick: (value: string) => void,
    *   onclose: () => void,
+   *   onclear?: () => void,
    * }} Props
    */
   /** @type {Props} */
-  let { ask, layout, onpick, onclose } = $props();
+  let { ask, layout, onpick, onclose, onclear } = $props();
 
   const CALENDAR = ["due", "snooze", "done"];
   /** What the body is for; a new one repaints it and moves focus into it. */
@@ -104,6 +105,9 @@
     {#key asked}
       {#if kind === "calendar"}
         <Calendar value={ask.value} today={ask.today} {onpick} />
+        {#if onclear && ask.value}
+          <button type="button" class="clear" onclick={onclear}>clear date</button>
+        {/if}
       {:else if kind === "band"}
         <RepeatBand choices={ask.choices} value={ask.value} label={ask.label} {onpick} />
       {:else if kind === "list" && (ask.key === "timezone" || ask.key === "currency")}
@@ -137,6 +141,11 @@
   .close:hover{color:var(--ink)}
   .close:focus-visible{outline:none;color:var(--ink);box-shadow:inset 0 0 0 1.5px var(--accent)}
   .kb{color:var(--ink-quiet)}
+  /* #1738 W-F23: a picked date goes back to none; a 44px target under the month */
+  .clear{display:block;min-height:44px;margin:6px auto 0;padding:0 14px;border:0;border-radius:999px;background:none;cursor:pointer;
+         font:var(--p-type-caps) var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--ink-mid)}
+  .clear:hover{color:var(--ink)}
+  .clear:focus-visible{outline:none;color:var(--ink);box-shadow:inset 0 0 0 1.5px var(--accent)}
   /* a pick-list is long: the card keeps to a screenful and the list scrolls */
   .body :global(.pick-options){max-height:min(46vh,360px);overflow-y:auto}
   .sheet .body :global(.pick-options){max-height:none}

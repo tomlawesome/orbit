@@ -554,28 +554,52 @@ export function materializeDeliveriesForCandidate(
   now: Date,
   catchUpBoundary: Date,
 ): MaterializedDelivery[] {
-  // Every offset this candidate's reminder actually fires at, already due
-  // (not scheduled for the future) and not snoozed away.
-  const due = candidateReminderOffsets(candidate)
-    .map((offset) => ({ offset, scheduledFor: householdReminderTime(candidate.dueDate, offset.daysBefore, candidate.timezone) }))
-    .filter(({ scheduledFor }) => scheduledFor <= now)
-    .filter(({ scheduledFor }) => !reminderIsSnoozed(scheduledFor, candidate.snoozedUntil, candidate.timezone));
+  return materializeDeliveriesForCandidates([candidate], now, catchUpBoundary);
+}
 
-  return (["email", "web_push"] as const).flatMap((channel) => {
-    const eligible = due.filter(({ offset }) => enabledDeliveryChannels({ ...candidate, ...offset }).includes(channel));
-    const onTime = eligible.filter(({ scheduledFor }) => scheduledFor >= catchUpBoundary);
-    const overdue = eligible.filter(({ scheduledFor }) => scheduledFor < catchUpBoundary && scheduledFor >= candidate.createdAt);
-    const chosen = [...onTime];
-    if (overdue.length > 0) {
-      chosen.push(overdue.reduce((latest, missed) => (missed.scheduledFor > latest.scheduledFor ? missed : latest)));
-    }
-    return chosen.map(({ scheduledFor }) => ({
-      householdId: candidate.householdId,
-      eventId: candidate.eventId,
-      userId: candidate.userId,
-      channel,
-      scheduledFor,
-    }));
+/**
+ * The deliveries for every candidate row of one item and member (one row per
+ * reminder rule). The catch-up collapse is per item, member and channel, not
+ * per rule: two rules that both fell in an outage are one missed mail, not two
+ * (RANGE-F14). Candidates of different items or members are kept apart.
+ */
+export function materializeDeliveriesForCandidates(
+  candidates: readonly MaterializationCandidate[],
+  now: Date,
+  catchUpBoundary: Date,
+): MaterializedDelivery[] {
+  const groups = new Map<string, MaterializationCandidate[]>();
+  for (const candidate of candidates) {
+    const key = `${candidate.eventId}:${candidate.userId}`;
+    const group = groups.get(key);
+    if (group) group.push(candidate); else groups.set(key, [candidate]);
+  }
+  return [...groups.values()].flatMap((group) => {
+    // Every offset this member's reminder actually fires at, already due
+    // (not scheduled for the future) and not snoozed away. Resolved once per
+    // candidate: the instant costs a date-formatter call.
+    const due = group.flatMap((candidate) => candidateReminderOffsets(candidate)
+      .map((offset) => ({ candidate, offset, scheduledFor: householdReminderTime(candidate.dueDate, offset.daysBefore, candidate.timezone) }))
+      .filter(({ scheduledFor }) => scheduledFor <= now)
+      .filter(({ scheduledFor }) => !reminderIsSnoozed(scheduledFor, candidate.snoozedUntil, candidate.timezone)));
+    return (["email", "web_push"] as const).flatMap((channel) => {
+      const eligible = due.filter(({ candidate, offset }) => enabledDeliveryChannels({ ...candidate, ...offset }).includes(channel));
+      const onTime = eligible.filter(({ scheduledFor }) => scheduledFor >= catchUpBoundary);
+      const overdue = eligible.filter(({ candidate, scheduledFor }) => scheduledFor < catchUpBoundary && scheduledFor >= candidate.createdAt);
+      const chosen = [...onTime];
+      if (overdue.length > 0) {
+        chosen.push(overdue.reduce((latest, missed) => (missed.scheduledFor > latest.scheduledFor ? missed : latest)));
+      }
+      const seen = new Set<number>();
+      return chosen.filter(({ scheduledFor }) => !seen.has(scheduledFor.getTime()) && seen.add(scheduledFor.getTime()))
+        .map(({ candidate, scheduledFor }) => ({
+          householdId: candidate.householdId,
+          eventId: candidate.eventId,
+          userId: candidate.userId,
+          channel,
+          scheduledFor,
+        }));
+    });
   });
 }
 
@@ -641,7 +665,7 @@ async function materializeDueDeliveries(db: NotificationDatabase, now: Date): Pr
     ));
 
   const catchUpBoundary = new Date(now.getTime() - notificationCatchUpWindowMs);
-  const deliveries = candidates.flatMap((candidate) => materializeDeliveriesForCandidate(candidate, now, catchUpBoundary));
+  const deliveries = materializeDeliveriesForCandidates(candidates, now, catchUpBoundary);
 
   if (deliveries.length) {
     await db.insert(notificationDeliveries).values(deliveries).onConflictDoNothing();

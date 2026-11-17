@@ -15,5 +15,5 @@ export const labelWords = (/** @type {number} */ d) =>
 export function warningHint(n) {
   if (n == null || !Number.isInteger(n) || n < 1) return "";
   const unit = (/** @type {number} */ d) => (d === 1 ? "1 day" : `${d} days`);
-  return `Your first warning is ${unit(n)} before, so each planet sits ${n === 30 ? "a month" : unit(n)} nearer the sun.`;
+  return `Your first warning is ${unit(n)} before, so each planet sits ${n === 30 ? "a month" : unit(n)} nearer the sun, unless an item has its own reminders: then it sits by its largest own day.`;
 }

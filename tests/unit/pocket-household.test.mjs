@@ -319,4 +319,38 @@ describe("the household page on a phone, mounted", () => {
     expect(names(services)).not.toContain("Move Services down");
     expect(names(services)).toContain("Move Services up");
   });
+
+  it("#1738 W-R7/W-R9: two quick section-colour picks both reach the server (the second send keeps the first)", async () => {
+    /** @type {Array<() => void>} */
+    const releases = [];
+    const { api, settle } = await mountHousehold({
+      "POST /api/workspace/commands": async () => {
+        await new Promise((resolve) => { releases.push(resolve); });
+        return { workspace: { households: [], activeHouseholdId: null } };
+      },
+    });
+    const swatch = (/** @type {string} */ section, /** @type {string} */ colour) => {
+      const group = [...document.querySelectorAll('.sec [role="radiogroup"]')]
+        .find((one) => one.getAttribute("aria-label") === `Colour for ${section}`);
+      return /** @type {HTMLElement | undefined} */ (group?.querySelector(`[data-opt="${colour}"]`));
+    };
+    const first = swatch("Home", "services");
+    const second = swatch("Vehicles", "services");
+    expect(first && second, "both sections show their swatches").toBeTruthy();
+    first?.click();
+    await settle();
+    second?.click();
+    await settle();
+    /* let each held save through in the order it was sent */
+    for (let turn = 0; turn < 5; turn += 1) {
+      releases.splice(0).forEach((release) => release());
+      await settle();
+    }
+    const sends = api.calls.filter((call) => call.method === "POST" && call.path === "/api/workspace/commands");
+    expect(sends.length, "each pick is sent").toBeGreaterThanOrEqual(2);
+    const last = sends.at(-1)?.body.sections;
+    const colourOf = (/** @type {string} */ name) => last.find((one) => one.name === name)?.colour;
+    expect(colourOf("Home"), "the first pick survives the second send").toBe("services");
+    expect(colourOf("Vehicles")).toBe("services");
+  });
 });

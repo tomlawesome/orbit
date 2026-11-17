@@ -61,7 +61,7 @@ const matrix = readGolden<{ cases: MatrixCase[] }>("configuration-migration", "m
 
 describe("configuration contract port: every captured configuration.sh case", () => {
   it("has the full captured matrix", () => {
-    expect(matrix.cases.length).toBe(94);
+    expect(matrix.cases.length).toBe(97);
   });
 
   for (const testCase of matrix.cases) {
