@@ -208,8 +208,8 @@ workflow:
 # and a merge request into `dev` no longer starts any of them: the nine browser jobs
 # (`smoke`, `smoke_webkit`, `smoke_webkit_mobile`, `smoke_local_only`, and the
 # rig's `rig_chromium`, `rig_firefox`, `rig_webkit`, `film_webkit`, `screens_chromium`;
-# ADR-0039, #1615, #1692, #1546; the four rig jobs run as `parallel:` shards)
-# run here, every night on `dev`, and all but the four rig jobs also at
+# ADR-0039, #1615, #1692, #1546; the four rig jobs other than `screens_chromium` run as `parallel:` shards)
+# run here, every night on `dev`, and all but those four sharded rig jobs also at
 # promotion (the `preview` push; owner answer 125, #1763). The
 # nightly alone also runs `pocket_measure`, the full tap-floor measurement,
 # which never fails the pipeline (#1616).
@@ -267,7 +267,7 @@ workflow:
 # `smoke_local_only`, and `acceptance` and `repair_journeys` (`smoke`,
 # `smoke_webkit`, `smoke_webkit_mobile`, `rig_chromium`, `rig_firefox`,
 # `rig_webkit`, `film_webkit`, `screens_chromium`, `acceptance`, `repair_journeys`); `record_image` needs
-# them as optional, the four nightly-only rig jobs aside (#1763). One variable is set per event, so the two tests never
+# them as optional, the four nightly-only sharded rig jobs aside (#1763). One variable is set per event, so the two tests never
 # both match, and neither matches a schedule or a push elsewhere.
 .not_on_hotfix: &not_on_hotfix
   if: $CI_COMMIT_BRANCH =~ /^hotfix\// || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME =~ /^hotfix\//
@@ -4450,6 +4450,18 @@ launcher_install_compat:
     # The candidate binary is build_launcher's own artifact (ADR-0031 #3):
     # the exact bytes record_image folds into the signed release manifest,
     # not a fresh build from this job's own checkout of the launcher source.
+    #
+    # A late retry of this job (#1738 D-S2/D-S4): build_launcher_branch's
+    # archive expires after 3 days, and a retry then finds nothing to download.
+    # Nothing here depends on how long artifacts last, so a missing archive is
+    # rebuilt from the same pinned source, with the same script and the Go
+    # toolchain set up above. A pipeline whose archive is present builds nothing.
+    - |
+      set -eu
+      if [ ! -s "$CI_PROJECT_DIR/.orbit-launcher-artifacts/orbit-launcher_linux_amd64.tar.gz" ]; then
+        echo "the launcher archive from this pipeline is gone (expired); rebuilding it from the pinned source"
+        bash scripts/ci/build-launcher.sh "$CI_PROJECT_DIR/.orbit-launcher-artifacts"
+      fi
     - |
       set -eu
       mkdir -p "$CI_PROJECT_DIR/.orbit-launcher-bin"
