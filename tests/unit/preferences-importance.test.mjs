@@ -43,7 +43,9 @@ function stubDatabase() {
       values: (/** @type {Record<string, any>} */ values) => ({
         onConflictDoUpdate: async (/** @type {{ set: Record<string, any> }} */ { set }) => {
           writes.push(values);
-          stored = { ...base, ...(stored ?? {}), ...set, ...values };
+          // A first write stores the inserted values; a conflict applies only `set`, as the database does,
+          // so a field the route drops from its update is not rescued by the inserted values.
+          stored = stored === null ? { ...base, ...values } : { ...stored, ...set };
         },
       }),
     }),
