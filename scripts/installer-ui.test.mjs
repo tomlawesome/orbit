@@ -224,7 +224,7 @@ function runPtyStorm(body, marker, signals) {
  * sends a trailing carriage return terminates on its own and keeps the
  * simpler spawnSync driver.
  */
-function runPtyOpenStdin(body, input, env = {}) {
+function runPtyOpenStdin(body, input, env = {}, waitFor = null) {
   return new Promise((resolve, reject) => {
     const child = spawn(
       "script",
@@ -234,11 +234,24 @@ function runPtyOpenStdin(body, input, env = {}) {
     let stdout = "";
     child.stdout.setEncoding("utf8");
     const watchdog = ptyWatchdog({ label: "runPtyOpenStdin", kill: () => child.kill("SIGKILL") });
-    child.stdout.on("data", (chunk) => { stdout += chunk; watchdog.touch(); });
+    // Written once, then left open: never child.stdin.end(). With waitFor, the
+    // write waits until that text is on screen: a widget that prints its prompt
+    // only after switching to raw mode (#1874) would otherwise see canonical
+    // line-discipline editing of the input instead of the raw bytes.
+    let written = false;
+    const write = () => {
+      if (written) return;
+      written = true;
+      child.stdin.write(input);
+    };
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+      watchdog.touch();
+      if (waitFor !== null && stdout.includes(waitFor)) write();
+    });
     child.on("error", reject);
-    // Written once, then left open: never child.stdin.end().
     child.stdin.on("error", () => { /* child exited first; nothing to write to */ });
-    child.stdin.write(input);
+    if (waitFor === null) write();
     child.on("close", (status) => {
       watchdog.stop();
       if (watchdog.reason) {
@@ -406,6 +419,45 @@ describe("installer semantic UI", () => {
     expect(result.stdout).toContain("CHOICE=update");
   });
 
+  it("echoes typed text on a dumb terminal that does not repaint (#1874 O-F1)", () => {
+    const result = runPty(
+      'source "$1"; exec 3<>/dev/tty; value="$(installer_ui_read_text 3 "Proceed (yes/N): " 64)"; printf "\\nVALUE=%s\\n" "$value"',
+      "yesplease\r",
+      { TERM: "dumb" },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("VALUE=yesplease");
+    // Once for the echo as typed, once for VALUE=.
+    expect(result.stdout.split("yesplease").length - 1).toBe(2);
+  });
+
+  it("erases the last typed character on a dumb terminal (#1874 O-F5)", async () => {
+    const result = await runPtyOpenStdin(
+      'source "$1"; exec 3<>/dev/tty; value="$(installer_ui_read_text 3 "Answer: " 64)"; printf "\\nVALUE=%s\\n" "$value"',
+      "abcX\x7f\r",
+      { TERM: "dumb" },
+      "Answer: ",
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toMatch(/VALUE=abc\r?\n/u);
+    expect(result.stdout).toContain("abcX\b \b");
+  });
+
+  it("does not echo a secret on a dumb terminal (#1874)", () => {
+    const secret = "not-echoed-dumb-value";
+    const result = runPty(
+      'source "$1"; exec 3<>/dev/tty; value="$(installer_ui_read_secret 3 "Secret: " 64)"; printf "\\nLENGTH=%s\\n" "${#value}"',
+      `${secret}\r`,
+      { TERM: "dumb" },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).not.toContain(secret);
+    expect(result.stdout).toContain(`LENGTH=${secret.length}`);
+  });
+
   it("treats Escape as cancellation in the numbered fallback", () => {
     const result = runPty(
       'source "$1"; exec 3<>/dev/tty; if choice="$(installer_ui_select 3 "Choose" install install Install update Update)"; then printf "CHOICE=%s\\n" "$choice"; else printf "STATUS=%s\\n" "$?"; fi',
@@ -513,6 +565,20 @@ describe("installer semantic UI", () => {
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("VALUE=a Xb");
+    expect(result.stdout).not.toMatch(/\x1b\[/u);
+  });
+
+  it("ignores arrow keys in plain mode on a normal TERM (#1874, #1834)", async () => {
+    const result = await runPtyOpenStdin(
+      'source "$1"; exec 3<>/dev/tty; value="$(installer_ui_read_text 3 "Value: " 64)"; printf "\\nVALUE=%s\\n" "$value"',
+      "ab\x1b[DX\r",
+      { ORBIT_INSTALLER_PLAIN: "1" },
+      "Value: ",
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("VALUE=abX");
+    expect(result.stdout).not.toContain("\b");
     expect(result.stdout).not.toMatch(/\x1b\[/u);
   });
 
@@ -674,4 +740,140 @@ describe("installer semantic UI", () => {
     expect(ordinary.status).toBe(0);
     expect(ordinary.stdout).not.toContain("simulation");
   });
+});
+
+// Wide characters in text prompts (#1885). A tiny terminal model: one line of
+// cells, a cursor column, double-width for East Asian wide characters, and
+// only the controls the widget may use (\b, \r, CSI K/D/C). Overwriting half
+// of a wide character blanks the other half, as real terminals do.
+// Unicode East Asian Width W and F ranges (EastAsianWidth.txt), written out
+// independently of the implementation.
+const WIDE_RANGES = [
+  [0x1100, 0x115f], [0x231a, 0x231b], [0x2329, 0x232a], [0x23e9, 0x23ec],
+  [0x23f0, 0x23f0], [0x23f3, 0x23f3], [0x25fd, 0x25fe], [0x2614, 0x2615],
+  [0x2648, 0x2653], [0x267f, 0x267f], [0x2693, 0x2693], [0x26a1, 0x26a1],
+  [0x26aa, 0x26ab], [0x26bd, 0x26be], [0x26c4, 0x26c5], [0x26ce, 0x26ce],
+  [0x26d4, 0x26d4], [0x26ea, 0x26ea], [0x26f2, 0x26f3], [0x26f5, 0x26f5],
+  [0x26fa, 0x26fa], [0x26fd, 0x26fd], [0x2705, 0x2705], [0x270a, 0x270b],
+  [0x2728, 0x2728], [0x274c, 0x274c], [0x274e, 0x274e], [0x2753, 0x2755],
+  [0x2757, 0x2757], [0x2795, 0x2797], [0x27b0, 0x27b0], [0x27bf, 0x27bf],
+  [0x2b1b, 0x2b1c], [0x2b50, 0x2b50], [0x2b55, 0x2b55], [0x2e80, 0x303e],
+  [0x3041, 0x33ff], [0x3400, 0x4dbf], [0x4e00, 0xa4cf], [0xa960, 0xa97f],
+  [0xac00, 0xd7a3], [0xf900, 0xfaff], [0xfe10, 0xfe19], [0xfe30, 0xfe6f],
+  [0xff01, 0xff60], [0xffe0, 0xffe6], [0x16fe0, 0x16fe4], [0x17000, 0x18cff],
+  [0x1b000, 0x1b2ff], [0x1f004, 0x1f004], [0x1f0cf, 0x1f0cf], [0x1f18e, 0x1f18e],
+  [0x1f191, 0x1f19a], [0x1f200, 0x1f320], [0x1f32d, 0x1f335], [0x1f337, 0x1f37c],
+  [0x1f37e, 0x1f393], [0x1f3a0, 0x1f3ca], [0x1f3cf, 0x1f3d3], [0x1f3e0, 0x1f3f0],
+  [0x1f3f4, 0x1f3f4], [0x1f3f8, 0x1f43e], [0x1f440, 0x1f440], [0x1f442, 0x1f4fc],
+  [0x1f4ff, 0x1f53d], [0x1f54b, 0x1f54e], [0x1f550, 0x1f567], [0x1f57a, 0x1f57a],
+  [0x1f595, 0x1f596], [0x1f5a4, 0x1f5a4], [0x1f5fb, 0x1f64f], [0x1f680, 0x1f6c5],
+  [0x1f6cc, 0x1f6cc], [0x1f6d0, 0x1f6d2], [0x1f6d5, 0x1f6d7], [0x1f6dc, 0x1f6df],
+  [0x1f6eb, 0x1f6ec], [0x1f6f4, 0x1f6fc], [0x1f7e0, 0x1f7eb], [0x1f7f0, 0x1f7f0],
+  [0x1f90c, 0x1f93a], [0x1f93c, 0x1f945], [0x1f947, 0x1f9ff], [0x1fa70, 0x1faff],
+  [0x20000, 0x3fffd],
+];
+
+function isWideChar(ch) {
+  const cp = ch.codePointAt(0);
+  return WIDE_RANGES.some(([lo, hi]) => cp >= lo && cp <= hi);
+}
+
+function displayWidth(text) {
+  let width = 0;
+  for (const ch of text) width += isWideChar(ch) ? 2 : 1;
+  return width;
+}
+
+function renderFirstLine(stdout) {
+  const cells = [];
+  let col = 0;
+  const blank = (at) => { cells[at] = " "; };
+  const put = (ch) => {
+    const w = isWideChar(ch) ? 2 : 1;
+    for (let at = col; at < col + w; at++) {
+      if (cells[at] === "") blank(at - 1);
+      if (cells[at + 1] === "" && at + 1 >= col + w) blank(at + 1);
+    }
+    cells[col] = ch;
+    if (w === 2) cells[col + 1] = "";
+    col += w;
+  };
+  const chars = [...stdout];
+  for (let i = 0; i < chars.length; i++) {
+    const ch = chars[i];
+    if (ch === "\n" || (ch === "\r" && chars[i + 1] === "\n")) break;
+    if (ch === "\r") { col = 0; continue; }
+    if (ch === "\b") { col = Math.max(0, col - 1); continue; }
+    if (ch === "\x1b" && chars[i + 1] === "[") {
+      let j = i + 2;
+      let param = "";
+      while (/[0-9;?]/u.test(chars[j] ?? "")) param += chars[j++];
+      const final = chars[j];
+      const n = param === "" ? 1 : Number(param);
+      if (final === "D") col = Math.max(0, col - n);
+      else if (final === "C") col += n;
+      else if (final === "K") {
+        if (param === "2") cells.length = 0;
+        else cells.length = Math.min(cells.length, col);
+      }
+      i = j;
+      continue;
+    }
+    put(ch);
+  }
+  for (let at = 0; at < cells.length; at++) if (cells[at] === undefined) cells[at] = " ";
+  return { text: cells.join("").replace(/\s+$/u, ""), column: col };
+}
+
+describe("installer text prompts with double-width characters (#1885)", () => {
+  const body = 'source "$1"; exec 3<>/dev/tty; value="$(installer_ui_read_text 3 "Answer: " 64)"; printf "\\nVALUE=%s\\n" "$value"';
+  const LEFT = "\x1b[D";
+  const HOME = "\x1b[H";
+  const RIGHT = "\x1b[C";
+  const END = "\x1b[F";
+  const DELETE = "\x1b[3~";
+  const BACKSPACE = "\x7f";
+  const modes = [
+    ["dumb terminal", { TERM: "dumb" }],
+    ["repainting terminal", { TERM: "xterm" }],
+  ];
+  // [name, keys typed before Enter, stored value, cursor offset in the value]
+  const cases = [
+    ["left arrows over a wide character", `a中b${LEFT}${LEFT}X`, "aX中b", 2],
+    ["backspace after a wide character", `a中b${LEFT}${BACKSPACE}`, "ab", 1],
+    ["backspace before a wide character", `a中b${LEFT}${LEFT}${BACKSPACE}`, "中b", 0],
+    ["delete of a wide character", `a中b${HOME}${RIGHT}${DELETE}`, "ab", 1],
+    ["inserting a wide character mid-line", `ab${LEFT}中`, "a中b", 2],
+    ["home then typing before wide characters", `中文x${HOME}Y`, "Y中文x", 1],
+    ["right arrow across a wide character", `a中b${HOME}${RIGHT}${RIGHT}X`, "a中Xb", 3],
+    ["End after moving left over wide characters", `中文x${LEFT}${LEFT}${LEFT}${END}Y`, "中文xY", 4],
+    ["left arrows over an emoji", `a🚀b${LEFT}${LEFT}X`, "aX🚀b", 2],
+    ["backspace after a 🚀 emoji", `a🚀b${LEFT}${BACKSPACE}`, "ab", 1],
+    ["delete of a 🪐 emoji", `x🪐y${HOME}${RIGHT}${DELETE}`, "xy", 1],
+    ["home then typing before a ⌚ character", `⌚a${HOME}Y`, "Y⌚a", 1],
+    ["right arrow across ⌚ and 🪐", `⌚🪐z${HOME}${RIGHT}${RIGHT}X`, "⌚🪐Xz", 3],
+    ["End after left arrows over emoji", `🚀⌚z${LEFT}${LEFT}${END}Y`, "🚀⌚zY", 4],
+  ];
+
+  for (const [modeName, env] of modes) {
+    for (const [name, keys, stored, cursorChars] of cases) {
+      it(`shows exactly the stored value after ${name} on a ${modeName}`, async () => {
+        const result = await runPtyOpenStdin(
+          body,
+          `${keys}\r`,
+          { ...env, LC_ALL: "C.UTF-8" },
+          "Answer: ",
+        );
+
+        expect(result.status).toBe(0);
+        expect(result.stdout).toMatch(new RegExp(`VALUE=${stored}\\r?\\n`, "u"));
+        const screen = renderFirstLine(result.stdout);
+        expect(screen.text).toBe(`Answer: ${stored}`);
+        // The cursor sits two columns past each wide character before it.
+        expect(screen.column).toBe(
+          displayWidth("Answer: ") + displayWidth([...stored].slice(0, cursorChars).join("")),
+        );
+      });
+    }
+  }
 });
