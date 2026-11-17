@@ -32,8 +32,7 @@ afterEach(() => {
 });
 
 describe("restoring a staged upload that was deleted without stagedDiscard (#1605 P-25)", () => {
-  // Expected to fail until #1871 (Archive restore puts a staged hold on kept documents) is decided.
-  it.fails("brings it back still unbound and still carrying a staged hold in the future", async () => {
+  it("brings it back still unbound and still carrying a staged hold in the future", async () => {
     vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "clean" });
     const fixture = await createIntegrationFixture("p25-staged-restore");
     const member = await fixture.session("member");
