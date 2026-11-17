@@ -172,9 +172,27 @@ async function seedUnlessBusy(userId: string): Promise<void> {
   }
 }
 
+/**
+ * The relay generation a reading was derived from (#1848 W-R1), for the
+ * route's `ETag`. Kept on the reading under a symbol and not enumerable, so it
+ * never reaches the response body: the body stays what ADR-0017 allows.
+ */
+export const RELAY_GENERATION: unique symbol = Symbol("relay generation");
+
+export type TaggedRelaySettings = RelaySettings & { readonly [RELAY_GENERATION]?: number };
+
+function tagged(settings: RelaySettings, generation: number): TaggedRelaySettings {
+  return Object.defineProperty(settings, RELAY_GENERATION, { value: generation, enumerable: false });
+}
+
+/** The generation a reading carries, or null when there is no relay. */
+export function relayGenerationOf(settings: RelaySettings): number | null {
+  return (settings as TaggedRelaySettings)[RELAY_GENERATION] ?? null;
+}
+
 export async function readRelaySettings(
   user: { id: string; isInstanceAdmin: boolean },
-): Promise<RelaySettings> {
+): Promise<TaggedRelaySettings> {
   const config = await resolvedConfig();
   const ingest: RelayIngest = config?.enabled ? "enabled" : "paused";
   // `enabled` already folds in `configured`, so this one test covers both an
@@ -226,7 +244,7 @@ export async function readRelaySettings(
       eq(imapIngestionMessages.userId, user.id),
       eq(imapIngestionMessages.status, "unattributed"),
     ));
-  return {
+  return tagged({
     address: relayAddressFor(user.id, relay.currentGeneration, config),
     /* The address is still shown when there is no checked sending address:
        the member needs it to set the forward up, and the word beside it says
@@ -238,7 +256,7 @@ export async function readRelaySettings(
     unattributed: unattributed?.count ?? 0,
     sender,
     senders,
-  };
+  }, relay.currentGeneration);
 }
 
 /**
@@ -252,11 +270,16 @@ export async function readRelaySettings(
  *
  * The new address is returned because the member needs to save it, and it is
  * derived here for that one response — never written, never logged.
+ *
+ * `expectedGeneration` is the request's `If-Match` (#1848 W-R1): given, the
+ * rotate happens only from that generation. The limits apply either way.
  */
 export async function rotateRelayAddress(
   user: { id: string; isInstanceAdmin: boolean },
   mode: RelayRotationMode,
-): Promise<RelaySettings> {
+  expectedGeneration?: number,
+  now = new Date(),
+): Promise<TaggedRelaySettings> {
   const config = await resolvedConfig();
   /* `configured`, not `enabled`: the administrator's pause (#1654) stops
      collection, not the member's own controls. An address that leaked while
@@ -267,7 +290,7 @@ export async function rotateRelayAddress(
     // rather than inventing an error the reader cannot act on.
     return readRelaySettings(user);
   }
-  await rotateRelay(user.id, mode, config);
+  await rotateRelay(user.id, mode, config, now, expectedGeneration);
   return readRelaySettings(user);
 }
 
@@ -284,7 +307,7 @@ export async function rotateRelayAddress(
 export async function setRelayIngest(
   user: { id: string; isInstanceAdmin: boolean },
   paused: boolean,
-): Promise<RelaySettings> {
+): Promise<TaggedRelaySettings> {
   const config = await resolvedConfig();
   // As for rotation: the member's own pause is recorded while the
   // administrator's holds, so it is still in force when theirs lifts (#1670 A-F3).

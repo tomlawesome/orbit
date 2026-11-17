@@ -25,6 +25,7 @@ import {
   runConfigurationPreflight,
   type ConfigurationMigrationTarget,
 } from "./configuration-migration";
+import { parseEnvOrbitContent } from "./env-orbit-file";
 
 // install's hand-off to the configuration migration: run_configuration_migration
 // and its --preflight companion (docs/installer-guarantees.md, Part 1 /
@@ -394,4 +395,44 @@ describe("standalone migration drops its rollback copy once the new file is conf
     expect(readFileSync(envFile(dir), "utf8")).toBe(LEGACY);
     expect(readFileSync(copyOf(dir), "utf8")).toBe("ORBIT_IMAGE=something-else\n");
   });
+});
+
+// A managed key is written once, at its first matching line (#1847): the empty
+// `# KEY=` placeholder after, before, or without a live line collapses, and the
+// result passes the strict parse the migration applies to its input.
+describe("migration writes each managed key once (#1847)", () => {
+  const DIGEST = "sha256:" + "a".repeat(64);
+  const TAIL = `ORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.2.3\nORBIT_CONFIG_APPLIED_DIGEST=${DIGEST}\nCOMPOSE_PROJECT_NAME=orbit\n`;
+  const LIVE = `ORBIT_IMAGE=${IMAGE}\n`;
+
+  const cases: Array<[string, string, string]> = [
+    ["placeholder after the live line", "ORBIT_IMAGE=\n# ORBIT_IMAGE=\nAPP_URL=x\n", `${LIVE}APP_URL=x\n${TAIL}`],
+    ["placeholder before the live line", "# ORBIT_IMAGE=\nAPP_URL=x\nORBIT_IMAGE=\n", `${LIVE}APP_URL=x\n${TAIL}`],
+    ["two placeholders and no live line", "APP_URL=x\n# ORBIT_IMAGE=\n# ORBIT_IMAGE=\n", `APP_URL=x\n${LIVE}${TAIL}`],
+    [
+      "a commented line that carries a value",
+      "ORBIT_IMAGE=\n# ORBIT_IMAGE=registry.example/x\nAPP_URL=x\n",
+      `${LIVE}# ORBIT_IMAGE=registry.example/x\nAPP_URL=x\n${TAIL}`,
+    ],
+  ];
+
+  for (const [name, input, expected] of cases) {
+    it(`${name}: one line per managed key, the rest byte for byte, and the file parses`, () => {
+      const dir = deployment(input);
+      const file = join(dir, ".env-orbit");
+      const result = migrateEnvironmentFile(file, {
+        orbitImage: IMAGE,
+        appliedVersion: "v1.2.3",
+        appliedDigest: DIGEST,
+        composeProjectName: "orbit",
+      });
+      expect(result.stderr).toBe("");
+      expect(result.status).toBe(0);
+      const output = readFileSync(file, "utf8");
+      expect(output).toBe(expected);
+      expect(output.split("\n").filter((line) => line.startsWith("ORBIT_IMAGE=")).length).toBe(1);
+      expect(parseEnvOrbitContent(output).ok).toBe(true);
+      expect(existsSync(`${file}${CONFIGURATION_ROLLBACK_SUFFIX}`)).toBe(false);
+    });
+  }
 });
