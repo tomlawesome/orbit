@@ -1370,6 +1370,7 @@ describe("the WebKit docker run in a worktree with the shared node_modules (#155
       mkdirSync(join(repo, "web"), { recursive: true });
       mkdirSync(stubs);
       copyFileSync(backendScript, join(repo, "scripts/test-backend.sh"));
+      copyFileSync(join(dirname(backendScript), "test-load-warning.sh"), join(repo, "scripts/test-load-warning.sh"));
       writeFileSync(join(repo, "pnpm-lock.yaml"), "");
       for (const args of [
         ["init", "--quiet"],

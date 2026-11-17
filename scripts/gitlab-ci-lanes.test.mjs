@@ -1575,6 +1575,7 @@ describe("merge requests run changed-reachable tests, the dev push runs everythi
         mkdirSync(join(repo, "web"), { recursive: true });
         mkdirSync(stubs);
         copyFileSync(SCRIPT, join(repo, "scripts", "test-backend.sh"));
+        copyFileSync(join(dirname(SCRIPT), "test-load-warning.sh"), join(repo, "scripts", "test-load-warning.sh"));
         writeFileSync(join(repo, "pnpm-lock.yaml"), "");
         const git = (...args) => execFileSync("git", args, { cwd: repo, stdio: "pipe" });
         git("init", "-q");
