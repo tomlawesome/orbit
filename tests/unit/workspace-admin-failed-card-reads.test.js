@@ -157,3 +157,35 @@ describe("every card failing at once", () => {
     expect(view.failed).toHaveProperty("contact");
   });
 });
+
+describe("R6-FR3 (#1604): an older slow admin session read never replaces a newer session", () => {
+  it("readSession() keeps answering the newer session after the slow admin read lands", async () => {
+    /** @type {(r: Response) => void} */
+    let releaseOld = () => {};
+    let sessionCalls = 0;
+    vi.stubGlobal("fetch", vi.fn(async (url) => {
+      const href = String(url);
+      if (href.includes("/api/auth/session")) {
+        sessionCalls += 1;
+        if (sessionCalls === 1) return new Promise((resolve) => { releaseOld = resolve; });
+        return new Response(JSON.stringify({ user: { id: "newer" }, csrfToken: "t-new" }), { status: 200 });
+      }
+      if (href.includes("/api/workspace")) {
+        return new Response(JSON.stringify({ workspace: { households: [HOUSEHOLD], activeHouseholdId: HOUSEHOLD.id } }), { status: 200 });
+      }
+      if (href.includes("/api/admin/users")) return new Response(JSON.stringify({ users: [] }), { status: 200 });
+      return new Response("{}", { status: 404 });
+    }));
+    const { readAdminScreen, readSession } = await import("../../web/src/lib/data/workspace.js");
+
+    const screen = readAdminScreen();
+    await vi.waitFor(() => expect(sessionCalls).toBe(1));
+    /* A newer read (a sign-in change elsewhere on the page) answers first. */
+    expect((await readSession({ refresh: true })).user.id).toBe("newer");
+
+    releaseOld(new Response(JSON.stringify({ user: { id: "older" }, csrfToken: "t-old" }), { status: 200 }));
+    await screen;
+
+    expect((await readSession()).user.id).toBe("newer");
+  });
+});

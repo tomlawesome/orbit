@@ -1,6 +1,7 @@
 import { getAuthConfig } from "orbit/lib/env";
 import { requireSession } from "orbit/lib/auth/session";
 import { assertKeyUsable } from "orbit/server/key-state";
+import { assertOutsideMaintenance } from "orbit/server/maintenance";
 import { verifySenderAddress } from "orbit/server/mail-in/sender-addresses";
 
 /**
@@ -36,6 +37,14 @@ export async function GET(event) {
      reader is sent to the screen that says why. */
   try {
     assertKeyUsable();
+  } catch {
+    return seeOther("/maintenance");
+  }
+  /* The same maintenance gate `read` and `write` apply (SEC-P1/1): a link
+     opened during a window verifies nothing, and the one-use token stays
+     good for after it. An administrator passes, as everywhere else. */
+  try {
+    await assertOutsideMaintenance(event.cookies);
   } catch {
     return seeOther("/maintenance");
   }

@@ -3,45 +3,41 @@ import { and, eq, inArray } from "drizzle-orm";
 
 import { getDb } from "orbit/db";
 import { notificationDeliveries, userPreferences } from "orbit/db/schema";
-import { themePreferenceSchema } from "orbit/lib/preferences";
+import { themePreferenceSchema, themePreferenceUpdateSchema } from "orbit/lib/preferences";
 
 import { write } from "$lib/server/api.js";
 import { keepImportanceOfferDismissed, keepLabelDays, keepPlanetSize, keepSkyDriver } from "$lib/server/fixture-scenes.js";
 
 /** Theme, text size, planet-name days, sky driver, planet size, the importance offer and notification-channel preferences (#735 port). */
 export const PUT = write(async (event, session) => {
-  const preference = themePreferenceSchema.parse(await event.request.json());
+  const preference = themePreferenceUpdateSchema.parse(await event.request.json());
+  /* Only the settings the request carries are written (#1738 A-S1, W-S2): a
+     setting it leaves out keeps its stored value, and a first save leaves the
+     database's own defaults in place. */
+  const carried = {
+    themeId: preference.theme,
+    ...(preference.textSize !== undefined && { textSize: preference.textSize }),
+    ...(preference.emailNotifications !== undefined && { emailNotifications: preference.emailNotifications }),
+    ...(preference.pushNotifications !== undefined && { pushNotifications: preference.pushNotifications }),
+    ...(preference.labelDays !== undefined && { labelDays: preference.labelDays }),
+    ...(preference.skyDriver !== undefined && { skyDriver: preference.skyDriver }),
+    ...(preference.planetSize !== undefined && { planetSize: preference.planetSize }),
+    ...(preference.importanceOfferDismissed !== undefined && { importanceOfferDismissed: preference.importanceOfferDismissed }),
+  };
   await getDb().transaction(async (transaction) => {
     await transaction.insert(userPreferences).values({
       userId: session.user.id,
-      themeId: preference.theme,
-      textSize: preference.textSize,
-      emailNotifications: preference.emailNotifications,
-      pushNotifications: preference.pushNotifications,
-      labelDays: preference.labelDays,
-      skyDriver: preference.skyDriver,
-      planetSize: preference.planetSize,
-      importanceOfferDismissed: preference.importanceOfferDismissed,
+      ...carried,
       updatedAt: new Date(),
     }).onConflictDoUpdate({
       target: userPreferences.userId,
-      set: {
-        themeId: preference.theme,
-        textSize: preference.textSize,
-        emailNotifications: preference.emailNotifications,
-        pushNotifications: preference.pushNotifications,
-        labelDays: preference.labelDays,
-        skyDriver: preference.skyDriver,
-        planetSize: preference.planetSize,
-        importanceOfferDismissed: preference.importanceOfferDismissed,
-        updatedAt: new Date(),
-      },
+      set: { ...carried, updatedAt: new Date() },
     });
 
     /** @type {Array<"email" | "web_push">} */
     const disabledChannels = [];
-    if (!preference.emailNotifications) disabledChannels.push("email");
-    if (!preference.pushNotifications) disabledChannels.push("web_push");
+    if (preference.emailNotifications === false) disabledChannels.push("email");
+    if (preference.pushNotifications === false) disabledChannels.push("web_push");
     if (disabledChannels.length) {
       await transaction.update(notificationDeliveries).set({
         status: "cancelled",

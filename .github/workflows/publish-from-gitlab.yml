@@ -10,8 +10,9 @@ name: Publish the GitLab-tested image to GHCR
 #
 # GitHub never connects to GitLab (#1824; GitHub's runners cannot reliably
 # reach it, #1821). GitLab hands off instead: its handoff_to_github job saves
-# the tested image, by digest, with its attestation, as one OCI-layout archive
-# and uploads it with the evidence and the SBOM to a release named
+# the tested image, by digest, with its attestations (the validation record
+# and the SBOM, D-S6 43a), as one OCI-layout archive and uploads it with the
+# evidence to a release named
 # handoff-<commit> in the separate public handoff repository,
 # <owner>/orbit-handoff (GitLab's upload script): a draft first,
 # handoff-complete.json last, published only once every file is up. This is
@@ -23,7 +24,8 @@ name: Publish the GitLab-tested image to GHCR
 #      ref, and refuses evidence older than seven days;
 #   2. the archive is loaded into a throwaway registry on this runner, and
 #      GitLab's attestation is verified there with the committed cosign.pub by
-#      the shared verifier (verify-validation-evidence.sh);
+#      the shared verifier (verify-validation-evidence.sh), which also writes
+#      out the newest verified SBOM for the SBOM attestation below;
 #   3. only then are the image and that attestation copied to GHCR, tagged and
 #      attested. Nothing unverified is written to GHCR.
 #
@@ -156,9 +158,10 @@ jobs:
           ORBIT_DIGEST: ${{ steps.evidence.outputs.digest }}
           ORBIT_COMMIT: ${{ github.sha }}
           ORBIT_REF: ${{ github.ref_name }}
-          # The SBOM attested below must be the one GitLab signed the sha256 of
-          # (sbomSha256, #1824); the SBOM file itself is not signed.
-          ORBIT_SBOM_FILE: ${{ steps.evidence.outputs.sbom }}
+          # The SBOM attested below is the one GitLab signed: the verifier
+          # extracts the newest verified spdxjson attestation's SPDX document
+          # to this path (D-S6 43a, #1848). No handed-off file is trusted.
+          ORBIT_SBOM_OUT: .orbit-supply-chain/image.spdx.json
         run: bash scripts/ci/verify-validation-evidence.sh
 
       # Only the newest commit on the branch may own the channel tag. This run
@@ -208,9 +211,14 @@ jobs:
             let raw = "";
             process.stdin.on("data", (c) => { raw += c; }).on("end", () => {
               const index = JSON.parse(raw);
+              // The validation attestations and the SBOM ones (D-S6 43a), so
+              // GHCR keeps the key-bound SBOM from GitLab too. No validation one
+              // means nothing is copied: the check below refuses.
+              const typeOf = (m) => m.annotations?.["dev.sigstore.bundle.predicateType"];
               const wanted = (index.manifests ?? []).filter((m) =>
                 m.artifactType === "application/vnd.dev.sigstore.bundle.v0.3+json" &&
-                m.annotations?.["dev.sigstore.bundle.predicateType"] === process.argv[1]);
+                [process.argv[1], "https://spdx.dev/Document"].includes(typeOf(m)));
+              if (!wanted.some((m) => typeOf(m) === process.argv[1])) return;
               process.stdout.write(wanted.map((m) => m.digest).join("\n"));
             });
           ' -- "${predicate_type}")"
@@ -237,15 +245,18 @@ jobs:
           printf 'image=%s\n' "${image}" >> "${GITHUB_OUTPUT}"
 
       # The same verifier against GHCR, so a copy that left GitLab's
-      # attestation behind fails here, before any channel tag moves.
+      # attestation behind fails here, before any channel tag moves. With
+      # ORBIT_SBOM_OUT it demands the SBOM attestation as well (43a).
       # countersign.yml and stable promotion read it from GHCR later.
       - name: Verify GitLab's evidence arrived on GHCR
         env:
           ORBIT_DIGEST: ${{ steps.evidence.outputs.digest }}
           ORBIT_COMMIT: ${{ github.sha }}
           ORBIT_REF: ${{ github.ref_name }}
-          ORBIT_SBOM_FILE: ${{ steps.evidence.outputs.sbom }}
-        run: ORBIT_IMAGE="${REGISTRY}/${IMAGE_NAME,,}" bash scripts/ci/verify-validation-evidence.sh
+        run: >-
+          ORBIT_SBOM_OUT="${RUNNER_TEMP}/ghcr-image.spdx.json"
+          ORBIT_IMAGE="${REGISTRY}/${IMAGE_NAME,,}"
+          bash scripts/ci/verify-validation-evidence.sh
 
       # Only now the channel tag, if this commit may take it (the "Decide
       # which tags" step): registry-side, by digest, so no bytes move and it
@@ -281,7 +292,7 @@ jobs:
         with:
           subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           subject-digest: ${{ steps.evidence.outputs.digest }}
-          sbom-path: ${{ steps.evidence.outputs.sbom }}
+          sbom-path: .orbit-supply-chain/image.spdx.json
           push-to-registry: true
           create-storage-record: false
 

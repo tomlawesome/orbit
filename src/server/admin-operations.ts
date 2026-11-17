@@ -28,7 +28,7 @@ import {
   MailInCredentialLockedError,
   verifyImapIngestionProviders,
 } from "@/server/mail-in/imap-ingestion";
-import { outgoingMailConfig, sendingConfigured, sendingImportedFromEnvironment, sendingImportSkipped, sendingSource } from "@/server/mail-in/sending-settings";
+import { outgoingMailConfig, resolveSendingAccount, sendingConfigured, sendingImportedFromEnvironment, sendingImportSkipped, sendingSource } from "@/server/mail-in/sending-settings";
 import { validUuid } from "@/lib/uuid";
 import { requireInstanceAdministrator } from "@/server/authorization";
 
@@ -450,6 +450,9 @@ export async function verifySmtpProvider(actorUserId: string): Promise<{ result:
   if (providerVerificationState.__orbitAdminSmtpVerification?.lastStartedAt && now - providerVerificationState.__orbitAdminSmtpVerification.lastStartedAt < 1_000) return { result: "retrying" };
   const inFlight = (async () => {
     try {
+      /* A key that cannot open the stored password reads as an empty config
+         below, which would record "not set up"; say it is locked instead. */
+      if ((await resolveSendingAccount().catch(() => null))?.state === "locked") return "credential_locked";
       return await verifySmtpProviderConnection(await outgoingMailConfig());
     } catch {
       return "unsafe_input";

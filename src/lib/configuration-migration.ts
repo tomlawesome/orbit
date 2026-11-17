@@ -361,6 +361,8 @@ function migrateLocked(file: string, options: MigrateEnvironmentFileOptions, rel
     const withoutCr = line.endsWith("\r") ? line.slice(0, -1) : line;
     const key = MANAGED_ORDER.find((candidate) => withoutCr.startsWith(`${candidate}=`) || withoutCr === `# ${candidate}=`);
     if (key) {
+      // #1847: write each managed key once, at its first line; drop repeats.
+      if (written.has(key)) continue;
       output += `${key}=${managed[key]}${newline}`;
       written.add(key);
     } else {

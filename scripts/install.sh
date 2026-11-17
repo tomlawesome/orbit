@@ -515,6 +515,8 @@ read_environment_value() {
       # The engine writes CRLF lines into a CRLF file; drop the CR.
       value="${line#*=}"
       value="${value%$'\r'}"
+      # Compose drops blanks between the "=" and the value; so do we.
+      value="${value#"${value%%[![:blank:]]*}"}"
       # Read the value the way Compose's env-file parser does: a trailing
       # comment (spaces or tabs, then "#", to the end) comes off, then
       # trailing spaces and tabs, then one pair of matching quotes. Otherwise
@@ -1998,6 +2000,13 @@ name_earlier_originals() {
 # them and removes nothing.
 readonly undo_copy_folder_pattern='^[0-9]{8}T[0-9]{6}Z(-repair)?(-[2-9])?$'
 
+# smtp_copy_tmp_name <name>: <name> is a temporary file repair.sh's mktemp
+# makes in an undo folder, which a killed repair leaves (#1848 FR-S1b).
+smtp_copy_tmp_name() {
+  local LC_ALL=C
+  [[ "$1" =~ ^(\.env-orbit|docker-compose\.mail\.yml)\.smtp-copy\.[A-Za-z0-9]{6}$ ]]
+}
+
 # undo_copy_folder_qualifies <folder>: <folder> is a real dated folder (not a
 # symlink) directly inside a real orbit-install-backups, readable, holding
 # nothing but the names the installer and repair.sh write there, each a
@@ -2011,7 +2020,7 @@ undo_copy_folder_qualifies() {
   for entry in "$folder"/*; do
     case "${entry##*/}" in
       .env-orbit | "$smtp_overlay_file" | "$smtp_copy_marker" | .env-orbit.smtp-copy.tmp) ;;
-      *) status=1; break ;;
+      *) smtp_copy_tmp_name "${entry##*/}" || { status=1; break; } ;;
     esac
     is_regular_non_symlink_file "$entry" || { status=1; break; }
   done
@@ -3041,13 +3050,22 @@ smtp_read_record() {
 
 # smtp_discard_copy: the change is confirmed. Removes the files the
 # retirement wrote into the undo copy's folder (.env-orbit's lines and its
-# temporary file, the copy marker and, from repair.sh, the overlay), the
-# folder when nothing else is in it, then the step record. Anything else in
-# the folder stays.
+# temporary file, the copy marker and, from repair.sh, the overlay and the
+# temporary files a killed repair left, #1848 FR-S1b), the folder when
+# nothing else is in it, then the step record. Anything else in the folder
+# stays.
 smtp_discard_copy() {
+  local saved_options entry status=0
   if [[ -n "$smtp_copy_dir" && ! -L orbit-install-backups && -d "$smtp_copy_dir" && ! -L "$smtp_copy_dir" ]]; then
     rm -f -- "$smtp_copy_dir/.env-orbit" "$smtp_copy_dir/$smtp_overlay_file" "$smtp_copy_dir/$smtp_copy_marker" \
       "$smtp_copy_dir/.env-orbit.smtp-copy.tmp" || return 1
+    saved_options="$(shopt -p nullglob)" || true
+    shopt -s nullglob
+    for entry in "$smtp_copy_dir"/.env-orbit.smtp-copy.?????? "$smtp_copy_dir/$smtp_overlay_file".smtp-copy.??????; do
+      if smtp_copy_tmp_name "${entry##*/}"; then rm -f -- "$entry" || status=1; fi
+    done
+    eval "$saved_options"
+    [[ "$status" == 0 ]] || return 1
     rmdir -- "$smtp_copy_dir" 2>/dev/null || true
   fi
   rm -f -- "$smtp_retirement_record"
@@ -3125,11 +3143,81 @@ smtp_wait_ready() {
   done
 }
 
+# #1855: the retirement holds the backup/restore lock that backup.sh,
+# restore.sh, the engine's export and repair.sh take (the shared flock
+# pattern), taken as repair.sh's acquire_backup_restore_lock takes it, in the
+# backups folder worked out as they work it out. Held from before the first
+# change until the confirmation and the step-record removal are done.
+smtp_lock_fd=""
+smtp_backup_restore_lock_path() {
+  local dir="${ORBIT_BACKUP_DIR:-$target_dir/backups}"
+  [[ "$dir" == /* ]] || dir="$target_dir/$dir"
+  printf '%s/.orbit-backup-restore.lock' "$dir"
+}
+
+# smtp_take_backup_restore_lock: 0 with the lock on $smtp_lock_fd (or with no
+# flock on PATH, said once); 1 with one stdout line when the retirement must
+# wait: the lock is held, or its file is unusable (never opened, followed or
+# replaced: a missing one is created only with O_EXCL, noclobber).
+smtp_take_backup_restore_lock() {
+  local lock fd status=0 words esc=$'\033'
+  lock="$(smtp_backup_restore_lock_path)"
+  if ! command -v flock >/dev/null 2>&1; then
+    printf 'Orbit installer: flock is not installed, so the old mail settings are being retired without the backup/restore lock; make sure no backup, restore or Repair run is going on.\n' || true
+    return 0
+  fi
+  local unusable="Orbit installer: the backup/restore lock at ${lock} can't be used (a link, not a regular file, unreadable, or it can't be created), so the old mail settings were left in place; the next update or Repair run will retire them."
+  if [[ ! -e "$lock" && ! -L "$lock" ]]; then
+    ( umask 077 && mkdir -p -- "${lock%/*}" && set -C && : > "$lock" ) 2>/dev/null || true
+  fi
+  if [[ -L "$lock" || ! -f "$lock" || ! -r "$lock" ]] || ! { exec {fd}<"$lock"; } 2>/dev/null; then
+    printf '%s\n' "$unusable" || true
+    return 1
+  fi
+  # Swapped for a link between the test and the open: let it go untouched.
+  if [[ -L "$lock" || ! "/dev/fd/$fd" -ef "$lock" ]]; then
+    exec {fd}<&-
+    printf '%s\n' "$unusable" || true
+    return 1
+  fi
+  # flock's words kept: exit 1 with none is a holder; with words (an
+  # unsupported filesystem) it is untestable, as repair.sh reads it.
+  words="$(flock -n -x "$fd" 2>&1 >/dev/null)" || status=$?
+  if [[ "$status" == 0 ]]; then
+    smtp_lock_fd="$fd"
+    return 0
+  fi
+  exec {fd}<&-
+  if [[ "$status" == 1 && -z "$words" ]]; then
+    printf 'Orbit installer: a backup, restore or Repair run is using the backups folder, so the old mail settings were left in place; the next update or Repair run will retire them.\n' || true
+  else
+    # One bounded, control-free line, as repair.sh's lock_words_excerpt makes it.
+    words="$(printf '%s' "$words" | LC_ALL=C sed -E "s|${esc}\\[[0-9;?]*[ -/]*[@-~]||g" |
+      LC_ALL=C tr '\r\n\t' '   ' | LC_ALL=C tr -d '\000-\037\177' | LC_ALL=C tr -s ' ' |
+      LC_ALL=C sed -E 's/^ +| +$//g' | { head -c 200; cat >/dev/null; })"
+    [[ -n "$words" ]] || words="exit status $status"
+    printf 'Orbit installer: the backup/restore lock at %s could not be tested (flock said: %s), so the old mail settings were left in place; the next update or Repair run will retire them.\n' "$lock" "$words" || true
+  fi
+  return 1
+}
+
+smtp_release_backup_restore_lock() {
+  [[ -z "$smtp_lock_fd" ]] || exec {smtp_lock_fd}<&-
+  smtp_lock_fd=""
+}
+
 retire_smtp_lines() {
   [[ "$target_was_empty" != 1 ]] || return 0
   smtp_retirement_due || return 0
   ! stopping || return 0
   mail_sending_gate_holds || return 0
+  smtp_take_backup_restore_lock || return 0
+  retire_smtp_steps
+  smtp_release_backup_restore_lock
+}
+
+# The retirement itself, under the lock retire_smtp_lines took.
+retire_smtp_steps() {
   smtp_read_record
 
   # A retirement that finished but was not confirmed: the gate holds now, so

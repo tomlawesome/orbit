@@ -19,6 +19,7 @@
  *    (`"ui" | "imported" | null`), beside `mailboxIngestion`: the field the
  *    launcher (ai/orbit-launcher#339) reads.
  */
+import postgres from "postgres";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanupIntegrationEnvironment, createIntegrationFixture, lockTheInstance, type IntegrationFixture } from "./support/fixtures";
 import {
@@ -47,7 +48,7 @@ vi.mock("nodemailer", async (importOriginal) => {
 const { readMailboxSettings, removeMailboxCredential, setMailboxSettings } = await import("@/server/mail-in/mailbox-settings");
 const { secondFactorConfigured } = await import("@/server/sign-in-approvals");
 const { sendBoundedMail, outgoingMailReady } = await import("@/server/invitations/send");
-const { getAdministratorOperations } = await import("@/server/admin-operations");
+const { getAdministratorOperations, verifySmtpProvider } = await import("@/server/admin-operations");
 
 let fixture: IntegrationFixture;
 let admin: string;
@@ -331,6 +332,59 @@ describe("sendBoundedMail reads the sending row, not SMTP_*", () => {
     } finally {
       restore();
     }
+  });
+
+  it("A-R1: testing the relay while the key is missing says the password is locked, not that sending is not set up", async () => {
+    const { setSendingSettings } = await sending();
+    await setSendingSettings(admin, null, anotherAccount);
+    const restore = lockTheInstance();
+    try {
+      const { result } = await verifySmtpProvider(admin);
+      expect(result).toBe("credential_locked");
+    } finally {
+      restore();
+    }
+  });
+
+  it("FR-3: choosing mailbox sending while the mailbox credential is being removed never leaves sending on a removed credential", async () => {
+    const { setSendingSettings, readSendingSettings } = await sending();
+    await setUpMailbox();
+    const url = process.env.DATABASE_URL;
+    if (!url) throw new Error("DATABASE_URL is required");
+    const other = postgres(url, { max: 1, prepare: false });
+    let refusal: unknown = null;
+    try {
+      /* Another administrator is mid-removal: holding the mailbox row. */
+      await other`begin`;
+      await other`select id from mail_in_mailbox for update`;
+      let settled = false;
+      const choosing = setSendingSettings(admin, null, viaMailbox).then(
+        () => { settled = true; return null; },
+        (error: unknown) => { settled = true; return error; },
+      );
+      /* Wait until the choose call is really queued on a row lock (not a fixed
+         sleep), so the test cannot pass on a call that never reached the lock. */
+      const deadline = Date.now() + 15_000;
+      for (;;) {
+        const [{ waiting }] = await other<{ waiting: number }[]>`
+          select count(*)::int as waiting from pg_stat_activity
+          where datname = current_database() and wait_event_type = 'Lock' and pid <> pg_backend_pid()`;
+        if (waiting > 0) break;
+        if (settled || Date.now() > deadline) throw new Error("the choose call never waited on the mailbox row lock");
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      expect(settled, "the choose call waits for the removal").toBe(false);
+      await other`update mail_in_mailbox set password_secret_id = null, enabled = false`;
+      await other`commit`;
+      refusal = await choosing;
+    } finally {
+      await other`rollback`.catch(() => undefined);
+      await other.end();
+    }
+
+    /* Refused because the credential is gone, not for any other reason. */
+    expect(refusal, "choosing mailbox was refused").toMatchObject({ code: "mailbox_not_configured", status: 409 });
+    expect((await readSendingSettings(admin)).via).not.toBe("mailbox");
   });
 
   it("records the last send, which the card shows as last sent", async () => {

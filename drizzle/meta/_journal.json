@@ -127,6 +127,20 @@
       "when": 1794648731909,
       "tag": "0017_imap_attachment_hash_sealed",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1794751399150,
+      "tag": "0018_relay_rotation_limit_index",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1794899362770,
+      "tag": "0019_sign_in_approval_sends",
+      "breakpoints": true
     }
   ]
 }

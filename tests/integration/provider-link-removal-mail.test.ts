@@ -26,7 +26,7 @@
 
 import { randomUUID } from "node:crypto";
 import { eq, inArray } from "drizzle-orm";
-import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import {
   auditLog,
@@ -47,9 +47,18 @@ import {
   accountAddressColumns,
   cleanupIntegrationEnvironment,
   createIntegrationFixture,
+  lockTheInstance,
   type IntegrationSession,
 } from "./support/fixtures";
+import { clearMailState, fakeTransporter, setUpSending } from "./support/mail-sending-1629";
 import { callRouteForSession, loadRoute, type RouteHandler } from "./support/request-event";
+
+/* Only for A-S2: saving sending runs a live sign-in that nodemailer must answer. */
+vi.mock("nodemailer", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("nodemailer")>();
+  const replaced = { ...actual, createTransport: () => fakeTransporter() };
+  return { ...replaced, default: { ...actual.default, createTransport: () => fakeTransporter() } };
+});
 
 const previousOidcKey = process.env.ORBIT_AUTH_OIDC;
 process.env.ORBIT_AUTH_OIDC = "true";
@@ -62,6 +71,7 @@ const created: string[] = [];
 
 afterEach(async () => {
   const db = getDb();
+  await clearMailState();
   await db.delete(instanceAuthority);
   await db.delete(auditLog);
   if (created.length > 0) await db.delete(users).where(inArray(users.id, created));
@@ -396,6 +406,21 @@ describe("mail mode: refusals change nothing (#1676)", () => {
 
     await expectUntouched(gone, 2, capture);
     expect(await sessionIds([stranded.id])).toEqual([providerSession]);
+  });
+
+  it("A-S2: with sending set up but its password unreadable, the refusal does not say mail is not set up", async () => {
+    const gone = newIssuer();
+    const admin = await member("r-admin", { password: true, admin: true, primary: true, issuers: [] });
+    await member("r-one", { password: false, issuers: [gone] });
+    await setUpSending(admin.id);
+    const restore = lockTheInstance();
+    let failure: Error;
+    try {
+      failure = await expectRefused(removeProviderLinks(admin.id, gone, { mailStranded: true }), { code: "mail_not_ready", status: 409 });
+    } finally {
+      restore();
+    }
+    expect(failure.message).not.toMatch(/not set up/iu);
   });
 
   it("refuses with 409 while the issuer is the one currently configured, saying to turn the provider off first", async () => {

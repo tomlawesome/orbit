@@ -143,6 +143,11 @@ saved copy:
 rm -f backups/orbit-pre-upgrade.env
 ```
 
+If restore.sh says outgoing mail is not set up, enter the SMTP password
+again in Administration > Mail. A backup taken before the update that moved
+that password into Orbit's Mail settings does not hold it, and the copy on
+the server was deleted then.
+
 [Installer guarantees](installer-guarantees.md#before-and-after-an-upgrade)
 lists exactly what the installer promises around an upgrade.
 

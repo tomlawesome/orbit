@@ -67,9 +67,9 @@ export function finalWarningLabel(count: number): string {
 /**
  * A configuration that cannot be resolved is "not configured", not a 500: the
  * thrown message names environment variables, which is the operator's surface
- * (#411), not this reader's. `smtpUrl` is the same emptiness test
- * `verifySmtpProviderConnection` treats as `smtp_unconfigured`, so the screen
- * and the worker cannot disagree about whether mail can leave.
+ * (#411), not this reader's. `sendingConfigured` (the sending row) is the
+ * test the sign-in door uses as well; the worker reads the same row through
+ * `outgoingMailConfig`, whose empty answer is `smtp_unconfigured`.
  */
 async function outboundMailState(): Promise<OutboundMail> {
   try {

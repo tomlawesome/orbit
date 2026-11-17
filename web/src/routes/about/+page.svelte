@@ -4,6 +4,7 @@
   import { creditsView, letterOf, sidecarVersionOf } from "$lib/about/group.js";
   import { buildLineOf, readAbout, readSession, readWorkspace } from "$lib/data/workspace.js";
   import PageSky from "$lib/PageSky.svelte";
+  import Sky from "$lib/pocket/Sky.svelte";
   import Chrome from "$lib/Chrome.svelte";
   import Credit from "./Credit.svelte";
   import "./about.css";
@@ -75,6 +76,8 @@
 <svelte:head><title>Orbit — about</title></svelte:head>
 
 <div class="about-page">
+<!-- #1789 W-F6/W-F9: the pocket kit's own sky under the pocket query, as every pocket screen has; PageSky (hidden there) stays for the desk. -->
+<div class="phone-sky"><Sky /></div>
 <PageSky />
 
 <Chrome user={chrome?.user} current="about" household={chrome?.household} />

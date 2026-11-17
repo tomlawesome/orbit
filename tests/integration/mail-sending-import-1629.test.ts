@@ -227,6 +227,55 @@ describe("importing SMTP_* once on first start", () => {
   });
 });
 
+describe("importing lines the old reader accepted (A-S6, A-F15, A-F18)", () => {
+  it("A-S6: imports a host written with a trailing dot, stored without the dot", async () => {
+    const { importSendingFromEnvironment, readSendingSettings } = await sending();
+    stubV033Environment({ SMTP_HOST: "smtp.legacy.example." });
+
+    await importSendingFromEnvironment();
+
+    expect(await readSendingSettings(admin)).toMatchObject({ configured: true, host: "smtp.legacy.example", source: "imported" });
+  });
+
+  it("A-S6: imports a directly set password longer than 1,024 characters", async () => {
+    const { importSendingFromEnvironment, readSendingSettings } = await sending();
+    stubV033Environment({ SMTP_PASSWORD_FILE: undefined, SMTP_PASSWORD: `fake-long-${"x".repeat(1_100)}` });
+
+    await importSendingFromEnvironment();
+
+    expect(await readSendingSettings(admin)).toMatchObject({ configured: true, password: "set", source: "imported" });
+  });
+
+  it("A-S6: imports a directly set password holding a control character", async () => {
+    const { importSendingFromEnvironment, readSendingSettings } = await sending();
+    stubV033Environment({ SMTP_PASSWORD_FILE: undefined, SMTP_PASSWORD: "fake-pass\u0007word-1629" });
+
+    await importSendingFromEnvironment();
+
+    expect(await readSendingSettings(admin)).toMatchObject({ configured: true, password: "set", source: "imported" });
+  });
+
+  it("A-F18: imports a user with a control character, as the old reader sent with it", async () => {
+    const { importSendingFromEnvironment, readSendingSettings } = await sending();
+    stubV033Environment({ SMTP_USER: "orbit\u0007user" });
+
+    await importSendingFromEnvironment();
+
+    expect(await readSendingSettings(admin)).toMatchObject({ configured: true, source: "imported" });
+  });
+
+  it("A-F15: shortens an imported sender name to the 80 characters the Mail card allows", async () => {
+    const { importSendingFromEnvironment, readSendingSettings } = await sending();
+    stubV033Environment({ SMTP_FROM: `${"N".repeat(150)} <orbit@legacy.example>` });
+
+    await importSendingFromEnvironment();
+
+    const view = await readSendingSettings(admin);
+    expect(view.source).toBe("imported");
+    expect(view.senderName).toHaveLength(80);
+  });
+});
+
 describe("after the import", () => {
   it("ignores SMTP_*: a send goes through the imported account whatever the lines now say", async () => {
     const { importSendingFromEnvironment } = await sending();

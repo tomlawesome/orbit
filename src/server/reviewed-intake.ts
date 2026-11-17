@@ -675,6 +675,7 @@ async function transferAttachments(userId: string, householdId: string, itemId: 
       continue;
     }
     let quarantinePath: string | undefined;
+    let fileStream: ReturnType<typeof createReadStream> | undefined;
     try {
       // Decrypted into a `.recovery` file whose tag has verified; the file is
       // streamed into the upload and discarded below, whatever the outcome (#1571).
@@ -685,12 +686,15 @@ async function transferAttachments(userId: string, householdId: string, itemId: 
         storageKey: attachment.storageKey,
         envelope: envelopeOf(attachment),
       }, { recipientUserId: userId, receiptId }));
+      /* Kept so the finally can destroy it: an upload refused before it reads
+         leaves the file handle open until the stream is collected. */
+      fileStream = createReadStream(quarantinePath);
       const document = await uploadItemDocument({
         userId,
         householdId,
         itemId,
         filename: attachment.displayName,
-        body: Readable.toWeb(createReadStream(quarantinePath)) as ReadableStream<Uint8Array>,
+        body: Readable.toWeb(fileStream) as ReadableStream<Uint8Array>,
         declaredBytes: attachment.sizeBytes,
         /* #1388: held under the mail limit at ingestion; the upload limit never
            applies to mail. The exact held size is the bound, so a .recovery
@@ -758,6 +762,7 @@ async function transferAttachments(userId: string, householdId: string, itemId: 
       pending.push(attachment.id);
       failureCode ??= "attachment_transfer_failed";
     } finally {
+      fileStream?.destroy();
       if (quarantinePath) await openDocumentStorage().discardQuarantine(quarantinePath).catch(() => undefined);
     }
   }
@@ -855,6 +860,7 @@ async function scanAndStageAttachments(userId: string, input: MailboxApproval, i
   const config = getDocumentConfig();
   const storage = openDocumentStorage();
   const quarantined: Array<{ attachment: typeof selected[number]; path: string }> = [];
+  const openStreams: ReturnType<typeof createReadStream>[] = [];
   try {
     for (const attachment of selected) {
       const { quarantinePath } = await readHeldImapAttachmentToQuarantine({
@@ -886,13 +892,17 @@ async function scanAndStageAttachments(userId: string, input: MailboxApproval, i
     await discardStagedDocuments(input.householdId, selected.map((row) => row.id), { exceptSealedUnder: itemId }, fence);
     const staged: string[] = [];
     for (const { attachment, path } of quarantined) {
+      /* Destroyed in the finally below: an upload refused before it reads
+         would otherwise leave the file handle open. */
+      const fileStream = createReadStream(path);
+      openStreams.push(fileStream);
       const document = await uploadItemDocument({
         userId,
         householdId: input.householdId,
         itemId,
         staged: true,
         filename: attachment.displayName,
-        body: Readable.toWeb(createReadStream(path)) as ReadableStream<Uint8Array>,
+        body: Readable.toWeb(fileStream) as ReadableStream<Uint8Array>,
         declaredBytes: attachment.sizeBytes,
         /* #1388/#1784: held under the mail limit at ingestion; the upload
            limit never applies to mail. The exact held size is the bound. */
@@ -911,6 +921,7 @@ async function scanAndStageAttachments(userId: string, input: MailboxApproval, i
     }
     return staged;
   } finally {
+    for (const stream of openStreams) stream.destroy();
     for (const { path } of quarantined) await storage.discardQuarantine(path).catch(() => undefined);
   }
 }

@@ -11,7 +11,7 @@
  * filling the hole with a plausible value.
  */
 
-import { bodySize, daysUntil, dialPlacement, seatBodies } from "$lib/data/chart.js";
+import { bodySize, daysUntil, dialPlacement, drivingDays, importanceSize, seatBodies } from "$lib/data/chart.js";
 import { ago, bandOf, dayMonthYear, initials, plural, tminus } from "$lib/format.js";
 import { SHIPPED_SECTION_IDS } from "$lib/marks.js";
 
@@ -305,19 +305,24 @@ export function invitationRowsOf(invitations, now) {
  * card beside you.
  * @param {import('./workspace.js').Household | null} [household]
  * @param {?string} [today]
+ * @param {{ skyDriver?: ?string, firstWarningDays?: ?number, planetSize?: ?string }} [options] the reader's Planets settings, as the dial takes them
  * @returns {{ marks: ConstellationMark[], figures: ConstellationFigure[] }}
  */
-export function constellationOf(household, today) {
+export function constellationOf(household, today, { skyDriver, firstWarningDays, planetSize } = {}) {
   /* No today, no sky: an undated room is better than one drawn from NaN. */
   if (!today) return { marks: [], figures: [] };
   const accents = new Map((household?.sections ?? []).map((section) => [section.id, section]));
   /** @type {ConstellationMark[]} */
   const marks = [];
+  /** The days each star sits by, in step with `marks` until they are sorted. */
+  const drivings = /** @type {number[]} */ ([]);
   for (const item of household?.items ?? []) {
     if (item.status !== "active" || !item.dueDate) continue;
     const days = daysUntil(item.dueDate, today);
     if (days === null) continue;
-    const { angle, radius } = dialPlacement(days);
+    const driving = drivingDays({ days, reminderDays: item.reminderDays }, { skyDriver, firstWarningDays });
+    const { angle, radius } = dialPlacement(driving);
+    drivings.push(driving);
     marks.push({
       id: item.id,
       title: item.title,
@@ -329,11 +334,11 @@ export function constellationOf(household, today) {
       band: bandOf(days),
       dx: Math.cos(angle) * radius,
       dy: Math.sin(angle) * radius,
-      halo: bodySize(item.costMinor, item.recurrenceMonths),
+      halo: planetSize === "importance" ? importanceSize(item.importance, "desk") : bodySize(item.costMinor, item.recurrenceMonths),
     });
   }
   /* Touching stars are nudged apart by bearing at the room's own (desk) size (#1464). */
-  const seated = seatBodies(marks.map((mark) => ({ days: mark.days, halo: mark.halo, ...dialPlacement(mark.days) })), (b) => b.halo);
+  const seated = seatBodies(marks.map((mark, i) => ({ days: mark.days, halo: mark.halo, ...dialPlacement(drivings[i]) })), (b) => b.halo);
   marks.forEach((mark, i) => {
     mark.dx = Math.cos(seated[i].angle) * seated[i].radius;
     mark.dy = Math.sin(seated[i].angle) * seated[i].radius;
@@ -425,7 +430,9 @@ export function householdScreenOf({
     items: household.items ?? [],
     /* The backdrop: this household's own constellation, at room scale, behind
        the cards (§15 H2). Placed by the dial law here; composed by room.js. */
-    constellation: constellationOf(household, today),
+    constellation: constellationOf(household, today, {
+      skyDriver: user?.skyDriver, firstWarningDays: user?.firstWarningDays, planetSize: user?.planetSize,
+    }),
     entries,
     memberCount,
     owner,

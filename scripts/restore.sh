@@ -39,6 +39,8 @@ read_environment_value() {
       # A CRLF .env-orbit is valid; drop the CR.
       value="${line#*=}"
       value="${value%$'\r'}"
+      # Compose drops blanks between the "=" and the value; so do we.
+      value="${value#"${value%%[![:blank:]]*}"}"
       # Read the value the way Compose's env-file parser does: a trailing
       # comment (spaces or tabs, then "#", to the end) comes off, then
       # trailing spaces and tabs, then one pair of matching quotes. Otherwise
@@ -247,6 +249,32 @@ wait_for_health() {
     sleep 1
   done
 }
+# #1848 O-S1, called by restore.sh only: once a restore or --finish has
+# succeeded, ask the restored app whether outgoing mail is set up, with
+# repair's rule (mail_sending_gate_holds):
+# exactly one answer line, exit 0, source imported or ui. Anything else, a
+# failed exec or a timeout prints one line saying the SMTP password may have
+# to be entered again. Never changes the exit status; no copy is kept.
+# shellcheck disable=SC2317  # only restore.sh calls it
+mail_sending_notice() {
+  local answer project seconds="${ORBIT_RESTORE_MAIL_STATUS_SECONDS:-30}"
+  [[ "$seconds" =~ ^[1-9][0-9]{0,3}$ ]] || seconds=30
+  if project="$(derive_compose_project_name)" &&
+    answer="$(set -o pipefail
+      { timeout --signal=TERM --kill-after=1s "$seconds" \
+        docker compose --project-name "$project" --env-file "$environment_file" \
+        exec -T orbit-app node /opt/orbit/cli/orbit.js mail-sending-status </dev/null 2>/dev/null; } |
+        head -c 257 && printf x)"; then
+    answer="${answer%x}"
+    answer="${answer%$'\n'}"
+    if ((${#answer} <= 256)) &&
+      [[ "$answer" =~ ^mail-sending\ source=(imported|ui|none)\ imported-from-environment=(true|false)$ ]] &&
+      [[ "${BASH_REMATCH[1]}" != none ]]; then
+      return 0
+    fi
+  fi
+  printf '%s\n' "Orbit restore: outgoing mail is not set up on the restored data (or Orbit could not confirm it). If this backup was taken before the update that moved the SMTP password into Orbit's Mail settings, that password was deleted from the server and is not in the backup: enter it again in Administration > Mail." >&2
+}
 # --- End of the shared functions. -------------------------------------------
 
 yes_flag=() && recover=false && finish=false && backup_file=""
@@ -272,7 +300,7 @@ if [[ "$finish" == true ]]; then
   engine_host_identity
   run_engine "" restore --finish </dev/null || exit $?
   drop_marker
-  exit 0
+  mail_sending_notice; exit 0
 fi
 if [[ "$recover" == true ]]; then
   [[ -z "$backup_file" && "${#yes_flag[@]}" == 0 ]] || fail 'usage failed; --recover does not accept a new backup bundle.'
@@ -329,7 +357,7 @@ if [[ "$status" == 0 && -f "$journal_path" ]]; then
   if compose start orbit-app >/dev/null 2>&1 && wait_for_health; then
     run_engine "" restore --finish </dev/null ||
       fail 'finish failed; Orbit is running the restored data, but the restore journal and checkpoint could not be removed; run bash scripts/restore.sh --finish.'
-    exit 0
+    mail_sending_notice; exit 0
   fi
   compose stop orbit-app >/dev/null 2>&1 || printf 'Orbit could not be stopped again.\n' >&2
   printf '%s\n' "$keep_stopped_message" >&2
@@ -341,4 +369,4 @@ if [[ -f "$journal_path" ]]; then
 fi
 compose start orbit-app >/dev/null 2>&1 || fail 'health failed; Orbit could not be started again.'
 wait_for_health || fail 'health failed; Orbit did not become healthy after the restore.'
-exit "$status"
+[[ "$status" != 0 || "$recover" == true ]] || mail_sending_notice; exit "$status"

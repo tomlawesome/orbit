@@ -138,8 +138,8 @@ describe("the About read's small parsers (#1256)", () => {
  *  - Nothing saved yet (the very first call): answer at once with
  *    version null ("not known", row state still "running"), start the probe
  *    in the background, and serve its answer from the next call on.
- *  - A saved answer is served as it stands while a refresh runs or hangs, and
- *    a refresh that fails or times out never replaces it with null.
+ *  - A saved answer is served as it stands while a refresh runs or hangs; a
+ *    refresh that fails or times out turns it into "not known" (#1603).
  *  - Calls that arrive while a probe is in flight share it: one probe each.
  */
 describe("getAboutFacts serves the saved answer and probes in the background (#1465)", () => {
@@ -185,7 +185,7 @@ describe("getAboutFacts serves the saved answer and probes in the background (#1
     expect(ROW(second, "clamav")).toEqual({ id: "clamav", state: "running", version: "1.5.4" });
   });
 
-  it("never waits on a hanging probe once an answer is saved, and keeps the saved answer when the refresh gives up", async () => {
+  it("never waits on a hanging probe once an answer is saved, and shows 'not known' once the refresh gives up (#1603 A-F3)", async () => {
     const getFacts = await freshRead();
     let hang = false;
     const probes: AboutProbes = {
@@ -205,11 +205,35 @@ describe("getAboutFacts serves the saved answer and probes in the background (#1
     expect(ROW(during, "postgres")?.version).toBe("18.0");
     expect(ROW(during, "clamav")?.version).toBe("1.5.4");
 
-    /* Long enough for any probe timeout to have fired: the answer still stands. */
+    /* Long enough for any probe timeout to have fired: the last check failed, so the old version is no longer shown (#1603 A-F3). */
     await vi.advanceTimersByTimeAsync(10_000);
     const later = await answeredWithin(getFacts(probes, {}));
-    expect(ROW(later, "postgres")).toEqual({ id: "postgres", state: "running", version: "18.0" });
-    expect(ROW(later, "clamav")).toEqual({ id: "clamav", state: "running", version: "1.5.4" });
+    expect(ROW(later, "postgres")).toEqual({ id: "postgres", state: "running", version: null });
+    expect(ROW(later, "clamav")).toEqual({ id: "clamav", state: "running", version: null });
+  });
+
+  it("shows a saved version only while its last check succeeded, and the next good answer replaces 'not known' (#1603 A-F2, A-F3)", async () => {
+    const getFacts = await freshRead();
+    let answer: string | null = PG_18_0;
+    const probes: AboutProbes = { ...HEALTHY, postgres: async () => answer };
+
+    await answeredWithin(getFacts(probes, {}));
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(ROW(await answeredWithin(getFacts(probes, {})), "postgres")?.version).toBe("18.0");
+
+    /* The service stops answering: the next look (a minute later) re-checks it, and the check fails. */
+    answer = null;
+    await vi.advanceTimersByTimeAsync(11 * 60 * 1_000);
+    await answeredWithin(getFacts(probes, {}));
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(ROW(await answeredWithin(getFacts(probes, {})), "postgres")).toEqual({ id: "postgres", state: "running", version: null });
+
+    /* It comes back, as a different build: shown again once a later check succeeds. */
+    answer = "PostgreSQL 18.1 on x86_64-pc-linux-musl";
+    await vi.advanceTimersByTimeAsync(60_000);
+    await answeredWithin(getFacts(probes, {}));
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(ROW(await answeredWithin(getFacts(probes, {})), "postgres")?.version).toBe("18.1");
   });
 
   it("refreshes the saved answer in the background, so a later call shows a changed version", async () => {

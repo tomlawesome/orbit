@@ -26,13 +26,15 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 const answers = vi.hoisted(() => ({
   sessions: /** @type {unknown[]} */ ([]),
   oidc: true,
+  /** The sessions list has not answered (yet). */
+  pending: false,
 }));
 
 const never = () => new Promise(() => {});
 vi.mock("$lib/data/workspace.js", () => ({
   readAuthMethodsOffered: async () => ({ oidc: answers.oidc, secondFactor: true }),
   readSentLately: async () => [],
-  readSessions: async () => answers.sessions,
+  readSessions: () => (answers.pending ? new Promise(() => {}) : Promise.resolve(answers.sessions)),
   readSettingsScreen: async () => ({
     user: { id: "u1", displayName: "Reader", email: "reader@example.test" },
     household: null,
@@ -133,9 +135,10 @@ const PROVIDER_SENTENCE = /sign-in provider in this browser only/iu;
  * Mounts settings with the server answering the given sessions and offered
  * methods, and returns the text of both layouts' "what this does" lines.
  *
- * @param {{ sessions: unknown[], oidc: boolean }} given
+ * @param {{ sessions: unknown[], oidc: boolean, pending?: boolean }} given
  */
 async function mountSettings(given) {
+  answers.pending = Boolean(given.pending);
   answers.sessions = given.sessions;
   answers.oidc = given.oidc;
   const { mount, unmount, flushSync } = await import(pathToFileURL(join(svelteSrc, "index-client.js")).href);
@@ -178,6 +181,14 @@ describe("settings: the provider sentence (#1444)", () => {
     for (const [layout, text] of Object.entries(lines)) {
       expect(text, `${layout}: the base sentence is missing`).toMatch(BASE_SENTENCE);
       expect(text, `${layout}: told of a provider the instance does not offer`).not.toMatch(PROVIDER_SENTENCE);
+    }
+  });
+
+  it("#1604 W-F18: while the sessions list is still loading, the full sentence including the provider part is shown", async () => {
+    const lines = await mountSettings({ sessions: [], oidc: true, pending: true });
+    for (const [layout, text] of Object.entries(lines)) {
+      expect(text, `${layout}: the base sentence is missing`).toMatch(BASE_SENTENCE);
+      expect(text, `${layout}: the provider part is missing while sessions load`).toMatch(PROVIDER_SENTENCE);
     }
   });
 });

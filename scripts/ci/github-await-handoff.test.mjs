@@ -49,10 +49,10 @@ function evidenceFor(overrides = {}) {
   };
 }
 
-function defaultFiles(evidence = evidenceFor(), sbom = { spdxVersion: "SPDX-2.3" }) {
+// D-S6 43a: the SBOM is no longer handed off; it travels as a signed attestation in the image.
+function defaultFiles(evidence = evidenceFor()) {
   return {
     "gitlab-tested-image.json": Buffer.from(JSON.stringify(evidence)),
-    "image.spdx.json": Buffer.from(JSON.stringify(sbom)),
     [IMAGE]: Buffer.from([9, 8, 7, 6, 0, 255]),
     "orbit-release-manifest.json": Buffer.from('{"manifest":1}'),
     "orbit-release-manifest.json.sig": Buffer.from("signature-bytes"),
@@ -133,7 +133,7 @@ const downloaded = (name) => fake.requests.some((r) => r.path.includes("/dl/") &
 const listCalls = () => fake.requests.filter((r) => r.method === "GET" && /\/releases$/u.test(r.path)).length;
 
 describe("github-await-handoff.sh, a good handoff", () => {
-  it("fetches the evidence and SBOM and reports them, without the image or launcher files", async () => {
+  it("fetches the evidence and reports it, without an SBOM, the image or the launcher files", async () => {
     const { files } = stage();
     const result = await run();
     expect(result.status, result.stderr).toBe(0);
@@ -141,7 +141,7 @@ describe("github-await-handoff.sh, a good handoff", () => {
     expect(result.outputs.source_reference).toBe(`${REGISTRY}/ai/orbit@${DIGEST}`);
     expect(result.outputs.pipeline_url).toContain("/pipelines/284");
     expect(readFileSync(result.outputs.evidence).equals(files["gitlab-tested-image.json"])).toBe(true);
-    expect(readFileSync(result.outputs.sbom).equals(files["image.spdx.json"])).toBe(true);
+    expect(result.outputs).not.toHaveProperty("sbom");
     expect(result.outputs.evidence.startsWith(result.evidenceDir)).toBe(true);
     for (const key of ["image_archive", "release_manifest", "release_manifest_sig", "launcher_amd64_archive", "launcher_arm64_archive"]) {
       expect(result.outputs, key).not.toHaveProperty(key);
@@ -310,7 +310,7 @@ describe("github-await-handoff.sh, handoff refusals", () => {
     expect(result.rawOutput).toBe("");
   });
 
-  for (const name of ["gitlab-tested-image.json", "image.spdx.json"]) {
+  for (const name of ["gitlab-tested-image.json"]) {
     it(`refuses when ${name} is missing from the list`, async () => {
       const files = defaultFiles();
       stage({ files, listed: Object.keys(files).filter((n) => n !== name) });
@@ -389,8 +389,8 @@ describe("github-await-handoff.sh, handoff refusals", () => {
 });
 
 describe("github-await-handoff.sh, evidence checks", () => {
-  const refuse = async (evidence, sbom) => {
-    stage({ files: defaultFiles(evidence, sbom) });
+  const refuse = async (evidence) => {
+    stage({ files: defaultFiles(evidence) });
     const result = await run();
     expect(result.status, JSON.stringify(evidence)).not.toBe(0);
     expect(result.rawOutput).toBe("");
@@ -424,7 +424,14 @@ describe("github-await-handoff.sh, evidence checks", () => {
     delete evidence.recordedAt;
     return refuse(evidence);
   });
-  it("refuses an SBOM that is not an SPDX document", () => refuse(evidenceFor(), { packages: [] }));
+  it("accepts a handoff that carries no SBOM file at all (D-S6 43a)", async () => {
+    const files = defaultFiles();
+    expect(files).not.toHaveProperty("image.spdx.json");
+    stage({ files });
+    const result = await run();
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.outputs.digest).toBe(DIGEST);
+  });
 
   it("accepts evidence six days old and one a minute ahead (the neighbours of the age limits)", async () => {
     for (const recordedAt of [ago(6 * DAY), stamp(new Date(Date.now() + 60 * 1000))]) {

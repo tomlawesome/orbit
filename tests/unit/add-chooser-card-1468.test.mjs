@@ -148,6 +148,34 @@ describe("phone Add: the due date is the chooser card's calendar (#1468)", () =>
   });
 });
 
+describe("phone Add: a picked due date can be cleared again (#1738 W-F23)", () => {
+  const loader = createPageLoader("add-chooser-1468-phone-clear", {
+    stub: (file) => /\/lib\/pocket\/(Sheet|Sky)\.svelte$/.test(file),
+  });
+  beforeAll(() => loader.setup("routes/create/EntryForm.svelte"));
+  afterAll(() => loader.teardown());
+  afterEach(() => { loader.unmount(); vi.unstubAllGlobals(); });
+
+  it("the calendar offers a clear control; pressing it takes the date back to none", async () => {
+    vi.stubGlobal("matchMedia", matchMedia);
+    const entry = blankEntry({ name: "Car MOT", householdId: "hh-1" });
+    Object.assign(entry, { sectionId: "s-1", dueDate: "2026-09-02" });
+    const households = [{ id: "hh-1", name: "Home", currency: "GBP",
+      sections: [{ id: "s-1", name: "Vehicles", icon: "car", accent: "a", visible: true }] }];
+    await loader.mount("routes/create/EntryForm.svelte", { entry, households });
+    await settle(6);
+    const due = () => document.querySelector('[id$="-due"]');
+    await press(due());
+    const dialog = card(/^Choose due date/iu);
+    const clear = [...dialog?.querySelectorAll("button") ?? []]
+      .find((button) => /clear|no (due )?date|remove/iu.test(`${button.textContent} ${button.getAttribute("aria-label") ?? ""}`));
+    expect(clear, "the calendar card has a clear control").toBeDefined();
+    await press(clear ?? null);
+    expect(due()?.textContent, "the due date is gone").not.toMatch(/2 Sep(tember)? 2026/u);
+    expect(entry.dueDate, "the entry holds no date").toBeFalsy();
+  });
+});
+
 /* ── first-run card (CreateSystem.svelte) ──────────────────────────────── */
 describe("arrival: time zone and currency use the chooser card's pick-list (#1468, #1338)", () => {
   const loader = createPageLoader("add-chooser-1468-arrival");

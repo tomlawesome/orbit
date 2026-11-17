@@ -114,7 +114,7 @@ describe("savePreferences", () => {
 
   const puts = () => calls.filter((c) => c.url === "/api/preferences");
 
-  it("PUTs the full body: the picked text size, the current theme and both notification flags", async () => {
+  it("PUTs the full body: the picked text size, the current theme", async () => {
     const { savePreferences } = await import("../../web/src/lib/data/workspace.js");
     /* Assumed call shape: an object naming what changed; the rest is read
        from the session. The theme key is `theme`, as in the schema. */
@@ -124,7 +124,7 @@ describe("savePreferences", () => {
     expect(init.method).toBe("PUT");
     expect(init.headers["x-csrf-token"]).toBe("csrf-fresh");
     const body = JSON.parse(init.body);
-    expect(body).toEqual({ theme: "dawn", textSize: "extra-large", emailNotifications: false, pushNotifications: true, labelDays: 30, skyDriver: "due", planetSize: "cost", importanceOfferDismissed: false });
+    expect(body).toEqual({ theme: "dawn", textSize: "extra-large", labelDays: 30, skyDriver: "due", planetSize: "cost", importanceOfferDismissed: false });
     expect(themePreferenceSchema.safeParse(body).success).toBe(true);
   });
 
@@ -132,17 +132,17 @@ describe("savePreferences", () => {
     const { savePreferences } = await import("../../web/src/lib/data/workspace.js");
     await savePreferences({ theme: "clouds" });
     const body = JSON.parse(puts()[0].init.body);
-    expect(body).toEqual({ theme: "clouds", textSize: "standard", emailNotifications: false, pushNotifications: true, labelDays: 30, skyDriver: "due", planetSize: "cost", importanceOfferDismissed: false });
+    expect(body).toEqual({ theme: "clouds", textSize: "standard", labelDays: 30, skyDriver: "due", planetSize: "cost", importanceOfferDismissed: false });
   });
 
-  it("takes the flags fresh from the server, not from a cached read", async () => {
+  it("never sends the notification flags, so a flip made meanwhile is not reverted (#1604 W-S2)", async () => {
     const { savePreferences, readSession } = await import("../../web/src/lib/data/workspace.js");
     await readSession();
     session.user = { ...session.user, emailNotifications: true, pushNotifications: false };
     await savePreferences({ textSize: "large" });
     const body = JSON.parse(puts()[0].init.body);
-    expect(body.emailNotifications).toBe(true);
-    expect(body.pushNotifications).toBe(false);
+    expect(body).not.toHaveProperty("emailNotifications");
+    expect(body).not.toHaveProperty("pushNotifications");
   });
 });
 

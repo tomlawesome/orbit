@@ -23,6 +23,7 @@
   import { tick } from "svelte";
   import { applyCommand, notSavedWords, unsavedWords } from "$lib/data/workspace.js";
   import { wake } from "$lib/pocket/wake.js";
+  import { SEARCH_DOC_CONCURRENCY } from "./pocket-search.js";
   import { upsertCommand } from "$lib/data/commands.js";
   import { draftOf, editsOf } from "$lib/editing/item-draft.js";
   import { daysUntil } from "$lib/data/chart.js";
@@ -80,25 +81,46 @@
     seat?.querySelector("[role=radio]")?.closest("button")?.focus({ preventScroll: true });
   }
 
-  /** Both ways out keep every pick; a row left alone stays not set. */
+  /**
+   * Both ways out keep every pick; a row left alone stays not set.
+   *
+   * #1738 W-R8: the picks go out together, at most SEARCH_DOC_CONCURRENCY in
+   * flight (the engine takes one upsert per item; there is no batch command),
+   * and every one settles: a refused pick loses only itself. One failure wake
+   * counts them. No retry control: the pill ("N items have no importance yet
+   * · set them now") is the retry, since a refused item stays unset and is
+   * counted there after the re-read.
+   */
   async function close() {
     const made = Object.entries(picks);
     open = false;
     if (opener?.isConnected) opener.focus({ preventScroll: true });
-    /** @type {unknown} */
-    let failure = null;
-    for (const [id, importance] of made) {
-      const item = rows.find((row) => row.id === id)?.item;
-      if (!item) continue;
-      try {
-        /* the edit drawer's own save: the draft's edits over the item, so the kind goes with it */
-        await applyCommand(upsertCommand({ ...item, householdId: household.id }, editsOf({ ...draftOf(item), importance })));
-      } catch (error) {
-        /* a refused pick leaves that item not set (the pill still counts it), and the person is told */
-        failure ??= error;
+    /** @type {unknown[]} the refusals, in pick order */
+    const refused = [];
+    let cursor = 0;
+    async function worker() {
+      while (cursor < made.length) {
+        const at = cursor++;
+        const [id, importance] = made[at];
+        const item = rows.find((row) => row.id === id)?.item;
+        if (!item) continue;
+        try {
+          /* the edit drawer's own save: the draft's edits over the item, so the kind goes with it */
+          await applyCommand(upsertCommand({ ...item, householdId: household.id }, editsOf({ ...draftOf(item), importance })));
+        } catch (error) {
+          /* a refused pick leaves that item not set (the pill still counts it), and the person is told */
+          refused[at] = error;
+        }
       }
     }
-    if (failure) wake(unsavedWords(failure) ?? notSavedWords(failure), { failure: true });
+    await Promise.all(Array.from({ length: Math.min(SEARCH_DOC_CONCURRENCY, made.length) }, worker));
+    const failed = refused.filter((error) => error !== undefined);
+    if (failed.length) {
+      const first = failed[0];
+      // One "not saved —": the first refusal's words without their own lead.
+      const words = (unsavedWords(first) ?? notSavedWords(first)).replace(/^not [a-z]+ — /iu, "");
+      wake(`${plural(failed.length, "pick")} not saved — ${words}`, { failure: true });
+    }
     if (made.length) await onsaved();
   }
 
