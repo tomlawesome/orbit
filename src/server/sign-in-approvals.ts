@@ -266,7 +266,7 @@ async function readRecipient(userId: string): Promise<Recipient | null> {
 
 /**
  * How many approval mails this account has had inside the last hour: one
- * row per mail actually sent, so a mail more than an hour old never counts,
+ * row per attempted send, so a mail more than an hour old never counts,
  * however recently its sign-in was resent (#1604 P-20).
  */
 async function sendsInWindow(userId: string, now: Date): Promise<number> {
