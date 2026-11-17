@@ -1,6 +1,7 @@
 <script>
   import { uuid } from "$lib/uuid.js";
   import { onDestroy, untrack } from "svelte";
+  import { holdUnsaved } from "$lib/unsaved.js";
   import { beforeNavigate, goto } from "$app/navigation";
   import { page } from "$app/state";
   import { resolve } from "$app/paths";
@@ -529,6 +530,9 @@
   /** @type {URL | null} */
   let leaveTo = null;
   let leaving = false;
+  /* #1879 W-S1: the root layout's guard asks about an update reload too. */
+  const releaseUnsaved = holdUnsaved(() => dirty && !leaving);
+  onDestroy(releaseUnsaved);
   beforeNavigate(({ cancel, to, type }) => {
     if (!dirty || leaving || type === "leave" || !to) return;
     cancel();
