@@ -92,9 +92,10 @@ export function readToken(env) {
 
 /*
  * Nightly pipelines on `dev`, newest first, with the pipelines of other
- * schedules removed. `sha` narrows to one commit when given.
+ * schedules removed. `sha` narrows to one commit when given. `firstOnly`
+ * stops at the first counted pipeline, so no later one has its jobs or log read.
  */
-export async function nightlyPipelines({ base, projectId, options, sha, skipId, log = () => {} }) {
+export async function nightlyPipelines({ base, projectId, options, sha, skipId, firstOnly = false, log = () => {} }) {
   const parameters = { source: "schedule", per_page: String(MAX_SCHEDULE_PIPELINES), order_by: "id", sort: "desc" };
   if (sha) parameters.sha = sha;
   else parameters.ref = "dev";
@@ -126,6 +127,7 @@ export async function nightlyPipelines({ base, projectId, options, sha, skipId, 
       continue;
     }
     found.push(pipeline);
+    if (firstOnly) break;
   }
   return found;
 }
@@ -192,7 +194,7 @@ export async function moved({ base, projectId, pipelineId, sha, token, fetchImpl
   }
   let nightlies;
   try {
-    nightlies = await nightlyPipelines({ base, projectId, options, skipId: pipelineId, log });
+    nightlies = await nightlyPipelines({ base, projectId, options, skipId: pipelineId, firstOnly: true, log });
   } catch (error) {
     log(`the schedule pipelines could not be listed (${error.message}): running`);
     return "run";

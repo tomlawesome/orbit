@@ -144,10 +144,19 @@ run_node() { "${PROMOTE_NODE:-node}" "$@"; }
 #
 # A tag that does not exist makes `inspect` fail; under pipefail that would end
 # the script with no message (#1482), so a missing tag resolves to nothing and
-# the caller names it.
+# the caller names it. An inspect that fails for any other reason (DNS, network,
+# auth) is not a missing tag: GHCR is unreachable, and that is said as such
+# (group 6 D-S1). Called in a command substitution, so it returns 3 for that
+# case and the caller, which must run it as a plain assignment, fails on it.
 resolve_digest() {
-  { docker buildx imagetools inspect "$1" 2> /dev/null || true; } |
-    first_inspect_digest "$ORBIT_DIGEST_AWK_PATTERN"
+  local out rc=0
+  out="$(docker buildx imagetools inspect "$1" 2>&1)" || rc=$?
+  if [[ "$rc" -ne 0 ]] && [[ -n "$out" ]] &&
+    ! grep -qiE 'not found|manifest unknown|no such manifest|name unknown' <<< "$out"; then
+    printf 'promote-stable: GHCR unreachable or inspect failed for %s: %s\n' "$1" "${out%%$'\n'*}" >&2
+    return 3
+  fi
+  first_inspect_digest "$ORBIT_DIGEST_AWK_PATTERN" <<< "$out"
 }
 
 main_head="$(git ls-remote "$remote" refs/heads/main | cut -f1)"
@@ -160,13 +169,15 @@ main_head="$(git ls-remote "$remote" refs/heads/main | cut -f1)"
 # An octopus merge or a single-parent main without an image is refused as
 # having no published image.
 tested_commit="$main_head"
-if [[ -z "$(resolve_digest "${image}:sha-${main_head}")" ]]; then
+main_head_digest="$(resolve_digest "${image}:sha-${main_head}")" || exit 1
+if [[ -z "$main_head_digest" ]]; then
   parents_line="$(git rev-list --parents -n 1 "$main_head")" ||
     fail "cannot read the parents of main's head ${main_head}; is it in this checkout?"
   read -r -a main_line <<< "$parents_line"
   if [[ "${#main_line[@]}" -eq 3 ]]; then
     second_parent="${main_line[2]}"
-    if [[ -n "$(resolve_digest "${image}:sha-${second_parent}")" ]]; then
+    second_parent_digest="$(resolve_digest "${image}:sha-${second_parent}")" || exit 1
+    if [[ -n "$second_parent_digest" ]]; then
       git diff --quiet "${second_parent}^{tree}" "${main_head}^{tree}" ||
         fail "main (${main_head}) is a merge commit but its tree differs from the tested commit ${second_parent}'s tree"
       tested_commit="$second_parent"
