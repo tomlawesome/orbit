@@ -65,10 +65,20 @@ describe("#1151 W1-S1: the desktop create form warns before discarding", () => {
     expect(tail).toMatch(/teardown:/u);
   });
 
-  it("+page.svelte guards in-app navigation and reads isDirty()", () => {
-    expect(page).toMatch(/beforeNavigate\(\(\{\s*cancel\s*\}\)\s*=>\s*\{/u);
-    expect(page).toMatch(/form\?\.isDirty\(\)/u);
-    expect(page).toMatch(/confirm\(/u);
+  it("+page.svelte registers its dirtiness with the shared registry; the layout asks (#1879 W-S1)", () => {
+    expect(page).toMatch(/holdUnsaved\(\(\)\s*=>\s*form\?\.isDirty\(\)/u);
+    expect(page).not.toMatch(/beforeNavigate\(/u);
+    expect(page).not.toMatch(/confirm\(/u);
+  });
+
+  it("pocket.svelte asks no leave-the-page question of its own (#1879 W-S1)", () => {
+    // Its own beforeNavigate opened the "Leave without adding?" callout on any
+    // in-app navigation, a second question beside the layout's. The phone back
+    // button closing the sheet is Sheet.svelte's own guard, not this one.
+    const pocket = readFileSync(new URL("../../web/src/routes/create/pocket.svelte", import.meta.url), "utf8");
+    expect(pocket).toMatch(/holdUnsaved\(/u);
+    expect(pocket).not.toMatch(/beforeNavigate\(/u);
+    expect(pocket).not.toContain("Discard this entry?");
   });
 
   it("+page.svelte warns on an actual tab close or reload too", () => {
