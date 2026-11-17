@@ -268,23 +268,67 @@ async function readRecipient(
   return { id: row.id, email: address.value, displayName: row.displayName };
 }
 
+/** The executor a transaction callback is handed. */
+type Transaction = Parameters<Parameters<ReturnType<typeof getDb>["transaction"]>[0]>[0];
+
+/**
+ * Takes the per-user address lock an administrator's address change takes
+ * (#1869), for the rest of `transaction`. The same lock serialises the
+ * hourly mail allowance below (#1882): one lock per account, not two.
+ */
+async function lockUser(transaction: Transaction, userId: string): Promise<void> {
+  await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${userAddressLockKey(userId)}, 0))`);
+}
+
 /**
  * How many approval mails this account has had inside the last hour: one
- * row per mail actually sent, so a mail more than an hour old never counts,
- * however recently its sign-in was resent (#1604 P-20).
+ * row per mail sent or reserved to send, so a mail more than an hour old
+ * never counts, however recently its sign-in was resent (#1604 P-20).
  */
-async function sendsInWindow(userId: string, now: Date): Promise<number> {
+async function sendsInWindow(
+  userId: string,
+  now: Date,
+  db: MetadataExecutor = getDb(),
+): Promise<number> {
   const since = new Date(now.getTime() - APPROVAL_SEND_WINDOW_MS);
-  const [row] = await getDb()
+  const [row] = await db
     .select({ sends: sql<number>`count(*)::int` })
     .from(signInApprovalSends)
     .where(and(eq(signInApprovalSends.userId, userId), gt(signInApprovalSends.sentAt, since)));
   return row?.sends ?? 0;
 }
 
-/** Notes one mail on the wire against the hour's allowance. */
-async function recordSend(approvalId: string, userId: string, sentAt: Date): Promise<void> {
-  await getDb().insert(signInApprovalSends).values({ approvalId, userId, sentAt });
+/**
+ * Reserves one of the hour's mails: atomic check-and-reserve under the
+ * per-user advisory lock, which the caller's `transaction` must already hold
+ * (#1882). Requests arriving together queue on the lock, so each one counts
+ * the reservations committed before it and no sixth mail is ever reserved.
+ * Null when the hour's allowance is spent; otherwise the reservation, which
+ * the caller commits before the mail goes and releases if it does not go.
+ */
+async function reserveSend(
+  transaction: Transaction,
+  approvalId: string,
+  userId: string,
+  now: Date,
+): Promise<string | null> {
+  if (await sendsInWindow(userId, now, transaction) >= APPROVAL_SENDS_PER_HOUR) return null;
+  const [reserved] = await transaction.insert(signInApprovalSends)
+    .values({ approvalId, userId, sentAt: now })
+    .returning({ id: signInApprovalSends.id });
+  return reserved.id;
+}
+
+/**
+ * Gives back a reservation whose mail did not go: only a mail that went out
+ * spends the hour's allowance, as before #1882. Under the same lock, so the
+ * count another request reads never sees a reservation half undone.
+ */
+async function releaseSend(reservationId: string, userId: string): Promise<void> {
+  await getDb().transaction(async (transaction) => {
+    await lockUser(transaction, userId);
+    await transaction.delete(signInApprovalSends).where(eq(signInApprovalSends.id, reservationId));
+  });
 }
 
 /** How long a finished or lapsed approval is kept before it is swept. */
@@ -399,16 +443,17 @@ export async function startSignInApproval(
   const claim = createSecret();
 
   await sweepExpiredApprovals(now);
-  const limited = await sendsInWindow(userId, now) >= APPROVAL_SENDS_PER_HOUR;
 
   const db = getDb();
   /* The address is read and the row written under the per-user address lock
      an administrator's address change takes (#1869). A change that commits
      before this reads the new address; one that commits after it finds this
      row and expires it, so the link mailed below can only work while it
-     goes to the address the account still has. */
-  const { recipient, row } = await db.transaction(async (transaction) => {
-    await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${userAddressLockKey(userId)}, 0))`);
+     goes to the address the account still has. The hour's mail is reserved
+     under the same lock (#1882) and the transaction commits before the mail
+     goes: nothing is held open across the network send. */
+  const { recipient, row, limited, reservation } = await db.transaction(async (transaction) => {
+    await lockUser(transaction, userId);
     const recipient = await readRecipient(userId, transaction);
     const [row] = await transaction.insert(signInApprovals).values({
       userId,
@@ -420,7 +465,11 @@ export async function startSignInApproval(
       sendCount: 0,
       lastSentAt: null,
     }).returning({ id: signInApprovals.id });
-    return { recipient, row };
+    const reservation = recipient ? await reserveSend(transaction, row.id, userId, now) : null;
+    const limited = recipient
+      ? reservation === null
+      : await sendsInWindow(userId, now, transaction) >= APPROVAL_SENDS_PER_HOUR;
+    return { recipient, row, limited, reservation };
   });
 
   /* An account that vanished between the password check and this read is a
@@ -438,7 +487,8 @@ export async function startSignInApproval(
     await db.update(signInApprovals)
       .set({ sendCount: 1, lastSentAt: now })
       .where(eq(signInApprovals.id, row.id));
-    await recordSend(row.id, userId, now);
+  } else if (reservation) {
+    await releaseSend(reservation, userId);
   }
 
   return {
@@ -737,10 +787,19 @@ export async function resendSignInApproval(
   if (row.lastSentAt && now.getTime() - row.lastSentAt.getTime() < APPROVAL_RESEND_INTERVAL_MS) {
     return { state: "too_soon", canResendAt: new Date(row.lastSentAt.getTime() + APPROVAL_RESEND_INTERVAL_MS) };
   }
-  if (await sendsInWindow(row.userId, now) >= APPROVAL_SENDS_PER_HOUR) return { state: "limited" };
-
-  const recipient = await readRecipient(row.userId);
-  if (!recipient) return { state: "unknown" };
+  /* Atomic check-and-reserve under the per-user lock (#1882), committed
+     before the mail goes. */
+  const reserved = await db.transaction(async (transaction) => {
+    await lockUser(transaction, row.userId);
+    if (await sendsInWindow(row.userId, now, transaction) >= APPROVAL_SENDS_PER_HOUR) return "limited" as const;
+    const recipient = await readRecipient(row.userId, transaction);
+    if (!recipient) return "unknown" as const;
+    const reservation = await reserveSend(transaction, row.id, row.userId, now);
+    return reservation ? { recipient, reservation } : "limited" as const;
+  });
+  if (reserved === "limited") return { state: "limited" };
+  if (reserved === "unknown") return { state: "unknown" };
+  const { recipient, reservation } = reserved;
 
   const token = createSecret();
   const sendError = await mailApproval(recipient, token, row, row.createdAt, row.expiresAt, options);
@@ -756,7 +815,8 @@ export async function resendSignInApproval(
         lastSentAt: now,
       })
       .where(eq(signInApprovals.id, row.id));
-    await recordSend(row.id, row.userId, now);
+  } else {
+    await releaseSend(reservation, row.userId);
   }
 
   return {
