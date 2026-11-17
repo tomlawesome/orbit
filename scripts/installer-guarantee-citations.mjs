@@ -217,3 +217,125 @@ export function citedFileLines(docText, fileText, guarantee, fileName) {
   const last = match[2] === undefined ? first : Number(match[2]);
   return fileText.split("\n").slice(first - 1, last).join("\n");
 }
+
+/**
+ * #1880: citations into a shell script other than install.sh, such as
+ * `installer-ui.sh:86-110`, name no function in their parentheses, so they are
+ * checked by content. `expectations` is a list of `{ guarantee, index,
+ * contains: [substring] }`, as for citationContentProblems, but `index` picks
+ * the n-th `<fileName>:` segment of the guarantee (from 0).
+ */
+export function fileCitationContentProblems(docText, fileText, fileName, expectations) {
+  const lines = fileText.split("\n");
+  const escaped = fileName.replaceAll(".", "\\.");
+  const pattern = new RegExp(`(?<![\\w./-])${escaped}:`, "gu");
+  const byGuarantee = new Map();
+  for (const { guarantee, text } of numberedGuarantees(docText)) {
+    if (!guarantee.startsWith(`${fileName} #`)) continue;
+    const segments = [];
+    for (const start of text.matchAll(pattern)) {
+      let position = start.index + start[0].length;
+      for (;;) {
+        SEGMENT.lastIndex = position;
+        const match = SEGMENT.exec(text);
+        if (!match) break;
+        const first = Number(match[1]);
+        const last = match[2] === undefined ? first : Number(match[2]);
+        segments.push({ citation: `${fileName}:${match[0].trim()}`, first, last });
+        position = SEGMENT.lastIndex;
+        SEPARATOR.lastIndex = position;
+        if (!SEPARATOR.exec(text)) break;
+        position = SEPARATOR.lastIndex;
+      }
+    }
+    byGuarantee.set(guarantee, segments);
+  }
+  const problems = [];
+  for (const { guarantee, index, contains } of expectations) {
+    const segment = byGuarantee.get(guarantee)?.[index];
+    if (!segment) {
+      problems.push({ guarantee, citation: `segment ${index}`, problem: "citation not found" });
+      continue;
+    }
+    const cited = lines.slice(segment.first - 1, segment.last).join("\n");
+    for (const needle of contains) {
+      if (!cited.includes(needle)) {
+        problems.push({ guarantee, citation: segment.citation, problem: `lines lack ${needle}` });
+      }
+    }
+  }
+  return problems;
+}
+
+/**
+ * #1880: in a guarantee of `<fileName>`'s own section, every backticked name
+ * that the script defines as a function must overlap at least one of the
+ * guarantee's `<fileName>:` citation segments. Returns `{ guarantee, citation,
+ * problem }` for each one that overlaps none.
+ */
+export function fileNamedFunctionProblems(docText, fileText, fileName) {
+  const spans = functionSpans(fileText);
+  const escaped = fileName.replaceAll(".", "\\.");
+  const pattern = new RegExp(`(?<![\\w./-])${escaped}:(\\d+(?:-\\d+)?(?:\\s*\\([^)]*\\))?(?:\\s*,\\s*\\d+(?:-\\d+)?(?:\\s*\\([^)]*\\))?)*)`, "gu");
+  const problems = [];
+  for (const { guarantee, text } of numberedGuarantees(docText)) {
+    if (!guarantee.startsWith(`${fileName} #`)) continue;
+    const ranges = [];
+    for (const match of text.matchAll(pattern)) {
+      for (const range of match[1].replace(/\([^)]*\)/gu, "").matchAll(/(\d+)(?:-(\d+))?/gu)) {
+        ranges.push([Number(range[1]), Number(range[2] ?? range[1])]);
+      }
+    }
+    if (ranges.length === 0) continue;
+    const names = new Set([...text.matchAll(/`([A-Za-z_]\w*)`/gu)].map((m) => m[1]));
+    for (const name of names) {
+      const span = spans.get(name);
+      if (span && !ranges.some(([first, last]) => last >= span.start && first <= span.end)) {
+        problems.push({
+          guarantee,
+          citation: `${fileName}:${ranges.map(([a, b]) => (a === b ? a : `${a}-${b}`)).join(",")} [${name}]`,
+          problem: `lines do not overlap the function (at ${span.start}-${span.end})`,
+        });
+      }
+    }
+  }
+  return problems;
+}
+
+/**
+ * #1880: "about N-M" citations, as in repair.sh `name` (about 6478-6499). The
+ * script is the last `<script>.sh` named earlier in the same guarantee. Each
+ * named function must be defined in the script and start inside the range.
+ * `scriptTexts` maps a script name to its text. Returns `{ guarantee,
+ * citation, problem }`.
+ */
+export function aboutCitationProblems(docText, scriptTexts) {
+  const spansByScript = new Map(
+    Object.entries(scriptTexts).map(([name, text]) => [name, functionSpans(text)]),
+  );
+  const token = /([A-Za-z0-9_-]+\.sh)\b|`([A-Za-z_]\w*)`[^`;(]{0,3}\(about (\d+)(?:-(\d+))?\)/gu;
+  const problems = [];
+  for (const { guarantee, text } of numberedGuarantees(docText)) {
+    let script = null;
+    for (const match of text.matchAll(token)) {
+      if (match[1]) {
+        script = match[1];
+        continue;
+      }
+      const first = Number(match[3]);
+      const last = match[4] === undefined ? first : Number(match[4]);
+      const citation = `${script ?? "?"} \`${match[2]}\` (about ${first}-${last})`;
+      const spans = spansByScript.get(script);
+      if (!spans) {
+        problems.push({ guarantee, citation, problem: "script not available to check" });
+        continue;
+      }
+      const span = spans.get(match[2]);
+      if (!span) problems.push({ guarantee, citation, problem: "function not defined" });
+      else if (span.start < first || span.start > last) {
+        problems.push({ guarantee, citation, problem: `function starts at line ${span.start}, outside the range` });
+      }
+    }
+  }
+  return problems;
+}
