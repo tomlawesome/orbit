@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createPageLoader, settle } from "../support/svelte-page.mjs";
@@ -36,7 +37,7 @@ async function open() {
 
 /** The page's own rules: about.css and the component's <style>, if any. */
 const stylesheet = () => {
-  const read = (/** @type {string} */ path) => readFileSync(new URL(`../../web/src/routes/about/${path}`, import.meta.url), "utf8");
+  const read = (/** @type {string} */ path) => readFileSync(join(resolve(import.meta.dirname, "../.."), "web/src/routes/about", path), "utf8");
   const svelte = read("+page.svelte");
   return `${read("about.css")}\n${/<style[^>]*>([\s\S]*?)<\/style>/.exec(svelte)?.[1] ?? ""}`;
 };

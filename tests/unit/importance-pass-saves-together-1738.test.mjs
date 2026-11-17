@@ -29,7 +29,6 @@ vi.mock("$lib/data/workspace.js", async (importOriginal) => ({
 const { WorkspaceError } = await import("$lib/data/workspace.js");
 
 const ROOT = resolve(import.meta.dirname, "../..");
-const OFFER = "routes/home/ImportanceOffer.svelte";
 const REFUSAL = "someone changed this item on another device";
 
 const items = Array.from({ length: 10 }, (_, k) => ({
