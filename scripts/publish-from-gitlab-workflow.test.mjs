@@ -431,13 +431,10 @@ describe("publish-from-gitlab copy step verifies each referrer before copying (#
   const stepText = workflow.slice(stepStart, workflow.indexOf("\n      - name:", stepStart + 1));
   const runLines = stepText.slice(stepText.indexOf("run: |\n") + "run: |\n".length).split("\n");
   const stepScript = runLines.map((line) => line.replace(/^ {10}/u, "")).join("\n");
-  // The step's node -e '...' block has an apostrophe in a comment ("GitLab's"),
-  // which ends the single-quoted shell string early, so the step as committed
-  // does not parse (the first test below). The behaviour tests run it with that
-  // one apostrophe removed, so they judge the copy logic and not the typo.
-  const script = stepScript.replaceAll("GitLab's key-bound", "GitLab key-bound");
+  const script = stepScript;
   const hex = (digest) => digest.replace(/^sha256:/u, "");
-  const bundleOf = (digest) => JSON.stringify({ mediaType: BUNDLE, stubReferrer: digest });
+  // The stub bundle names its referrer and the subject its statement attests.
+  const bundleOf = (digest, subject = IMAGE_DIGEST) => JSON.stringify({ mediaType: BUNDLE, stubReferrer: digest, stubSubject: subject });
 
   const CRANE = String.raw`#!/usr/bin/env bash
 printf 'crane\x1f%s\n' "$*" >> "$STUB_LOG"
@@ -456,14 +453,26 @@ esac
   const COSIGN = String.raw`#!/usr/bin/env bash
 printf 'cosign\x1f%s\n' "$*" >> "$STUB_LOG"
 seen="$*"
-type=""; prev=""
+type=""; prev=""; given=""
 for a in "$@"; do
   [[ -f "$a" ]] && seen="$seen $(cat "$a")"
   [[ "$prev" == "--type" ]] && type="$a"
+  [[ "$prev" == "--digest" ]] && given="$a"
   [[ "$a" == --type=* ]] && type="@{a#--type=}"
   prev="$a"
 done
 [[ -t 0 ]] || seen="$seen $(cat)"
+# --digest must be the image digest under test, and the bundle's statement
+# must attest exactly that subject (a bundle for another digest fails).
+if [[ -n "$given" && "$given" != "@{STUB_IMAGE_DIGEST#sha256:}" ]]; then
+  printf 'Error: --digest %s is not the digest under test\n' "$given" >&2
+  exit 1
+fi
+subject="$(grep -o '"stubSubject":"sha256:[0-9a-f]*"' <<< "$seen" | head -1 | cut -d'"' -f4)"
+if [[ -n "$given" && -n "$subject" && "$subject" != "sha256:$given" ]]; then
+  printf 'Error: the statement subject %s does not match --digest %s\n' "$subject" "$given" >&2
+  exit 1
+fi
 for f in "$STUB_DIR"/bad-*; do
   [[ -e "$f" ]] || continue
   d="@{f##*/bad-}"
@@ -488,7 +497,11 @@ payload="$(printf '{"predicateType":"%s","subject":[{"digest":{"sha256":"%s"}}]}
 printf '{"payloadType":"application/vnd.in-toto+json","payload":"%s","signatures":[]}\n' "$payload"
 `.replaceAll("@{", "${");
 
-  /** referrers: [{ digest, label, verifies = true, actualType = label }] */
+  /**
+   * referrers: [{ digest, label, verifies = true, actualType = label,
+   * bundleSubject = the image, manifestSubject = the image, blobMissing = false,
+   * layerSize = 1 }]
+   */
   const runCopy = (referrers) => {
     const root = mkdtempSync(join(tmpdir(), "orbit-copy-step-"));
     const bin = join(root, "bin");
@@ -526,11 +539,11 @@ printf '{"payloadType":"application/vnd.in-toto+json","payload":"%s","signatures
           mediaType: "application/vnd.oci.image.manifest.v1+json",
           artifactType: BUNDLE,
           config: { mediaType: "application/vnd.oci.empty.v1+json", digest: r.digest, size: 2 },
-          layers: [{ mediaType: BUNDLE, digest: r.digest, size: 1 }],
-          subject: { mediaType: "application/vnd.oci.image.manifest.v1+json", digest: IMAGE_DIGEST, size: 1 },
+          layers: [{ mediaType: BUNDLE, digest: r.digest, size: r.layerSize ?? 1 }],
+          subject: { mediaType: "application/vnd.oci.image.manifest.v1+json", digest: r.manifestSubject ?? IMAGE_DIGEST, size: 1 },
         }),
       );
-      writeFileSync(join(stub, `bundle-${hex(r.digest)}.json`), bundleOf(r.digest));
+      if (r.blobMissing !== true) writeFileSync(join(stub, `bundle-${hex(r.digest)}.json`), bundleOf(r.digest, r.bundleSubject));
       if (r.verifies === false) writeFileSync(join(stub, `bad-${hex(r.digest)}`), "");
       writeFileSync(join(stub, `type-${hex(r.digest)}`), r.actualType ?? r.label);
     }
@@ -627,6 +640,51 @@ printf '{"payloadType":"application/vnd.in-toto+json","payload":"%s","signatures
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain(liar.digest);
     expect(copies).toEqual([]);
+  });
+
+  it("refuses a referrer whose bundle attests another digest than the image, and copies nothing", () => {
+    const wrong = { digest: d("7"), label: VALIDATION_TYPE, bundleSubject: d("2") };
+    const { result, copies } = runCopy([ok, wrong]);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(wrong.digest);
+    expect(copies).toEqual([]);
+  });
+
+  it("refuses a referrer whose manifest has another image as its subject, and copies nothing", () => {
+    const wrong = { digest: d("6"), label: SPDX_TYPE, manifestSubject: d("2") };
+    const { result, copies } = runCopy([ok, wrong]);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(wrong.digest);
+    expect(copies).toEqual([]);
+  });
+
+  it("refuses a referrer whose bundle blob cannot be fetched, and copies nothing", () => {
+    const gone = { digest: d("5"), label: VALIDATION_TYPE, blobMissing: true };
+    const { result, copies } = runCopy([okSbom, gone]);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(gone.digest);
+    expect(copies).toEqual([]);
+  });
+
+  describe("bounded bundle size", () => {
+    const LIMIT = 16 * 1024 * 1024;
+
+    it("refuses a referrer whose bundle layer is over 16 MiB before fetching its blob, and copies nothing", () => {
+      const big = { digest: d("4"), label: SPDX_TYPE, layerSize: LIMIT + 1 };
+      const { result, copies, lines } = runCopy([ok, big]);
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(big.digest);
+      expect(result.stderr).toMatch(/16 ?MiB|larger than|too large|size/iu);
+      expect(lines.filter((line) => line.startsWith("crane\x1fblob ") && line.includes(hex(big.digest)))).toEqual([]);
+      expect(copies).toEqual([]);
+    });
+
+    it("accepts a referrer whose bundle layer is exactly 16 MiB", () => {
+      const edge = { digest: d("3"), label: SPDX_TYPE, layerSize: LIMIT };
+      const { result, copies } = runCopy([ok, edge]);
+      expect(result.status, result.stderr).toBe(0);
+      expect(copies).toHaveLength(3);
+    });
   });
 
   it("fails and copies nothing when a validation-labelled referrer really carries the SPDX type", () => {
