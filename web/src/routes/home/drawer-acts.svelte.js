@@ -310,6 +310,9 @@ export function createDrawerActs({
   let papersReady = $state(false);
   /** @type {object | null} */
   let searchDocumentsFor = null;
+  /** #1605 W-R7: bumped as each read starts or is superseded; a read whose
+   *  number is no longer current must not land. */
+  let searchReadGeneration = 0;
 
   /** #1151 W1-Q8: pocket-search.js's readSearchDocuments carries the
    *  concurrency cap (#1151 W1-R9). Answers the items whose papers could
@@ -323,14 +326,15 @@ export function createDrawerActs({
     const householdId = current?.primary;
     if (!household || !householdId || searchDocumentsFor === household) return failed;
     searchDocumentsFor = household;
+    const generation = ++searchReadGeneration;
     const carrying = (household.items ?? []).filter((item) => (item.status === "active" || item.id === also) && (item.documentCount ?? 0) > 0);
     // Additive: an item whose papers cannot be read loses its papers from the
     // results, not the search. Which items those were is answered, for the
     // one caller that must know (rereadSearchDocuments).
     const found = await readSearchDocuments(
-      carrying, readItemDocuments, householdId, () => searchDocumentsFor !== household, (id) => failed.add(id),
+      carrying, readItemDocuments, householdId, () => searchDocumentsFor !== household || generation !== searchReadGeneration, (id) => failed.add(id),
     );
-    if (searchDocumentsFor === household) {
+    if (searchDocumentsFor === household && generation === searchReadGeneration) {
       searchDocuments = found;
       papersReady = true;
     }
@@ -343,6 +347,7 @@ export function createDrawerActs({
       Any other item's papers still drop out quietly: the search is additive. @param {string | null} [also] @param {string | null} [mustRead] */
   async function rereadSearchDocuments(also = null, mustRead = null) {
     searchDocumentsFor = null;
+    searchReadGeneration += 1;
     papersReady = false;
     const failed = await loadSearchDocuments(also);
     if (mustRead && failed.has(mustRead)) throw new Error(`the papers of ${mustRead} could not be read`);
