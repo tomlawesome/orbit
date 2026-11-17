@@ -1670,8 +1670,9 @@ fast_checks:
       # The built web application, so the rig jobs serve these bytes instead of
       # building their own copy (#1061, ADR-0028 slice 1). About 7 MB. A
       # `fast_checks` that stood on an earlier run leaves no web/build behind;
-      # that is safe rather than stale, because the rig's webServer checks the
-      # stamp and builds when there is nothing to serve.
+      # that is safe rather than stale, because the rig's webServer and
+      # `integration` (#1853) check the stamp and build when there is nothing
+      # to serve.
       - web/build/
       - ci-evidence/
     expire_in: 7 days
@@ -2837,6 +2838,10 @@ integration:
       # The document tests check and draw PDFs with the real poppler tools (#1436).
       command -v pdftoppm > /dev/null 2>&1 || { export DEBIAN_FRONTEND=noninteractive; apt-get update -qq && apt-get install -y -qq --no-install-recommends poppler-utils fonts-liberation; }
       pnpm install --frozen-lockfile
+      # Some tests serve web/build. fast_checks hands it over, but a reused
+      # fast_checks leaves none behind (#1853): build it when it is missing or
+      # not this checkout's, as the rig jobs do.
+      node scripts/web-build-stamp.mjs check || pnpm --filter orbit-web build
       export DATABASE_URL="postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}"
       # A per-run 256-bit hexadecimal secret, the rule the runtime applies
       # (#578). Test-only and thrown away with the job.

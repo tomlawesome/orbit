@@ -3357,3 +3357,69 @@ describe("signing_image_age warns without failing the pipeline (#1830)", () => {
     expect(above).toContain("orbit-base-image #33");
   });
 });
+
+/*
+ * #1853: `integration` builds the web application when `fast_checks` left none
+ * (the "build if the artefact is missing or stale" stamp check, as fast_checks
+ * and the rig jobs use). Only a job that really tests builds.
+ */
+describe("integration builds a missing web artefact (#1853)", () => {
+  const BUILD = "node scripts/web-build-stamp.mjs check || pnpm --filter orbit-web build";
+  // The job's lines with comments dropped, trimmed of the YAML list dash.
+  const lines = () =>
+    allBlocks
+      .get("integration")
+      .split("\n")
+      .filter((line) => !/^\s*#/u.test(line))
+      .map((line) => line.trim().replace(/^- /u, ""));
+  const at = (matcher) => lines().findIndex((line) => matcher.test(line));
+
+  it("runs the stamp check with the build fallback, once, as its own command", () => {
+    expect(lines().filter((line) => line === BUILD)).toHaveLength(1);
+  });
+
+  it("runs it after pnpm install --frozen-lockfile", () => {
+    const build = lines().indexOf(BUILD);
+    const install = at(/^pnpm install --frozen-lockfile$/u);
+    expect(install).toBeGreaterThan(-1);
+    expect(build).toBeGreaterThan(install);
+  });
+
+  it("runs it before the first vitest run", () => {
+    const build = lines().indexOf(BUILD);
+    const vitest = at(/vitest run/u);
+    expect(vitest).toBeGreaterThan(-1);
+    expect(build).toBeGreaterThan(-1);
+    expect(build).toBeLessThan(vitest);
+  });
+
+  it("runs it after the lane gate, the reuse gate and the ORBIT_INTEGRATION skip exit", () => {
+    const build = lines().indexOf(BUILD);
+    expect(build).toBeGreaterThan(-1);
+    const lane = at(/orbit_lane_admits integration \|\| exit 0/u);
+    const reuse = at(/^\*reuse_gate$/u);
+    const skipMessage = at(/skipped: no integration-risk change/u);
+    expect(lane).toBeGreaterThan(-1);
+    expect(reuse).toBeGreaterThan(-1);
+    expect(skipMessage).toBeGreaterThan(-1);
+    const skipExit = lines().findIndex((line, index) => index > skipMessage && line === "exit 0");
+    expect(skipExit).toBeGreaterThan(-1);
+    for (const gate of [lane, reuse, skipExit]) expect(build).toBeGreaterThan(gate);
+  });
+
+  it("is not inside the skip branch (the build line is not between the ORBIT_INTEGRATION test and its fi)", () => {
+    const text = lines();
+    const open = text.findIndex((line) => /ORBIT_INTEGRATION:-true/u.test(line));
+    const close = text.findIndex((line, index) => index > open && line === "fi");
+    expect(open).toBeGreaterThan(-1);
+    expect(close).toBeGreaterThan(open);
+    const build = text.indexOf(BUILD);
+    expect(build).toBeGreaterThan(close);
+  });
+
+  it("the comment beside fast_checks' web/build artefact says integration builds too", () => {
+    const comment = allBlocks.get("fast_checks").match(/((?:[ \t]*#.*\n)+)[ \t]*- web\/build\//u);
+    expect(comment, "no comment above the web/build artefact").not.toBeNull();
+    expect(comment[1]).toMatch(/integration/u);
+  });
+});
