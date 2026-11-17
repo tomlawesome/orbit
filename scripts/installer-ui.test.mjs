@@ -746,12 +746,36 @@ describe("installer semantic UI", () => {
 // cells, a cursor column, double-width for East Asian wide characters, and
 // only the controls the widget may use (\b, \r, CSI K/D/C). Overwriting half
 // of a wide character blanks the other half, as real terminals do.
+// Unicode East Asian Width W and F ranges (EastAsianWidth.txt), written out
+// independently of the implementation.
+const WIDE_RANGES = [
+  [0x1100, 0x115f], [0x231a, 0x231b], [0x2329, 0x232a], [0x23e9, 0x23ec],
+  [0x23f0, 0x23f0], [0x23f3, 0x23f3], [0x25fd, 0x25fe], [0x2614, 0x2615],
+  [0x2648, 0x2653], [0x267f, 0x267f], [0x2693, 0x2693], [0x26a1, 0x26a1],
+  [0x26aa, 0x26ab], [0x26bd, 0x26be], [0x26c4, 0x26c5], [0x26ce, 0x26ce],
+  [0x26d4, 0x26d4], [0x26ea, 0x26ea], [0x26f2, 0x26f3], [0x26f5, 0x26f5],
+  [0x26fa, 0x26fa], [0x26fd, 0x26fd], [0x2705, 0x2705], [0x270a, 0x270b],
+  [0x2728, 0x2728], [0x274c, 0x274c], [0x274e, 0x274e], [0x2753, 0x2755],
+  [0x2757, 0x2757], [0x2795, 0x2797], [0x27b0, 0x27b0], [0x27bf, 0x27bf],
+  [0x2b1b, 0x2b1c], [0x2b50, 0x2b50], [0x2b55, 0x2b55], [0x2e80, 0x303e],
+  [0x3041, 0x33ff], [0x3400, 0x4dbf], [0x4e00, 0xa4cf], [0xa960, 0xa97f],
+  [0xac00, 0xd7a3], [0xf900, 0xfaff], [0xfe10, 0xfe19], [0xfe30, 0xfe6f],
+  [0xff01, 0xff60], [0xffe0, 0xffe6], [0x16fe0, 0x16fe4], [0x17000, 0x18cff],
+  [0x1b000, 0x1b2ff], [0x1f004, 0x1f004], [0x1f0cf, 0x1f0cf], [0x1f18e, 0x1f18e],
+  [0x1f191, 0x1f19a], [0x1f200, 0x1f320], [0x1f32d, 0x1f335], [0x1f337, 0x1f37c],
+  [0x1f37e, 0x1f393], [0x1f3a0, 0x1f3ca], [0x1f3cf, 0x1f3d3], [0x1f3e0, 0x1f3f0],
+  [0x1f3f4, 0x1f3f4], [0x1f3f8, 0x1f43e], [0x1f440, 0x1f440], [0x1f442, 0x1f4fc],
+  [0x1f4ff, 0x1f53d], [0x1f54b, 0x1f54e], [0x1f550, 0x1f567], [0x1f57a, 0x1f57a],
+  [0x1f595, 0x1f596], [0x1f5a4, 0x1f5a4], [0x1f5fb, 0x1f64f], [0x1f680, 0x1f6c5],
+  [0x1f6cc, 0x1f6cc], [0x1f6d0, 0x1f6d2], [0x1f6d5, 0x1f6d7], [0x1f6dc, 0x1f6df],
+  [0x1f6eb, 0x1f6ec], [0x1f6f4, 0x1f6fc], [0x1f7e0, 0x1f7eb], [0x1f7f0, 0x1f7f0],
+  [0x1f90c, 0x1f93a], [0x1f93c, 0x1f945], [0x1f947, 0x1f9ff], [0x1fa70, 0x1faff],
+  [0x20000, 0x3fffd],
+];
+
 function isWideChar(ch) {
   const cp = ch.codePointAt(0);
-  return (cp >= 0x1100 && cp <= 0x115f) || (cp >= 0x2e80 && cp <= 0xa4cf)
-    || (cp >= 0xac00 && cp <= 0xd7a3) || (cp >= 0xf900 && cp <= 0xfaff)
-    || (cp >= 0xfe30 && cp <= 0xfe6f) || (cp >= 0xff00 && cp <= 0xff60)
-    || (cp >= 0xffe0 && cp <= 0xffe6) || (cp >= 0x20000 && cp <= 0x3fffd);
+  return WIDE_RANGES.some(([lo, hi]) => cp >= lo && cp <= hi);
 }
 
 function displayWidth(text) {
@@ -805,6 +829,8 @@ describe("installer text prompts with double-width characters (#1885)", () => {
   const body = 'source "$1"; exec 3<>/dev/tty; value="$(installer_ui_read_text 3 "Answer: " 64)"; printf "\\nVALUE=%s\\n" "$value"';
   const LEFT = "\x1b[D";
   const HOME = "\x1b[H";
+  const RIGHT = "\x1b[C";
+  const END = "\x1b[F";
   const DELETE = "\x1b[3~";
   const BACKSPACE = "\x7f";
   const modes = [
@@ -816,9 +842,17 @@ describe("installer text prompts with double-width characters (#1885)", () => {
     ["left arrows over a wide character", `a中b${LEFT}${LEFT}X`, "aX中b", 2],
     ["backspace after a wide character", `a中b${LEFT}${BACKSPACE}`, "ab", 1],
     ["backspace before a wide character", `a中b${LEFT}${LEFT}${BACKSPACE}`, "中b", 0],
-    ["delete of a wide character", `a中b${HOME}\x1b[C${DELETE}`, "ab", 1],
+    ["delete of a wide character", `a中b${HOME}${RIGHT}${DELETE}`, "ab", 1],
     ["inserting a wide character mid-line", `ab${LEFT}中`, "a中b", 2],
     ["home then typing before wide characters", `中文x${HOME}Y`, "Y中文x", 1],
+    ["right arrow across a wide character", `a中b${HOME}${RIGHT}${RIGHT}X`, "a中Xb", 3],
+    ["End after moving left over wide characters", `中文x${LEFT}${LEFT}${LEFT}${END}Y`, "中文xY", 4],
+    ["left arrows over an emoji", `a🚀b${LEFT}${LEFT}X`, "aX🚀b", 2],
+    ["backspace after a 🚀 emoji", `a🚀b${LEFT}${BACKSPACE}`, "ab", 1],
+    ["delete of a 🪐 emoji", `x🪐y${HOME}${RIGHT}${DELETE}`, "xy", 1],
+    ["home then typing before a ⌚ character", `⌚a${HOME}Y`, "Y⌚a", 1],
+    ["right arrow across ⌚ and 🪐", `⌚🪐z${HOME}${RIGHT}${RIGHT}X`, "⌚🪐Xz", 3],
+    ["End after left arrows over emoji", `🚀⌚z${LEFT}${LEFT}${END}Y`, "🚀⌚zY", 4],
   ];
 
   for (const [modeName, env] of modes) {
