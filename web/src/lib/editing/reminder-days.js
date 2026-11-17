@@ -18,3 +18,6 @@ export function reminderDayOf(text) {
   const day = Number(text);
   return day >= REMINDER_DAYS_MIN && day <= REMINDER_DAYS_MAX ? day : null;
 }
+
+/** The most reminders an item may carry (REMINDER_MAX in src/lib/domain.ts, pinned by test). */
+export const REMINDER_MAX = 8;

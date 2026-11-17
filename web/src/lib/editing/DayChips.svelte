@@ -1,7 +1,7 @@
 <script>
   import { addDays } from "./calendar.js";
   import { dayMonth } from "$lib/format.js";
-  import { REMINDER_PRESETS, REMINDER_REFUSAL, reminderDayOf } from "./reminder-days.js";
+  import { REMINDER_MAX, REMINDER_PRESETS, REMINDER_REFUSAL, reminderDayOf } from "./reminder-days.js";
 
   /**
    * THE REMINDER DAYS (#1468, round 6 Q): the chooser card's body for "how
@@ -16,7 +16,7 @@
    * scale, lit, with a cross: for it, off is removal. Typing a number that is
    * already a chip presses that chip (never a twin); already on, the chip
    * nudges and the line says so. One line under the grid carries, in turn,
-   * the add, the refusal and "already chosen".
+   * the add, the refusal, "already chosen" and, at the cap of 8, why no more.
    *
    * @typedef {{
    *   days: number[],
@@ -29,6 +29,10 @@
 
   const extra = $derived(days.filter((day) => !REMINDER_PRESETS.includes(day)));
   const scale = $derived([...new Set([...REMINDER_PRESETS, ...extra])].sort((a, b) => a - b));
+  /* the cap (#1892): at REMINDER_MAX the off chips and the field are disabled;
+     a saved item over it is never trimmed, only told how many must go */
+  const capped = $derived(days.length >= REMINDER_MAX);
+  const over = $derived(days.length - REMINDER_MAX);
   /** @type {HTMLInputElement | undefined} */
   let input = $state();
   let typed = $state("");
@@ -75,15 +79,15 @@
 <div class="grid" role="group" aria-label="Remind me this many days before">
   {#each scale as day (day)}
     {#if REMINDER_PRESETS.includes(day)}
-      <button type="button" class="chip" class:nudge={nudged === day} aria-pressed={days.includes(day)}
+      <button type="button" class="chip" class:nudge={nudged === day} aria-pressed={days.includes(day)} disabled={capped && !days.includes(day)}
               tabindex={day === scale[0] ? 0 : undefined} onclick={() => press(day)}>{day}d</button>
     {:else}
       <button type="button" class="chip" class:nudge={nudged === day} data-extra aria-label={`${day}d, remove`}
               onclick={() => press(day)}>{day}d<span class="x" aria-hidden="true">×</span></button>
     {/if}
   {/each}
-  <div class="own" class:has={typed !== ""} class:bad={voice === "refused"}>
-    <input bind:this={input} type="text" inputmode="numeric" maxlength="3" autocomplete="off" placeholder="other"
+  <div class="own" class:off={capped} class:has={typed !== ""} class:bad={voice === "refused"}>
+    <input bind:this={input} type="text" inputmode="numeric" maxlength="3" disabled={capped} autocomplete="off" placeholder="other"
            aria-label="Another number of days before" aria-invalid={voice === "refused" ? "true" : undefined}
            aria-describedby={voice === "refused" ? `${uid}-refusal` : undefined}
            value={typed} oninput={(event) => typing(event.currentTarget.value)}
@@ -91,8 +95,12 @@
     <span class="unit" aria-hidden="true">d</span>
   </div>
 </div>
-<div class="line" class:warm={voice === "refused"} aria-live="polite">
-  {#if voice === "add"}
+<div class="line" class:warm={voice === "refused" || over > 0} aria-live="polite">
+  {#if over > 0}
+    <span class="in">{REMINDER_MAX} at most · turn {over} off to save</span>
+  {:else if capped}
+    <span class="in">{REMINDER_MAX} at most · turn one off to add more</span>
+  {:else if voice === "add"}
     <button type="button" class="add" onclick={commit}>add {reminderDayOf(typed)} d <span class="kb">↵</span></button>
   {:else if voice === "refused"}
     <span class="in" id="{uid}-refusal">{REMINDER_REFUSAL}</span>
@@ -131,7 +139,9 @@
   .own .unit{position:absolute;right:11px;top:50%;transform:translateY(-50%);font:var(--p-type-meta) var(--mono);color:var(--ink-quiet);pointer-events:none;display:none}
   .own.has .unit{display:block}
   .own.has input{padding-right:22px}
-  /* one line, three voices in turn; it keeps its height so the card never jumps */
+  .chip:disabled,.own.off{opacity:.45;cursor:default}
+  .chip:disabled:hover{color:var(--ink-mid)}
+  /* one line, four voices in turn; it keeps its height so the card never jumps */
   .line{display:flex;align-items:center;min-height:24px;margin-top:4px;font:var(--p-type-meta) var(--mono);color:var(--ink-quiet);letter-spacing:.02em}
   .line .add{appearance:none;display:inline-flex;align-items:center;min-height:24px;padding:0 10px;margin-left:-10px;border:0;border-radius:15px;background:none;
         cursor:pointer;font:var(--p-type-meta) var(--mono);color:var(--accent)}
@@ -151,6 +161,9 @@
      pocket's 16px floor so it never zooms, and no Enter hint on a number pad */
   @media (max-width: 839.98px), (max-height: 479.98px){
     .own input{font-size:var(--p-type-input)}
+    /* the 44px tap floor: the slot, and the add that fills it (all voices share it, so nothing jumps) */
+    .line{min-height:44px;margin-top:0}
+    .line .add{min-height:44px}
     .line .add .kb{display:none}
   }
   @media (prefers-reduced-motion: reduce){
