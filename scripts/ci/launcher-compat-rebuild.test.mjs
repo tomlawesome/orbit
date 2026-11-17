@@ -18,11 +18,9 @@ describe("launcher_install_compat after the launcher archive has expired (#1738 
     expect(branch).toContain("expire_in: 3 days");
   });
 
-  it("rebuilds the archive with build-launcher.sh when the downloaded one is missing", () => {
+  it("gets the archive through the rebuilding helper before it is extracted", () => {
     const extract = job.indexOf(`--file "$CI_PROJECT_DIR/${archive}"`);
     expect(extract).toBeGreaterThan(-1);
-    const before = job.slice(0, extract);
-    expect(before).toMatch(/if \[ ! -s "\$CI_PROJECT_DIR\/\.orbit-launcher-artifacts\/orbit-launcher_linux_amd64\.tar\.gz" \]/u);
-    expect(before).toContain('bash scripts/ci/build-launcher.sh "$CI_PROJECT_DIR/.orbit-launcher-artifacts"');
+    expect(job.slice(0, extract)).toContain('node scripts/ci/provide-launcher-archive.mjs "$CI_PROJECT_DIR/.orbit-launcher-artifacts"');
   });
 });
