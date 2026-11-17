@@ -4268,7 +4268,7 @@ do_restore_compose_file() {
   compose_image_tmp="$(mktemp "${scratch_prefix}XXXXXX")" || { compose_image_tmp=""; return 1; }
   if ! { exec {compose_image_tmp_lock_fd}<"$compose_image_tmp"; } 2>/dev/null; then
     compose_image_tmp_lock_fd=""
-    compose_image_tmp=""
+    discard_image_compose
     return 1
   fi
   # Exit 75 only when another run holds the lock (a sweep that won the race

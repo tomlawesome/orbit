@@ -381,6 +381,22 @@ describe("repair.sh's compose restore is durable and leaves no scratch file (aud
     expect(existsSync(leftover), result.combined).toBe(true);
   });
 
+  it("O-S2 review: a fresh scratch file that cannot be opened is removed", () => {
+    const targetDir = makeDeployment({});
+    const shimDir = scratchDir("orbit-repair-mktemp-unreadable-");
+    writeFileSync(join(shimDir, "mktemp"), [
+      "#!/bin/sh",
+      'p="$(/usr/bin/mktemp "$@")" || exit 1',
+      'case "$p" in *docker-compose.yml.repair.*) chmod 000 "$p" ;; esac',
+      'printf \'%s\\n\' "$p"',
+      "",
+    ].join("\n"));
+    chmodSync(join(shimDir, "mktemp"), 0o755);
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], { pathPrefix: shimDir });
+    expect(result.stdout, result.combined).toContain("execute action=restore-compose-file resolves=compose-file-restorable result=failed");
+    expect(readdirSync(targetDir).filter((name) => name.startsWith(".docker-compose.yml.repair")), result.combined).toEqual([]);
+  });
+
   it("O-R4 review: a failing sync does not stop the compose restore", () => {
     const targetDir = makeDeployment({});
     const shimDir = scratchDir("orbit-repair-sync-fails-");
