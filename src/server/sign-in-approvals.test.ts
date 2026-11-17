@@ -186,7 +186,6 @@ vi.mock("@/db", async () => {
           consumedAt: null,
           outcome: null,
           decidedAt: null,
-          noticeShownAt: null,
           sendCount: 0,
           lastSentAt: null,
           ...value,
@@ -294,7 +293,7 @@ const {
   resendSignInApproval,
   secondFactorConfigured,
   startSignInApproval,
-  takeDeniedSignInNotice,
+  readDeniedSignInNotice,
 } = await import("@/server/sign-in-approvals");
 
 const USER = "22222222-2222-4222-8222-222222222222";
@@ -632,20 +631,21 @@ describe("a refusal (ADR-0027 §8 and consequences)", () => {
     expect((lockedUntil as Date).getTime()).toBeGreaterThan(now.getTime());
   });
 
-  it("tells the account holder once, on their next successful sign-in", async () => {
+  it("marks the password, and showing the mark does not spend it (#1881)", async () => {
     await startSignInApproval(USER, { userAgent: CHROME, clientAddress: null }, { mailer });
     await decideSignInApproval(tokenFromLatestMail(), "denied");
 
-    const notice = await takeDeniedSignInNotice(USER);
+    const notice = await readDeniedSignInNotice(USER);
     expect(notice).not.toBeNull();
-    /* Taken, not read: the second sign-in is not told again. */
-    expect(await takeDeniedSignInNotice(USER)).toBeNull();
+    expect(store.credentials[0].passwordChangeRequiredAt).toEqual(notice?.deniedAt);
+    /* Security state, not a notice: only a saved password clears it. */
+    expect(await readDeniedSignInNotice(USER)).toEqual(notice);
   });
 
   it("says nothing when nobody has refused anything", async () => {
     await startSignInApproval(USER, { userAgent: CHROME, clientAddress: null }, { mailer });
     await decideSignInApproval(tokenFromLatestMail(), "approved");
-    expect(await takeDeniedSignInNotice(USER)).toBeNull();
+    expect(await readDeniedSignInNotice(USER)).toBeNull();
   });
 });
 

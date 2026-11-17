@@ -5,7 +5,7 @@ import { checkPasswordBounds, hashPassword, MAX_PASSWORD_LENGTH, MIN_PASSWORD_LE
 import { assertSameOrigin, createSession, deleteSessionToken } from "orbit/lib/auth/session";
 import { VerificationGateRefusedError } from "orbit/lib/auth/verification-gate";
 import { getAuthConfig } from "orbit/lib/env";
-import { consumeSetupToken } from "orbit/server/local-credentials";
+import { assertNotRefusedPassword, consumeSetupToken, setupTokenOwner } from "orbit/server/local-credentials";
 
 import { api } from "$lib/server/api.js";
 
@@ -56,6 +56,13 @@ export const POST = api(
         400,
       );
     }
+
+    /* A recovery link is one of the ways out of a refused sign-in's mark
+       (#1881), and the new password it sets must not be the refused one. An
+       unknown or spent token has no owner here and is refused below by
+       `consumeSetupToken`, exactly as before. */
+    const owner = await setupTokenOwner(token);
+    if (owner) await assertNotRefusedPassword(owner, password);
 
     let passwordHash;
     try {

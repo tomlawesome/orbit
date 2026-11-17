@@ -49,7 +49,19 @@ export type AuthErrorCode =
      setting the second factor turns on (S-data3-1). A 503 that names no
      subsystem: a signed-out visitor learning which one failed is
      reconnaissance, the availability route's own rule. */
-  | "sign_in_unavailable";
+  | "sign_in_unavailable"
+  /* A refused sign-in forces a new password (#1881, ADR-0027 amendment of
+     2026-11-17). `password_change_required` is session creation refusing an
+     account whose password is marked; the sign-in routes turn it into the
+     change-password hold rather than answering it. `password_unchanged` is a
+     new password that is the refused one; `password_mismatch` is the two
+     entries disagreeing (or the second missing). `password_change_lapsed` is
+     a hold that has run out, been spent, or never existed: one word for all
+     three, as a setup link has. */
+  | "password_change_required"
+  | "password_unchanged"
+  | "password_mismatch"
+  | "password_change_lapsed";
 
 /**
  * Closed internal diagnostic reasons for a token-exchange failure.
@@ -80,6 +92,23 @@ export class AuthError extends Error {
     super(message, options);
     this.name = "AuthError";
     this.tokenExchangeReason = options?.tokenExchangeReason;
+  }
+}
+
+/**
+ * Session creation's refusal for an account whose password a refused sign-in
+ * has marked (#1881). Carries the mark's own moment, because that is both
+ * what the change-password hold is bound to and what the card tells the
+ * reader. Never shown to a browser as an error: every sign-in route catches
+ * it and answers with the hold instead.
+ */
+export class PasswordChangeRequiredError extends AuthError {
+  constructor(
+    public readonly userId: string,
+    public readonly requiredAt: Date,
+  ) {
+    super("password_change_required", "A new password is needed before this account can sign in", 403);
+    this.name = "PasswordChangeRequiredError";
   }
 }
 

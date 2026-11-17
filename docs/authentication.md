@@ -113,8 +113,12 @@ row → "send a new setup link"), and that gets them in.
 The link lasts ten minutes and works once. You can ask for another after a
 minute, and up to five in an hour; past that, the answer is to read the mail
 already sent. A refused sign-in counts as a failed attempt in the same backoff
-a wrong password does, and leaves a one-line notice on your sky the next time
-you do get in, with a link to change your password — somebody knew it.
+a wrong password does. It also means somebody else knew your password, so it
+marks the password: the next sign-in with it still needs the approval mail,
+and once approved it asks for a new password — different from the old one —
+before it lets you in. Signing in through your identity provider asks the
+same. The mark stays until a new password is saved, there or through a setup
+or recovery link; it does not wear off.
 
 ## Adding OIDC later
 

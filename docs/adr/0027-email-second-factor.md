@@ -94,3 +94,35 @@ forwarded-for header this instance has any reason to believe — so the address
 is `event.getClientAddress()`, noted here as the ruling asks. An operator who
 puts a reverse proxy in front of Orbit will need that convention before the
 address on the approval page means what it says.
+
+## Amendment of 2026-11-17: a refused sign-in forces a new password (#1881)
+
+**Ruled (owner, 2026-11-17)**, replacing the 2026-09-18 ruling above that a
+refusal "leaves a one-line notice on the sky at the next successful sign-in":
+after **This wasn't me**, the account holder must change the password at their
+next sign-in; a reminder is not enough. A refused sign-in means somebody else
+knew the password, and NIST SP 800-63B section 5.1.1 (memorized secret verifiers) says a verifier SHALL force a
+change of memorized secret on evidence of compromise.
+
+- A recorded refusal marks the password
+  (`local_credentials.password_change_required_at`, the newest refusal's
+  moment), in the same transaction that records the refusal.
+- The mark is checked where every sign-in path mints a session
+  (`createSession`): password and provider alike. A marked account gets no
+  session. The next password sign-in still needs the emailed approval; once
+  approved, and for a provider sign-in or an instance without the factor once
+  the password is right, the browser is given only a change-password hold — a
+  sealed, HTTP-only proof for one route, `POST
+  /api/auth/local/login/new-password` — that lapses with the approval's ten
+  minutes (ten minutes from issue where no approval preceded it).
+- The new password must differ from the refused one, and is held to the setup
+  and recovery rules (ADR-0021 §6). Saving it clears the mark in the same
+  statement that writes the hash, revokes every session the account held
+  (ADR-0023 §7) and records `password_changed`; only then is a session minted.
+  A setup or recovery link, or a signed-in change, clears it the same way and
+  is held to the same "not the refused one" rule.
+- The mark has no time limit: it is security state, not a notice, and is not
+  spent by being shown. The one-time notice on the sky goes; the moment of the
+  refusal is said on the new-password step instead (design round
+  `design/v19/password-after-refusal/round-1/`, direction R, owner verdict
+  2026-11-17). This closes #1879 A-S1.

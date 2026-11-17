@@ -713,6 +713,10 @@ async function writePasswordHash(
         failedAttemptCount: 0,
         lockedUntil: null,
         passwordChangedAt: new Date(),
+        /* A saved password is the only thing that clears the mark a refused
+           sign-in left (#1881), and it does so in this same statement: setup
+           and recovery links, a signed-in change and the forced step alike. */
+        passwordChangeRequiredAt: null,
         updatedAt: new Date(),
       })
       .where(eq(localCredentials.userId, userId));
@@ -797,6 +801,95 @@ export async function hasAnyLocalCredential(): Promise<boolean> {
     .from(localCredentials)
     .limit(1);
   return Boolean(existing);
+}
+
+/**
+ * When a refused sign-in marked `userId`'s password (#1881), or null when it
+ * is not marked or there is no password. A pure read.
+ */
+export async function passwordChangeRequiredAt(userId: string): Promise<Date | null> {
+  const [row] = await getDb()
+    .select({ requiredAt: localCredentials.passwordChangeRequiredAt })
+    .from(localCredentials)
+    .where(eq(localCredentials.userId, userId))
+    .limit(1);
+  return row?.requiredAt ?? null;
+}
+
+/**
+ * Refuses a new password that IS the one a refused sign-in showed somebody
+ * else knew (#1881: "the new password must differ from the old one"). Only a
+ * marked password is compared -- an unmarked account changing to the same
+ * password is ADR-0023's business, not this rule's -- so the derivation it
+ * costs is spent only on the few accounts that carry the mark. Run before any
+ * transaction is opened, so a 64 MiB derivation never holds a row lock.
+ */
+export async function assertNotRefusedPassword(userId: string, password: string): Promise<void> {
+  const [row] = await getDb()
+    .select({ passwordHash: localCredentials.passwordHash, requiredAt: localCredentials.passwordChangeRequiredAt })
+    .from(localCredentials)
+    .where(eq(localCredentials.userId, userId))
+    .limit(1);
+  if (!row?.requiredAt) return;
+  let verified: boolean;
+  try {
+    ({ verified } = await verifyPassword(row.passwordHash, password));
+  } catch (error) {
+    if (error instanceof VerificationGateRefusedError) {
+      throw new AuthError("too_many_attempts", "Too many attempts at once; try again shortly", 429);
+    }
+    throw error;
+  }
+  if (verified) {
+    throw new AuthError("password_unchanged", "Choose a password different from the one that was refused", 400);
+  }
+}
+
+/**
+ * Whose account an open setup or recovery token names, or null for a token
+ * that is unknown, spent or expired. A pure read, so the setup route can hold
+ * a new password to the refused-password rule before it spends anything;
+ * `consumeSetupToken` still decides the token under its own row lock.
+ */
+export async function setupTokenOwner(token: string): Promise<string | null> {
+  if (token.length === 0) return null;
+  const [row] = await getDb()
+    .select({ userId: credentialSetupTokens.userId, expiresAt: credentialSetupTokens.expiresAt, consumedAt: credentialSetupTokens.consumedAt })
+    .from(credentialSetupTokens)
+    .where(eq(credentialSetupTokens.tokenHash, setupTokenDigest(token)))
+    .limit(1);
+  if (!row || row.consumedAt || row.expiresAt.getTime() <= Date.now()) return null;
+  return row.userId;
+}
+
+/**
+ * Saves the new password a change-password hold was issued for (#1881).
+ *
+ * The hold is bound to the exact mark it was issued against, and the mark is
+ * read under the credential's row lock in the same transaction that writes
+ * the new hash and clears it: a hold whose mark has since been cleared (the
+ * password already saved, by this hold or a recovery link) or replaced (a
+ * later refusal) is `password_change_lapsed`, so a hold spends once and a
+ * stale one buys nothing. The change is ADR-0023 §7's like any other: every
+ * session the account held is revoked and `password_changed` recorded.
+ */
+export async function completePasswordRenewal(
+  userId: string,
+  requiredAt: Date,
+  passwordHash: string,
+): Promise<PasswordChangeOutcome> {
+  return getDb().transaction(async (transaction) => {
+    const [row] = await transaction
+      .select({ requiredAt: localCredentials.passwordChangeRequiredAt })
+      .from(localCredentials)
+      .where(eq(localCredentials.userId, userId))
+      .for("update")
+      .limit(1);
+    if (!row?.requiredAt || row.requiredAt.getTime() !== requiredAt.getTime()) {
+      throw new AuthError("password_change_lapsed", "This sign-in has lapsed; sign in again", 400);
+    }
+    return applyPasswordChange(transaction, userId, passwordHash, userId);
+  });
 }
 
 export interface ConsumedSetupToken extends PasswordChangeOutcome {

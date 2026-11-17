@@ -141,6 +141,13 @@
       "when": 1794899362770,
       "tag": "0019_sign_in_approval_sends",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1794954007889,
+      "tag": "0021_password_change_required",
+      "breakpoints": true
     }
   ]
 }

@@ -4,8 +4,9 @@ import {
   setPendingSignInCookie,
   setSessionCookie,
 } from "orbit/lib/auth/cookies";
-import { AuthError } from "orbit/lib/auth/errors";
+import { AuthError, PasswordChangeRequiredError } from "orbit/lib/auth/errors";
 import { authErrorResponse } from "orbit/lib/auth/http";
+import { issuePasswordChangeHold } from "orbit/lib/auth/password-change-hold";
 import { assertSameOrigin, createSession, deleteSessionToken } from "orbit/lib/auth/session";
 import { getAuthConfig } from "orbit/lib/env";
 import { verifyCredential } from "orbit/server/local-credentials";
@@ -127,6 +128,16 @@ export const POST = api(
          the race must answer the same way rather than reveal what happened. */
       if (error instanceof AuthError && error.code === "account_disabled") {
         throw new AuthError("credentials_invalid", INVALID_MESSAGE, 401);
+      }
+      /* A refused sign-in marked this password (#1881). With no factor the
+         password is the whole of the sign-in (ADR-0027 §2), so it earns what
+         an approved one would: the change-password hold, never a session. */
+      if (error instanceof PasswordChangeRequiredError) {
+        const hold = await issuePasswordChangeHold(event.cookies, error, config);
+        return new Response(
+          JSON.stringify({ authenticated: false, state: "password_change_required", refusedAt: hold.refusedAt }),
+          { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store" } },
+        );
       }
       throw error;
     }

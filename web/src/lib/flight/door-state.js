@@ -298,6 +298,11 @@ export function cardMessageFor(code) {
       return "That password is too short or too long.";
     case "setup_token_invalid":
       return "This link has been used already, or it has expired.";
+    /* The new-password step after a refused sign-in (#1881). */
+    case "password_mismatch":
+      return "Those two passwords are not the same.";
+    case "password_unchanged":
+      return "That is the password that was refused. Choose a different one.";
     case "sign_in_unavailable":
       return "Sign-in is briefly unavailable. Try again shortly.";
     case "invalid_request":
@@ -344,4 +349,24 @@ export const APPROVAL_BACKSTOP_MS = 10 * 60_000;
 export function applyStartingBackstop(state, deadline, now) {
   if (state !== STARTING) return state;
   return now >= deadline ? FAILED : STARTING;
+}
+
+const MOMENT_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/**
+ * A refusal's moment, in the words the approval mail and page already use
+ * for a moment (`formatApprovalMoment`, src/server/sign-in-approvals/mail.ts):
+ * "11 Nov 2026 at 21:14 UTC" (#1881). UTC and to the minute, so the card says
+ * the same time the mail did. `null` for anything that is not a moment, so a
+ * hostile or garbled answer puts nothing on the card rather than "NaN".
+ *
+ * @param {unknown} iso
+ * @returns {string | null}
+ */
+export function refusalMoment(iso) {
+  if (typeof iso !== "string") return null;
+  const when = new Date(iso);
+  if (Number.isNaN(when.getTime())) return null;
+  const pad = (/** @type {number} */ value) => String(value).padStart(2, "0");
+  return `${when.getUTCDate()} ${MOMENT_MONTHS[when.getUTCMonth()]} ${when.getUTCFullYear()} at ${pad(when.getUTCHours())}:${pad(when.getUTCMinutes())} UTC`;
 }

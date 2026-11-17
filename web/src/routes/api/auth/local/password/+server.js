@@ -9,7 +9,7 @@ import { requireRecentAuthentication } from "orbit/lib/auth/recent-auth";
 import { createSession } from "orbit/lib/auth/session";
 import { VerificationGateRefusedError } from "orbit/lib/auth/verification-gate";
 import { getAuthConfig } from "orbit/lib/env";
-import { hasLocalCredential, setPassword } from "orbit/server/local-credentials";
+import { assertNotRefusedPassword, hasLocalCredential, setPassword } from "orbit/server/local-credentials";
 
 import { write } from "$lib/server/api.js";
 
@@ -50,6 +50,10 @@ export const POST = write(async (event, session) => {
       400,
     );
   }
+
+  /* A signed-in change clears a refused sign-in's mark too (#1881), so it is
+     held to the same rule: not the refused password. */
+  await assertNotRefusedPassword(session.user.id, submitted.password);
 
   let passwordHash;
   try {
