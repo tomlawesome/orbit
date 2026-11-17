@@ -59,7 +59,8 @@ export function archiveFileProblem(file, limits) {
   /* archiveFileBytes follows the current storage limit (maxArchiveFileBytes),
      so an archive over it is over that limit, which can be raised (#1823
      A-F11, owner answer 46a on #1799). */
-  if (limits && file.size > limits.archiveFileBytes) {
+  if (!limits) return "orbit has not said how large an archive may be yet — reload the page";
+  if (file.size > limits.archiveFileBytes) {
     return `this file is larger than ${sizeLabel(limits.archiveFileBytes)}, the most the storage limit allows; ask your administrator to raise the storage limit`;
   }
   return null;
