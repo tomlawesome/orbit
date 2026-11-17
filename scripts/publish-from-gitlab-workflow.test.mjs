@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -407,5 +407,240 @@ describe("publish-from-gitlab copy step referrer filter", () => {
     expect(block).toMatch(/exit 1/u);
     // Nothing is copied before the guard.
     expect(step.slice(0, guard)).not.toContain("crane copy");
+  });
+});
+
+/*
+ * The whole copy step run against stubs (#1862): only referrers whose bundle
+ * verifies under cosign.pub, for the subject digest, with the predicate type
+ * their label claims, may reach GHCR; one that does not stops everything.
+ * The step's run script is sliced out of the workflow and run in a throwaway
+ * copy of the repository layout with crane and cosign stubbed on PATH. The
+ * crane stub serves the referrer index, each referrer's manifest and bundle
+ * blob, and logs every copy; the cosign stub fails for a referrer marked
+ * unverifiable (wherever the step hands it: argument, file or stdin), and
+ * prints the predicate type the referrer really carries.
+ */
+describe("publish-from-gitlab copy step verifies each referrer before copying (#1862)", () => {
+  const VALIDATION_TYPE = "https://tomlawson.io/attestations/orbit-validation/v1";
+  const SPDX_TYPE = "https://spdx.dev/Document";
+  const BUNDLE = "application/vnd.dev.sigstore.bundle.v0.3+json";
+  const IMAGE_DIGEST = `sha256:${"1".repeat(64)}`;
+  const COMMIT = "c".repeat(40);
+  const stepStart = workflow.indexOf("- name: Copy the exact tested digest");
+  const stepText = workflow.slice(stepStart, workflow.indexOf("\n      - name:", stepStart + 1));
+  const runLines = stepText.slice(stepText.indexOf("run: |\n") + "run: |\n".length).split("\n");
+  const stepScript = runLines.map((line) => line.replace(/^ {10}/u, "")).join("\n");
+  // The step's node -e '...' block has an apostrophe in a comment ("GitLab's"),
+  // which ends the single-quoted shell string early, so the step as committed
+  // does not parse (the first test below). The behaviour tests run it with that
+  // one apostrophe removed, so they judge the copy logic and not the typo.
+  const script = stepScript.replaceAll("GitLab's key-bound", "GitLab key-bound");
+  const hex = (digest) => digest.replace(/^sha256:/u, "");
+  const bundleOf = (digest) => JSON.stringify({ mediaType: BUNDLE, stubReferrer: digest });
+
+  const CRANE = String.raw`#!/usr/bin/env bash
+printf 'crane\x1f%s\n' "$*" >> "$STUB_LOG"
+case "$1" in
+  digest) printf '%s\n' "$STUB_IMAGE_DIGEST" ;;
+  manifest)
+    case "$2" in
+      *:sha256-*) cat "$STUB_DIR/index.json" ;;
+      *@sha256:*) d="@{2##*@sha256:}"; cat "$STUB_DIR/manifest-$d.json" ;;
+    esac ;;
+  blob) d="@{2##*@sha256:}"; cat "$STUB_DIR/bundle-$d.json" ;;
+  copy) ;;
+  *) printf 'crane test stub: unsupported subcommand: %s\n' "$*" >&2; exit 97 ;;
+esac
+`.replaceAll("@{", "${");
+  const COSIGN = String.raw`#!/usr/bin/env bash
+printf 'cosign\x1f%s\n' "$*" >> "$STUB_LOG"
+seen="$*"
+type=""; prev=""
+for a in "$@"; do
+  [[ -f "$a" ]] && seen="$seen $(cat "$a")"
+  [[ "$prev" == "--type" ]] && type="$a"
+  [[ "$a" == --type=* ]] && type="@{a#--type=}"
+  prev="$a"
+done
+[[ -t 0 ]] || seen="$seen $(cat)"
+for f in "$STUB_DIR"/bad-*; do
+  [[ -e "$f" ]] || continue
+  d="@{f##*/bad-}"
+  if [[ "$seen" == *"sha256:$d"* || "$seen" == *"$d"* ]]; then
+    printf 'Error: no matching signatures: invalid signature for %s\n' "$d" >&2
+    exit 1
+  fi
+done
+actual="$STUB_DEFAULT_TYPE"
+for f in "$STUB_DIR"/type-*; do
+  [[ -e "$f" ]] || continue
+  d="@{f##*/type-}"
+  [[ "$seen" == *"$d"* ]] && actual="$(cat "$f")"
+done
+want="$type"
+[[ "$want" == spdxjson ]] && want="https://spdx.dev/Document"
+if [[ -n "$want" && "$want" != "$actual" ]]; then
+  printf 'Error: none of the attestations match the predicate type: %s\n' "$type" >&2
+  exit 1
+fi
+payload="$(printf '{"predicateType":"%s","subject":[{"digest":{"sha256":"%s"}}]}' "$actual" "@{STUB_IMAGE_DIGEST#sha256:}" | base64 -w0)"
+printf '{"payloadType":"application/vnd.in-toto+json","payload":"%s","signatures":[]}\n' "$payload"
+`.replaceAll("@{", "${");
+
+  /** referrers: [{ digest, label, verifies = true, actualType = label }] */
+  const runCopy = (referrers) => {
+    const root = mkdtempSync(join(tmpdir(), "orbit-copy-step-"));
+    const bin = join(root, "bin");
+    const stub = join(root, "stub");
+    mkdirSync(join(root, "scripts", "ci"), { recursive: true });
+    mkdirSync(bin);
+    mkdirSync(stub);
+    for (const file of ["release-metadata-patterns.sh", "ci/verify-validation-evidence.sh"]) {
+      copyFileSync(new URL(`./${file}`, import.meta.url), join(root, "scripts", file));
+    }
+    copyFileSync(new URL("../cosign.pub", import.meta.url), join(root, "cosign.pub"));
+    for (const [name, body] of [["crane", CRANE], ["cosign", COSIGN]]) {
+      writeFileSync(join(bin, name), body);
+      chmodSync(join(bin, name), 0o755);
+    }
+    writeFileSync(join(root, "scripts", "ci", "ensure-cosign.sh"), `#!/usr/bin/env bash\nprintf '%s\\n' '${join(bin, "cosign")}'\n`);
+    writeFileSync(
+      join(stub, "index.json"),
+      JSON.stringify({
+        schemaVersion: 2,
+        manifests: referrers.map((r) => ({
+          mediaType: "application/vnd.oci.image.manifest.v1+json",
+          digest: r.digest,
+          size: 1,
+          artifactType: BUNDLE,
+          annotations: { "dev.sigstore.bundle.predicateType": r.label },
+        })),
+      }),
+    );
+    for (const r of referrers) {
+      writeFileSync(
+        join(stub, `manifest-${hex(r.digest)}.json`),
+        JSON.stringify({
+          schemaVersion: 2,
+          mediaType: "application/vnd.oci.image.manifest.v1+json",
+          artifactType: BUNDLE,
+          config: { mediaType: "application/vnd.oci.empty.v1+json", digest: r.digest, size: 2 },
+          layers: [{ mediaType: BUNDLE, digest: r.digest, size: 1 }],
+          subject: { mediaType: "application/vnd.oci.image.manifest.v1+json", digest: IMAGE_DIGEST, size: 1 },
+        }),
+      );
+      writeFileSync(join(stub, `bundle-${hex(r.digest)}.json`), bundleOf(r.digest));
+      if (r.verifies === false) writeFileSync(join(stub, `bad-${hex(r.digest)}`), "");
+      if (r.actualType !== undefined) writeFileSync(join(stub, `type-${hex(r.digest)}`), r.actualType);
+    }
+    const log = join(root, "calls.log");
+    writeFileSync(log, "");
+    const outputFile = join(root, "github-output");
+    writeFileSync(outputFile, "");
+    const scriptFile = join(root, "step.sh");
+    writeFileSync(scriptFile, script);
+    const result = spawnSync("bash", [scriptFile], {
+      cwd: root,
+      encoding: "utf8",
+      input: "",
+      env: {
+        PATH: `${bin}:${process.env.PATH}`,
+        REGISTRY: "ghcr.io",
+        IMAGE_NAME: "Owner/Orbit",
+        THROWAWAY_IMAGE: "127.0.0.1:5000/ai/orbit",
+        SOURCE: `127.0.0.1:5000/ai/orbit@${IMAGE_DIGEST}`,
+        DIGEST: IMAGE_DIGEST,
+        GITHUB_SHA: COMMIT,
+        GITHUB_OUTPUT: outputFile,
+        GITHUB_WORKSPACE: root,
+        ORBIT_COSIGN: join(bin, "cosign"),
+        COSIGN_PUBLIC_KEY: join(root, "cosign.pub"),
+        STUB_LOG: log,
+        STUB_DIR: stub,
+        STUB_IMAGE_DIGEST: IMAGE_DIGEST,
+        STUB_DEFAULT_TYPE: VALIDATION_TYPE,
+      },
+    });
+    const lines = readFileSync(log, "utf8").split("\n").filter(Boolean);
+    const copies = lines.filter((line) => line.startsWith("crane\x1fcopy ")).map((line) => line.slice("crane\x1f".length));
+    return { result, lines, copies, output: readFileSync(outputFile, "utf8") };
+  };
+
+  const d = (c) => `sha256:${c.repeat(64)}`;
+
+  it("is a shell script that parses: no apostrophe inside the node -e single-quoted block ends it early", () => {
+    const parsed = spawnSync("bash", ["-n"], { input: stepScript, encoding: "utf8" });
+    expect(parsed.stderr).toBe("");
+    expect(parsed.status).toBe(0);
+  });
+
+  const ok = { digest: d("a"), label: VALIDATION_TYPE };
+  const okSbom = { digest: d("b"), label: SPDX_TYPE };
+
+  it("copies the image and every labelled referrer when all of them verify under cosign.pub", () => {
+    const { result, copies, output } = runCopy([ok, okSbom]);
+    expect(result.status, result.stderr).toBe(0);
+    expect(copies).toEqual([
+      `copy ${`127.0.0.1:5000/ai/orbit@${IMAGE_DIGEST}`} ghcr.io/owner/orbit:sha-${COMMIT}`,
+      `copy 127.0.0.1:5000/ai/orbit@${ok.digest} ghcr.io/owner/orbit@${ok.digest}`,
+      `copy 127.0.0.1:5000/ai/orbit@${okSbom.digest} ghcr.io/owner/orbit@${okSbom.digest}`,
+    ]);
+    expect(output).toContain("image=ghcr.io/owner/orbit");
+  });
+
+  it("puts each labelled referrer to cosign with the committed key before the first copy", () => {
+    const { result, lines } = runCopy([ok, okSbom]);
+    expect(result.status, result.stderr).toBe(0);
+    const verifies = lines.filter((line) => line.startsWith("cosign\x1f"));
+    for (const referrer of [ok, okSbom]) {
+      expect(verifies.some((line) => line.includes(hex(referrer.digest))), referrer.digest).toBe(true);
+    }
+    expect(verifies.every((line) => line.includes("cosign.pub"))).toBe(true);
+    const firstCopy = lines.findIndex((line) => line.startsWith("crane\x1fcopy "));
+    expect(lines.findLastIndex((line) => line.startsWith("cosign\x1f"))).toBeLessThan(firstCopy);
+  });
+
+  it("fails naming the digest, and copies nothing, when a validation-labelled referrer does not verify under cosign.pub", () => {
+    const rogue = { digest: d("e"), label: VALIDATION_TYPE, verifies: false };
+    const { result, copies } = runCopy([ok, okSbom, rogue]);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(rogue.digest);
+    expect(result.stderr).toContain("cosign.pub");
+    expect(result.stderr).not.toContain(ok.digest);
+    expect(copies).toEqual([]);
+  });
+
+  it("fails naming the digest, and copies nothing, when an SPDX-labelled referrer does not verify under cosign.pub", () => {
+    const rogue = { digest: d("f"), label: SPDX_TYPE, verifies: false };
+    const { result, copies } = runCopy([ok, okSbom, rogue]);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(rogue.digest);
+    expect(result.stderr).toContain("cosign.pub");
+    expect(result.stderr).not.toContain(okSbom.digest);
+    expect(copies).toEqual([]);
+  });
+
+  it("fails and copies nothing when a referrer's verified predicate type differs from its label", () => {
+    const liar = { digest: d("9"), label: SPDX_TYPE, actualType: "https://slsa.dev/provenance/v1" };
+    const { result, copies } = runCopy([ok, liar]);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(liar.digest);
+    expect(copies).toEqual([]);
+  });
+
+  it("fails and copies nothing when a validation-labelled referrer really carries the SPDX type", () => {
+    const liar = { digest: d("8"), label: VALIDATION_TYPE, actualType: SPDX_TYPE };
+    const { result, copies } = runCopy([liar, okSbom]);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(liar.digest);
+    expect(copies).toEqual([]);
+  });
+
+  it("keeps the header's promise and says in the step's comment that each referrer is verified before the copy", () => {
+    expect(workflow).toContain("Nothing unverified is written to GHCR");
+    const comment = workflow.slice(workflow.lastIndexOf("\n\n", stepStart), stepStart);
+    expect(comment).toMatch(/each referrer[^.]*verif|verif[^.]*each referrer/iu);
+    expect(comment).toContain("cosign.pub");
   });
 });

@@ -433,6 +433,64 @@ describe("verify-validation-evidence.sh", () => {
         expect(written()).toBeNull();
       });
 
+      // The validation path gets the same limit (#1862). The fake prints the
+      // real envelope for the validation call, then pads or generates bytes on
+      // the fly; a node stub on PATH records any attempt to parse.
+      describe("the validation path (#1862)", () => {
+        const nodeStub = () => {
+          const dir = mkdtempSync(join(tmpdir(), "verify-fake-node-"));
+          const log = join(dir, "node.log");
+          writeFileSync(join(dir, "node"), `#!/usr/bin/env bash\necho called >> '${log}'\nexit 99\n`);
+          chmodSync(join(dir, "node"), 0o755);
+          return { dir, calls: () => (existsSync(log) ? readFileSync(log, "utf8").split("\n").filter(Boolean).length : 0) };
+        };
+        // A cosign whose validation call (no spdxjson in its arguments) runs `body`.
+        const validationCosign = (body) => {
+          const dir = mkdtempSync(join(tmpdir(), "verify-fake-cosign-"));
+          const path = join(dir, "cosign");
+          writeFileSync(path, ["#!/usr/bin/env bash", 'case "$*" in', "  *spdxjson*) exit 1 ;;", `  *) ${body} ;;`, "esac", ""].join("\n"));
+          chmodSync(path, 0o755);
+          return path;
+        };
+        // The envelope line, a newline, then spaces (blank to the parser) up to `total` bytes.
+        const paddedCosign = (total) => {
+          const pad = total - Buffer.byteLength(`${envelope()}\n`);
+          return validationCosign(`cat "$STUB_COSIGN_OUTPUT"; head -c ${pad} /dev/zero | tr '\\0' ' '`);
+        };
+
+        it("refuses (missing, exit 11) a validation cosign output larger than 64 MiB, before parsing it, with no node parse attempted", () => {
+          const node = nodeStub();
+          const cosign = paddedCosign(MAX_SBOM_BYTES + 1);
+          const { result } = run({ env: { ORBIT_COSIGN: cosign, PATH: `${node.dir}:${process.env.PATH}` } });
+          expect(result.status, result.stderr.slice(0, 500)).toBe(11);
+          expect(result.stderr).toContain("refused (missing)");
+          expect(result.stderr).toMatch(/64 ?MiB|67108864|too large|larger than|exceeds|size limit/iu);
+          expect(result.stderr).toMatch(/validation/iu);
+          expect(node.calls()).toBe(0);
+        });
+
+        it("refuses a validation cosign output of unparseable garbage over 64 MiB for its size, not for being undecodable", () => {
+          const cosign = validationCosign(`head -c ${MAX_SBOM_BYTES + 1} /dev/zero`);
+          const { result } = run({ env: { ORBIT_COSIGN: cosign } });
+          expect(result.status, result.stderr.slice(0, 500)).toBe(11);
+          expect(result.stderr).toMatch(/64 ?MiB|67108864|too large|larger than|exceeds|size limit/iu);
+          expect(result.stderr).not.toContain("not decodable");
+        });
+
+        it("accepts a validation cosign output of exactly 64 MiB", () => {
+          const cosign = paddedCosign(MAX_SBOM_BYTES);
+          const { result } = run({ env: { ORBIT_COSIGN: cosign } });
+          expect(result.stderr).toBe("");
+          expect(result.status).toBe(0);
+          expect(result.stdout).toContain(`accepted ${DIGEST}`);
+        });
+      });
+
+      it("lists the validation output's 64 MiB refusal in the script's header of refusals", () => {
+        const header = readFileSync(script, "utf8").split("\nset -Eeuo pipefail")[0];
+        expect(header).toMatch(/validation[^.]{0,80}(output|read)[^.]{0,80}64 MiB|64 MiB[^.]{0,80}validation/iu);
+      });
+
       it("cuts the cosign stderr echoed on a validation refusal to at most 4096 bytes (D-S6 43a addendum 2)", () => {
         const cosign = fakeCosign("exit 0");
         // The validation call (no spdxjson in its arguments) fails with 200000 bytes of stderr.
