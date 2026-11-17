@@ -1613,7 +1613,7 @@ cleanup() {
   [[ -z "${smtp_rewrite_tmp:-}" ]] || as_folder_owner rm -f -- "$smtp_rewrite_tmp" 2>/dev/null || true
   [[ -z "${smtp_step_tmp:-}" ]] || as_folder_owner rm -f -- "$smtp_step_tmp" 2>/dev/null || true
 
-  if [[ -n "${recovery_dir:-}" ]]; then
+  if [[ -n "${recovery_dir:-}" || -n "${owner_recovery_dir:-}" ]]; then
     printf 'Orbit repair: interrupted before completion; this run left a private recovery copy in place, now removed. Re-run "repair.sh --plan" to see current state, then "--execute" again if repairs are still needed.\n' >&2
     cleanup_recovery_dir
   fi
@@ -2228,13 +2228,20 @@ pinned_orbit_image() {
 # file, or the copy is empty. The image is never pulled: the label read needs
 # it local, and `--pull never` refuses to fetch it.
 read_image_deployment_asset() {
-  local image="$1" asset="$2" destination="$3" assets_root
+  local destination="$3"
+  image_deployment_asset_bytes "$1" "$2" >"$destination" || return 1
+  [[ -f "$destination" && ! -L "$destination" && -s "$destination" ]]
+}
+
+# image_deployment_asset_bytes <image> <asset-name>: the same read, to stdout
+# (restore-compose-file streams it to the folder's owner, #1857 S3).
+image_deployment_asset_bytes() {
+  local image="$1" asset="$2" assets_root
   assets_root="$(timeout "$docker_probe_timeout" docker image inspect \
     --format '{{index .Config.Labels "io.orbit.deployment-assets"}}' "$image" 2>/dev/null)" || return 1
   [[ "$assets_root" == "$deployment_assets_root" ]] || return 1
   timeout "$docker_image_read_timeout" docker run --rm --pull never --network none --entrypoint cat \
-    "$image" "${deployment_assets_root}/${asset}" >"$destination" 2>/dev/null || return 1
-  [[ -f "$destination" && ! -L "$destination" && -s "$destination" ]]
+    "$image" "${deployment_assets_root}/${asset}" 2>/dev/null
 }
 
 # compose_image_tmp is the one temporary file this feature owns at a time;
@@ -2850,7 +2857,27 @@ ensure_recovery_dir() {
   return 1
 }
 
+# #1857 S4: the .env-orbit configuration-rollback restore's own recovery
+# folder, made (and removed by cleanup_recovery_dir) the same way, as the
+# deployment folder's owner (as_folder_owner); restore-transaction keeps
+# root's. Separate, so neither action ever writes in the other's.
+owner_recovery_dir=""
+ensure_owner_recovery_dir() {
+  [[ -n "$owner_recovery_dir" ]] && return 0
+  local attempt
+  for attempt in 1 2 3; do
+    owner_recovery_dir="./.orbit-repair-recovery.$$.${RANDOM}${RANDOM}"
+    as_folder_owner mkdir -m 700 -- "$owner_recovery_dir" 2>/dev/null && return 0
+  done
+  owner_recovery_dir=""
+  return 1
+}
+
 cleanup_recovery_dir() {
+  if [[ -n "${owner_recovery_dir:-}" ]]; then
+    as_folder_owner rm -rf -- "$owner_recovery_dir" || true
+    owner_recovery_dir=""
+  fi
   [[ -n "$recovery_dir" ]] || return 0
   rm -rf -- "$recovery_dir"
   recovery_dir=""
@@ -3571,8 +3598,9 @@ backup_restore_lock_state() {
 # $held_lock_fd (no subshell, so the descriptor survives) until
 # release_backup_restore_lock; the caller holds it across its compose call.
 # The outcome is left in $lock_probe_state (empty when taken or not checked).
-# With $lock_made_as_owner set to 1 (retire-smtp-lines only, #1848 FIX-S1
-# addendum), root makes a missing backups folder or lock file as the
+# With $lock_made_as_owner set to 1 (acquire_backup_restore_lock_as_owner:
+# retire-smtp-lines, #1848 FIX-S1 addendum; start-services and
+# recreate-services, #1857 S2), root makes a missing backups folder or lock file as the
 # deployment folder's owner (as_folder_owner), never itself; root then only
 # opens the lock read-only, as before.
 held_lock_fd=""
@@ -3671,6 +3699,15 @@ lock_refusal=""
 acquire_backup_restore_lock() {
   probe_backup_restore_lock keep
   lock_refusal="$(lock_state_refusal "$lock_probe_state")"
+}
+
+# The same, with a missing backups folder or lock file made as the
+# deployment folder's owner (#1848 FIX-S1 addendum, #1857 S2): the actions
+# that take the lock run check_folder_owner first.
+acquire_backup_restore_lock_as_owner() {
+  lock_made_as_owner=1
+  acquire_backup_restore_lock
+  lock_made_as_owner=0
 }
 
 # flock's words as one bounded, control-free line for a refusal: escape
@@ -4230,32 +4267,41 @@ do_fix_permissions() {
 
 # --- restore-compose-file (#1484) -------------------------------------------
 #
-# Puts back a MISSING docker-compose.yml from the pinned image. Re-checks
-# immediately before acting that nothing exists at the path (a file, a
-# symlink, anything): a present file is never replaced. The image's bytes go
-# to a temporary file in the deployment folder (streamed, no shell text
-# handling, so trailing blank lines, trailing spaces and non-ASCII survive),
-# then take the installer's mode 0644 and the folder's owner, then an atomic
-# rename that refuses to overwrite. Returns 1 with nothing left behind when
-# any step fails; the caller reports `failed`.
+# Puts back a MISSING docker-compose.yml from the pinned image. A present
+# file (a file, a symlink, anything) is never replaced. In order (#1857 S3):
+# the deployment folder's owner makes a same-folder temporary file with the
+# installer's mode 0644 (smtp_owner_write); root re-checks that nothing
+# exists at the name, so a file that appeared since the diagnosis stops it
+# before the image is read again (#1558); root reads the image's bytes
+# (streamed, no shell text handling, so trailing blank lines, trailing
+# spaces and non-ASCII survive) and the owner writes them into that file;
+# the owner renames it onto the name with mv -n, which refuses to overwrite
+# a file that appeared meanwhile. Root writes, renames and chowns nothing in
+# the folder; as root in a folder another user owns, check_folder_owner
+# refuses first. Returns 1 with nothing left behind when any step fails; the
+# caller reports `failed`.
+# shellcheck disable=SC2016 # expanded by the child bash
+readonly owner_fill_script='cat > "$1" && test -s "$1"'
 do_restore_compose_file() {
-  local image
-  [[ ! -e "$compose_file" && ! -L "$compose_file" ]] || return 1
+  local image tmp
+  if [[ "$(id -u)" == 0 ]] && ! check_folder_owner; then
+    printf 'Orbit repair: restore-compose-file refused, nothing was changed: %s.\n' "$owner_refusal" >&2
+    return 1
+  fi
   image="$(pinned_orbit_image)" || return 1
-  compose_image_tmp="$(mktemp "./.${compose_file}.repair.XXXXXX")" || { compose_image_tmp=""; return 1; }
-  if ! read_image_deployment_asset "$image" "$compose_file" "$compose_image_tmp" ||
-    ! chmod 0644 -- "$compose_image_tmp" ||
-    ! own_as_folder "$compose_image_tmp"; then
-    discard_image_compose
+  smtp_owner_write . ".${compose_file}.repair.XXXXXX" 644 "" true || return 1
+  tmp="$smtp_step_tmp"
+  # mv -n leaves the source in place when the target appeared in the
+  # meantime (and, in newer coreutils, says so with exit 1).
+  if [[ -e "$compose_file" || -L "$compose_file" ]] ||
+    ! image_deployment_asset_bytes "$image" "$compose_file" |
+    as_folder_owner --pipe bash -c "$owner_fill_script" owner-fill "$tmp" >/dev/null ||
+    ! as_folder_owner mv -n -- "$tmp" "$compose_file" || [[ -e "$tmp" || -L "$tmp" ]]; then
+    as_folder_owner rm -f -- "$tmp" || true
+    smtp_step_tmp=""
     return 1
   fi
-  mv -n -- "$compose_image_tmp" "$compose_file" || { discard_image_compose; return 1; }
-  # mv -n leaves the source in place when the target appeared in the meantime.
-  if [[ -e "$compose_image_tmp" ]]; then
-    discard_image_compose
-    return 1
-  fi
-  compose_image_tmp=""
+  smtp_step_tmp=""
 }
 
 # --- restore-transaction ----------------------------------------------------
@@ -4508,7 +4554,7 @@ do_restore_transaction() {
 # immediately before touching anything; refuse a symlinked parent directory
 # on either side and a symlinked rollback file; back up the current live
 # .env-orbit into this run's private recovery directory before it is
-# touched; on any failure report failed, leaving both .env-orbit and the
+# touched (its own one, owner_recovery_dir, #1857 S4); on any failure report failed, leaving both .env-orbit and the
 # rollback copy exactly as they were for a future retry; on full success,
 # remove the rollback copy (mirroring do_restore_transaction's own
 # staging-directory removal) and report done.
@@ -4518,6 +4564,13 @@ do_restore_transaction() {
 # renames it onto .env-orbit — an atomic same-filesystem rename, matching
 # configuration.sh's own migrate_file() write pattern, so .env-orbit is
 # never observably absent or partially written.
+#
+# #1857 S4: as root in a folder another user owns, every file and folder
+# this action makes or replaces there is made by that owner (as_folder_owner,
+# smtp_owner_write): the recovery folder and its evidence copy, the staged
+# file and its rename, and the removal of the rollback copy. Root only reads
+# the rollback copy (smtp_read_file, never through a link), after the owner
+# checks of check_folder_owner.
 do_restore_configuration_rollback() {
   local rollback_path="${environment_file}${configuration_rollback_suffix}"
   local parent staged
@@ -4530,11 +4583,16 @@ do_restore_configuration_rollback() {
   parent="$(dirname -- "$rollback_path")"
   [[ "$parent" == "." || ! -L "$parent" ]] || return 1
 
-  ensure_recovery_dir || return 1
+  if [[ "$(id -u)" == 0 ]] && ! check_folder_owner; then
+    printf 'Orbit repair: restore-transaction refused, nothing was changed: %s.\n' "$owner_refusal" >&2
+    return 1
+  fi
+
+  ensure_owner_recovery_dir || return 1
 
   if [[ -e "$environment_file" || -L "$environment_file" ]]; then
-    mkdir -p -- "$(dirname -- "$recovery_dir/live/$environment_file")" || return 1
-    cp -a -- "$environment_file" "$recovery_dir/live/$environment_file" || return 1
+    as_folder_owner mkdir -p -- "$(dirname -- "$owner_recovery_dir/live/$environment_file")" || return 1
+    as_folder_owner cp -a -- "$environment_file" "$owner_recovery_dir/live/$environment_file" || return 1
   fi
 
   # No branch below calls restore_transaction_self_restore, deliberately.
@@ -4547,18 +4605,16 @@ do_restore_configuration_rollback() {
   # action never modified. The backup above is still taken: it is the
   # operator's evidence in the one case that does end with .env-orbit
   # changed and the action reporting failed, the rollback-copy removal below.
-  staged="$(mktemp "${environment_file}.repair-restore.XXXXXX" 2>/dev/null)" || return 1
-  if ! cp -- "$rollback_path" "$staged" 2>/dev/null || ! chmod 600 -- "$staged" 2>/dev/null ||
-    ! own_as_folder "$staged" 2>/dev/null; then
-    rm -f -- "$staged"
+  smtp_owner_write . "${environment_file}.repair-restore.XXXXXX" 600 "" smtp_read_file "$rollback_path" || return 1
+  staged="$smtp_step_tmp"
+  if ! as_folder_owner mv -fT -- "$staged" "$environment_file"; then
+    as_folder_owner rm -f -- "$staged" || true
+    smtp_step_tmp=""
     return 1
   fi
-  if ! mv -f -- "$staged" "$environment_file" 2>/dev/null; then
-    rm -f -- "$staged"
-    return 1
-  fi
+  smtp_step_tmp=""
 
-  rm -f -- "$rollback_path" || return 1
+  as_folder_owner rm -f -- "$rollback_path" || return 1
   return 0
 }
 
@@ -4738,16 +4794,6 @@ mail_sending_gate_holds() {
 smtp_copy_dir=""
 smtp_record_step=""
 
-# As root, give a path the deployment folder's owner (restore-compose-file's
-# rule): the folder's user must still be able to read what this run leaves
-# behind. As any other user, a no-op. Never through a symlink: a link swapped
-# in at the name is re-owned itself, its target untouched (FIX-S1). Used by
-# restore-compose-file and the .env-orbit restore; retire-smtp-lines writes
-# as the owner instead (#1848 FIX-S1).
-own_as_folder() {
-  [[ "$(id -u)" != 0 ]] || chown --no-dereference --reference=. -- "$@"
-}
-
 # #1848 FIX-S1: the deployment folder's owner, read once per run by
 # smtp_owner_init; $smtp_writer_uid is the uid whose files this run makes
 # (the folder's owner as root, else the running user). As root in a folder
@@ -4774,6 +4820,36 @@ smtp_owner_init() {
   smtp_owner_name="${BASH_REMATCH[1]}"
   smtp_owner_gid="${BASH_REMATCH[3]}"
   smtp_owner_home="${BASH_REMATCH[4]:-/}"
+}
+
+# #1857 S1: the one owner check of every action that writes in the
+# deployment folder (retire-smtp-lines, start-services, recreate-services,
+# restore-compose-file, the .env-orbit configuration-rollback restore). Reads
+# the folder's owner (smtp_owner_init); as root in a folder another user
+# owns, the owner's steps need setpriv, a setsid with --wait and the owner's
+# user-database entry. Leaves the refusal in $owner_refusal and returns 1,
+# or returns 0 with it empty. Run in the caller's shell: it sets the
+# smtp_owner_* globals as_folder_owner reads.
+owner_refusal=""
+check_folder_owner() {
+  owner_refusal=""
+  if ! smtp_owner_init; then
+    owner_refusal="the deployment folder's owner could not be read"
+  elif [[ "$(id -u)" != 0 || "$smtp_folder_uid" == 0 ]]; then
+    :
+  elif ! command -v setpriv >/dev/null 2>&1; then
+    # #1848 FIX-S1: as root it writes only as the folder's owner.
+    owner_refusal="run as root, it writes as the deployment folder's owner through setpriv (util-linux), which is not on PATH"
+  elif ! setsid --wait true </dev/null >/dev/null 2>&1; then
+    # #1848 FIX-S1 addendum 2 item 2: that child runs in a new session, and
+    # root waits for it (addendum 3 item 4: --wait is util-linux 2.31+).
+    owner_refusal="run as root, it runs the deployment folder's owner's commands in a new session through setsid --wait (util-linux 2.31 or later), which is not on PATH or does not support --wait"
+  elif [[ -z "$smtp_owner_gid" ]]; then
+    # #1848 FIX-S1 addendum 2 item 3: the owner's own group, from the user
+    # database; addendum 3 item 3: no entry, no getent or a failed lookup.
+    owner_refusal="run as root, it could not look up the deployment folder's owner (uid $smtp_folder_uid) in the user database (getent passwd)"
+  fi
+  [[ -z "$owner_refusal" ]]
 }
 
 # clean_terminal_text: stdin to stdout, made safe for root's terminal the way
@@ -5225,28 +5301,15 @@ do_retire_smtp_lines() {
     refusal="$environment_file is missing"
   elif ! environment_file_ok_now; then
     refusal="$environment_file has changed or is not valid (owner-only KEY=value lines naming this project)"
-  elif ! smtp_owner_init; then
-    refusal="the deployment folder's owner could not be read"
-  elif [[ "$(id -u)" == 0 && "$smtp_folder_uid" != 0 ]] && ! command -v setpriv >/dev/null 2>&1; then
-    # #1848 FIX-S1: as root it writes only as the folder's owner.
-    refusal="run as root, it writes as the deployment folder's owner through setpriv (util-linux), which is not on PATH"
-  elif [[ "$(id -u)" == 0 && "$smtp_folder_uid" != 0 ]] && ! setsid --wait true </dev/null >/dev/null 2>&1; then
-    # #1848 FIX-S1 addendum 2 item 2: that child runs in a new session, and
-    # root waits for it (addendum 3 item 4: --wait is util-linux 2.31+).
-    refusal="run as root, it runs the deployment folder's owner's commands in a new session through setsid --wait (util-linux 2.31 or later), which is not on PATH or does not support --wait"
-  elif [[ "$(id -u)" == 0 && "$smtp_folder_uid" != 0 && -z "$smtp_owner_gid" ]]; then
-    # #1848 FIX-S1 addendum 2 item 3: the owner's own group, from the user
-    # database; addendum 3 item 3: no entry, no getent or a failed lookup.
-    refusal="run as root, it could not look up the deployment folder's owner (uid $smtp_folder_uid) in the user database (getent passwd)"
+  elif ! check_folder_owner; then
+    refusal="$owner_refusal"
   else
     refusal="$(smtp_foreign_folder_refusal)"
   fi
   if [[ -z "$refusal" ]]; then
     # #1848 FIX-S1 addendum: a missing backups folder or lock file is made
     # as the folder's owner.
-    lock_made_as_owner=1
-    acquire_backup_restore_lock
-    lock_made_as_owner=0
+    acquire_backup_restore_lock_as_owner
     refusal="$lock_refusal"
   fi
   if [[ -n "$refusal" ]]; then
@@ -5437,11 +5500,15 @@ do_recreate_services() {
     refusal="the Compose file $compose_file is missing"
   elif ! secrets_all_ok_now; then
     refusal="a secret is missing or has the wrong permissions"
+  elif [[ "$(id -u)" == 0 ]] && ! check_folder_owner; then
+    # #1857 S1: as root, the lock is made as the folder's owner.
+    refusal="$owner_refusal"
   fi
 
   # #1823 O-R2: take the lock for the whole compose call; a run that starts
-  # meanwhile sees it held and refuses.
-  [[ -n "$refusal" ]] || { acquire_backup_restore_lock; refusal="$lock_refusal"; }
+  # meanwhile sees it held and refuses. #1857 S2: a missing backups folder or
+  # lock file is made as the deployment folder's owner.
+  [[ -n "$refusal" ]] || { acquire_backup_restore_lock_as_owner; refusal="$lock_refusal"; }
   if [[ -n "$refusal" ]]; then
     printf 'Orbit repair: recreate-services refused, nothing was changed: %s.\n' "$refusal" >&2
     return 1
@@ -5531,8 +5598,13 @@ do_start_services() {
     else
       refusal="there is no database container and no database volume, so starting Orbit would make a new, empty database; restore from a backup or run the installer"
     fi
+  elif [[ "$(id -u)" == 0 ]] && ! check_folder_owner; then
+    # #1857 S1: as root, the lock is made as the folder's owner.
+    refusal="$owner_refusal"
   fi
-  [[ -n "$refusal" ]] || { acquire_backup_restore_lock; refusal="$lock_refusal"; }
+  # #1857 S2: a missing backups folder or lock file is made as the
+  # deployment folder's owner.
+  [[ -n "$refusal" ]] || { acquire_backup_restore_lock_as_owner; refusal="$lock_refusal"; }
   if [[ -n "$refusal" ]]; then
     printf 'Orbit repair: start-services refused, nothing was changed: %s.\n' "$refusal" >&2
     return 1
@@ -6561,6 +6633,7 @@ execute_repair() {
   local entry action fclass ftarget
 
   recovery_dir=""
+  owner_recovery_dir=""
   service_restart_result=()
   checkpoint_bundle_path=""
   safe_batch_exit_code=0
