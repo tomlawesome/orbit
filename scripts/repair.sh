@@ -1058,6 +1058,10 @@ set -Eeuo pipefail
 #      followed by the unchanged diagnosis. This is the same exit code the
 #      dangerous batch's own refusal uses — 6 uniformly means "refused,
 #      unmutated" whichever gate refused.
+#      6 also covers `reason=repair-running` (#1849): another `--execute`
+#      run holds the folder's run lock, so this run refuses first of all —
+#      before it lists checkpoints or diagnoses — printing the same refused
+#      line(s) with that reason, one stderr line, and no diagnosis.
 #
 # The exit code always reflects THIS RUN's execution outcome, never the
 # post-execution re-diagnosis's own severity (analogous to how `--plan`'s
@@ -6519,6 +6523,40 @@ is_removable_checkpoint_dir() {
   return 0
 }
 
+# #1849: one --execute run per deployment folder. Takes an exclusive,
+# non-blocking flock on a read-only descriptor of the folder itself (no lock
+# file, so nothing to plant or leave behind) and keeps it open, not
+# in a subshell, until the process exits (the descriptor is never closed). Held: refuses with exit 6 and
+# changes nothing. No flock, or one that cannot lock the folder: says so on
+# stderr and carries on without the lock.
+acquire_repair_run_lock() {
+  local fd status=0 words
+  if ! command -v flock >/dev/null 2>&1; then
+    printf 'Orbit repair: flock is not available, so this run goes on without the lock that keeps two Repair runs from working on this folder at once.\n' >&2
+    return 0
+  fi
+  if ! { exec {fd}<.; } 2>/dev/null; then
+    printf 'Orbit repair: this folder cannot be opened for locking, so this run goes on without the lock that keeps two Repair runs from working on it at once.\n' >&2
+    return 0
+  fi
+  words="$(flock -n -x "$fd" 2>&1 >/dev/null)" || status=$?
+  # Taken: $fd stays open (never closed) until the process exits.
+  [[ "$status" == 0 ]] && return 0
+  exec {fd}<&-
+  if [[ "$status" == 1 && -z "$words" ]]; then
+    printf 'execution result=refused done=0 failed=0 reason=repair-running\n'
+    if [[ "$dangerous" == 1 ]]; then
+      printf 'dangerous result=refused done=0 failed=0 reason=repair-running\n'
+    fi
+    printf 'Orbit repair: another Repair run is working on this folder; wait for it to finish, then run Repair again.\n' >&2
+    exit 6
+  fi
+  words="$(printf '%s' "$words" | lock_words_excerpt)"
+  [[ -n "$words" ]] || words="exit status $status"
+  printf 'Orbit repair: flock could not lock this folder (flock said: %s), so this run goes on without the lock that keeps two Repair runs from working on it at once.\n' "$words" >&2
+  return 0
+}
+
 execute_repair() {
   local entry action fclass ftarget
 
@@ -6527,6 +6565,7 @@ execute_repair() {
   checkpoint_bundle_path=""
   safe_batch_exit_code=0
   dangerous_exit_code=0
+  acquire_repair_run_lock
   snapshot_run_checkpoints
 
   run_diagnosis
