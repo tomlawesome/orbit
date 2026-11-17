@@ -540,6 +540,8 @@ describe("github-await-handoff.sh, a flaky GitHub (#1848 SEC-D-S4)", () => {
     flaky(Array(10).fill("fail"), isReleaseList);
     const result = await run({ extra: { ORBIT_WAIT_MINUTES: "0" } });
     expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("gave up after 0 minutes");
+    expect(result.stderr).not.toContain("polls in a row");
     expect(result.rawOutput).toBe("");
   });
 

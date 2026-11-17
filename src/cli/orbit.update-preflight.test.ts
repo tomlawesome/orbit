@@ -87,7 +87,10 @@ describe("orbit update --preflight, as a command", () => {
   it("is only for the engine container, like the other update commands", () => {
     const root = sandbox();
     const result = runCli(["update", "--preflight", "--dir", root], { ORBIT_ENGINE_CONTEXT: "" });
-    expect(result.status).not.toBe(0);
+    // The guard's own refusal (exit 1, its text), not the exit 2 the database
+    // step gives with no database behind it.
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("update runs only inside the Orbit image");
     expect(result.stdout).not.toMatch(/^update-preflight: ready/mu);
   });
 
