@@ -592,12 +592,12 @@ cleanup() {
     printf 'Orbit installer: could not remove a temporary directory: %s.\n' "$release_manifest_work_dir" >&2 || true
     exit_status=1
   fi
-  [[ -z "${saved_stty:-}" ]] || { stty "$saved_stty" 2>/dev/null; stty echo 2>/dev/null; } || true
+  [[ -z "${saved_stty:-}" ]] || { stty "$saved_stty" </dev/tty 2>/dev/null; stty echo </dev/tty 2>/dev/null; } || true
   exit "$exit_status"
 }
 
 original_stdout_fd="" original_stderr_fd="" saved_stty=""
-if [[ -t 0 ]]; then saved_stty="$(stty -g 2>/dev/null)" || saved_stty=""; fi
+if { : </dev/tty; } 2>/dev/null; then saved_stty="$(stty -g </dev/tty 2>/dev/null)" || saved_stty=""; fi
 exec {original_stdout_fd}>&1 {original_stderr_fd}>&2 || true
 trap cleanup EXIT
 # An untrapped INT/TERM/HUP ends bash with $? still 0 in the EXIT trap, so
