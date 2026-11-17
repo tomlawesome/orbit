@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { runOwner } from "./repair-owner-fixtures.mjs";
 import { privShims, realTool } from "./repair-priv-shims.mjs";
-import { makeFixture, scratchDir, treeSnapshot } from "./repair-test-harness.mjs";
+import { makeFixture, scratchDir, scriptsDir, treeSnapshot } from "./repair-test-harness.mjs";
 
 // #1876: repair never leaves a half-removed folder that still has the staging name. Both removals in
 // do_restore_transaction first rename `.orbit-install-staging.<x>` to `.orbit-repair-discard.<x>` (a tombstone), then
@@ -194,7 +194,7 @@ describe("#1876: a half-deleted .orbit-repair-discard.* is never restored from a
 });
 
 describe("#1876: a failed rename deletes nothing and fails the step as before", () => {
-  for (const [what, make, expected] of [["a no-op removal", noopFolder, null], ["the end of a finished restore", restoreFolder, null]]) {
+  for (const [what, make] of [["a no-op removal", noopFolder], ["the end of a finished restore", restoreFolder]]) {
     it(`${what}: with the rename refused the staging folder and everything in it is still there`, () => {
       const folder = make();
       const stagingBefore = spawnSync("bash", ["-c", `find ${STAGING} -printf '%p %m %s %y\\n' | LC_ALL=C sort`], { cwd: folder.targetDir, encoding: "utf8" }).stdout;
@@ -205,7 +205,6 @@ describe("#1876: a failed rename deletes nothing and fails the step as before", 
       expect(discarded(folder.targetDir)).toEqual([]);
       const stagingAfter = spawnSync("bash", ["-c", `find ${STAGING} -printf '%p %m %s %y\\n' | LC_ALL=C sort`], { cwd: folder.targetDir, encoding: "utf8" }).stdout;
       expect(stagingAfter).toBe(stagingBefore);
-      expect(expected).toBeNull();
     });
   }
 
@@ -244,5 +243,70 @@ describe("#1876: as root in a folder another user owns, the rename and the remov
     expect(setprivNaming(shims, new RegExp(`rm .*${DISCARD.replaceAll(".", "\\.")}`, "u")), "the cleanup was not made as the owner").not.toEqual([]);
     expect(rootCalls(shims, ["rm"]), "root ran rm in the owner's folder").toEqual([]);
     expect(discarded(targetDir)).toEqual([]);
+  });
+});
+
+// The start cleanup runs only once the operator has approved a batch (after the version gate and the confirmation): a
+// declined or refused run changes nothing (installer guarantees 33 and 56).
+describe("#1876: a declined or refused --execute keeps a leftover .orbit-repair-discard.* folder", () => {
+  function leftoverFolder(extra = () => {}) {
+    const targetDir = makeFixture();
+    extra(targetDir);
+    halfDeletedDiscard(targetDir);
+    return { targetDir, state: { ...RUNNING } };
+  }
+  // A safe action is on the table, so the confirmation is really asked.
+  const withSafeAction = (targetDir) => chmodSync(join(targetDir, ".orbit-secrets", "postgres-password"), 0o644);
+
+  for (const [what, input] of [["Enter", "\n"], ["end of input", ""]]) {
+    it(`an operator who declines with ${what} leaves the discard folder in place`, () => {
+      const folder = leftoverFolder(withSafeAction);
+      const result = runOwner(folder.targetDir, { shims: plainShims(folder.targetDir), state: folder.state, args: ["--execute", "--safe-only"], input, capSeconds: 60 });
+      expect(result.status, result.stderr).toBe(1);
+      expect(discarded(folder.targetDir)).toEqual([DISCARD]);
+      expect(result.stderr).not.toContain("which an earlier repair run left part removed");
+    });
+  }
+
+  it("a run that ends with exit 5 (not an Orbit installation) leaves the discard folder in place", () => {
+    const targetDir = scratchDir("orbit-discard-notorbit-");
+    mkdirSync(join(targetDir, "scripts"));
+    writeFileSync(join(targetDir, "scripts", "repair.sh"), readFileSync(join(scriptsDir, "repair.sh")));
+    chmodSync(join(targetDir, "scripts", "repair.sh"), 0o755);
+    halfDeletedDiscard(targetDir);
+    const result = runOwner(targetDir, { shims: plainShims(targetDir), args: ["--execute", "--safe-only"], capSeconds: 60 });
+    expect(result.status, result.stderr).toBe(5);
+    expect(discarded(targetDir)).toEqual([DISCARD]);
+  });
+
+  it("a run refused with exit 6 (deployment version unsupported) leaves the discard folder in place", () => {
+    const folder = leftoverFolder((targetDir) => {
+      withSafeAction(targetDir);
+      const envPath = join(targetDir, ".env-orbit");
+      writeFileSync(envPath, readFileSync(envPath, "utf8").split("\n").filter((line) => !line.startsWith("ORBIT_CONFIG_APPLIED_")).join("\n"));
+      chmodSync(envPath, 0o600);
+    });
+    const result = runRestore(folder, plainShims(folder.targetDir));
+    expect(result.status, result.stderr).toBe(6);
+    expect(result.stdout).toContain("reason=deployment-version-unsupported");
+    expect(discarded(folder.targetDir)).toEqual([DISCARD]);
+  });
+
+  it("an approved run still removes the leftover", () => {
+    const folder = leftoverFolder(withSafeAction);
+    const result = runRestore(folder, plainShims(folder.targetDir));
+    expect(result.status, result.stderr).toBe(0);
+    expect(discarded(folder.targetDir)).toEqual([]);
+  });
+});
+
+describe("#1876: a refused rename names the path and a next step", () => {
+  it("with the discard name already taken by a file at restore time, stderr names that path", () => {
+    const folder = restoreFolder();
+    writeFileSync(join(folder.targetDir, DISCARD), "in the way\n");
+    const result = runRestore(folder, plainShims(folder.targetDir));
+    expect(result.stdout).not.toContain(DONE);
+    expect(result.stderr, "the refusal is silent").toContain(DISCARD);
+    expect(staged(folder.targetDir)).toEqual([STAGING]);
   });
 });
