@@ -113,6 +113,7 @@ export const EXPECTED_TABLE_COLUMNS: Record<string, string[]> = {
   credential_setup_tokens: ["id", "user_id", "token_hash", "purpose", "expires_at", "consumed_at", "created_by_user_id", "created_at"],
   step_up_proofs: ["id", "session_id", "intent", "expires_at", "consumed_at", "created_at"],
   sign_in_approvals: ["id", "user_id", "token_hash", "claim_hash", "user_agent", "client_address", "expires_at", "consumed_at", "outcome", "decided_at", "send_count", "last_sent_at", "notice_shown_at", "created_at"],
+  sign_in_approval_sends: ["id", "approval_id", "user_id", "sent_at"],
 };
 for (const columns of Object.values(EXPECTED_TABLE_COLUMNS)) columns.sort();
 
@@ -207,6 +208,8 @@ export const EXPECTED_INDEXES: Record<string, ExpectedIndex> = {
   credential_setup_tokens_user_idx: { table: "credential_setup_tokens", columns: ["user_id"], unique: false },
   step_up_proofs_session_idx: { table: "step_up_proofs", columns: ["session_id"], unique: false },
   sign_in_approvals_user_idx: { table: "sign_in_approvals", columns: ["user_id"], unique: false },
+  sign_in_approval_sends_user_sent_idx: { table: "sign_in_approval_sends", columns: ["user_id", "sent_at"], unique: false },
+  sign_in_approval_sends_approval_idx: { table: "sign_in_approval_sends", columns: ["approval_id"], unique: false },
 };
 
 type ExpectedConstraint = {
@@ -366,6 +369,9 @@ export const EXPECTED_CONSTRAINTS: Record<string, ExpectedConstraint> = {
   sign_in_approvals_token_hash_unique: unique("sign_in_approvals", ["token_hash"]),
   sign_in_approvals_claim_hash_unique: unique("sign_in_approvals", ["claim_hash"]),
   sign_in_approvals_user_id_users_id_fk: foreign("sign_in_approvals", ["user_id"], "users", ["id"], "cascade"),
+  sign_in_approval_sends_pkey: primary("sign_in_approval_sends", ["id"]),
+  sign_in_approval_sends_approval_id_sign_in_approvals_id_fk: foreign("sign_in_approval_sends", ["approval_id"], "sign_in_approvals", ["id"], "cascade"),
+  sign_in_approval_sends_user_id_users_id_fk: foreign("sign_in_approval_sends", ["user_id"], "users", ["id"], "cascade"),
 };
 
 type PostgresClient = ReturnType<typeof postgres>;
