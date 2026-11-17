@@ -176,6 +176,30 @@ describe("the view pool's wait is bounded (#1446 decision 1)", () => {
   });
 });
 
+describe("a view acquire with no fallback (#1446)", () => {
+  it("answers the queue_full outcome, and never throws, when the waiting list is full or the wait runs out", async () => {
+    draw(1);
+    draw(2);
+    await started("1");
+    await started("2");
+    const waiters = Array.from({ length: VIEW_WAITING_LIMIT }, (_, index) => draw(3 + index));
+
+    // Refused at once: a page count has no refusal of its own to fall back on.
+    const refused = readPdfPageCountInSandbox(file, "view");
+    pending.push(refused);
+    await expect(refused).resolves.toEqual({ outcome: "failed", stop: "queue_full" });
+
+    await vi.advanceTimersByTimeAsync(VIEW_SLOT_WAIT_MS);
+    for (const waiter of waiters) await waiter;
+
+    // Timed out: one waiter in a smaller queue.
+    const timedOut = readPdfPageCountInSandbox(file, "view");
+    pending.push(timedOut);
+    await vi.advanceTimersByTimeAsync(VIEW_SLOT_WAIT_MS);
+    await expect(timedOut).resolves.toEqual({ outcome: "failed", stop: "queue_full" });
+  });
+});
+
 describe("the check and background pools keep unbounded waits (#1446 decision 1)", () => {
   it("background: one job runs, ten wait past any bound, none refused, all drawn in turn", async () => {
     const first = draw(1, "background");

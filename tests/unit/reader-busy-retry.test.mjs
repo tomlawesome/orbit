@@ -109,13 +109,19 @@ describe("a busy page turn is retried once, quietly (#1446 decision 3)", () => {
     await quiet();
 
     expect(target.textContent).toContain(LOST);
-    expect(target.textContent?.toLowerCase()).toContain("try again");
     expect(target.textContent).not.toContain(BUSY);
+    const again = [...target.querySelectorAll("button")].find((b) => /try again/i.test(b.textContent ?? "") || /try again/i.test(b.getAttribute("aria-label") ?? ""));
+    expect(again, "a try again control, not only the words").toBeTruthy();
 
     await vi.advanceTimersByTimeAsync(60_000);
     flushSync();
     await quiet();
-    expect(asked.filter((n) => n === 2), "one request and one retry, no more").toHaveLength(2);
+    expect(asked.filter((n) => n === 2), "one request and one retry, no more, until pressed").toHaveLength(2);
+
+    /** @type {HTMLButtonElement} */ (again).click();
+    flushSync();
+    await quiet();
+    expect(asked.filter((n) => n === 2), "a press fetches the page again").toHaveLength(3);
   });
 
   it("clamps a long Retry-After to 10 s for the wait", async () => {
