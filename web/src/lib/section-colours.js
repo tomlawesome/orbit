@@ -20,9 +20,10 @@ export function startColourPick(problems, id) {
  * about anyone's problem.
  * @param {{ rows: { id: string, name: string, colour: string }[], saved: Record<string, string>, problems: Record<string, string>, id: string, colour: string, error: string | null }} outcome
  */
-export function settleColourPick({ rows, saved, problems, id, error }) {
-  if (!error) return { rows, problems };
+export function settleColourPick({ rows, saved, problems, id, colour, error }) {
   const row = rows.find((one) => one.id === id);
+  /* A later pick of this section is the latest word: this failure is stale. */
+  if (!error || !row || row.colour !== colour) return { rows, problems };
   return {
     rows: rows.map((one) => (one.id === id ? { ...one, colour: saved[id] } : one)),
     problems: { ...problems, [id]: `not saved — ${row?.name ?? ""}: ${error}` },

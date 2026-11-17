@@ -449,7 +449,7 @@
       for (const one of data.household.sections) if (pickedColours.get(one.id) === one.colour) pickedColours.delete(one.id);
     } catch (error) {
       if (pickedColours.get(id) === colour) pickedColours.delete(id);
-      const saved = Object.fromEntries(data.household.sections.map((one) => [one.id, sectionColourOf(one)]));
+      const saved = Object.fromEntries(data.household.sections.map((one) => [one.id, one.colour]));
       const settled = settleColourPick({ rows, saved, problems: colourProblems, id, colour, error: wordsOf(error) });
       rows = settled.rows;
       colourProblems = settled.problems;
