@@ -228,13 +228,13 @@
 
   /** The pager's arrows, the keys, and the reader's turns all land here. @param {number} n */
   function turn(n) {
-    const again = n === pageNo && turnLost;
-    if (!shown || (n === pageNo && !again)) return;
+    const isRetry = n === pageNo && turnLost;
+    if (!shown || (n === pageNo && !isRetry)) return;
     pageNo = n;
     problem = null;
     turnLost = false;
-    retrying = again;
-    if (!again) retryFocus = false;
+    retrying = isRetry;
+    if (!isRetry) retryFocus = false;
     /* From here the turn's own answer decides; the first load's deadline no longer applies. */
     clearTimeout(loadTimer);
     loadPage(shown, n, token, true);

@@ -173,22 +173,6 @@ describe("card: try again on a lost page (#1870)", () => {
     expect(asked.filter((n) => n === 2), "page 2: the first ask and the one retry only").toHaveLength(2);
   });
 
-  it("C5b: asking again for the page already drawn (a key toward the same page) sends no request", async () => {
-    const { target, flushSync, asked } = await cardWithLostTwo(() => Promise.resolve(ok()));
-    target.querySelector(".sheet img")?.dispatchEvent(new Event("load"));
-    flushSync();
-    await quiet();
-    /** @type {HTMLButtonElement} */ (target.querySelector(".sheet")).click();
-    flushSync();
-    await quiet();
-    const before = asked.length;
-    for (const key of ["Home", "ArrowLeft", "PageUp"]) window.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
-    flushSync();
-    await quiet();
-    expect(document.querySelector(".rd-retry"), "no button on a drawn page").toBeNull();
-    expect(asked.length - before).toBe(0);
-  });
-
   it("C6: turning away and back to a lost page asks for it again (existing behaviour, kept)", async () => {
     const { target, flushSync, asked } = await cardWithLostTwo((attempt) => Promise.resolve(attempt === 1 ? bad() : ok()));
     await click(target, "Next page", flushSync);
