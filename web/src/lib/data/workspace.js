@@ -2820,26 +2820,30 @@ function keepRelayTag(response) {
  * refusal (4xx) is the server's answer and is thrown as it is; anything else
  * (no answer at all, a 5xx, a lost response) may have applied, so the relay
  * is read again and its address compared with the one held before. A 412
- * (#1848 W-R1) is read the same way: the relay moved on since this screen
- * read it, perhaps by this member's own earlier press whose answer was lost. Answers
- * the relay to show and whether it rotated; `relay` is null when even the
- * re-read could not answer, or answered with no address, and nothing is known.
+ * (#1848 W-R1) is a refusal: the relay moved on since this screen read it,
+ * so the relay is read again to show its current address, but this press
+ * did not rotate it and `rotated` is false whatever the address now is
+ * (#1879 W-F1); another tab's rotate is not this one's. Answers the relay to
+ * show and whether it rotated; `relay` is null when even the re-read could
+ * not answer, or answered with no address, and nothing is known.
  *
  * @param {string} before the address shown before the rotate
  * @returns {Promise<{ relay: Relay | null, rotated: boolean | null }>}
  */
 export async function rotateRelayReconciled(before) {
+  let refused = false;
   try {
     return { relay: await rotateRelay("rotate"), rotated: true };
   } catch (error) {
     const status = error instanceof WorkspaceError ? error.status : undefined;
     if (status !== undefined && status >= 400 && status < 500 && status !== 412) throw error;
+    refused = status === 412;
   }
   try {
     const relay = await readRelay({ signal: AbortSignal.timeout(STAGED_PAGE_TIMEOUT_MS) });
     /* A re-read naming no address confirms nothing: it is not a new one. */
     if (relay.address === NO_ADDRESS) return { relay: null, rotated: null };
-    return { relay, rotated: relay.address !== before };
+    return { relay, rotated: refused ? false : relay.address !== before };
   } catch {
     return { relay: null, rotated: null };
   }
