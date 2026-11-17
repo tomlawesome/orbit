@@ -17,6 +17,7 @@ const read = (name) => readFileSync(new URL(name, dir), "utf8").replace(/\s+/gu,
 const page = read("+page.svelte");
 const acts = read("acts.svelte.js");
 const pocket = read("pocket.svelte");
+const workspace = readFileSync(new URL("../../web/src/lib/data/workspace.js", import.meta.url), "utf8").replace(/\s+/gu, " ");
 
 describe("the new step-up intent (#1869)", () => {
   it("is appended to stepUpIntents, separate from setup_link_issue", async () => {
@@ -56,8 +57,9 @@ describe("People rows offer to set or change an address (#1869)", () => {
   });
 
   it("puts the address to /api/admin/users/<id>/email with PUT, with the password when the actor has one", () => {
-    expect(acts).toMatch(/\/api\/admin\/users\/\$\{[^}]+\}\/email/u);
-    expect(acts).toMatch(/method:\s*"PUT"/u);
+    // The request itself lives in the shared data layer the acts call.
+    expect(workspace).toMatch(/\/api\/admin\/users\/\$\{[^}]+\}\/email/u);
+    expect(workspace).toMatch(/method:\s*"PUT"/u);
     expect(acts).toMatch(/currentPassword/u);
   });
 

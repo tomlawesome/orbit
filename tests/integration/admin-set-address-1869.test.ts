@@ -1,4 +1,4 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, gt, isNull } from "drizzle-orm";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { auditLog, credentialSetupTokens, localCredentials, signInApprovals, users } from "@/db/schema";
@@ -403,7 +403,7 @@ describe("PUT /api/admin/users/{userId}/email: the success path", () => {
     const link = /https?:\/\/\S*\/setup\/(\S+)/u.exec(captured.at(-1)?.text ?? "");
     const recoveryToken = decodeURIComponent(link![1]);
     const [liveRecovery] = await getDb().select({ purpose: credentialSetupTokens.purpose }).from(credentialSetupTokens)
-      .where(and(eq(credentialSetupTokens.userId, target.id), isNull(credentialSetupTokens.consumedAt)));
+      .where(and(eq(credentialSetupTokens.userId, target.id), isNull(credentialSetupTokens.consumedAt), gt(credentialSetupTokens.expiresAt, new Date())));
     expect(liveRecovery.purpose).toBe("recovery");
 
     expect((await put(admin, target.id, { email: "recovery-retired-new@example.invalid", currentPassword: ADMIN_PASSWORD })).status).toBe(200);
