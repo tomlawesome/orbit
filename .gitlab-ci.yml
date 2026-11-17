@@ -1175,7 +1175,7 @@ variables:
 # was never ready (v0.3.9 lost two days to checks that only ran at the end).
 # The same script runs locally before the promotion is opened
 # (docs/releasing.md). On no other pipeline: its rule list ends in `never`,
-# and the `needs:` on it are optional, so those pipelines are unchanged.
+# and no other job lists it under `needs:`, so those pipelines are unchanged.
 #
 # It reads earlier pipelines for the slow-gates check with the read-only
 # ORBIT_REUSE_TOKEN alone, as the reuse lookup does (#898), so it declares the
