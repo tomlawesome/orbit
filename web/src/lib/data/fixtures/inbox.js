@@ -72,7 +72,7 @@ export const INBOX_FIXTURE = {
       receivedAt: "2026-08-09T16:02:00.000Z",
       expiresAt: "2026-09-23T12:00:00.000Z",
       attachmentCount: 1,
-      classification: "retry",
+      classification: "unavailable",
       canApprove: false,
       canDiscard: true,
       message:
