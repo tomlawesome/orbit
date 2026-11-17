@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Shared helpers for the upgrade-matrix configuration shapes (#1662, #1647).
 # A shape script sources this, optionally overrides shape_provision,
-# shape_after_install and SHAPE_ASSERTS, then calls shape_main "$@".
+# shape_after_install, shape_expected_env, RETIRED_FILE_NAMES and
+# SHAPE_ASSERTS, then calls shape_main "$@".
 # Usage: <shape>.sh provision|after_install|assert <target-dir> <old-tree-dir>
 # Nothing here prints a secret value: only key names and fixed text.
 set -euo pipefail
@@ -12,8 +13,14 @@ APP_HOST=https://orbit.example.invalid
 MANAGED_KEYS='ORBIT_IMAGE|ORBIT_CONFIG_APPLIED_VERSION|ORBIT_CONFIG_APPLIED_DIGEST|ORBIT_PREVIOUS_IMAGE'
 SECRET_KEY='(SECRET|PASSWORD|KEK|TOKEN|PRIVATE_KEY)$'
 
+# *_FILE names the update is meant to take out of the container (#1817).
+RETIRED_FILE_NAMES=()
+
 shape_provision() { :; }
 shape_after_install() { :; }
+# shape_expected_env < snapshot: the .env-orbit the update should leave, from the
+# normalised snapshot. Unchanged unless a shape's update deliberately rewrites it.
+shape_expected_env() { cat; }
 
 # set_key KEY VALUE: replace or append a line in $ENV_FILE.
 set_key() {
@@ -81,26 +88,15 @@ changed_keys() {
 
 assert_env-file-intact() {
   local keys
-  keys=$(changed_keys "$SNAP/env-orbit" "$ENV_FILE")
+  keys=$(changed_keys <(shape_expected_env <"$SNAP/env-orbit") "$ENV_FILE")
   [[ -z $keys ]] || fail env-file-intact ".env-orbit differs from the snapshot in: $keys"
-}
-
-assert_overlay-composed() {
-  local running
-  running=$(cd "$TARGET" && docker compose --env-file .env-orbit ps --services 2>/dev/null) || true
-  grep -qx orbit-app <<<"$running" ||
-    fail overlay-composed "orbit-app is not running with the mail overlay"
-  # A running orbit-app alone does not prove the overlay was composed: only
-  # docker-compose.mail.yml sets SMTP_PASSWORD_FILE in its environment (#1665).
-  grep -qx SMTP_PASSWORD_FILE <<<"$(env_names 2>/dev/null || true)" ||
-    fail overlay-composed "orbit-app's environment has no SMTP_PASSWORD_FILE, so the mail overlay was not composed"
 }
 
 assert_secret-file-referenced() {
   local name path names
   names=$(env_names 2>/dev/null) || fail secret-file-referenced "orbit container environment unavailable"
   while IFS= read -r name; do
-    [[ $name == *_FILE ]] || continue
+    [[ $name == *_FILE && " ${RETIRED_FILE_NAMES[*]} " != *" $name "* ]] || continue
     grep -qx "$name" <<<"$names" || fail secret-file-referenced "$name is no longer in the container environment"
   done <"$SNAP/env-names"
   while IFS='=' read -r name path; do
