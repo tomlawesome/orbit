@@ -1,4 +1,5 @@
 <script>
+  import { tick } from "svelte";
   import { addDays } from "./calendar.js";
   import { dayMonth } from "$lib/format.js";
   import { REMINDER_MAX, REMINDER_PRESETS, REMINDER_REFUSAL, reminderDayOf } from "./reminder-days.js";
@@ -48,24 +49,45 @@
     nudged = null;
     voice = text === "" ? "none" : reminderDayOf(text) === null ? "refused" : "add";
   }
+  /* the chips that can take focus: a chip that is off at the cap is disabled */
+  const enabled = (/** @type {number} */ day) => !capped || days.includes(day);
+  const firstEnabled = $derived(scale.find(enabled));
+  /** @type {HTMLElement | undefined} */
+  let grid = $state();
+  /* once the parent has repainted: focus the chip for `day`, or the field, or
+     (when the field is disabled by the cap) the first chip still enabled */
+  /** @param {number | null} day */
+  async function refocus(day) {
+    await tick();
+    /** @type {HTMLElement | null | undefined} */
+    const target = input && !input.disabled ? input
+      : (day === null ? null : grid?.querySelector(`[data-day="${day}"]:not(:disabled)`)) ?? grid?.querySelector("button:not(:disabled)");
+    target?.focus({ preventScroll: true });
+  }
+  /* reaching the cap closes the field: what was typed and the line it earned go with it */
+  $effect(() => {
+    if (capped) { typed = ""; voice = "none"; nudged = null; }
+  });
   function commit() {
     const day = reminderDayOf(typed);
     if (day === null) { voice = "refused"; return; }
     typed = "";
     said = day;
-    input?.focus({ preventScroll: true }); // the add button, or the chip, may be about to leave
+    input?.focus({ preventScroll: true }); // the add button may be about to leave
     if (days.includes(day)) { voice = "already"; nudged = day; return; }
     voice = "none";
     nudged = null;
     onpick(String(day));
+    refocus(day); // the field, or, if that added the eighth, the chip just added
   }
   /** @param {number} day */
   function press(day) {
     nudged = null;
     if (voice === "already") voice = "none";
     onpick(String(day));
-    // a typed day's chip leaves with its removal: focus goes to the field, not the page
-    if (!REMINDER_PRESETS.includes(day)) input?.focus({ preventScroll: true });
+    // a typed day's chip leaves with its removal: focus goes to the field, or
+    // to a chip still enabled when the cap has closed the field, never the page
+    if (!REMINDER_PRESETS.includes(day)) refocus(null);
   }
   const chosen = $derived([...days].sort((a, b) => a - b));
   const words = $derived(
@@ -76,13 +98,14 @@
     : "");
 </script>
 
-<div class="grid" role="group" aria-label="Remind me this many days before">
+<div class="grid" bind:this={grid} role="group" aria-label="Remind me this many days before">
   {#each scale as day (day)}
     {#if REMINDER_PRESETS.includes(day)}
-      <button type="button" class="chip" class:nudge={nudged === day} aria-pressed={days.includes(day)} disabled={capped && !days.includes(day)}
-              tabindex={day === scale[0] ? 0 : undefined} onclick={() => press(day)}>{day}d</button>
+      <button type="button" class="chip" class:nudge={nudged === day} aria-pressed={days.includes(day)} disabled={!enabled(day)} data-day={day}
+              tabindex={day === firstEnabled ? 0 : undefined} onclick={() => press(day)}>{day}d</button>
     {:else}
-      <button type="button" class="chip" class:nudge={nudged === day} data-extra aria-label={`${day}d, remove`}
+      <button type="button" class="chip" class:nudge={nudged === day} data-extra data-day={day} aria-label={`${day}d, remove`}
+              tabindex={day === firstEnabled ? 0 : undefined}
               onclick={() => press(day)}>{day}d<span class="x" aria-hidden="true">×</span></button>
     {/if}
   {/each}

@@ -164,3 +164,90 @@ describe("the reminder cap (#1892)", async () => {
     expect(css).toMatch(/\n  \.line\{[^}]*min-height:24px/u);
   });
 });
+
+/* ── focus and stale lines at the cap (#1892 fix review) ───────────────── */
+describe("focus and the line at the cap (#1892)", () => {
+  const loader = createPageLoader("reminder-days-1892-capfocus", {
+    stub: (file) => /\/(lib\/Chrome|lib\/PageSky|routes\/create\/pocket)\.svelte$/.test(file),
+    stubs: { "$lib/backdrops/constellations.js": "export const mountConstellations = () => () => {};" },
+  });
+  beforeAll(() => loader.setup("routes/create/+page.svelte"));
+  afterAll(() => loader.teardown());
+  afterEach(() => { loader.unmount(); vi.unstubAllGlobals(); });
+
+  async function openDesk() {
+    vi.stubGlobal("fetch", fixtureApi().fetch);
+    vi.stubGlobal("matchMedia", matchMedia);
+    vi.stubGlobal("requestAnimationFrame", (/** @type {() => void} */ fn) => setTimeout(fn, 0));
+    await loader.mount("routes/create/+page.svelte", { data: { fixtures: true } }, { url: "http://localhost/create" });
+    await settle(10);
+    document.getElementById("f-reminder")?.click();
+    await flush();
+  }
+  /** @param {string} text */
+  async function add(text) {
+    await type(text);
+    field().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    await flush();
+  }
+  const chip = (/** @type {RegExp} */ re) => /** @type {HTMLButtonElement | undefined} */ (button(re));
+  const lineText = () => document.querySelector(".line")?.textContent?.trim();
+  /** From 3 and 14, five typed days make seven; the eighth is added by the caller. */
+  async function sevenChosen() {
+    await openDesk();
+    for (const day of ["21", "45", "100", "2", "5"]) await add(day);
+  }
+
+  it("focuses the chip just added when the 8th day is typed in", async () => {
+    await sevenChosen();
+    await add("9");
+    expect(field().disabled).toBe(true);
+    expect(document.activeElement).toBe(chip(/(^| )9d, remove/u));
+  });
+
+  it("clears the typed text and the old line when the cap is reached, and keeps them clear when one is turned off", async () => {
+    await sevenChosen();
+    await type("99");
+    expect(lineText()).toMatch(/add 99 d/u);
+    chip(/^1d/u)?.click(); // the eighth, by a chip
+    await flush();
+    expect(field().value).toBe("");
+    expect(lineText()).toBe("8 at most · turn one off to add more");
+    chip(/^1d/u)?.click(); // turn it off again
+    await flush();
+    expect(lineText()).toBe("");
+    expect(field().value).toBe("");
+  });
+});
+
+describe("the chip that takes focus when the chooser opens (#1892 fix review)", () => {
+  const loader = createPageLoader("reminder-days-1892-tab");
+  beforeAll(() => loader.setup("lib/editing/DayChips.svelte"));
+  afterAll(() => loader.teardown());
+  afterEach(() => loader.unmount());
+  const tabStops = () => [...document.querySelectorAll('button[tabindex="0"]')].map((one) => one.textContent?.trim().replace(/×$/u, ""));
+
+  it("after a removal while over the cap, focus is on an enabled chip, not the page", async () => {
+    await loader.mount("lib/editing/DayChips.svelte", { days: [3, 7, 14, 30, 60, 90, 21, 45, 9], due: null, onpick() {} });
+    await settle(4);
+    const cross = /** @type {HTMLButtonElement} */ ([...document.querySelectorAll("button")].find((one) => /45d, remove/u.test(one.getAttribute("aria-label") ?? "")));
+    cross.focus();
+    cross.click();
+    await settle(4);
+    const active = document.activeElement;
+    expect(active?.tagName).toBe("BUTTON");
+    expect(/** @type {HTMLButtonElement} */ (active).disabled).toBe(false);
+  });
+
+  it("is a 0-day chip when the scale starts with one", async () => {
+    await loader.mount("lib/editing/DayChips.svelte", { days: [0, 14], due: null, onpick() {} });
+    await settle(4);
+    expect(tabStops()).toEqual(["0d"]);
+  });
+
+  it("is the first enabled chip when 1d is disabled at the cap", async () => {
+    await loader.mount("lib/editing/DayChips.svelte", { days: [3, 7, 14, 30, 60, 90, 21, 45], due: null, onpick() {} });
+    await settle(4);
+    expect(tabStops()).toEqual(["3d"]);
+  });
+});
