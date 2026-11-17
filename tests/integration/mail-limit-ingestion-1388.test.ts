@@ -258,6 +258,38 @@ describe("mail size limit in ingestion (#1388)", () => {
     }
   }, 60_000);
 
+  it("A-S4: a retried receipt over the lowered limit is settled as sender_too_large and its message is removed from the mailbox", async () => {
+    const fixture = await createIntegrationFixture("mail-limit-retry-removed");
+    try {
+      const member = fixture.users.member.id;
+      const address = await verifiedSenderFor(member);
+      await reconcileImapRecipientAliases(config());
+      await setMail(fixture, 10 * MIB);
+      const uidValidity = freshValidity();
+      await collect(address, 3 * MIB, uidValidity);
+      await getDb().update(imapIngestionMessages)
+        .set({ status: "processing", receiptStatus: "processing", failureCode: null })
+        .where(eq(imapIngestionMessages.mailboxUidValidity, String(uidValidity)));
+
+      await setMail(fixture, 1 * MIB);
+      const deleted: string[] = [];
+      setImapClientFactoryForTests(() => fakeImapMailbox({
+        uidValidity, search: "all", deleted,
+        messages: [{ uid: 1, headers: attributedHeaders(address), source: undefined, size: 3 * MIB }],
+        download: () => { throw new Error("no attachment is expected"); },
+      }).client);
+      await runImapIngestionCycle(config());
+
+      const row = await rowFor(uidValidity);
+      expect(row.status).toBe("failed");
+      expect(row.failureCode).toBe("sender_too_large");
+      expect(deleted).toContain("1");
+    } finally {
+      await setMail(fixture, null);
+      await fixture.cleanup();
+    }
+  }, 60_000);
+
   it("reads the limit once per cycle, not once per message", async () => {
     const fixture = await createIntegrationFixture("mail-limit-once-per-cycle");
     try {

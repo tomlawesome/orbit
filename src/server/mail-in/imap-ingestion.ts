@@ -496,13 +496,14 @@ function isMemberFailureRow(receipt: { status: string; failureCode: string | nul
  * read again after the limit was lowered below its message, is settled as too
  * large rather than left processing to be fetched every cycle.
  */
-async function settleRetryAsTooLarge(receipt: { id: string; status: string }): Promise<void> {
-  if (receipt.status !== "processing") return;
-  await getDb().update(imapIngestionMessages).set({
-    status: "failed", receiptStatus: "cancelled", failureCode: "message_too_large",
+async function settleRetryAsTooLarge(receipt: { id: string; status: string }, failureCode: "message_too_large" | "sender_too_large" = "message_too_large"): Promise<boolean> {
+  if (receipt.status !== "processing") return false;
+  const settled = await getDb().update(imapIngestionMessages).set({
+    status: "failed", receiptStatus: "cancelled", failureCode,
     attachmentProcessingLockedAt: null, attachmentProcessingLeaseToken: null, attachmentProcessingNextAttemptAt: null,
     updatedAt: new Date(),
-  }).where(and(eq(imapIngestionMessages.id, receipt.id), eq(imapIngestionMessages.status, "processing")));
+  }).where(and(eq(imapIngestionMessages.id, receipt.id), eq(imapIngestionMessages.status, "processing"))).returning({ id: imapIngestionMessages.id });
+  return settled.length > 0;
 }
 
 type ReceiptTransaction = Parameters<Parameters<ReturnType<typeof getDb>["transaction"]>[0]>[0];
@@ -1466,7 +1467,8 @@ export async function runImapIngestionCycle(
               .returning({ id: imapIngestionMessages.id });
             filed = Boolean(resolved);
           }
-          if (kept && !kept.created && oversized && kept.userId === sender.userId) await settleRetryAsTooLarge(kept);
+          /* A retried receipt over a lowered limit is settled as the others of this branch are, and the message is removed with them. */
+          if (kept && !kept.created && oversized && kept.userId === sender.userId && await settleRetryAsTooLarge(kept, "sender_too_large")) filed = true;
           if (filed || isMemberFailureRow(kept, memberFailureCode)) unattributedUids.push(message.uid);
           return;
         }
