@@ -232,6 +232,8 @@ describe("a change to something updates depend on, after a passed run", () => {
     ["the matrix itself", "scripts/ci/upgrade-cell.sh"],
     ["the matrix's manifest writer", "scripts/ci/write-test-manifest.sh"],
     ["the launcher checkout the launcher cell builds from", "scripts/ci/checkout-launcher-source.sh"],
+    ["the registry the cells install from", "scripts/ci/start-installer-registry.sh"],
+    ["the oidc sidecar the oidc cell builds", "tests/oidc/Dockerfile"],
     ["this script", "scripts/ci/upgrade-cells-gate.mjs"],
   ])("writes run for %s (%s)", async (unused, path) => {
     const base = git("rev-parse", "HEAD");

@@ -2720,7 +2720,7 @@ describe("upgrade matrix wiring (#1665)", () => {
       "a push to main": [allEvents.mainPush, false],
       "a push to dev": [allEvents.devPush, false],
       "a schedule": [allEvents.nightly, false],
-      "a merge request into dev": [allEvents.devMergeRequest, false],
+      "a merge request into dev": [allEvents.devMergeRequest, true],
       "a merge request into hotfix/*": [allEvents.hotfixMergeRequest, false],
     };
 
@@ -2939,7 +2939,7 @@ describe("upgrade cells on merge requests into dev (#1752)", () => {
     "scripts/ci/write-test-manifest.sh",
     "scripts/ci/checkout-launcher-source.sh",
   ];
-  // The cell's own files named by the spec, which the gate's list need not hold.
+  // The cell's own files named by the spec; the gate must watch them too (D-F3).
   const CELL_OWN_SAMPLES = [
     "scripts/ci/upgrade-cell.sh",
     "scripts/ci/upgrade-cell-launcher.sh",
@@ -2966,6 +2966,9 @@ describe("upgrade cells on merge requests into dev (#1752)", () => {
     }
     for (const sample of CELL_OWN_SAMPLES) {
       if (!globMatches(globs, sample)) problems.push(`script path not in YAML list: ${sample}`);
+      // D-F3: the gate answers skip on a promotion for anything it does not list,
+      // so a path that starts the cells on a dev merge request must be in it too.
+      if (!updateRelevant(sample)) problems.push(`sample ${sample} is in the YAML list but not update-relevant per the gate`);
     }
     for (const glob of globs) {
       const sample = sampleOf(glob);
@@ -2997,6 +3000,14 @@ describe("upgrade cells on merge requests into dev (#1752)", () => {
     const noPin = globs.filter((glob) => !globToRegExp(glob).test("launcher/pin.json"));
     expect(noPin.length, "some glob covers launcher/pin.json").toBeLessThan(globs.length);
     expect(driftOf(noPin, scripts)).toContain("script path not in YAML list: launcher/pin.json");
+  });
+
+  it("drift check, gate side: a YAML path the gate does not watch (tests/oidc) is reported (D-F3)", async () => {
+    const scripts = await loadScripts();
+    const blind = (path) => !path.startsWith("tests/oidc/") && scripts.updateRelevant(path);
+    expect(driftOf(anchorGlobs(), { ...scripts, updateRelevant: blind })).toContain(
+      "sample tests/oidc/a.ts is in the YAML list but not update-relevant per the gate",
+    );
   });
 
   it("drift check, YAML side: an extra glob no script list covers is reported", async () => {

@@ -58,7 +58,10 @@ export function updateRelevant(path) {
        reads a bare "scripts/ci/..." string in code as a file it must hash */
     || /^scripts\/ci\/upgrade-/u.test(path)
     || path === "scripts/ci/write-test-manifest.sh"
-    || path === "scripts/ci/checkout-launcher-source.sh";
+    || path === "scripts/ci/checkout-launcher-source.sh"
+    || path === "scripts/ci/start-installer-registry.sh"
+    /* the sidecar the oidc cell builds (upgrade-cell.sh) */
+    || path.startsWith("tests/oidc/");
 }
 
 /* A finished pipeline: later cells of an unfinished one may not exist yet. */

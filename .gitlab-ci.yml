@@ -1405,12 +1405,12 @@ classify:
     # the file above so they reach the pipeline in the same dotenv report. The
     # tags are fetched because the checkout carries none. With no tags every
     # slot is empty and every cell would SKIP, so on the pipelines that run the
-    # cells (the merge request into preview, owner 59a, and a push to
-    # hotfix/*) a failed fetch fails this job rather than letting the gate pass
-    # untested; elsewhere it is best effort.
+    # cells (the merge requests into preview, owner 59a, and into dev, #1752,
+    # and a push to hotfix/*) a failed fetch fails this job rather than letting
+    # the gate pass untested; elsewhere it is best effort.
     - |
       set -eu
-      if { [ "${CI_PIPELINE_SOURCE:-}" = "merge_request_event" ] && [ "${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-}" = "preview" ]; } \
+      if { [ "${CI_PIPELINE_SOURCE:-}" = "merge_request_event" ] && case "${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-}" in preview | dev) true ;; *) false ;; esac; } \
         || { [ "${CI_PIPELINE_SOURCE:-}" = "push" ] && case "${CI_COMMIT_BRANCH:-}" in hotfix/*) true ;; *) false ;; esac; }; then
         git fetch --quiet --tags origin || git fetch --quiet --tags origin
       else
