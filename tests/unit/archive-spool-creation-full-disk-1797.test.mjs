@@ -17,8 +17,15 @@ const fail = vi.hoisted(() => ({ mkdir: /** @type {null | string} */ (null), ope
 vi.mock("node:fs/promises", async (importOriginal) => {
   const real = await importOriginal();
   const refuse = (code) => Object.assign(new Error(`${code}: simulated`), { code });
+  // The preflight's free-space read is stubbed too, so this file does not read
+  // the host's free disk either (#1868): 1 TiB free, whatever the runner has.
+  const statfs = async (...args) => {
+    const actual = await real.statfs(...args);
+    return { ...actual, bsize: 4096, bavail: 1024 ** 4 / 4096, bfree: 1024 ** 4 / 4096 };
+  };
   return {
     ...real,
+    statfs,
     mkdir: async (...args) => {
       if (fail.mkdir && String(args[0]).endsWith("portable-archives")) throw refuse(fail.mkdir);
       return real.mkdir(...args);

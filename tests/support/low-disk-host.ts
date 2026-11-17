@@ -16,8 +16,8 @@ vi.mock("node:fs/promises", async (importOriginal) => {
   const forced = Number(process.env.ORBIT_TEST_FREE_DISK_BYTES);
   if (!Number.isFinite(forced) || forced <= 0) return real;
   const bsize = 4096;
-  const statfs = async (path: Parameters<typeof real.statfs>[0], ...rest: unknown[]) => {
-    const actual = await (real.statfs as (...a: unknown[]) => Promise<Record<string, number | bigint>>)(path, ...rest);
+  const statfs = async (path: Parameters<typeof real.statfs>[0]) => {
+    const actual = await real.statfs(path);
     return { ...actual, bsize, bavail: Math.floor(forced / bsize), bfree: Math.floor(forced / bsize) };
   };
   return { ...real, default: { ...(real as { default?: object }).default, statfs }, statfs };
