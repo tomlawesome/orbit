@@ -110,7 +110,7 @@
     entry.sectionId = null;
   }
 
-  /* ---- reminders: two chips, editable in a callout (§2.5) -------------- */
+  /* ---- reminders: tags, editable in the chooser card (§2.5, #1892) ------ */
   let remindOpen = $state(false);
   /** @type {HTMLElement | undefined} */
   let remindButton = $state();

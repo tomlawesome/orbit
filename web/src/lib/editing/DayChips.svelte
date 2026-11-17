@@ -35,6 +35,7 @@
   /** @type {"none" | "add" | "refused" | "already"} */
   let voice = $state("none");
   let said = $state(0);
+  const uid = $props.id();
   /** @type {number | null} */
   let nudged = $state(null);
   /** @param {string} text */
@@ -48,6 +49,7 @@
     if (day === null) { voice = "refused"; return; }
     typed = "";
     said = day;
+    input?.focus({ preventScroll: true }); // the add button, or the chip, may be about to leave
     if (days.includes(day)) { voice = "already"; nudged = day; return; }
     voice = "none";
     nudged = null;
@@ -58,6 +60,8 @@
     nudged = null;
     if (voice === "already") voice = "none";
     onpick(String(day));
+    // a typed day's chip leaves with its removal: focus goes to the field, not the page
+    if (!REMINDER_PRESETS.includes(day)) input?.focus({ preventScroll: true });
   }
   const chosen = $derived([...days].sort((a, b) => a - b));
   const words = $derived(
@@ -72,7 +76,7 @@
   {#each scale as day (day)}
     {#if REMINDER_PRESETS.includes(day)}
       <button type="button" class="chip" class:nudge={nudged === day} aria-pressed={days.includes(day)}
-              onclick={() => press(day)}>{day}d</button>
+              tabindex={day === scale[0] ? 0 : undefined} onclick={() => press(day)}>{day}d</button>
     {:else}
       <button type="button" class="chip" class:nudge={nudged === day} data-extra aria-label={`${day}d, remove`}
               onclick={() => press(day)}>{day}d<span class="x" aria-hidden="true">×</span></button>
@@ -81,6 +85,7 @@
   <div class="own" class:has={typed !== ""} class:bad={voice === "refused"}>
     <input bind:this={input} type="text" inputmode="numeric" maxlength="3" autocomplete="off" placeholder="other"
            aria-label="Another number of days before" aria-invalid={voice === "refused" ? "true" : undefined}
+           aria-describedby={voice === "refused" ? `${uid}-refusal` : undefined}
            value={typed} oninput={(event) => typing(event.currentTarget.value)}
            onkeydown={(event) => { if (event.key === "Enter") { event.preventDefault(); commit(); } }}>
     <span class="unit" aria-hidden="true">d</span>
@@ -90,7 +95,7 @@
   {#if voice === "add"}
     <button type="button" class="add" onclick={commit}>add {reminderDayOf(typed)} d <span class="kb">↵</span></button>
   {:else if voice === "refused"}
-    <span class="in">{REMINDER_REFUSAL}</span>
+    <span class="in" id="{uid}-refusal">{REMINDER_REFUSAL}</span>
   {:else if voice === "already"}
     <span class="in">{said} d is already chosen</span>
   {/if}
@@ -142,6 +147,12 @@
   .foot b{font-weight:500;color:var(--ink)}
   .when{min-width:0}
   .rel{flex:none}
+  /* the phone, wherever the card stands (the sheet or inline): the field at the
+     pocket's 16px floor so it never zooms, and no Enter hint on a number pad */
+  @media (max-width: 839.98px), (max-height: 479.98px){
+    .own input{font-size:var(--p-type-input)}
+    .line .add .kb{display:none}
+  }
   @media (prefers-reduced-motion: reduce){
     .chip,.line .in{transition:none;animation:none}
   }
