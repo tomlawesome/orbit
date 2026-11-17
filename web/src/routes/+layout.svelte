@@ -51,8 +51,8 @@
 
   import { onMount } from "svelte";
   import { page, updated } from "$app/state";
-  import { beforeNavigate } from "$app/navigation";
-  import { anyUnsaved } from "$lib/unsaved.js";
+  import { beforeNavigate, goto } from "$app/navigation";
+  import { anyUnsaved, unsavedAsker } from "$lib/unsaved.js";
   import { reloadWhenUpdated } from "$lib/reload-when-updated.js";
   import { readSession, savePreferences } from "$lib/data/workspace.js";
   import { applyTheme } from "$lib/theme-swatches.js";
@@ -67,7 +67,8 @@
     reloadWhenUpdated(navigation, updated, (href) => { location.href = href; }, {
       isDirty: anyUnsaved,
       ask: () => confirm("Discard this entry? What you've typed will be lost."),
-    });
+      holderAsk: unsavedAsker(),
+    }, (href) => goto(href));
   });
 
   /* The server is the source of truth for theme and text size (#1180);
