@@ -9,7 +9,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vites
 // A namespace import, so a missing `runWithLimit` fails one test, not the whole file.
 import * as readiness from "./release-readiness.mjs";
 
-const { fetchJson, handoffRepository, realLookups } = readiness;
+const { fetchJson, handoffRepository, realLookups, GITHUB_REPOSITORY } = readiness;
 
 /*
  * Limits and least privilege in scripts/release-readiness.mjs (#1866):
@@ -246,7 +246,7 @@ const envNames = (path) =>
 
 describe("handoffRepository", () => {
   it("reads the repository name from the publish workflow", () => {
-    expect(handoffRepository(newRepo())).toBe("tomlawesome/orbit-handoff");
+    expect(handoffRepository(newRepo())).toBe(`${GITHUB_REPOSITORY.split("/")[0]}/orbit-handoff`);
   });
 
   it("throws when the line is missing", () => {
@@ -407,7 +407,7 @@ describe("child script environment (R5)", () => {
     await lookups.evidenceAgeDays();
     expectNarrow(dump, ["ORBIT_IMAGE", "ORBIT_DIGEST", "ORBIT_COMMIT", "ORBIT_REF"]);
     const text = readFileSync(dump, "utf8");
-    expect(text).toContain("ORBIT_IMAGE=ghcr.io/tomlawesome/orbit");
+    expect(text).toContain(`ORBIT_IMAGE=ghcr.io/${GITHUB_REPOSITORY}`);
     expect(text).toContain(`ORBIT_DIGEST=${DIGEST}`);
     expect(text).toContain(`ORBIT_COMMIT=${SHA}`);
     expect(text).toContain("ORBIT_REF=preview");
