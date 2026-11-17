@@ -1,5 +1,5 @@
 import { createECDH } from "node:crypto";
-import { chmodSync, lstatSync, statSync } from "node:fs";
+import { chmodSync, lstatSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import {
@@ -43,6 +43,18 @@ export function generateVapidKeyPair(): VapidKeyPair {
   };
 }
 
+/** The public key of a stored private key, or undefined when it is not a 32-byte P-256 scalar in base64url. */
+function derivePublicKey(privateKey: string): string | undefined {
+  if (!/^[A-Za-z0-9_-]{43}$/.test(privateKey)) return undefined;
+  try {
+    const ecdh = createECDH("prime256v1");
+    ecdh.setPrivateKey(Buffer.from(privateKey, "base64url"));
+    return ecdh.getPublicKey().toString("base64url");
+  } catch {
+    return undefined;
+  }
+}
+
 export interface EnsureVapidKeysResult {
   generated: boolean;
   message?: string;
@@ -50,8 +62,10 @@ export interface EnsureVapidKeysResult {
 
 /**
  * ensure_vapid_keys (configure.sh, guarantees #24-26): an existing non-empty
- * private key file is kept (mode restricted to 600) and nothing else is
- * touched; otherwise a new pair is generated, the private key written
+ * private key file is kept (mode restricted to 600); .env-orbit is touched
+ * only when its VAPID_PUBLIC_KEY is empty, which is filled in from the kept
+ * key (P-15), or, when that key cannot be decoded, a new pair is made as
+ * below. Otherwise a new pair is generated, the private key written
  * atomically at mode 600, and only then are VAPID_PUBLIC_KEY and
  * VAPID_PRIVATE_KEY_FILE recorded in .env-orbit. A symlink or other
  * non-regular file at the key path is refused, like every other secret the
@@ -74,7 +88,17 @@ export function ensureVapidKeys(deployDir: string, generate: () => VapidKeyPair 
       } catch {
         throw new ConfigureEngineRefusal(`Could not restrict permissions on ${VAPID_PRIVATE_KEY_RELATIVE_PATH}.`, "secret-file-invalid");
       }
-      return { generated: false };
+      // P-15: a kept private key whose public half is missing from .env-orbit is repaired, not skipped.
+      if (configureEngineInternal.environmentKeyIsNonEmpty(deployDir, "VAPID_PUBLIC_KEY")) return { generated: false };
+      const publicKey = derivePublicKey(readFileSync(keyPath, "utf8").trim());
+      if (publicKey !== undefined) {
+        updateManagedKeys(deployDir, [
+          ["VAPID_PUBLIC_KEY", publicKey],
+          ["VAPID_PRIVATE_KEY_FILE", VAPID_PRIVATE_KEY_RUNTIME_PATH],
+        ]);
+        return { generated: false, message: "Restored VAPID_PUBLIC_KEY from the existing VAPID private key." };
+      }
+      // Not a P-256 scalar, and no public key to pair it with: push cannot work with it, so a new pair replaces it.
     }
   }
 

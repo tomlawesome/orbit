@@ -64,6 +64,8 @@ describe("ensureVapidKeys", () => {
   it("keeps an existing non-empty key and never touches .env-orbit", () => {
     mkdirSync(join(deployDir, ".orbit-secrets"), { mode: 0o700 });
     writeFileSync(keyPath(), "existing\n", { mode: 0o644 });
+    // A recorded public key: with it empty, P-15 repairs .env-orbit.
+    writeFileSync(envPath(), "APP_URL=https://orbit.vapid.invalid\nVAPID_PUBLIC_KEY=pub-existing\nVAPID_PRIVATE_KEY_FILE=\n", { mode: 0o600 });
     const before = readFileSync(envPath(), "utf8");
     const result = ensureVapidKeys(deployDir, () => {
       throw new Error("must not generate");
