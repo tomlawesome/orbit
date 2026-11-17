@@ -625,7 +625,7 @@ describe("'about' and installer-ui.sh citations in the guarantee catalogue (#188
   // `index` is the segment's position among the guarantee's installer-ui.sh citations.
   const uiExpectations = [
     { guarantee: "installer-ui.sh #1", index: 0, contains: ["installer_ui_safe_field() {", "printf 'unknown'"] },
-    { guarantee: "installer-ui.sh #2", index: 0, contains: ["installer_ui_elapsed() {", "return 2"] },
+    { guarantee: "installer-ui.sh #2", index: 0, contains: ["installer_ui_elapsed() {", "printf '0s'"] },
     { guarantee: "installer-ui.sh #3", index: 0, contains: ["installer_ui_emit() {", "$# -eq 5 || $# -eq 6"] },
     { guarantee: "installer-ui.sh #4", index: 0, contains: ["[SIMULATION] "] },
     { guarantee: "installer-ui.sh #4", index: 1, contains: ["simulation=true"] },
@@ -634,7 +634,7 @@ describe("'about' and installer-ui.sh citations in the guarantee catalogue (#188
     { guarantee: "installer-ui.sh #7", index: 0, contains: ["installer_ui_read_paste() {", "[[:cntrl:]]", "return 2"] },
     { guarantee: "installer-ui.sh #8", index: 0, contains: ["${#value} -le maximum", "[[:cntrl:]]", "return 2"] },
     { guarantee: "installer-ui.sh #9", index: 0, contains: ["installer_ui_menu_render() {"] },
-    { guarantee: "installer-ui.sh #9", index: 1, contains: ['>&"$terminal_fd"'] },
+    { guarantee: "installer-ui.sh #9", index: 1, contains: ["installer_ui_select() {"] },
     { guarantee: "installer-ui.sh #9", index: 2, contains: ['printf \'%s\\n\\n\' "$prompt" >&"$terminal_fd"'] },
     { guarantee: "installer-ui.sh #10", index: 0, contains: ["saved_state=", "installer_ui_save_traps", "trap 'interrupted=1' INT TERM HUP"] },
     { guarantee: "installer-ui.sh #10", index: 1, contains: ['stty "$saved_state"', "installer_ui_restore_traps"] },
