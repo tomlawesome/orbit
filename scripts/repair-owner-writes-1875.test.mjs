@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
@@ -275,31 +275,79 @@ describe("#1875 W3: root compares the folder's files only through the bounded, n
   }
 });
 
-// --- W4: the checkpoint bundle without a bind mount ---------------------------------------------------------------------
+// --- W4: the checkpoint bundle is mounted from a private copy outside the folder -----------------------------------------
 
-describe("#1875 W4: the checkpoint bundle reaches the container on standard input, not through --volume", () => {
-  /** A docker in front of the harness's own that copies the standard input of the decrypt call to a file. */
-  function capture() {
-    const dir = scratchDir("orbit-1875-capture-");
-    const file = join(dir, "decrypt-stdin");
-    writeFileSync(join(dir, "docker"), `#!/usr/bin/env bash\nPATH="\${PATH#'${dir}':}"\nif [[ "$*" == *decrypt* ]]; then tee '${file}' | docker "$@"; exit "\${PIPESTATUS[1]}"; fi\nexec docker "$@"\n`);
+describe("#1875 W4: the checkpoint bundle is mounted from a private copy outside the folder", () => {
+  const MOUNT = /(?:--volume|\s-v)[= ]([^:\s]+):\/recovery\/postgres-password\.enc/u;
+
+  /** A docker in front of the harness's own that, on the decrypt call, records the mount's source, whether it exists then, and its mode. */
+  function spy() {
+    const dir = scratchDir("orbit-1875-spy-");
+    const record = join(dir, "mount-record");
+    writeFileSync(
+      join(dir, "docker"),
+      `#!/usr/bin/env bash\nPATH="\${PATH#'${dir}':}"\nif [[ "$*" == *decrypt* ]]; then\n  prev=""\n  for a in "$@"; do\n    case "$prev" in --volume|-v) src="\${a%%:*}"; { printf '%s\\n' "$src"; if [[ -f "$src" && ! -L "$src" ]]; then printf 'regular %s\\n' "$(stat -c %a -- "$src")"; else printf 'absent\\n'; fi; } >> '${record}';; esac\n    case "$a" in --volume=*) src="\${a#--volume=}"; src="\${src%%:*}"; { printf '%s\\n' "$src"; if [[ -f "$src" && ! -L "$src" ]]; then printf 'regular %s\\n' "$(stat -c %a -- "$src")"; else printf 'absent\\n'; fi; } >> '${record}';; esac\n    prev="$a"\n  done\nfi\nexec docker "$@"\n`,
+    );
     chmodSync(join(dir, "docker"), 0o755);
-    return { dir, file };
+    return { dir, record };
   }
 
-  it("no recorded docker argument binds the folder or the bundle, and the bundle is on the decrypt call's standard input", () => {
+  const decryptLines = (result) => result.argv.filter((line) => /\bdecrypt\b/u.test(line));
+  const insideFolder = (path, folder) => [folder.targetDir, realpathSync(folder.targetDir)].some((root) => path === root || path.startsWith(`${root}/`));
+
+  it("no --volume or -v source of repair's decrypt call is inside the deployment folder", () => {
     const folder = mismatchFolder();
     const shims = shimsFor(folder.targetDir);
-    const { dir, file } = capture();
+    const result = rotate(shims, folder, { fakeBin: spy().dir });
+    expect(result.stdout, result.stderr).toContain(DONE);
+    const decrypts = decryptLines(result);
+    expect(decrypts.length, `the bundle was never checked:\n${result.argv.join("\n")}`).toBeGreaterThan(0);
+    const inside = decrypts.filter((line) => {
+      const source = MOUNT.exec(line)?.[1];
+      return source === undefined ? /orbit-repair-checkpoint|orbkek/u.test(line) || line.includes(folder.targetDir) : insideFolder(source, folder);
+    });
+    expect(inside, "the decrypt call mounts a path inside the owner's folder").toEqual([]);
+  });
+
+  it("the mounted source is a private (mode 600) file outside the folder and is gone after the run", () => {
+    const folder = mismatchFolder();
+    const shims = shimsFor(folder.targetDir);
+    const { dir, record } = spy();
     const result = rotate(shims, folder, { fakeBin: dir });
     expect(result.stdout, result.stderr).toContain(DONE);
-    const decrypts = result.argv.filter((line) => /\bdecrypt\b/u.test(line));
-    expect(decrypts.length, `the bundle was never checked:\n${result.argv.join("\n")}`).toBeGreaterThan(0);
-    const binds = result.argv.filter((line) => /--volume|\s-v\s/u.test(line) && (line.includes(folder.targetDir) || /orbit-repair-checkpoint|orbkek|postgres-password/u.test(line)));
-    expect(binds, "the folder or the bundle was bind-mounted").toEqual([]);
-    expect(existsSync(file), "nothing was read from the decrypt call's standard input").toBe(true);
-    expect(readFileSync(file).includes("ORBKEK01"), "the bundle did not reach the decrypt call on standard input").toBe(true);
+    expect(existsSync(record), "the decrypt call mounted no bundle at /recovery/postgres-password.enc").toBe(true);
+    const [source, state] = readFileSync(record, "utf8").split("\n");
+    expect(insideFolder(source, folder), `the mounted source ${source} is inside the folder`).toBe(false);
+    expect(state, "the mounted source was not a regular file when docker ran").toMatch(/^regular 600$/u);
+    expect(existsSync(source), "the private copy was left behind").toBe(false);
   });
+
+  /** A `stat` that, once repair has looked at the checkpoint bundle, swaps it for a symlink or a FIFO. */
+  function swapBundle(kind) {
+    const dir = scratchDir("orbit-1875-bundle-stat-");
+    const outside = scratchDir("orbit-1875-outside-");
+    const swap = kind === "symlink" ? `cp -- "$last" '${outside}/copy' && rm -f -- "$last" && ln -s '${outside}/copy' "$last"` : `rm -f -- "$last" && mkfifo "$last"`;
+    writeFileSync(
+      join(dir, "stat"),
+      `#!/usr/bin/env bash\nout="$('${realTool("stat")}' "$@")" || exit $?\nlast="\${@: -1}"\ncase "$last" in */.orbit-repair-checkpoint.*/postgres-password.orbkek) if [[ ! -e '${outside}/swapped' ]]; then : > '${outside}/swapped'; ${swap}; fi;; esac\nprintf '%s\\n' "$out"\n`,
+    );
+    chmodSync(join(dir, "stat"), 0o755);
+    return dir;
+  }
+
+  for (const kind of ["symlink", "fifo"]) {
+    it(`a ${kind} swapped in at the bundle path gives 'cannot check', never a pass; root does not block`, () => {
+      const folder = mismatchFolder();
+      const shims = shimsFor(folder.targetDir);
+      const { dir, record } = spy();
+      const result = rotate(shims, folder, { fakeBin: dir, env: { PATH: `${swapBundle(kind)}:${shims.env.PATH}` } });
+      expect(result.hung, "root blocked on the bundle").toBe(false);
+      expect(result.ms).toBeLessThan(BUDGET_MS);
+      expect(result.stdout, "the swapped bundle passed the check and the rotation finished").not.toContain(DONE);
+      expect(orbitLines(result).some((line) => /cannot check|could not check|not a regular file|changed while it was being opened|was not read|failed verification/u.test(line)), `no line says the bundle could not be checked:\n${result.stderr.slice(0, 1200)}`).toBe(true);
+      expect(existsSync(record) ? readFileSync(record, "utf8") : "", "docker was still given a mount for the swapped bundle").toBe("");
+    });
+  }
 });
 
 // --- not root: unchanged ----------------------------------------------------------------------------------------------
@@ -350,7 +398,7 @@ describe("#1875 W5: guarantee 59 names these steps", () => {
     "the removal of old credential checkpoints is the owner's": /(removal|removes)[^;]*checkpoint[^;]*(\bas the owner\b|owner's)|checkpoint[^;]*(removal|removed)[^;]*(\bas the owner\b|by the owner)/u,
     "root's compares read the folder's file through the bounded no-follow read (regular files, 1 MiB, time limit)": /(compare|cmp)[^;]*(bounded|no-follow|no symlink)[^;]*1 MiB|(bounded|no-follow)[^;]*(compare|cmp)[^;]*1 MiB/u,
     "a file that fails the read is never 'same'": /never (counts as |treated as |compared as )?["`]?same/u,
-    "the bundle check gets the bundle on standard input and no longer through --volume": /(standard input[^;]*bundle|bundle[^;]*standard input)[^;]*(--volume|bind mount)|(--volume|bind mount)[^;]*(standard input)/u,
+    "the bundle check mounts a private copy outside the folder": /bundle[^;]*(private|temporary) (copy|file)[^;]*outside (the|that|this) (deployment )?folder|(private|temporary) (copy|file)[^;]*outside[^;]*folder[^;]*bundle|bundle[^;]*mounted[^;]*(private|temporary) (copy|file)/u,
   };
   for (const [what, re] of Object.entries(WORDING)) {
     it(what, () => {
