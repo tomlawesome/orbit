@@ -7,7 +7,7 @@ import { LocalDocumentStorage } from "./storage";
 /* #1605 SEC-D2/1 (from #1209): a stalled upload is ended by the web server
    (scripts/web-server.mjs, minimum body rate, #1390), which destroys the
    socket, so the body stream then errors. This pins what `receive` does with
-   that: the quarantine file is removed and the error is passed on. */
+   that: the quarantine file is removed and the upload is rejected. */
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -15,7 +15,7 @@ afterEach(async () => {
 });
 
 describe("receive when the body stream errors mid-upload", () => {
-  it("rejects, removes the quarantine file and closes its handle", async () => {
+  it("rejects and removes the quarantine file", async () => {
     const root = await mkdtemp(join(tmpdir(), "orbit-receive-error-1605-"));
     roots.push(root);
     const storage = new LocalDocumentStorage(join(root, "objects"), join(root, "quarantine"));
