@@ -156,6 +156,12 @@
     unmark("dueDate");
     closeDue(true);
   }
+  /** #1738 W-F23: a picked date goes back to none. */
+  function clearDue() {
+    entry.dueDate = "";
+    entry = { ...entry }; // a fresh object, so a host that passes a plain entry repaints too
+    closeDue(true);
+  }
   /** The page behind the sheet is inert while it stands (it is modal). @param {HTMLElement} seat */
   function holdSeat(seat) {
     const restore = inertPage(seat);
@@ -452,7 +458,7 @@
   {#if dueOpen}
     <div class="pc-chseat" data-chooser-card use:holdSeat>
       <div class="pc-chscrim" aria-hidden="true" onclick={() => closeDue(false)}></div>
-      <ChooserCard ask={dueAsk} layout="sheet" onpick={pickDue} onclose={() => closeDue(true)} />
+      <ChooserCard ask={dueAsk} layout="sheet" onpick={pickDue} onclear={clearDue} onclose={() => closeDue(true)} />
     </div>
   {/if}
 

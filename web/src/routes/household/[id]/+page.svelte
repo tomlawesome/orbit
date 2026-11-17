@@ -2,6 +2,7 @@
   import { uuid } from "$lib/uuid.js";
   import { plural } from "$lib/format.js";
   import { onMount, tick, untrack } from "svelte";
+  import { SvelteMap } from "svelte/reactivity";
   import { invalidateAll } from "$app/navigation";
   import Chrome from "$lib/Chrome.svelte";
   import Mark from "$lib/Mark.svelte";
@@ -422,7 +423,7 @@
      whole-list save does not undo it. A section not yet saved (still being
      named) keeps the pick with the list. */
   /** Colour picks sent and not yet seen back in the saved list, by section id; each send carries them all, so a quick second pick keeps the first. */
-  const pickedColours = new Map();
+  const pickedColours = /** @type {SvelteMap<string, string>} */ (new SvelteMap());
   /** Colour saves run one at a time, so a later list never lands before an earlier one. */
   let colourChain = /** @type {Promise<void>} */ (Promise.resolve());
   /** @param {EditorRow} row @param {string} colour */
