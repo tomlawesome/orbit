@@ -1362,14 +1362,21 @@ classify:
     # on the merge request into preview, after a passed run, only a change to
     # what updates depend on runs them again. The gate never fails this job and
     # answers `run` on any doubt; a gate that fails or writes nothing counts as
-    # `run` too. Its file is kept as an artefact: the next pipeline on the same
-    # merge request reads it to find the commit a chain of skips relies on.
+    # `run` too. Its file is kept as an artefact: later pipelines into preview,
+    # on this merge request or another (#1767), read it to find the commit a
+    # chain of skips relies on and the slot tags the run had. The gate reads
+    # this pipeline's slot tags from its environment, so they are exported from
+    # classify.env first; only its UPGRADE_CELLS lines are appended back, since
+    # the slot lines are in classify.env already and dotenv is capped at twenty.
     - |
       set -u
       mkdir -p .orbit-upgrade
       rm -f .orbit-upgrade/gate.env
+      while IFS= read -r line; do
+        case "$line" in ORBIT_UPGRADE_SLOT_*=*) export "$line" ;; esac
+      done < classify.env
       if node scripts/ci/upgrade-cells-gate.mjs .orbit-upgrade/gate.env && [ -s .orbit-upgrade/gate.env ]; then
-        cat .orbit-upgrade/gate.env >> classify.env
+        sed -n '/^UPGRADE_CELLS/p' .orbit-upgrade/gate.env >> classify.env
       else
         echo "upgrade cells gate: no answer, so the cells run"
         printf 'UPGRADE_CELLS=run\n' > .orbit-upgrade/gate.env
