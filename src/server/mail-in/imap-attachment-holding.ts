@@ -127,9 +127,11 @@ async function checkReceivedAttachment(
   received: ReceivedDocument,
   input: { filename?: string; declaredMediaType?: string; mailboxIngestion?: boolean },
   maxBytes: number,
+  callerBytes?: Buffer,
 ): Promise<{ mediaType: SupportedDocumentMediaType; displayName: string }> {
   const config = getDocumentConfig();
-  const bytes = await openDocumentStorage().readQuarantine(received.quarantinePath, maxBytes);
+  // #1605 A-Q2: the caller's own copy is checked when given; only a copy read here is zeroed here.
+  const bytes = callerBytes ?? (await openDocumentStorage().readQuarantine(received.quarantinePath, maxBytes));
   try {
     // Size, magic bytes and declared type only: nothing opens the file yet.
     const identified = identifyImapAttachmentBytes(bytes, input.declaredMediaType, { maximumDocumentBytes: maxBytes, pdfOnly: input.mailboxIngestion === true });
@@ -151,7 +153,7 @@ async function checkReceivedAttachment(
     if (structure !== "supported_structure") throw new Error("mime_structure_invalid");
     return { mediaType, displayName };
   } finally {
-    releaseBuffer(bytes);
+    if (!callerBytes) releaseBuffer(bytes);
   }
 }
 
@@ -177,7 +179,7 @@ export async function scanAndHoldImapAttachment(input: {
   const body = new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(input.bytes); controller.close(); } });
   const received = await openDocumentStorage().receive(body, id, maxBytes, input.bytes.length);
   try {
-    const { mediaType, displayName } = await checkReceivedAttachment(received, input, maxBytes);
+    const { mediaType, displayName } = await checkReceivedAttachment(received, input, maxBytes, input.bytes);
     return await holdBytes(id, { quarantinePath: received.quarantinePath, sizeBytes: received.sizeBytes, contentSha256: received.contentSha256, displayName, mediaType }, input.recipientUserId, input.receiptId, input.onCiphertextAllocated);
   } finally {
     received.leadingBytes.fill(0);
