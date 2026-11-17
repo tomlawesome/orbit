@@ -4480,7 +4480,10 @@ restore_transaction_originals_match_live() {
 discard_staging_root() {
   local staging_root="$1" discard
   discard=".orbit-repair-discard.${staging_root#.orbit-install-staging.}"
-  [[ ! -e "$discard" && ! -L "$discard" ]] || return 1
+  if [[ -e "$discard" || -L "$discard" ]]; then
+    printf 'Orbit repair: %s could not be removed: %s is in the way of setting it aside; once Orbit is working, remove %s, then run Repair again.\n' "$staging_root" "$discard" "$discard" >&2
+    return 1
+  fi
   as_folder_owner mv -n -T -- "$staging_root" "$discard" || return 1
   [[ ! -e "$staging_root" && ! -L "$staging_root" ]] || return 1
   is_real_non_symlink_directory "$discard" || return 1
@@ -6597,6 +6600,7 @@ execute_dangerous_batch() {
     dangerous_exit_code=6
     return 0
   fi
+  remove_leftover_discards
 
   # Approved. rotate-database-credential's own entries always share one
   # execution instance and outcome (mirrors do_restart_services's own
@@ -6692,6 +6696,8 @@ run_safe_batch() {
     fi
     printf 'execution result=%s done=0 failed=0\n' "$terminal_result"
     safe_batch_exit_code=0
+    # #1876: nothing to confirm here; a dangerous batch clears after its own.
+    [[ "$dangerous" == 1 ]] || remove_leftover_discards
     return 0
   fi
 
@@ -6707,6 +6713,7 @@ run_safe_batch() {
     safe_batch_exit_code=1
     return 0
   fi
+  remove_leftover_discards
 
   for entry in "${plan_entries[@]:-}"; do
     [[ -n "$entry" ]] || continue
@@ -6835,13 +6842,19 @@ is_removable_checkpoint_dir() {
 
 # #1876: removes each `.orbit-repair-discard.*` an earlier run left when it
 # was stopped between discard_staging_root's rename and the end of its
-# removal. Runs once, at the start of --execute (--check and --plan never
-# call it), and never reads what is inside. Only a real folder is removed, as
+# removal. Runs at most once per --execute, under the run lock, and only once
+# a batch is approved: after the version gate and the confirmation, before
+# any action (run_safe_batch, execute_dangerous_batch). A declined or refused
+# run, and --check and --plan, never call it (guarantees 33 and 56). It never
+# reads what is inside. Only a real folder is removed, as
 # the folder owner (#1872), and rm -rf does not follow a symlink inside it;
 # anything else under that name is named and left for the operator.
+discards_cleared=0
 remove_leftover_discards() {
   local dir
   local -a dirs=()
+  [[ "$discards_cleared" == 0 ]] || return 0
+  discards_cleared=1
   for dir in ./.orbit-repair-discard.*; do
     [[ -e "$dir" || -L "$dir" ]] || continue
     dirs+=("$dir")
@@ -6902,7 +6915,6 @@ execute_repair() {
   dangerous_exit_code=0
   acquire_repair_run_lock
   snapshot_run_checkpoints
-  remove_leftover_discards
 
   run_diagnosis
 
