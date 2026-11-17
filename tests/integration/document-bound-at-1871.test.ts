@@ -85,7 +85,7 @@ async function row(id: string) {
 async function stagedHoldMs(documentId: string, sinceBefore: number, sinceAfter: number) {
   const { delete_after } = await row(documentId);
   expect(delete_after).not.toBeNull();
-  return { low: delete_after!.getTime() - sinceAfter, high: delete_after!.getTime() - sinceBefore };
+  return { low: new Date(delete_after!).getTime() - sinceAfter, high: new Date(delete_after!).getTime() - sinceBefore };
 }
 
 const del = (session: Session, id: string) => callRouteForSession(deleteDocument, session, {
@@ -104,7 +104,7 @@ describe("storing a document sets bound_at by where it went (#1871)", () => {
     const state = await row(id);
     expect(state.bound_at).toBeNull();
     expect(state.item_id).toBeNull();
-    expect(state.delete_after!.getTime()).toBeGreaterThan(Date.now());
+    expect(new Date(state.delete_after!).getTime()).toBeGreaterThan(Date.now());
   });
 
   it("a direct upload to an item has bound_at about now and delete_after null", async () => {
@@ -117,8 +117,8 @@ describe("storing a document sets bound_at by where it went (#1871)", () => {
     expect(state.item_id).toBe(fixture.item.id);
     expect(state.delete_after).toBeNull();
     expect(state.bound_at, "bound_at set at insert").not.toBeNull();
-    expect(state.bound_at!.getTime()).toBeGreaterThanOrEqual(before);
-    expect(state.bound_at!.getTime()).toBeLessThanOrEqual(Date.now() + 2_000);
+    expect(new Date(state.bound_at!).getTime()).toBeGreaterThanOrEqual(before);
+    expect(new Date(state.bound_at!).getTime()).toBeLessThanOrEqual(Date.now() + 2_000);
   });
 });
 
@@ -149,8 +149,8 @@ describe("binding sets bound_at in the same update that clears the hold (#1871)"
     expect(state.item_id).not.toBeNull();
     expect(state.delete_after).toBeNull();
     expect(state.bound_at).not.toBeNull();
-    expect(state.bound_at!.getTime()).toBeGreaterThanOrEqual(before);
-    expect(state.bound_at!.getTime()).toBeLessThanOrEqual(Date.now() + 2_000);
+    expect(new Date(state.bound_at!).getTime()).toBeGreaterThanOrEqual(before);
+    expect(new Date(state.bound_at!).getTime()).toBeLessThanOrEqual(Date.now() + 2_000);
   });
 });
 
@@ -198,8 +198,8 @@ describe("restoreDocument decides the hold from bound_at (#1871)", () => {
     const state = await row(id);
     expect(state).toMatchObject({ lifecycle: "available", item_id: null, bound_at: null });
     // Fresh hold: restore time + the same hold the stage gave (stage-time measurement band), with 5 s slack.
-    expect(state.delete_after!.getTime()).toBeGreaterThanOrEqual(t0 + hold.low - 5_000);
-    expect(state.delete_after!.getTime()).toBeLessThanOrEqual(t1 + hold.high + 5_000);
+    expect(new Date(state.delete_after!).getTime()).toBeGreaterThanOrEqual(t0 + hold.low - 5_000);
+    expect(new Date(state.delete_after!).getTime()).toBeLessThanOrEqual(t1 + hold.high + 5_000);
   });
 
   it("a kept orphan (item_id null, bound_at set) comes back available with delete_after null, and the sweep leaves it", async () => {

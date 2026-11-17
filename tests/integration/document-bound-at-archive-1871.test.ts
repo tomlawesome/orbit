@@ -58,8 +58,8 @@ describe("a v2 archive round trip leaves every imported document bound (#1871)",
       expect(imported.item_id).not.toBeNull();
       expect(imported.delete_after).toBeNull();
       expect(imported.bound_at, "bound at the switch").not.toBeNull();
-      expect(imported.bound_at!.getTime()).toBeGreaterThanOrEqual(before);
-      expect(imported.bound_at!.getTime()).toBeLessThanOrEqual(Date.now() + 2_000);
+      expect(new Date(imported.bound_at!).getTime()).toBeGreaterThanOrEqual(before);
+      expect(new Date(imported.bound_at!).getTime()).toBeLessThanOrEqual(Date.now() + 2_000);
     }
   });
 });
