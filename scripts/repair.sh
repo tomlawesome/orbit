@@ -1221,7 +1221,8 @@ set -Eeuo pipefail
 # Checkpoint storage — local-only, owner-only, removed after a clean re-check
 # --------------------------------------------------------------------------
 # The bundle is written into a freshly created, mode-0700 directory
-# (`.orbit-repair-checkpoint.XXXXXX`, a sibling naming convention to the
+# (`.orbit-repair-checkpoint.<pid>.<random>`, made by the deployment
+# folder's owner as root, #1872 V3; a sibling naming convention to the
 # existing `.orbit-repair-recovery.*`/`.orbit-install-staging.XXXXXX`
 # prefixes, distinct so it is never mistaken for either by a later
 # diagnosis) as a mode-0600 file. Unlike the stage-one private recovery
@@ -2849,7 +2850,9 @@ print_entries_preview() {
 
 ensure_recovery_dir() {
   [[ -n "$recovery_dir" ]] && return 0
-  owner_private_dir recovery_dir ./.orbit-repair-recovery. || { recovery_dir=""; return 1; }
+  # On failure a name is left only for a folder still there (#1872 V10),
+  # which cleanup_recovery_dir removes.
+  owner_private_dir recovery_dir ./.orbit-repair-recovery.
 }
 
 # owner_private_dir <variable> <prefix>: a new mode-700 folder named
@@ -2869,12 +2872,21 @@ ensure_recovery_dir() {
 # burns one attempt, and any other failure (nothing at the name) stops.
 # As root the owner step's own "Orbit repair:" line (a time-out, what the
 # child said) is shown; otherwise mkdir's words are not, as before.
+# #1872 V10: an owner step that timed out may still have made the folder,
+# so it is never retried under a new name: the folder is removed as the
+# owner, and if it is still there its name is kept in <variable> (the
+# caller's cleanup removes or names it). Returns 1 either way.
 owner_private_dir() {
   local attempt
   for attempt in 1 2 3; do
     printf -v "$1" '%s%s.%s%s' "$2" "$$" "$RANDOM" "$RANDOM"
     if [[ "$(id -u)" == 0 ]]; then
       as_folder_owner mkdir -m 700 -- "${!1}" && return 0
+      if [[ "$owner_step_problem" == "timed out" ]]; then
+        [[ ! -e "${!1}" && ! -L "${!1}" ]] || as_folder_owner rm -rf -- "${!1}" || true
+        [[ -e "${!1}" || -L "${!1}" ]] || printf -v "$1" '%s' ""
+        return 1
+      fi
     else
       mkdir -m 700 -- "${!1}" 2>/dev/null && return 0
     fi
@@ -2891,7 +2903,7 @@ owner_private_dir() {
 owner_recovery_dir=""
 ensure_owner_recovery_dir() {
   [[ -n "$owner_recovery_dir" ]] && return 0
-  owner_private_dir owner_recovery_dir ./.orbit-repair-recovery. || { owner_recovery_dir=""; return 1; }
+  owner_private_dir owner_recovery_dir ./.orbit-repair-recovery.
 }
 
 cleanup_recovery_dir() {
@@ -4352,17 +4364,47 @@ do_restore_compose_file() {
 # directory is left in place for a future retry. On success, the staging
 # directory is removed entirely and 0 is returned. See "Action
 # implementations" above for the full rationale.
+#
+# #1872 V9: $touched holds only paths this call changed (see
+# restore_transaction_fail), so an original that was never moved or removed
+# is never removed here. When a path cannot be put back, the recovery folder
+# is kept past exit (cleanup no longer knows it) and an "Orbit repair:" line
+# names where the original is.
 restore_transaction_self_restore() {
   local -a touched=("$@")
-  local index path live_backup_path
+  local index path live_backup_path lost=0
   for ((index = ${#touched[@]} - 1; index >= 0; index--)); do
     path="${touched[index]}"
     live_backup_path="$recovery_dir/live/$path"
-    remove_repair_path "$path" || true
     if [[ -e "$live_backup_path" || -L "$live_backup_path" ]]; then
-      as_folder_owner cp -a -- "$live_backup_path" "$path" 2>/dev/null || true
+      if ! remove_repair_path "$path" ||
+        ! as_folder_owner cp -a -- "$live_backup_path" "$path" 2>/dev/null; then
+        printf 'Orbit repair: restore-transaction: %s could not be put back; its original is kept in %s.\n' \
+          "$path" "$live_backup_path" >&2
+        lost=1
+      fi
+    else
+      remove_repair_path "$path" || true
     fi
   done
+  if [[ "$lost" == 1 ]]; then
+    printf 'Orbit repair: restore-transaction: the recovery folder %s was kept; copy what you need back from it, then remove it.\n' \
+      "$recovery_dir" >&2
+    recovery_dir=""
+  fi
+}
+
+# restore_transaction_fail <path> <changed> [<touched>...] (#1872 V9): the
+# self-restore after a failed step on <path>, which counts as changed only
+# when <changed> is 1.
+restore_transaction_fail() {
+  local path="$1" changed="$2"
+  shift 2
+  if [[ "$changed" == 1 ]]; then
+    restore_transaction_self_restore "$@" "$path"
+  else
+    restore_transaction_self_restore "$@"
+  fi
 }
 
 # #1834 slice 4: true only when no engine transaction may be live: there is
@@ -4431,7 +4473,7 @@ do_restore_transaction() {
   local -a staging_matches=()
   local -a touched=()
   local staging_root path parent backup_path live_backup_path had_backup have_live
-  local live_secret_path live_secret_backup_path dated_backup_path
+  local live_secret_path live_secret_backup_path dated_backup_path changed
 
   # #1872 V1/V2: as root in a folder another user owns, every folder, copy,
   # move and removal below is the owner's (as_folder_owner): the recovery
@@ -4541,8 +4583,10 @@ do_restore_transaction() {
         return 1
       }
     fi
-    touched+=("$path")
 
+    # #1872 V9: $path joins $touched once it is changed; a failed or
+    # timed-out step that left it as it was keeps it out, so the
+    # self-restore never removes an unchanged original.
     if [[ "$have_live" == 1 ]]; then
       if [[ "$path" == .env-orbit || "$path" == .orbit-secrets ]]; then
         # O2-S1: never delete the live copy of a secret — move it to a
@@ -4556,17 +4600,25 @@ do_restore_transaction() {
           restore_transaction_self_restore "${touched[@]}"
           return 1
         fi
+        # A rename either happened or did not: changed only if the dated
+        # name now exists.
         as_folder_owner mv -- "$path" "$dated_backup_path" || {
-          restore_transaction_self_restore "${touched[@]}"
+          changed=0
+          [[ ! -e "$dated_backup_path" && ! -L "$dated_backup_path" ]] || changed=1
+          restore_transaction_fail "$path" "$changed" "${touched[@]}"
           return 1
         }
       else
+        # rm -f of a file or link is all or nothing; a folder may be half gone.
         remove_repair_path "$path" || {
-          restore_transaction_self_restore "${touched[@]}"
+          changed=1
+          [[ ! -L "$path" && ( ! -e "$path" || -d "$path" ) ]] || changed=0
+          restore_transaction_fail "$path" "$changed" "${touched[@]}"
           return 1
         }
       fi
     fi
+    touched+=("$path")
 
     if [[ "$had_backup" == 1 ]]; then
       # cp, not mv: the staged backup stays intact in case a later path in
@@ -6048,6 +6100,9 @@ do_checkpoint_step() {
   # rename from a mktemp name beside it) are made by the deployment
   # folder's owner; root only produces the bundle's bytes.
   owner_private_dir checkpoint_dir ./.orbit-repair-checkpoint. || {
+    # #1872 V10: a folder its timed-out owner step made and could not
+    # remove is settled (named, kept) like any checkpoint of this run.
+    [[ -z "$checkpoint_dir" ]] || run_checkpoint_dirs+=("$checkpoint_dir")
     checkpoint_passphrase=""
     original_hex=""
     return 1
