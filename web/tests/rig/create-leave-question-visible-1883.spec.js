@@ -57,7 +57,7 @@ test("typed on narrow, then widened: leaving shows the layout's confirm; cancel 
   await expect.poll(() => asked, { message: "the layout's confirm was not shown" }).toEqual([CONFIRM]);
   await handled(page);
   await expect(page, "cancelling the confirm must keep the page").toHaveURL(/\/create(\?.*)?$/);
-  await expect(page.getByText("Leave without adding?"), "the hidden pocket's callout must not be the question").toHaveCount(0);
+  await expect(page.getByText("Leave without adding?"), "the hidden pocket's callout must not be the question").not.toBeVisible();
 
   await page.setViewportSize(NARROW);
   await expect(pocketName(page)).toHaveValue(NAME);
@@ -101,6 +101,6 @@ test("typed in the desk form on wide, then shrunk: leaving shows the layout's co
   await navigate(page);
   await expect.poll(() => asked, { message: "the layout's confirm was not shown" }).toEqual([CONFIRM]);
   await handled(page);
-  await expect(page.getByText("Leave without adding?")).toHaveCount(0);
+  await expect(page.getByText("Leave without adding?")).not.toBeVisible();
   await expect(page).toHaveURL(/\/create(\?.*)?$/);
 });
