@@ -945,6 +945,28 @@ describe("a passed run on another merge request into preview (#1767)", () => {
     expectRun(await gate(crossMr(slotEnv, [previewRun(base, 250, 5, gateRun)])));
   });
 
+  it("runs when this pipeline has no slot tags, even if a passed run matches otherwise", async () => {
+    const base = git("rev-parse", "HEAD");
+    touch("src/a.test.ts");
+
+    // The run's gate file also has no slot lines: two empty strings must not count as equal.
+    expectRun(await gate(crossMr({}, [previewRun(base, 250, 5, gateRun)])));
+    // ...and a run that did record tags is no match for a pipeline that has none.
+    expectRun(await gate(crossMr({}, [previewRun(base, 250, 5, gateRun + SLOTS)])));
+  });
+
+  it("treats a run whose gate file has no slot lines as missing data and ends the search with run", async () => {
+    const base = git("rev-parse", "HEAD");
+    touch("src/a.test.ts");
+
+    // Newest is a pre-slot artefact; an older run matches in every way. Passing the
+    // newest over and skipping on the older one would be a wrong skip.
+    expectRun(await gate(crossMr(slotEnv, [
+      previewRun(base, 250, 5, gateRun),
+      previewRun(base, 240, 6, gateRun + SLOTS),
+    ])));
+  });
+
   it("runs when an update-relevant path changed since B", async () => {
     const base = git("rev-parse", "HEAD");
     touch("scripts/install.sh");
