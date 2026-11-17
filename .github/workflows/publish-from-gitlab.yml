@@ -252,6 +252,7 @@ jobs:
           bundles="$(mktemp -d)"
           trap 'rm -rf "${bundles}"' EXIT
           label=""
+          readonly MAX_BUNDLE_BYTES=$((16 * 1024 * 1024))
           refuse() {
             printf 'Attestation %s did not verify under cosign.pub as %s for %s (%s); copying nothing.\n' \
               "${referrer}" "${label:-<unlabelled>}" "${DIGEST}" "$1" >&2
@@ -274,11 +275,16 @@ jobs:
                 const layers = Array.isArray(m.layers) ? m.layers : [];
                 if (m.subject?.digest !== process.argv[1] || layers.length !== 1 ||
                     layers[0].mediaType !== "application/vnd.dev.sigstore.bundle.v0.3+json") return;
-                process.stdout.write(String(layers[0].digest));
+                process.stdout.write(String(layers[0].digest) + " " + String(layers[0].size));
               });
             ' -- "${DIGEST}")" || refuse "its manifest is unreadable"
+            read -r layer layer_size <<< "${layer}"
             [[ "${layer}" =~ ${ORBIT_DIGEST_PATTERN} ]] ||
               refuse "it is not one sigstore bundle attached to this digest"
+            # Bounded fetch: the declared size is checked before a byte is pulled.
+            if ! [[ "${layer_size}" =~ ^[0-9]{1,8}$ ]] || (( 10#${layer_size} > MAX_BUNDLE_BYTES )); then
+              refuse "its bundle is declared as ${layer_size:-no} bytes, not a size within the 16 MiB limit"
+            fi
             bundle="${bundles}/${referrer#sha256:}.json"
             crane blob "${THROWAWAY_IMAGE}@${layer}" > "${bundle}" < /dev/null ||
               refuse "its bundle is unreadable"
