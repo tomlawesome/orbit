@@ -66,6 +66,7 @@
    *   view: SettingsView | null,
    *   methods: Methods | null,
    *   sessions: Sessions,
+   *   sessionsLoaded?: boolean,
    *   active: string,
    *   textSize: string,
    *   labelDays: number,
