@@ -331,6 +331,14 @@ describe("repair.sh's compose restore is durable and leaves no scratch file (aud
     runRepair(targetDir, ["--execute", "--safe-only"], {
       raceHook: 'if compgen -G "$PWD/.docker-compose.yml.repair*" >/dev/null; then pkill -9 -f "$PWD/scripts/repair.sh"; sleep 2; fi',
     });
+    // The killed run's `timeout docker run` child outlives repair.sh (it holds
+    // none of spawnSync's pipes) and inherits the #1849 folder lock until it
+    // exits; the later run starts once that run is wholly gone.
+    const deadline = Date.now() + 10_000;
+    while (spawnSync("flock", ["-n", targetDir, "true"]).status !== 0) {
+      if (Date.now() > deadline) throw new Error("the killed run never released the folder lock");
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+    }
     const second = runRepair(targetDir, ["--execute", "--safe-only"]);
     expect(existsSync(join(targetDir, "docker-compose.yml")), second.combined).toBe(true);
     expect(readdirSync(targetDir).filter((name) => name.startsWith(".docker-compose.yml.repair"))).toEqual([]);

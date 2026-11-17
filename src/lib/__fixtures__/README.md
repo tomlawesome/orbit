@@ -46,6 +46,11 @@ write the key twice) changed "migrate: duplicate managed keys" by hand: each
 managed key is now written once, at its first matching line, and later matching
 lines are dropped, so the case now exits 0 with the migrated file.
 
+#1603 (installer audit Low: the non-interactive guidance names the way out)
+changed `install-guided-configuration/noninteractive-configuration-guidance.json`
+by hand: its second line now ends "; set ORBIT_AUTH_OIDC=false to use local
+accounts with no OIDC secret." instead of a full stop.
+
 #1211 captured its three directories from `6448f07e` (the scripts unchanged since
 `d6a365a3`), before backup.sh, restore.sh and the recovery-bundle scripts
 became thin shells, with a throwaway script that ran each bash half the

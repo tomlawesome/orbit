@@ -95,11 +95,14 @@ describe("launcher install compatibility gate", () => {
     );
   });
 
-  it("needs build_launcher's artifact, spelled out rather than through *needs_gated_image (ADR-0031 #2)", () => {
+  it("needs build_launcher, spelled out rather than through *needs_gated_image (ADR-0031 #2), for ordering only (#1738 D-S2/D-S4)", () => {
     const job = launcherCompatJob();
 
     expect(job).toMatch(/needs:\s*\n\s*- job: classify\s*\n\s*artifacts: true/u);
-    expect(job).toMatch(/- job: build_launcher\s*\n\s*artifacts: true/u);
+    // #1738 D-S2/D-S4 (ruling 2026-11-17): the archive is not downloaded by
+    // `needs:` -- GitLab fails the job once it has expired -- the script
+    // fetches or rebuilds it (scripts/ci/launcher-compat-rebuild.test.mjs).
+    expect(job).toMatch(/- job: build_launcher\s*\n\s*artifacts: false/u);
     expect(job).not.toContain("needs: *needs_gated_image");
   });
 
@@ -255,9 +258,10 @@ describe("launcher install compatibility gate", () => {
     expect(launcherCompatRules()).toMatch(
       /\.launcher_branch_rules: &launcher_branch_rules\n {2}- !reference \[\.dev-landing, job_rule\]\n {2}- !reference \[\.backmerge-skip, job_rule\]\n {2}- \*batch_intake_skip\n {2}- \*not_on_main_push\n {2}- \*not_scheduled\n {2}- if: \$CI_COMMIT_BRANCH == "preview" \|\| \$CI_COMMIT_BRANCH =~ \/\^hotfix\\\/\/\n {4}when: never\n/u,
     );
-    // compat takes whichever build ran.
-    expect(job).toMatch(/- job: build_launcher\n\s*artifacts: true\n\s*optional: true/u);
-    expect(job).toMatch(/- job: build_launcher_branch\n\s*artifacts: true\n\s*optional: true/u);
+    // compat waits for whichever build ran; it fetches that build's archive
+    // itself rather than through `needs:` (#1738 D-S2/D-S4).
+    expect(job).toMatch(/- job: build_launcher\n\s*artifacts: false\n\s*optional: true/u);
+    expect(job).toMatch(/- job: build_launcher_branch\n\s*artifacts: false\n\s*optional: true/u);
   });
 
   it("collects Docker and installer diagnostics as an artifact regardless of outcome (#819 follow-up)", () => {

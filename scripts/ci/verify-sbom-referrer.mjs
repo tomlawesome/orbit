@@ -8,6 +8,7 @@
 // Usage: verify-sbom-referrer.mjs <bundle.json> <public-key.pem> <sha256:digest>
 import { createPublicKey, verify } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { ORBIT_DIGEST_PATTERN } from "../release-metadata-patterns.mjs";
 
 function fail(message) {
   process.stderr.write(`verify-sbom-referrer: ${message}\n`);
@@ -15,7 +16,7 @@ function fail(message) {
 }
 
 const [bundlePath, keyPath, subjectDigest] = process.argv.slice(2);
-if (!bundlePath || !keyPath || !/^sha256:[0-9a-f]{64}$/u.test(subjectDigest ?? "")) {
+if (!bundlePath || !keyPath || !ORBIT_DIGEST_PATTERN.test(subjectDigest ?? "")) {
   fail("usage: verify-sbom-referrer.mjs <bundle.json> <public-key.pem> <sha256:digest>");
 }
 
