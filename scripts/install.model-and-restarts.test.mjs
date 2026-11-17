@@ -88,7 +88,7 @@ describe("install.sh: the confirmed model download (#1456 decision, #1474)", () 
     const result = runInstall(targetDir, { ...environment, ...withModelPull, FAKE_MODEL_PULL_FAIL: "1" });
     expect(result.status).toBe(0);
     const output = `${result.stdout}\n${result.stderr}`;
-    expect(output).toMatch(/To try again: docker compose .*--profile ai-model-pull run --rm orbit-ollama-model-pull/u);
+    expect(output).toMatch(/To try again: (cd \S+ && )?docker compose .*--profile ai-model-pull run --rm orbit-ollama-model-pull/u);
     expect(output).not.toContain("orbit-orbit-ollama-model-pull-install");
   });
 });
@@ -335,7 +335,7 @@ describe("install.sh: a model-pull container left behind by an earlier run", () 
     const result = runInstall(targetDir, { ...environment, ...confirmed, FAKE_MODEL_PULL_FAIL: "1" });
     expect(result.status).toBe(0);
     const note = `${result.stdout}\n${result.stderr}`.split("\n").find((line) => /confirmed download did not complete/.test(line)) ?? "";
-    expect(note).toMatch(/To try again: docker compose /u);
+    expect(note).toMatch(/To try again: (cd \S+ && )?docker compose /u);
     expect(note).not.toContain(leftover);
   });
 });

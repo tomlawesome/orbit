@@ -2638,7 +2638,8 @@ pull_confirmed_model() {
   # (its first process is a shell with no TERM handler), so an interrupt
   # removes it by this name -- that container only, never `compose down`.
   local container="${compose_project_name}-orbit-ollama-model-pull-install"
-  again="$(shell_words docker compose --env-file "$environment_file" --profile ai-model-pull run --rm orbit-ollama-model-pull)"
+  # O-F9: run from anywhere, like the Check command for a service left starting.
+  again="cd $(printf '%q' "$target_dir") && $(shell_words docker compose --env-file "$environment_file" --profile ai-model-pull run --rm orbit-ollama-model-pull)"
   model_pull_ok=0
   installer_failure_detail=""
   if [[ "$optional_interrupted" != 1 ]]; then
