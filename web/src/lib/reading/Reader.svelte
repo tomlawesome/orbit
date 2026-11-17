@@ -121,13 +121,13 @@
   const count = $derived(picture ? picture.count : (pageCount ?? (typeof doc.pageCount === "number" ? doc.pageCount : null)));
   const lost = $derived((picture ? picture.failed : ownLost) || (brokenSrc !== "" && brokenSrc === shownSrc));
   const turn = $derived(pageTurn(pageNo, count));
-  const UNDRAWN = "this page could not be drawn";
+  const UNDRAWN = "this page could not be drawn — try again";
 
   /** @param {number} next */
   function turnTo(next) {
     if (!turn.arrows || count === null) return;
     const target = Math.min(count, Math.max(1, next));
-    if (target === pageNo) return;
+    if (target === pageNo && !lost) return;
     /* An arrow that goes (the last page reached by the right one) hands
        focus to the other once it is drawn, so focus never lands on nothing. */
     const active = document.activeElement;
