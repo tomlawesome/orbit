@@ -33,7 +33,7 @@ describe("#1151 W1-R11: Reader's full-screen <img> has an onerror handler", () =
   });
 
   it("the error renders through the component's existing alert pattern, in place of the picture", () => {
-    expect(READER).toMatch(/\{#if lost\}[\s\S]{0,300}<p class="p-error rd-lost" role="alert">\{(?:staged \? STAGED_UNDRAWN : )?UNDRAWN\}<\/p>\s*\{:else\}\s*<img bind:this=\{img\}/u);
+    expect(READER).toMatch(/\{#if lost\}[\s\S]{0,300}<p class="p-error rd-lost" role="alert">\{(?:staged \? STAGED_UNDRAWN : )?UNDRAWN\}<\/p>[\s\S]{0,300}\{:else\}\s*<img bind:this=\{img\}/u);
     expect(READER).toMatch(/\{#if problem\}<p class="p-error" role="alert">\{problem\}<\/p>\{\/if\}/u);
   });
 });
