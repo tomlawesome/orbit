@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { holdUnsaved, anyUnsaved, unsavedAsker } from "../../web/src/lib/unsaved.js";
+import { holdUnsaved, anyUnsaved, unsavedAsker, markLeaving } from "../../web/src/lib/unsaved.js";
 
 /*
  * #1879 W-S1: a shared unsaved-changes registry. The create form holds an
@@ -59,5 +59,15 @@ describe("unsaved registry (#1879 W-S1)", () => {
     dirty();
     expect(unsavedAsker()).toBeUndefined();
     clean();
+  });
+
+  it("markLeaving() makes every holder read clean (the page is going away) until undone", () => {
+    const release = holdUnsaved(() => true);
+    expect(anyUnsaved()).toBe(true);
+    const undo = markLeaving();
+    expect(anyUnsaved()).toBe(false);
+    undo();
+    expect(anyUnsaved()).toBe(true);
+    release();
   });
 });

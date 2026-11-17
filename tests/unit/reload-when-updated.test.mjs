@@ -188,6 +188,42 @@ describe("reloadWhenUpdated with a holder's own ask (#1879 W-S1, phone)", () => 
   });
 });
 
+/*
+ * #1879 review: on the desk a yes to the native question is followed by
+ * `location.href = ...`, which fires the desk form's beforeunload and asks a
+ * second time. Before a reload the guard calls `guard.leaving()` (the layout
+ * passes the registry's markLeaving), so nothing prompts again.
+ */
+describe("reloadWhenUpdated marks the page as leaving before the reload (#1879 review)", () => {
+  const to = { url: new URL("https://orbit.example.test/household/1") };
+  const nav = () => ({ willUnload: false, to, cancel: vi.fn() });
+
+  it("update pending, native yes: leaving() runs once, before the reload", () => {
+    const order = [];
+    const leaving = vi.fn(() => { order.push("leaving"); });
+    const go = vi.fn(() => { order.push("go"); });
+    reloadWhenUpdated(nav(), { current: true }, go, { isDirty: () => true, ask: () => true, leaving });
+    expect(leaving).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(["leaving", "go"]);
+  });
+
+  it("native no, or nothing typed, or no update: leaving() is never called", () => {
+    const leaving = vi.fn();
+    const go = vi.fn();
+    reloadWhenUpdated(nav(), { current: true }, go, { isDirty: () => true, ask: () => false, leaving });
+    reloadWhenUpdated(nav(), { current: false }, go, { isDirty: () => true, ask: () => true, leaving });
+    expect(leaving).not.toHaveBeenCalled();
+  });
+
+  it("the layout wires it, and the desk's beforeunload reads the registry (not the form) so it goes quiet", () => {
+    const read = (path) => readFileSync(new URL(`../../web/src/${path}`, import.meta.url), "utf8");
+    expect(read("routes/+layout.svelte")).toMatch(/leaving:\s*markLeaving/);
+    const page = read("routes/create/+page.svelte");
+    const handler = page.slice(page.indexOf("function onBeforeUnload"));
+    expect(handler.slice(0, handler.indexOf("\n  }"))).toMatch(/anyUnsaved\(\)/);
+  });
+});
+
 describe("the question is asked once per navigation (#1879 W-S1)", () => {
   const read = (path) => readFileSync(new URL(`../../web/src/${path}`, import.meta.url), "utf8");
 
