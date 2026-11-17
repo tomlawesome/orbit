@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { holdUnsaved, anyUnsaved, unsavedAsker, markLeaving } from "../../web/src/lib/unsaved.js";
+import { holdUnsaved, anyUnsaved, unsavedAsker, markLeaving, resetLeaving } from "../../web/src/lib/unsaved.js";
 
 /*
  * #1879 W-S1: a shared unsaved-changes registry. The create form holds an
@@ -67,6 +67,15 @@ describe("unsaved registry (#1879 W-S1)", () => {
     const undo = markLeaving();
     expect(anyUnsaved()).toBe(false);
     undo();
+    expect(anyUnsaved()).toBe(true);
+    release();
+  });
+
+  it("resetLeaving() puts a page restored from the back-forward cache under guard again", () => {
+    const release = holdUnsaved(() => true);
+    markLeaving();
+    expect(anyUnsaved()).toBe(false);
+    resetLeaving();
     expect(anyUnsaved()).toBe(true);
     release();
   });

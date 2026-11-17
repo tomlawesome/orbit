@@ -224,6 +224,69 @@ describe("reloadWhenUpdated marks the page as leaving before the reload (#1879 r
   });
 });
 
+/*
+ * #1879 re-review: the leaving flag is set only for the navigation the reader
+ * agreed to, and its undo (what `guard.leaving()` returns) runs when that
+ * navigation settles or turns out not to unload the page.
+ */
+describe("the leaving flag is undone when the agreed navigation does not leave (#1879 re-review)", () => {
+  const at = (href) => ({ url: new URL(href) });
+  const nav = (from, to) => ({ willUnload: false, from: at(from), to: at(to), cancel: vi.fn() });
+  const settled = async (result) => { await Promise.resolve(result).catch(() => {}); };
+
+  it("holder's yes, no update: leaving is set before goto, and undone when goto fails", async () => {
+    const order = [];
+    const undo = vi.fn(() => { order.push("undo"); });
+    const leaving = vi.fn(() => { order.push("leaving"); return undo; });
+    const goto = vi.fn(async () => { order.push("goto"); throw new Error("refused"); });
+    const result = reloadWhenUpdated(nav("https://o.test/create", "https://o.test/home"), { current: false }, vi.fn(),
+      { isDirty: () => true, ask: () => true, holderAsk: async () => true, leaving }, goto);
+    await settled(result);
+    expect(order).toEqual(["leaving", "goto", "undo"]);
+  });
+
+  it("holder's yes, no update: the undo also runs when goto resolves", async () => {
+    const undo = vi.fn();
+    const result = reloadWhenUpdated(nav("https://o.test/create", "https://o.test/home"), { current: false }, vi.fn(),
+      { isDirty: () => true, ask: () => true, holderAsk: async () => true, leaving: () => undo }, vi.fn(async () => {}));
+    await settled(result);
+    expect(undo).toHaveBeenCalledTimes(1);
+  });
+
+  it("a planned reload that only changes the #hash does not unload the page: the undo runs", async () => {
+    const undo = vi.fn();
+    const go = vi.fn();
+    const result = reloadWhenUpdated(nav("https://o.test/create#a", "https://o.test/create#b"), { current: true }, go,
+      { isDirty: () => true, ask: () => true, leaving: () => undo });
+    await settled(result);
+    expect(go).toHaveBeenCalledTimes(1);
+    expect(undo).toHaveBeenCalledTimes(1);
+  });
+
+  it("the same for a holder's yes", async () => {
+    const undo = vi.fn();
+    const result = reloadWhenUpdated(nav("https://o.test/create#a", "https://o.test/create#b"), { current: true }, vi.fn(),
+      { isDirty: () => true, ask: () => true, holderAsk: async () => true, leaving: () => undo });
+    await settled(result);
+    expect(undo).toHaveBeenCalledTimes(1);
+  });
+
+  it("a reload to another page unloads it: the undo does not run", async () => {
+    const undo = vi.fn();
+    const result = reloadWhenUpdated(nav("https://o.test/create", "https://o.test/home"), { current: true }, vi.fn(),
+      { isDirty: () => true, ask: () => true, leaving: () => undo });
+    await settled(result);
+    expect(undo).not.toHaveBeenCalled();
+  });
+
+  it("the layout resets the flag on a persisted pageshow", () => {
+    const layout = readFileSync(new URL("../../web/src/routes/+layout.svelte", import.meta.url), "utf8");
+    expect(layout).toMatch(/pageshow/);
+    expect(layout).toMatch(/persisted/);
+    expect(layout).toMatch(/resetLeaving/);
+  });
+});
+
 describe("the question is asked once per navigation (#1879 W-S1)", () => {
   const read = (path) => readFileSync(new URL(`../../web/src/${path}`, import.meta.url), "utf8");
 

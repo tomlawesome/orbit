@@ -86,11 +86,13 @@ describe("#1151 W1-S1: the desktop create form warns before discarding", () => {
     expect(page).toMatch(/event\.returnValue = ""/u);
   });
 
-  it("pocket.svelte resets `leaving` if the resumed navigation fails or stays on /create (#1879 review, as M2)", () => {
+  it("pocket.svelte's leave() carries no reset timer: the layout undoes the flag when the navigation settles (#1879 re-review)", () => {
     const pocket = readFileSync(new URL("../../web/src/routes/create/pocket.svelte", import.meta.url), "utf8");
     const start = pocket.indexOf("function leave()");
     expect(start).toBeGreaterThan(-1);
     const body = pocket.slice(start, pocket.indexOf("\n  }\n", start));
-    expect(body).toMatch(/leaving = false/);
+    expect(body).not.toMatch(/leaving\s*=/);
+    expect(body).not.toMatch(/resetLeaving|setTimeout\([^\n]*leaving/);
+    expect(pocket).not.toMatch(/resetLeaving/);
   });
 });
