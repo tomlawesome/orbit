@@ -343,6 +343,14 @@ function compose() {
         secretPresent: fs.existsSync(".orbit-secrets/smtp-password"),
       };
       if (env.FAKE_STATE_DIR) fs.appendFileSync(env.FAKE_STATE_DIR + "/up-trace.jsonl", JSON.stringify(state) + "\\n");
+      // Compose refuses to start when the mail overlay is listed in COMPOSE_FILE and the secret file it declares is missing (#1789 D-S3).
+      {
+        const listed = /^COMPOSE_FILE=(.*)$/m.exec(environment)?.[1] ?? env.COMPOSE_FILE ?? "";
+        if (/docker-compose\\.mail\\.yml/.test(listed) && !state.secretPresent) {
+          process.stderr.write("secret file ./.orbit-secrets/smtp-password not found: no such file or directory\\n");
+          exit(1);
+        }
+      }
       // A crash after the SMTP lines left .env-orbit: every start from then on fails.
       if (env.FAKE_UP_FAIL_AFTER_SMTP_RETIRED === "1" && !state.smtpLines && !state.overlayListed) exit(1);
     }

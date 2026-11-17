@@ -25,7 +25,7 @@
 // secret is gone; otherwise it is kept and named, and the next run removes it.
 
 import { spawnSync } from "node:child_process";
-import { appendFileSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -577,11 +577,56 @@ describe("install.sh --plain --update: adopting a killed run's SMTP copy never w
   }
 });
 
-describe("the retired docker-compose.mail.yml overlay (audit Low D-S3)", () => {
-  it("does not require .orbit-secrets/smtp-password to exist, so the stack still starts after the file is removed", () => {
-    const overlay = readFileSync(new URL("../docker-compose.mail.yml", import.meta.url), "utf8");
-    const active = overlay.split("\n").filter((line) => !line.trim().startsWith("#")).join("\n");
-    expect(active).not.toMatch(/\.orbit-secrets\/smtp-password/u);
+describe("the retired docker-compose.mail.yml overlay (#1789 D-S3)", () => {
+  // The overlay still declares ./.orbit-secrets/smtp-password as a secret file, so Compose cannot start while it is missing.
+  // Dropping the secret would lose the password on the one-time import, so a missing file is recreated empty.
+  const dropSecret = (targetDir) => rmSync(secretPath(targetDir));
+  const modeOf = (path) => statSync(path).mode & 0o7777;
+
+  it("--update recreates a missing smtp-password as an empty 0600 file owned like the other secrets, before Compose starts", () => {
+    const targetDir = withSmtpLines(installedFolder());
+    dropSecret(targetDir);
+    const result = update(targetDir, undefined);
+    expect(`${result.stdout}\n${result.stderr}`).not.toMatch(/smtp-password not found/u);
+    expect(result.status).toBe(0);
+    expect(existsSync(secretPath(targetDir))).toBe(true);
+    expect(readFileSync(secretPath(targetDir))).toHaveLength(0);
+    expect(modeOf(secretPath(targetDir))).toBe(0o600);
+    const other = statSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"));
+    expect(statSync(secretPath(targetDir)).uid).toBe(other.uid);
+    expect(statSync(secretPath(targetDir)).gid).toBe(other.gid);
+    for (const start of upTrace(result)) expect(start.secretPresent).toBe(true);
+  });
+
+  it("--install recreates a missing smtp-password when the overlay is listed in COMPOSE_FILE", () => {
+    const targetDir = makeTarget();
+    makePreprovisionedDeployment(targetDir, ["COMPOSE_FILE=docker-compose.yml:docker-compose.mail.yml"]);
+    expect(existsSync(secretPath(targetDir))).toBe(false);
+    const result = runInstall(targetDir, {}, ["--plain", "--install"]);
+    expect(`${result.stdout}\n${result.stderr}`).not.toMatch(/smtp-password not found/u);
+    expect(result.status).toBe(0);
+    expect(readFileSync(secretPath(targetDir))).toHaveLength(0);
+    expect(modeOf(secretPath(targetDir))).toBe(0o600);
+  });
+
+  it("--update never touches an existing smtp-password: its content stays byte for byte and its mode stays", () => {
+    const targetDir = withSmtpLines(installedFolder());
+    const content = Buffer.from([0x70, 0x00, 0x77, 0x0a, 0xff, 0x20]);
+    writeFileSync(secretPath(targetDir), content, { mode: 0o640 });
+    chmodSync(secretPath(targetDir), 0o640);
+    const result = update(targetDir, undefined);
+    expect(result.status).toBe(0);
+    expect(readFileSync(secretPath(targetDir)).equals(content)).toBe(true);
+    expect(modeOf(secretPath(targetDir))).toBe(0o640);
+  });
+
+  it("--install never touches an existing smtp-password either", () => {
+    const targetDir = makeTarget();
+    makePreprovisionedDeployment(targetDir, ["COMPOSE_FILE=docker-compose.yml:docker-compose.mail.yml"]);
+    writeFileSync(secretPath(targetDir), FAKE_PASSWORD, { mode: 0o600 });
+    const result = runInstall(targetDir, {}, ["--plain", "--install"]);
+    expect(result.status).toBe(0);
+    expect(readFileSync(secretPath(targetDir), "utf8")).toBe(FAKE_PASSWORD);
   });
 });
 
