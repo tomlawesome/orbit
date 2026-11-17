@@ -86,6 +86,43 @@ describe("local document storage", () => {
     }
   });
 
+  // #1605 SEC-D2/1: the read loop had no deadline, so a client that sent a few bytes and then
+  // went quiet held the upload (and its quarantine file) open for ever. Fake time stands in for
+  // the wait; the test names no limit, only that a day of silence ends the upload and cleans up.
+  it("#1605 SEC-D2/1: ends an upload whose sender goes silent, and removes its partial quarantine file", async () => {
+    const { root, storage } = await createStorage();
+    const documentId = randomUUID();
+    let askedForMore!: () => void;
+    const stalled = new Promise<void>((resolve) => { askedForMore = resolve; });
+    let sentFirst = false;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (!sentFirst) {
+          sentFirst = true;
+          controller.enqueue(Buffer.from("%PDF-1.7\n"));
+          return undefined;
+        }
+        askedForMore();
+        return new Promise<void>(() => undefined); // the sender went quiet
+      },
+    });
+    vi.useFakeTimers();
+    try {
+      let outcome: "pending" | "rejected" | "resolved" = "pending";
+      const received = storage.receive(body, documentId, 1_024).then(() => { outcome = "resolved"; }, () => { outcome = "rejected"; });
+      await stalled;
+      await vi.advanceTimersByTimeAsync(24 * 60 * 60 * 1_000);
+      vi.useRealTimers();
+      // Real time only bounds the wait for the file handle to close; the verdict is the outcome.
+      await Promise.race([received, new Promise((resolve) => setTimeout(resolve, 3_000))]);
+      expect(outcome).toBe("rejected");
+      expect(await readdir(join(root, "quarantine"))).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+      await body.cancel().catch(() => undefined);
+    }
+  }, 20_000);
+
   it("removes partial quarantine content when the size limit is exceeded", async () => {
     const { root, storage } = await createStorage();
     const documentId = randomUUID();
