@@ -8,6 +8,7 @@ import {
   lstatSync,
   openSync,
   readFileSync,
+  readSync,
   renameSync,
   rmSync,
   writeFileSync,
@@ -217,39 +218,84 @@ function buildMigratedContent(parsed: ParsedConfiguration, managed: ManagedValue
   return output;
 }
 
+/** A leftover copy larger than this is never read whole, replayed or deleted by the replay rule (#1877). */
+const LEFTOVER_COPY_REPLAY_LIMIT = 1024 * 1024;
+
+/** The device and inode a leftover copy was checked on, so only that same file is ever removed. */
+interface LeftoverIdentity {
+  dev: number;
+  ino: number;
+}
+
 /**
  * #1877 roll-forward recovery after the commit point: true only when the
- * leftover copy is a regular file (never a symlink) that passes the same
- * strict parse as the file, and replaying the migration on it with the
- * current file's five managed values gives the current file byte for byte.
- * Such a copy is the pre-migration file of a run that got past its rename.
- * Any read or parse error is not proof.
+ * copy's bytes pass the same strict parse as the file, and replaying the
+ * migration on them with the current file's five managed values gives the
+ * current file byte for byte. Such a copy is the pre-migration file of a run
+ * that got past its rename. A parse error is not proof.
  */
-function leftoverCopyIsFinishedMigration(copy: string, current: ParsedConfiguration): boolean {
+function leftoverCopyIsFinishedMigration(raw: Buffer, current: ParsedConfiguration): boolean {
   const managed = {} as ManagedValues;
   for (const key of MANAGED_ORDER) {
     const value = current.values[key];
     if (value === undefined) return false;
     managed[key] = value;
   }
-  let raw: Buffer;
+  const outcome = parseConfigurationBytes(raw);
+  if (!outcome.ok) return false;
+  return Buffer.from(buildMigratedContent(outcome.parsed, managed), "utf8").equals(current.raw);
+}
+
+/**
+ * Whether a leftover copy may be removed, and the file it was checked on.
+ * Read through one O_NOFOLLOW descriptor, it must be a regular file (never a
+ * symlink) and either byte-identical to the current file (#1151 O1-R5) or
+ * proven by the #1877 replay. The read is bounded: a copy no larger than the
+ * current file can be compared as identical, and only a copy of at most
+ * 1 MiB is replayed. Any read error, or a larger copy, is not proof.
+ */
+function provenLeftoverCopy(copy: string, current: ParsedConfiguration): LeftoverIdentity | undefined {
   let descriptor: number;
   try {
     descriptor = openSync(copy, constants.O_RDONLY | constants.O_NOFOLLOW);
   } catch {
-    return false;
+    return undefined;
   }
+  let raw: Buffer;
+  let identity: LeftoverIdentity;
   try {
-    if (!fstatSync(descriptor).isFile()) return false;
-    raw = readFileSync(descriptor);
+    const stat = fstatSync(descriptor);
+    if (!stat.isFile()) return undefined;
+    if (stat.size > Math.max(LEFTOVER_COPY_REPLAY_LIMIT, current.raw.length)) return undefined;
+    identity = { dev: stat.dev, ino: stat.ino };
+    raw = Buffer.alloc(stat.size);
+    let length = 0;
+    while (length < raw.length) {
+      const count = readSync(descriptor, raw, length, raw.length - length, null);
+      if (count === 0) break;
+      length += count;
+    }
+    raw = raw.subarray(0, length);
   } catch {
-    return false;
+    return undefined;
   } finally {
     closeSync(descriptor);
   }
-  const outcome = parseConfigurationBytes(raw);
-  if (!outcome.ok) return false;
-  return Buffer.from(buildMigratedContent(outcome.parsed, managed), "utf8").equals(current.raw);
+  if (raw.equals(current.raw)) return identity;
+  if (raw.length > LEFTOVER_COPY_REPLAY_LIMIT) return undefined;
+  return leftoverCopyIsFinishedMigration(raw, current) ? identity : undefined;
+}
+
+/**
+ * Removes a proven leftover copy only if the path is still the regular file
+ * that was checked (same device and inode); otherwise it is left alone and
+ * treated as not proven. Throws if the removal itself fails.
+ */
+function removeProvenLeftoverCopy(copy: string, identity: LeftoverIdentity): boolean {
+  const now = lstatSync(copy, { throwIfNoEntry: false });
+  if (!now || !now.isFile() || now.dev !== identity.dev || now.ino !== identity.ino) return false;
+  rmSync(copy, { force: true });
+  return true;
 }
 
 /**
@@ -358,19 +404,16 @@ function migrateLocked(file: string, options: MigrateEnvironmentFileOptions, rel
       const stray = lstatSync(leftoverCopy, { throwIfNoEntry: false });
       if (stray) {
         if (!stray.isFile() || (stray.mode & 0o777) !== 0o600) return failure("configuration_migration");
-        let identical = false;
-        try {
-          identical = readFileSync(leftoverCopy).equals(parsed.raw);
-        } catch {
-          identical = false;
-        }
-        if (identical || leftoverCopyIsFinishedMigration(leftoverCopy, parsed)) {
+        const identity = provenLeftoverCopy(leftoverCopy, parsed);
+        let removed = false;
+        if (identity) {
           try {
-            rmSync(leftoverCopy, { force: true });
+            removed = removeProvenLeftoverCopy(leftoverCopy, identity);
           } catch {
             return failure("configuration_migration");
           }
-        } else {
+        }
+        if (!removed) {
           stderr = `Orbit configuration: kept ${leftoverCopy}: it differs from the current file and may be the only copy of the earlier one; remove it once Orbit is working, or run Repair (scripts/repair.sh --check) if it is not.\n`;
         }
       }
@@ -398,23 +441,19 @@ function migrateLocked(file: string, options: MigrateEnvironmentFileOptions, rel
   if (!options.transaction) {
     const leftover = lstatSync(backup, { throwIfNoEntry: false });
     if (leftover) {
-      let identical = false;
-      if (!leftover.isSymbolicLink()) {
-        try {
-          identical = readFileSync(backup).equals(parsed.raw);
-        } catch {
-          identical = false;
-        }
-      }
-      // #1877: a differing copy is removed only when replaying the migration
-      // proves it is the pre-migration file of a run that got past its
-      // rename; anything else still refuses.
-      if (!identical && !leftoverCopyIsFinishedMigration(backup, parsed)) return failure("configuration_migration");
+      // #1877: a copy is removed only when it is byte-identical or replaying
+      // the migration proves it is the pre-migration file of a run that got
+      // past its rename, and only if the path is still that same file;
+      // anything else still refuses.
+      const identity = provenLeftoverCopy(backup, parsed);
+      if (!identity) return failure("configuration_migration");
+      let removed: boolean;
       try {
-        rmSync(backup, { force: true });
+        removed = removeProvenLeftoverCopy(backup, identity);
       } catch {
         return failure("configuration_migration");
       }
+      if (!removed) return failure("configuration_migration");
     }
     try {
       copyFileSync(file, backup, constants.COPYFILE_EXCL);
