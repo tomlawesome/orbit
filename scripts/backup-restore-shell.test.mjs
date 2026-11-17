@@ -889,6 +889,38 @@ describe("the stop / engine / start rule (E3)", () => {
     expect(verbs(result.calls)).toEqual([]);
   });
 
+  // #1603 review: the dangling-link advice must be a key-only step. The recovery import also
+  // restores the bundle's backup over the live database, so sending the operator there for a
+  // lost key would lose every change since that backup. The step is the kept key file put back
+  // (docs/administrator-operations.md, "To restore it"), with the exact command.
+  it.each([
+    ["backup.sh", []],
+    ["restore.sh", ["BUNDLE"]],
+    ["restore.sh", ["--finish"]],
+    ["export-recovery-bundle.sh", ["BUNDLE"]],
+    ["import-recovery-bundle.sh", ["BUNDLE"]],
+  ])("%s %j: the dangling document-key advice puts back the kept key file, never the recovery import", (script, args) => {
+    const { deployment } = danglingKeyDeployment();
+    const bundle = join(deployment.deployDir, "b.tar");
+    writeFileSync(bundle, "bundle");
+    const result = run(deployment, script, args.map((arg) => (arg === "BUNDLE" ? bundle : arg)));
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("document-kek is a link to a file that does not exist");
+    expect(result.stderr).toContain("install -m 0400 /path/to/your/copy/document-kek .orbit-secrets/document-kek");
+    expect(result.stderr).not.toContain("import-recovery-bundle.sh");
+    expect(verbs(result.calls)).toEqual([]);
+  });
+
+  it("refuse_dangling_key() is the same text in all four operator scripts", () => {
+    const bodies = SCRIPTS.map((script) => {
+      const source = readFileSync(join(scriptsDir, script), "utf8");
+      const start = source.indexOf("refuse_dangling_key() {");
+      expect(start, script).toBeGreaterThanOrEqual(0);
+      return source.slice(start, source.indexOf("\n}\n", start) + 2);
+    });
+    for (const body of bodies) expect(body).toBe(bodies[0]);
+  });
+
   it("restore.sh: a hard-killed engine (exit 137) that left its journal keeps Orbit stopped", () => {
     const deployment = makeDeployment();
     const bundle = join(deployment.deployDir, "b.tar");
