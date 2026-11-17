@@ -1,12 +1,12 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "../../scripts/process-budget.mjs";
-import { type ContractPrecondition, runUpdatePreflight } from "../db/contract-preconditions";
+import { CONTRACT_PRECONDITIONS, type ContractPrecondition, runUpdatePreflight } from "../db/contract-preconditions";
 import { readExpectedMigrationHashes } from "../db/migration-integrity";
 
 // `orbit update --preflight --dir <deployment>` (#1779, build note 58520 A):
@@ -112,15 +112,39 @@ describe("orbit update --preflight, as a command", () => {
   });
 });
 
-async function preflightWith(rowsPending: number, preconditions?: ContractPrecondition[]) {
-  const expected = await readExpectedMigrationHashes(MIGRATIONS);
+/**
+ * A copy of this image's migrations folder that also ships the given tags, as a
+ * release carrying those contract migrations would. Never applied by the fake
+ * journal below, so each is pending.
+ */
+function imageCarrying(tags: string[]): string {
+  const folder = join(sandbox(), "drizzle");
+  cpSync(MIGRATIONS, folder, { recursive: true });
+  if (tags.length === 0) return folder;
+  const journalPath = join(folder, "meta", "_journal.json");
+  const journal = JSON.parse(readFileSync(journalPath, "utf8")) as { entries: Array<Record<string, unknown>> };
+  for (const tag of tags) {
+    writeFileSync(join(folder, `${tag}.sql`), `-- ${tag}\n`);
+    journal.entries.push({ idx: journal.entries.length, version: "7", when: Date.now(), tag, breakpoints: true });
+  }
+  writeFileSync(journalPath, JSON.stringify(journal));
+  return folder;
+}
+
+/**
+ * The preflight against a database that has applied this image's own
+ * migrations (not the extra ones `carrying` adds) and holds `rowsPending`
+ * documents with a plain content hash.
+ */
+async function preflightWith(rowsPending: number, preconditions?: ContractPrecondition[], carrying: string[] = preconditions?.map((entry) => entry.migrationTag) ?? CONTRACT_PRECONDITIONS.map((entry) => entry.migrationTag)) {
+  const applied = await readExpectedMigrationHashes(MIGRATIONS);
   const issued: string[] = [];
   const result = await runUpdatePreflight({
-    migrationsFolder: MIGRATIONS,
+    migrationsFolder: imageCarrying(carrying.filter((tag) => !applied.some((entry) => entry.tag === tag))),
     preconditions,
     query: async (sql: string) => {
       issued.push(sql);
-      if (sql.includes("__drizzle_migrations")) return expected.map((entry) => [entry.hash]);
+      if (sql.includes("__drizzle_migrations")) return applied.map((entry) => [entry.hash]);
       return [[String(rowsPending)]];
     },
   });
@@ -176,8 +200,22 @@ describe("runUpdatePreflight, the function the command calls", () => {
     ).rejects.toThrow();
   });
 
-  it("checks the shipped list by default (documents.content_sha256)", async () => {
+  it("checks the shipped list by default (documents.content_sha256), for an image that ships its migration", async () => {
     const { result } = await preflightWith(3);
     expect(result.lines[0]).toBe("update-preflight: blocked documents.content_sha256 rows=3");
+  });
+
+  // A precondition gates only in the release that ships its migration: a tag
+  // missing from the target image's own migrations folder is skipped.
+  it("A-R1: passes for an install with plain content hashes when this image ships no drop migration (an install from v0.3.7)", async () => {
+    const { result, issued } = await preflightWith(4, undefined, []);
+    expect(result).toMatchObject({ ready: true, exitCode: 0, lines: ["update-preflight: ready"] });
+    expect(issued.some((sql) => sql.includes("content_sha256"))).toBe(false);
+  });
+
+  it("A-R1: blocks an undrained install as before when the image carries the tagged migration", async () => {
+    const { result } = await preflightWith(4, undefined, ["0017_drop_document_content_sha256"]);
+    expect(result.exitCode).toBe(1);
+    expect(result.lines[0]).toBe("update-preflight: blocked documents.content_sha256 rows=4");
   });
 });
