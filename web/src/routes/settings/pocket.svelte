@@ -13,7 +13,7 @@
   import { watchTour } from "$lib/tour/watch.js";
   import { alertsSupported, syncAlerts } from "$lib/push/alerts.js";
   import {
-    ROTATE_LIMITED, ROTATE_NOT_CONFIRMED, ROTATE_UNCHANGED, ROTATE_UNKNOWN, WorkspaceError, addSender, dismissReceipt, readRelay, readSentLately, removeSender, rotateRelay, rotateRelayReconciled,
+    ROTATE_ALREADY_CHANGED, ROTATE_LIMITED, ROTATE_NOT_CONFIRMED, ROTATE_UNCHANGED, ROTATE_UNKNOWN, WorkspaceError, addSender, dismissReceipt, readRelay, readSentLately, removeSender, rotateRelay, rotateRelayReconciled,
     sendSenderCheck, wordsOf,
   } from "$lib/data/workspace.js";
   import { ADMIN_PAUSED_WORDS, copyRelayAddress, relayAddressLabel } from "$lib/relay-address.js";
@@ -367,10 +367,11 @@
     try {
       if (action === "rotate") {
         /* #1810 W-R2: a lost answer is re-read, and the screen says what it shows. */
-        const outcome = await rotateRelayReconciled(relay?.address ?? "");
+        const before = relay?.address ?? "";
+        const outcome = await rotateRelayReconciled(before);
         if (outcome.relay) relayShared.rotated = outcome.relay;
         if (outcome.rotated) wake("new address · the old one collects for 14 more days");
-        else await refuse(outcome.rotated === null ? ROTATE_UNKNOWN : ROTATE_NOT_CONFIRMED);
+        else await refuse(outcome.rotated === null ? ROTATE_UNKNOWN : outcome.relay && outcome.relay.address !== before ? ROTATE_ALREADY_CHANGED : ROTATE_NOT_CONFIRMED);
       } else {
         relayShared.rotated = await rotateRelay(action);
         wake(action === "pause" ? "ingest paused · mail is held until you resume" : "ingest resumed");

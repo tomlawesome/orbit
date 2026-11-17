@@ -4,7 +4,7 @@
   import { dayMonth, plural } from "$lib/format.js";
   import { createArm } from "$lib/arm.js";
   import { ADMIN_PAUSED_WORDS, copyRelayAddress, relayAddressLabel } from "$lib/relay-address.js";
-  import { ROTATE_LIMITED, ROTATE_NOT_CONFIRMED, ROTATE_UNCHANGED, ROTATE_UNKNOWN, WorkspaceError, addSender, readRelay, removeSender, rotateRelay, rotateRelayReconciled, sendSenderCheck } from "$lib/data/workspace.js";
+  import { ROTATE_ALREADY_CHANGED, ROTATE_LIMITED, ROTATE_NOT_CONFIRMED, ROTATE_UNCHANGED, ROTATE_UNKNOWN, WorkspaceError, addSender, readRelay, removeSender, rotateRelay, rotateRelayReconciled, sendSenderCheck } from "$lib/data/workspace.js";
   import { failureWords } from "$lib/pocket/words.js";
   import {
     checkRow, linkCheckedWords, LINK_FAILED, alreadyCheckedWords, refusalWords, SENDING, sentWords,
@@ -118,10 +118,11 @@
     try {
       if (action === "rotate") {
         /* #1810 W-R2: a lost answer is re-read, and the screen says what it shows. */
-        const outcome = await rotateRelayReconciled(relay.address);
+        const before = relay.address;
+        const outcome = await rotateRelayReconciled(before);
         if (outcome.relay) shared.rotated = outcome.relay;
         if (outcome.rotated === null) await refuse(ROTATE_UNKNOWN);
-        else if (!outcome.rotated) await refuse(ROTATE_NOT_CONFIRMED);
+        else if (!outcome.rotated) await refuse(outcome.relay && outcome.relay.address !== before ? ROTATE_ALREADY_CHANGED : ROTATE_NOT_CONFIRMED);
       } else {
         shared.rotated = await rotateRelay(action);
       }

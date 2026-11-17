@@ -2855,6 +2855,8 @@ export const ROTATE_UNCHANGED = "not rotated — your address is unchanged. try 
 export const ROTATE_LIMITED = "not rotated — rotated too often lately. your address is unchanged; try again later";
 /** What a rotate says when its outcome was unknown and the re-read shows the old address (#1848 W-R1). */
 export const ROTATE_NOT_CONFIRMED = "rotate not confirmed — your address still reads the same. try again";
+/** What a rotate says when this press did not rotate but the address shown now differs from the one before it (#1879). */
+export const ROTATE_ALREADY_CHANGED = "not rotated — your address had already changed, so this is the new one. nothing more to do";
 /** What a rotate says when neither it nor the re-read after it answered. */
 export const ROTATE_UNKNOWN = "rotate not confirmed — Orbit could not reach your relay. reload to see your address";
 
