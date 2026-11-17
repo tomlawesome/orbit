@@ -43,10 +43,13 @@ const mail = (/** @type {Record<string, unknown>[]} */ attachments) => ({
 });
 
 describe("a flagged attachment is not offered (#1398 review findings)", () => {
-  it("the home suggestion drawer lists no paper for a flagged attachment, so no Open button and no 'attached on acceptance'", () => {
+  /* #1795 (note 63499): the flagged row is now kept, as `flagged: true` with no preview route, so the
+     drawers can say why it is left out; they draw it as a non-button row (review-amend-flagged-1795). */
+  it("the home suggestion drawer keeps the flagged attachment as a flagged row with no preview route (#1795)", () => {
     const rows = suggestionPapersOf(/** @type {any} */ (mail([pdf("a-ok", "clean"), pdf("a-bad", "flagged")])));
-    expect(rows.map((row) => row.name)).toEqual(["a-ok.pdf"]);
-    expect(rows.every((row) => row.meta === "attached on acceptance")).toBe(true);
+    expect(rows.map((row) => row.name)).toEqual(["a-ok.pdf", "a-bad.pdf"]);
+    expect(rows[0].meta).toBe("attached on acceptance");
+    expect(rows[1]).toMatchObject({ flagged: true, previewHref: "" });
   });
 
   it("the documents archive does not list a flagged attachment as a relay document waiting for approval", () => {
