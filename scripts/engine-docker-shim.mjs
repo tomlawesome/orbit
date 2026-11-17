@@ -1,6 +1,7 @@
 import { chmodSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { testCliBundle } from "./test-cli-bundle.mjs";
 
 /*
  * A fake `docker` for tests that drive the real scripts/configure.sh (#1210).
@@ -8,7 +9,7 @@ import { fileURLToPath } from "node:url";
  * configure.sh runs every flow as `docker run --rm ... --entrypoint node
  * <image> /opt/orbit/cli/orbit.js <args> --dir /orbit-deploy` with the
  * deployment directory bind-mounted at /orbit-deploy. This shim runs the same
- * orbit CLI from this checkout (src/cli/orbit.ts through tsx) with the mount
+ * orbit CLI from this checkout (the bundle the Vitest globalSetup builds once per run) with the mount
  * path translated back to the host directory and only the `-e` variables the
  * real run would forward (plus the image's own ORBIT_ENGINE_CONTEXT), so a
  * suite exercises configure.sh or install.sh, its argv and the engine
@@ -22,11 +23,9 @@ import { fileURLToPath } from "node:url";
  * (default true), rootless (default false).
  */
 
-const repoRoot = fileURLToPath(new URL("..", import.meta.url));
-
 export function writeEngineDockerShim(binDir, { imagePresent = true, pullSucceeds = true, rootless = false } = {}) {
-  const tsx = join(repoRoot, "node_modules", "tsx", "dist", "cli.mjs");
-  const cli = join(repoRoot, "src", "cli", "orbit.ts");
+  const cli = testCliBundle();
+  const containerStdio = fileURLToPath(new URL("./test-engine-container-stdio.cjs", import.meta.url));
   const source = `#!/usr/bin/env node
 const { appendFileSync } = require("node:fs");
 const { spawnSync } = require("node:child_process");
@@ -72,7 +71,7 @@ const translate = (value) => {
   }
   return value;
 };
-const result = spawnSync("node", [${JSON.stringify(tsx)}, ${JSON.stringify(cli)}, ...rest.slice(1).map(translate)], { stdio: "inherit", env });
+const result = spawnSync("node", ["--require", ${JSON.stringify(containerStdio)}, ${JSON.stringify(cli)}, ...rest.slice(1).map(translate)], { stdio: "inherit", env });
 process.exit(result.status === null ? 1 : result.status);
 `;
   const path = join(binDir, "docker");
