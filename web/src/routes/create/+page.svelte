@@ -145,7 +145,7 @@
   }
 
   onMount(() => {
-    const releaseUnsaved = holdUnsaved(() => form?.isDirty() ?? false);
+    const releaseUnsaved = holdUnsaved(() => form?.isDirty() ?? false, { visible: () => !isPocket() });
     form = mountCreate({
       documentReading,
       importance: { get: () => importance, setColour: (colour) => { importanceColour = colour; } },

@@ -2,6 +2,7 @@
   import { uuid } from "$lib/uuid.js";
   import { onDestroy, untrack } from "svelte";
   import { holdUnsaved } from "$lib/unsaved.js";
+  import { isPocket } from "$lib/pocket/media.js";
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import { resolve } from "$app/paths";
@@ -535,7 +536,7 @@
   let answer = null;
   /** @returns {Promise<boolean>} */
   const ask = () => new Promise((settle) => { answer = settle; leaveOpen = true; });
-  const releaseUnsaved = holdUnsaved(() => dirty && !leaving, { ask });
+  const releaseUnsaved = holdUnsaved(() => dirty && !leaving, { ask, visible: isPocket });
   onDestroy(releaseUnsaved);
   /* Dismissing the callout any other way than "leave" is "stay". */
   $effect(() => {
