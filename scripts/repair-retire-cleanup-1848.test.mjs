@@ -12,7 +12,7 @@ import { composeUpCalls, makeFixture, runRepair, scratchDir } from "./repair-tes
 //  - FR-O5a: when the backup chain of retire-smtp-lines fails, the dated folder is removed and, if this run made
 //    orbit-install-backups, it is removed too (rmdir only), whether the run is root or not. A root that existed before,
 //    one that is not empty, and failures after the chain succeeded keep today's behaviour.
-//  - FR-S1b: the four mktemp files of a retirement are removed on TERM and HUP (a SIGINT case is not written: bash only dies of INT when the child did too, so a shim cannot fake it), and the next retirement sweeps the two
+//  - FR-S1b: the four temporary files of a retirement are removed on TERM and HUP (a SIGINT case is not written: bash only dies of INT when the child did too, so a shim cannot fake it), and the next retirement sweeps the two
 //    deployment-folder names (exactly 6 characters of [A-Za-z0-9] after the fixed part) before writing anything.
 //
 // Root is simulated, as in repair-retire-smtp-1817.test.mjs: an `id` shim prints 0 for `id -u` and a `chown` shim fails
@@ -20,7 +20,7 @@ import { composeUpCalls, makeFixture, runRepair, scratchDir } from "./repair-tes
 // root run does not chown at all: it writes as the folder's owner through setpriv, so the shim logs every chown call
 // (none is expected) and a `setpriv` shim logs and, on request, fails the owner's step. Each link of the chain is failed
 // with a shim on PATH: mkdir (dated folder; a directory squatting on the marker name), setpriv (marker write, dated
-// folder mkdir, root mkdir), mktemp (copy, overlay, record). SIGTERM is sent by an `mv` shim at the moment the
+// folder mkdir, root mkdir), dd of= (the create step of the copy, overlay, record). SIGTERM is sent by an `mv` shim at the moment the
 // temporary file is about to be renamed, so the timing is exact and not a race.
 
 vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
@@ -91,8 +91,9 @@ function shims({ root = false, fail = null, intrude = false, signal = null } = {
   }
   // A root run no longer chowns: the shim only records a call, then runs the real chown.
   sh("chown", `printf '%s\\n' "$*" >> '${chownLog}'\nexec '${realTool("chown")}' "$@"`);
-  const mktempFail = { copy: "*/.env-orbit.smtp-copy.*", overlay: "*/docker-compose.mail.yml.smtp-copy.*", record: "./.orbit-smtp-retirement.*" }[fail];
-  sh("mktemp", `case "\${@: -1}" in ${mktempFail ?? "__never__"}) ${failNow};; esac\nexec '${realTool("mktemp")}' "$@"`);
+  const createFail = { copy: "*/.env-orbit.smtp-copy.*", overlay: "*/docker-compose.mail.yml.smtp-copy.*", record: "./.orbit-smtp-retirement.*" }[fail];
+  // #1873 X1: the owner creates the root-chosen name with `dd of=<name> conv=excl`; the failure is injected there.
+  sh("dd", `for a in "$@"; do case "$a" in of=${createFail ?? "__never__"}) ${failNow};; esac; done\nexec '${realTool("dd")}' "$@"`);
   // datedMkdir: the dated folder cannot be made. markerSquat: it is made, but a directory already sits at the marker's name.
   sh(
     "mkdir",

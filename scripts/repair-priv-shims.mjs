@@ -13,7 +13,7 @@ export const GID = process.getgid();
 export const USER_NAME = spawnSync("id", ["-un"], { encoding: "utf8" }).stdout.trim();
 export const realTool = (name) => spawnSync("bash", ["-c", `command -v ${name}`], { encoding: "utf8" }).stdout.trim();
 
-const TOOLS = ["mktemp", "chmod", "mv", "rm", "rmdir", "mkdir"];
+const TOOLS = ["mktemp", "dd", "chmod", "mv", "rm", "rmdir", "mkdir"];
 
 // Bash source of each tool shim (String.raw, so bash's own ${...} is not JS interpolation; __TOKENS__ are filled in).
 // Besides the marker log, each call records what the process it runs in actually inherited, read from /proc at
@@ -23,6 +23,7 @@ const TOOLS = ["mktemp", "chmod", "mv", "rm", "rmdir", "mkdir"];
 const TOOL_SHIM = String.raw`under=0
 for a in "$@"; do
   [[ "$a" == -* ]] && continue
+  case "$a" in of=*|if=*) a="\${a#*=}";; esac
   case "$a" in /*) p="$a";; *) p="$PWD/$a";; esac
   case "$p" in '__TARGET__'|'__TARGET__'/*) under=1;; esac
 done

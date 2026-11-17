@@ -22,7 +22,7 @@ const REFUSALS = {
   "the owner has no user-database entry": { shims: { getent: "fail" }, words: new RegExp(`could not look up the deployment folder's owner \\(uid ${UID}\\) in the user database`, "u") },
 };
 
-const MUTATING = ["mktemp", "chmod", "mv", "rm", "rmdir", "mkdir"];
+const MUTATING = ["mktemp", "dd", "chmod", "mv", "rm", "rmdir", "mkdir"];
 const EXTRA = ["cp", "install", "touch", "ln", "tee"];
 const notOwnedByTestUser = (targetDir) =>
   spawnSync("find", [targetDir, "(", "-not", "-uid", String(UID), "-o", "-not", "-gid", String(GID), ")"], { encoding: "utf8" }).stdout.split("\n").filter(Boolean);
@@ -135,7 +135,7 @@ describe("#1857 S3: restore-compose-file creates docker-compose.yml as the owner
     const result = runOwner(targetDir, { shims, state, fakeBin });
     expect(result.stdout, result.stderr).toContain(action.done);
     const calls = shims.toolCalls().filter((line) => / under=1 /u.test(line));
-    for (const tool of ["mktemp", "chmod", "mv"]) {
+    for (const tool of ["dd", "chmod", "mv"]) {
       expect(calls.some((line) => line.startsWith(`${tool} `) && / marker=1 /u.test(line)), `no ${tool} ran under setpriv:\n${shims.toolCalls().join("\n")}`).toBe(true);
     }
     expect(calls.some((line) => /^mv .*-n/u.test(line) || /^mv .*docker-compose\.yml/u.test(line)), "the rename did not name docker-compose.yml").toBe(true);
@@ -159,7 +159,7 @@ describe("#1857 S3: restore-compose-file creates docker-compose.yml as the owner
 
   it("when the owner can't make the temporary file, the action reports failed and root makes nothing in the folder", () => {
     const { targetDir, state, fakeBin } = action.make();
-    const shims = shimsFor(targetDir, { setprivFail: '*mktemp*' });
+    const shims = shimsFor(targetDir, { setprivFail: '*conv=excl*' });
     const before = treeSnapshot(targetDir);
     const result = runOwner(targetDir, { shims, state, fakeBin });
     expect(shims.setprivCalls().length, "the restore never used setpriv").toBeGreaterThan(0);
@@ -198,7 +198,7 @@ describe("#1857 S4: the .env-orbit configuration-rollback restore makes and repl
     const named = (re) => calls.some((line) => re.test(line));
     expect(named(/mkdir .*\.orbit-repair-recovery/u), `the recovery folder was not made as the owner:\n${calls.join("\n")}`).toBe(true);
     expect(named(/\.orbit-repair-recovery\S*\/live\S*\.env-orbit/u), "the evidence copy of .env-orbit was not made as the owner").toBe(true);
-    expect(named(/mktemp .*\.env-orbit\.repair-restore\./u), "the staged file was not made as the owner").toBe(true);
+    expect(named(/dd if=\/dev\/null of="\$1" conv=excl.* smtp-owner-write \S*\.env-orbit\.repair-restore\.[A-Za-z0-9]{6} /u), "the staged file was not made as the owner").toBe(true);
     expect(named(/mv .*\.env-orbit\.repair-restore\.\S* \S*\.env-orbit$/u), "the rename onto .env-orbit was not done as the owner").toBe(true);
     expect(named(/rm .*\.env-orbit\.orbit-config\.rollback/u), "the rollback copy was not removed as the owner").toBe(true);
     expectOwnerWrites(shims, targetDir);
