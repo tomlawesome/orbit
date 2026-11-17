@@ -1,11 +1,11 @@
-import { spawnSync } from "node:child_process";
-import { appendFileSync, chmodSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { appendFileSync, chmodSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import { PROCESS_TEST_TIMEOUT_MS } from "./process-budget.mjs";
-import { composeUpCalls, makeFixture, repoDir, runRepair, scratchDir, scriptsDir, treeSnapshot } from "./repair-test-harness.mjs";
+import { composeUpCalls, makeFixture, repoDir, runRepair, runRepairBetweenPlanAndExecute, scratchDir, scriptsDir, stderrLines, treeSnapshot } from "./repair-test-harness.mjs";
 
 // #1817: repair.sh retires the SMTP lines once Orbit holds outgoing mail in its
 // own settings. Written from the issue's specification alone, before the change.
@@ -589,9 +589,10 @@ const bashRegex = (regex) => regex.source.replace(/\\d/gu, "[0-9]");
  * When a chown names a directory (not a link), its entries down to two levels at that moment (`find -printf '%P:%y'`)
  * go to a contents log, so a test can tell what was already in a folder when it changed owner.
  */
-function rootShims({ chown = "pass", root = true, plant = null, failWhen = null } = {}) {
+function rootShims({ chown = "pass", root = true, plant = null, failWhen = null, setprivFail = null } = {}) {
   const dir = scratchDir("orbit-repair-os5-shims-");
   const log = join(dir, "chown.log");
+  const setprivLog = join(dir, "setpriv.log");
   const order = join(dir, "chown-order.log");
   const datedRegex = join(dir, "dated.re");
   writeFileSync(datedRegex, bashRegex(DATED));
@@ -600,14 +601,25 @@ function rootShims({ chown = "pass", root = true, plant = null, failWhen = null 
   if (failWhen) writeFileSync(failRegex, bashRegex(failWhen));
   const plantRegex = join(dir, "plant.re");
   let planting = "";
+  let setprivPlanting = "";
   if (plant) {
     writeFileSync(plantRegex, bashRegex(plant.when));
     const links = plant.links.map(([name, target]) => `  ln -s '${target}' "$last/${name}" 2>/dev/null || true`).join("\n");
     planting = `re="$(cat '${plantRegex}')"\nif [[ "$rel" =~ $re ]]; then\n${links}\nfi\n`;
+    // FIX-S1: nothing is chowned any more, so the links are planted by the setpriv shim, as the folder's owner could,
+    // the moment the command it runs (the dated folder's mkdir) has succeeded.
+    setprivPlanting = `"$@"; rc=$?\nlast="\${@: -1}"; rel="\${last#./}"; rel="\${rel%/}"\nre="$(cat '${plantRegex}')"\nif [[ $rc == 0 && "$rel" =~ $re ]]; then\n${links}\nfi\nexit $rc\n`;
   }
   if (root) {
     writeFileSync(join(dir, "id"), `#!/usr/bin/env bash\nif [[ $# -eq 1 && "$1" == -u ]]; then echo 0; exit 0; fi\nexec '${realTool("id")}' "$@"\n`);
     chmodSync(join(dir, "id"), 0o755);
+    // #1848 FIX-S1: a root run writes through setpriv. This one logs its argv, fails when the argv matches the
+    // setprivFail glob, and otherwise runs the command after `--` as the test user.
+    writeFileSync(
+      join(dir, "setpriv"),
+      `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >> '${setprivLog}'\ncase "$*" in ${setprivFail ?? "__never__"}) exit 1;; esac\nwhile [[ $# -gt 0 && "$1" != -- ]]; do shift; done\nshift\n${setprivPlanting || 'exec "$@"\n'}`,
+    );
+    chmodSync(join(dir, "setpriv"), 0o755);
   }
   const outcome = {
     pass: `exec '${realTool("chown")}' "$@"`,
@@ -640,30 +652,13 @@ ${planting}${outcome}
     log,
     env: { ORBIT_REPAIR_PROMPTS: "machine", PATH: `${dir}:${process.env.PATH}` },
     calls: () => read(log),
+    setprivCalls: () => read(setprivLog),
     /** Each chown of a directory, in order: { path, entries: ["<relative path>:<find %y type>", ...] }. */
     contents: () => read(contents).map((line) => /^([^|]*)\|(.*)$/u.exec(line)).map((found) => ({ path: found[1], entries: found[2].split(" ").filter(Boolean) })),
     order: () => read(order).map((line) => /^(.*) ups=(\S+)$/u.exec(line)).map((found) => ({ path: found[1].replace(/^\.\//u, ""), ups: found[2] })),
   };
 }
 
-/**
- * The chown calls, each parsed as `--no-dereference --reference=. -- <path> exists=<yes|no> link=<yes|no>`; any
- * other form (the dereferencing `--reference=. -- <path>` included) is kept with path=null.
- */
-const chownCalls = (shims) =>
-  shims.calls().map((line) => {
-    const found = /^--no-dereference --reference=\. -- (\S+) exists=(yes|no) link=(yes|no)$/u.exec(line);
-    return found ? { line, path: found[1].replace(/^\.\//u, ""), exists: found[2], link: found[3] } : { line, path: null, exists: null, link: null };
-  });
-/** Every call is of the --no-dereference form and none names a symlink. */
-const expectNoDereference = (calls) => {
-  for (const call of calls) {
-    expect(call.path, `a chown call not of the form --no-dereference --reference=. -- <path>: ${call.line}`).not.toBeNull();
-    expect(call.link, `a chown call names a symlink: ${call.line}`).toBe("no");
-  }
-};
-const RECORD_TMP = /^\.orbit-smtp-retirement\.[A-Za-z0-9]{6}$/u;
-const REWRITE_TMP = /^\.env-orbit\.retire-smtp\.[A-Za-z0-9]{6}$/u;
 /** Top-level names in the folder like a mktemp leftover of the record or of the rewrite (`<fixed>.??????`). */
 const tempLeftovers = (targetDir) => readdirSync(targetDir).filter((name) => /^\.(orbit-smtp-retirement|env-orbit\.retire-smtp)\..{6}$/u.test(name));
 const modeOf = (path) => (statSync(path).mode & 0o777).toString(8);
@@ -695,90 +690,109 @@ const DATED = /^orbit-install-backups\/\d{8}T\d{6}Z-repair(-\d)?$/u;
 const DONE = "execute action=retire-smtp-lines resolves=smtp-lines-retirable result=done";
 
 describe("O-S5 (#1844): a root run of retire-smtp-lines leaves nothing owned by root", () => {
-  // FIX-S1 test 6: the same outcome with mktemp names and the --no-dereference form.
-  it("gives every lasting file the folder's owner (chown --no-dereference --reference=.) before it is renamed or left, the rewritten copy before compose up", () => {
+  // #1848 FIX-S1 rewrites these: a root run no longer chowns; every write under the folder runs as the folder's
+  // owner through setpriv, so what it leaves behind is theirs from creation.
+  /** Each setpriv call drops to the test user, as U's primary group with U's own groups (--init-groups), and no new privileges, and chown is never run. */
+  const expectOwnerWrites = (shims) => {
+    const calls = shims.setprivCalls();
+    expect(calls.length, "setpriv was never run under a root run").toBeGreaterThan(0);
+    for (const call of calls) {
+      expect(call).toMatch(new RegExp(`^--reuid=${process.getuid()} --regid=${process.getgid()} --init-groups --no-new-privs -- `, "u"));
+    }
+    expect(shims.calls(), "chown was run by retire-smtp-lines").toEqual([]);
+    return calls;
+  };
+
+  it("writes the rewritten copy, both backup folders, the copy and the record as the folder's owner (setpriv), the rewritten copy before compose up; no chown", () => {
     const targetDir = withMail({ lines: true, overlayListed: true, overlayFile: true, secret: true }, { inlinePassword: true });
     const shims = rootShims();
     const result = runRepair(targetDir, ["--execute", "--safe-only"], { ...IMPORTED, env: shims.env, input: "y\n" });
     expect(result.stdout, result.stderr).toContain(DONE);
-    const calls = chownCalls(shims);
-    expect(calls.length, "chown was never run under a root run").toBeGreaterThan(0);
-    expectNoDereference(calls);
-    const named = (test) => calls.filter((call) => call.path !== null && (typeof test === "string" ? call.path === test : test.test(call.path)));
-    const datedFolder = named(DATED);
+    const calls = expectOwnerWrites(shims);
+    const log = calls.join("\n");
     for (const [label, test] of [
-      [".env-orbit.retire-smtp.<6>", REWRITE_TMP],
-      ["orbit-install-backups", "orbit-install-backups"],
-      ["orbit-install-backups/<stamp>-repair", DATED],
-      [".orbit-smtp-retirement.<6>", RECORD_TMP],
+      [".env-orbit.retire-smtp.<6>", / \. \.env-orbit\.retire-smtp\.XXXXXX 600$/u],
+      ["orbit-install-backups", / mkdir -m 700 -- orbit-install-backups$/u],
+      ["orbit-install-backups/<stamp>-repair", / mkdir -m 700 -- orbit-install-backups\/\d{8}T\d{6}Z-repair(-\d)?$/u],
+      ["the backed-up .env-orbit", / \.env-orbit\.smtp-copy\.XXXXXX 600$/u],
+      [".orbit-smtp-retirement.<6>", / \. \.orbit-smtp-retirement\.XXXXXX 600$/u],
+      ["the rename over .env-orbit", / mv -f -- \.\/\.env-orbit\.retire-smtp\.[A-Za-z0-9]{6} \.env-orbit$/u],
     ]) {
-      const hits = named(test);
-      expect(hits.length, `no chown names ${label}:\n${shims.calls().join("\n")}`).toBeGreaterThan(0);
-      for (const hit of hits) expect(hit.exists, hit.line).toBe("yes");
+      expect(calls.some((call) => test.test(call)), `no setpriv call for ${label}:\n${log}`).toBe(true);
     }
-    const copy = `${datedFolder[0].path}/.env-orbit`;
-    const copyHits = named(copy);
-    expect(copyHits.length, `no chown names ${copy}:\n${shims.calls().join("\n")}`).toBeGreaterThan(0);
-    for (const hit of copyHits) expect(hit.exists, hit.line).toBe("yes");
-    // The rewritten copy is chowned before it is renamed over .env-orbit, so before the stack is started on it.
+    // The rewritten copy is written before the stack is started on it.
     expect(composeUpCalls(result).length).toBeGreaterThan(0);
-    const tmpOrder = shims.order().filter((entry) => REWRITE_TMP.test(entry.path));
-    expect(tmpOrder.length).toBeGreaterThan(0);
-    for (const entry of tmpOrder) expect(entry.ups, "the chown of the rewritten copy came after compose up").toBe("0");
     // The record is removed at the end, and no mktemp name is left behind.
     expect(existsSync(join(targetDir, ".orbit-smtp-retirement"))).toBe(false);
     expect(tempLeftovers(targetDir)).toEqual([]);
   });
 
-  it("a record that lingers after a failed start has been given the folder's owner too, and a later ordinary run finishes", () => {
+  it("a record that lingers after a failed start was written as the folder's owner too, and a later ordinary run finishes", () => {
     const targetDir = withMail();
     const shims = rootShims();
     const first = runRepair(targetDir, ["--execute", "--safe-only"], { ...IMPORTED, upFails: true, env: shims.env, input: "y\n" });
     expect(first.stdout).not.toContain(DONE);
     expect(existsSync(join(targetDir, ".orbit-smtp-retirement"))).toBe(true);
     expect(envOf(targetDir)).not.toMatch(/^SMTP_/mu);
-    const calls = chownCalls(shims);
-    expectNoDereference(calls);
-    for (const test of [RECORD_TMP, REWRITE_TMP]) {
-      const hits = calls.filter((call) => call.path !== null && test.test(call.path));
-      expect(hits.length, `no chown names ${test}:\n${shims.calls().join("\n")}`).toBeGreaterThan(0);
-      for (const hit of hits) expect(hit.exists, hit.line).toBe("yes");
+    const calls = expectOwnerWrites(shims);
+    for (const test of [/ \. \.orbit-smtp-retirement\.XXXXXX 600$/u, / \. \.env-orbit\.retire-smtp\.XXXXXX 600$/u]) {
+      expect(calls.some((call) => test.test(call)), `no setpriv call matches ${test}:\n${calls.join("\n")}`).toBe(true);
     }
     const second = runRepair(targetDir, ["--execute", "--safe-only"], { ...IMPORTED, ...MACHINE });
     expect(second.stdout, second.stderr).toContain(DONE);
     expect(existsSync(secretPath(targetDir))).toBe(false);
   });
 
-  it("a chown that fails on the rewritten copy leaves everything as it was, and says so", () => {
+  // FIX-S1 addendum, acceptance d: the "remove docker-compose.mail.yml by hand" advice stays only for the rewrite
+  // tool's own "can't rewrite this line safely" result (awk exit 3), here a COMPOSE_FILE value with quotes.
+  it("a rewrite tool refusal (awk exit 3) still tells the admin to remove the overlay from COMPOSE_FILE by hand, and changes nothing", () => {
     const targetDir = withMail();
-    const shims = rootShims({ chown: "fail" });
+    const envPath = join(targetDir, ".env-orbit");
+    writeFileSync(envPath, `${envOf(targetDir)}COMPOSE_FILE="docker-compose.yml:docker-compose.mail.yml"\n`);
+    chmodSync(envPath, 0o600);
+    const shims = rootShims();
+    const before = envOf(targetDir);
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], { ...IMPORTED, env: shims.env, input: "y\n" });
+    expect(result.stdout).not.toContain(DONE);
+    expect(result.stderr).toMatch(/could not be rewritten safely.*by hand|by hand.*could not be rewritten safely/su);
+    expect(envOf(targetDir)).toBe(before);
+    expect(tempLeftovers(targetDir)).toEqual([]);
+    expect(composeUpCalls(result)).toEqual([]);
+  });
+
+  it("a write of the rewritten copy that fails as the folder's owner leaves everything as it was, and says so", () => {
+    const targetDir = withMail();
+    const shims = rootShims({ setprivFail: '*" .env-orbit.retire-smtp.XXXXXX 600"' });
     const result = runRepair(targetDir, ["--execute", "--safe-only"], { ...IMPORTED, env: shims.env, input: "y\n" });
     expect(result.stdout).not.toContain(DONE);
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("retire-smtp-lines left .env-orbit as it was: the rewritten copy could not be given the folder's owner");
+    // FIX-S1 addendum item 4: a failed owner write is not the rewrite tool's "can't rewrite this line safely".
+    expect(result.stderr).toMatch(/\.env-orbit could not be rewritten/u);
+    expect(result.stderr).not.toMatch(/by hand/u);
     expect(envOf(targetDir)).toContain("SMTP_HOST=");
     expect((statSync(join(targetDir, ".env-orbit")).mode & 0o777).toString(8)).toBe("600");
-    expect(existsSync(join(targetDir, ".env-orbit.retire-smtp.tmp"))).toBe(false);
+    expect(tempLeftovers(targetDir)).toEqual([]);
     expect(existsSync(secretPath(targetDir))).toBe(true);
     expect(composeUpCalls(result)).toEqual([]);
     expect(envBackups(targetDir)).toEqual([]);
+    expect(shims.calls()).toEqual([]);
   });
 
-  it("a chown that fails on the backup folder refuses with the backup message and leaves no backup", () => {
+  it("a backup folder that cannot be made as the folder's owner refuses with the backup message and leaves no backup", () => {
     const targetDir = withMail();
     const before = envOf(targetDir);
-    const shims = rootShims({ chown: "fail-backups-root" });
+    const shims = rootShims({ setprivFail: '*" mkdir -m 700 -- orbit-install-backups"' });
     const result = runRepair(targetDir, ["--execute", "--safe-only"], { ...IMPORTED, env: shims.env, input: "y\n" });
     expect(result.stdout).not.toContain(DONE);
     expect(result.stderr).toContain("the backup of .env-orbit could not be made in orbit-install-backups");
     expect(envOf(targetDir)).toBe(before);
     expect((statSync(join(targetDir, ".env-orbit")).mode & 0o777).toString(8)).toBe("600");
-    expect(existsSync(join(targetDir, ".env-orbit.retire-smtp.tmp"))).toBe(false);
+    expect(tempLeftovers(targetDir)).toEqual([]);
     expect(existsSync(join(targetDir, ".orbit-smtp-retirement"))).toBe(false);
     expect(composeUpCalls(result)).toEqual([]);
-    // orbit-install-backups itself may remain, but empty.
     expect(envBackups(targetDir)).toEqual([]);
     expect(findCalls(["-path", join(targetDir, "orbit-install-backups", "*")], targetDir)).toEqual([]);
+    expect(shims.calls()).toEqual([]);
   });
 
   // FIX-S1 test 7: also no mktemp name is left behind and the record is gone.
@@ -833,17 +847,18 @@ describe("FIX-S1 (#1844): a root run of retire-smtp-lines does not follow a plan
     expect(modeOf(path)).toBe("600");
   }
 
-  function expectRecordChownedByMktempName(shims) {
-    const calls = chownCalls(shims);
-    expect(calls.length, "chown was never run under a root run").toBeGreaterThan(0);
-    expectNoDereference(calls);
-    expect(calls.filter((call) => call.path === RECORD_FIXED_TMP || /\.orbit-smtp-retirement\.tmp(\s|$)/u.test(call.line))).toEqual([]);
-    const hits = calls.filter((call) => call.path !== null && RECORD_TMP.test(call.path));
-    expect(hits.length, `no chown names ${RECORD}.<6>:\n${shims.calls().join("\n")}`).toBeGreaterThan(0);
-    for (const hit of hits) expect(hit.exists, hit.line).toBe("yes");
+  /** The record goes to a mktemp name as the folder's owner (setpriv), never to .tmp; and nothing is chowned. */
+  function expectRecordWrittenByMktempName(shims) {
+    const calls = shims.setprivCalls();
+    expect(calls.length, "setpriv was never run under a root run").toBeGreaterThan(0);
+    expect(shims.calls(), "chown was run by retire-smtp-lines").toEqual([]);
+    expect(calls.filter((call) => /\.orbit-smtp-retirement\.tmp(\s|$)/u.test(call))).toEqual([]);
+    const hits = calls.filter((call) => / \. \.orbit-smtp-retirement\.XXXXXX 600$/u.test(call));
+    expect(hits.length, `no setpriv call writes ${RECORD}.<6>:\n${calls.join("\n")}`).toBeGreaterThan(0);
+    expect(calls.filter((call) => / mv -fT -- \.\/\.orbit-smtp-retirement\.[A-Za-z0-9]{6} \.orbit-smtp-retirement$/u.test(call)).length, calls.join("\n")).toBeGreaterThan(0);
   }
 
-  it("test 1: a symlink planted at .orbit-smtp-retirement.tmp is neither written through nor re-owned", () => {
+  it("test 1: a symlink planted at .orbit-smtp-retirement.tmp is neither written through nor touched", () => {
     const targetDir = withMail();
     const outside = outsideFile();
     const planted = join(targetDir, RECORD_FIXED_TMP);
@@ -856,7 +871,7 @@ describe("FIX-S1 (#1844): a root run of retire-smtp-lines does not follow a plan
     expect(readlinkSync(planted)).toBe(outside.path);
     expectRegularRecord(targetDir);
     expect(envOf(targetDir), result.stderr).not.toMatch(/^SMTP_/mu);
-    expectRecordChownedByMktempName(shims);
+    expectRecordWrittenByMktempName(shims);
     expect(readdirSync(targetDir).filter((name) => /^\.orbit-smtp-retirement\..{6}$/u.test(name))).toEqual([]);
   });
 
@@ -873,11 +888,11 @@ describe("FIX-S1 (#1844): a root run of retire-smtp-lines does not follow a plan
     expect(readlinkSync(planted)).toBe(missing);
     expectRegularRecord(targetDir);
     expect(envOf(targetDir), result.stderr).not.toMatch(/^SMTP_/mu);
-    expectRecordChownedByMktempName(shims);
+    expectRecordWrittenByMktempName(shims);
     expect(readdirSync(targetDir).filter((name) => /^\.orbit-smtp-retirement\..{6}$/u.test(name))).toEqual([]);
   });
 
-  it("test 3: .env-orbit.retire-smtp.tmp is never opened or chowned by that name, and the owner change is --no-dereference", () => {
+  it("test 3: .env-orbit.retire-smtp.tmp is never opened by that name; the rewrite is written as the folder's owner to a mktemp name, with no chown", () => {
     const targetDir = withMail();
     const outside = outsideFile();
     const planted = join(targetDir, REWRITE_FIXED_TMP);
@@ -895,17 +910,17 @@ describe("FIX-S1 (#1844): a root run of retire-smtp-lines does not follow a plan
     const env = envOf(targetDir);
     expect(env).not.toMatch(/^SMTP_[A-Z_]+=/mu);
     expect(env).not.toMatch(/^COMPOSE_FILE=.*docker-compose\.mail\.yml/mu);
-    const calls = chownCalls(shims);
-    expect(calls.length, "chown was never run under a root run").toBeGreaterThan(0);
-    expectNoDereference(calls);
-    expect(calls.filter((call) => call.path === REWRITE_FIXED_TMP || /\.env-orbit\.retire-smtp\.tmp(\s|$)/u.test(call.line))).toEqual([]);
-    const hits = calls.filter((call) => call.path !== null && REWRITE_TMP.test(call.path));
-    expect(hits.length, `no chown names .env-orbit.retire-smtp.<6>:\n${shims.calls().join("\n")}`).toBeGreaterThan(0);
-    for (const hit of hits) expect(hit.exists, hit.line).toBe("yes");
+    const calls = shims.setprivCalls();
+    expect(calls.length, "setpriv was never run under a root run").toBeGreaterThan(0);
+    expect(shims.calls(), "chown was run by retire-smtp-lines").toEqual([]);
+    expect(calls.filter((call) => /\.env-orbit\.retire-smtp\.tmp(\s|$)/u.test(call))).toEqual([]);
+    const hits = calls.filter((call) => / \. \.env-orbit\.retire-smtp\.XXXXXX 600$/u.test(call));
+    expect(hits.length, `no setpriv call writes .env-orbit.retire-smtp.<6>:\n${calls.join("\n")}`).toBeGreaterThan(0);
+    expect(calls.filter((call) => / mv -f -- \.\/\.env-orbit\.retire-smtp\.[A-Za-z0-9]{6} \.env-orbit$/u.test(call)).length, calls.join("\n")).toBeGreaterThan(0);
     expect(readdirSync(targetDir).filter((name) => /^\.env-orbit\.retire-smtp\..{6}$/u.test(name))).toEqual([]);
   });
 
-  it("test 4: entries planted in the dated backup folder the moment it changes owner are not written through", () => {
+  it("test 4: entries planted in the dated backup folder the moment it is made are not written through", () => {
     const targetDir = withMail();
     const outsideDir = scratchDir("orbit-repair-fix-s1-outside-");
     const target = outsideFile(outsideDir, "target");
@@ -932,22 +947,20 @@ describe("FIX-S1 (#1844): a root run of retire-smtp-lines does not follow a plan
     expect(copied).not.toContain("APP_URL=https://orbit.repair-test.internal");
     expect(readFileSync(overlayCopy, "utf8")).toBe(OVERLAY);
     expect(modeOf(datedDir)).toBe("700");
-    const calls = chownCalls(shims);
-    expectNoDereference(calls);
-    const index = (path) => calls.findIndex((call) => call.path === path);
-    const relDated = `orbit-install-backups/${dated[0]}`;
-    const [copyAt, datedAt, rootAt] = [index(`${relDated}/.env-orbit`), index(relDated), index("orbit-install-backups")];
-    const log = shims.calls().join("\n");
-    expect(copyAt, `no chown names the backed-up .env-orbit:\n${log}`).toBeGreaterThan(-1);
-    expect(datedAt, `no chown names the dated folder:\n${log}`).toBeGreaterThan(copyAt);
-    expect(rootAt, `the backup root was not chowned after the dated folder:\n${log}`).toBeGreaterThan(datedAt);
+    // The copies are written as the folder's owner to mktemp names and renamed over the planted links (the links
+    // themselves are replaced, their targets untouched), and nothing is chowned.
+    const calls = shims.setprivCalls();
+    expect(shims.calls(), "chown was run by retire-smtp-lines").toEqual([]);
+    const log = calls.join("\n");
+    expect(calls.some((call) => / \S*orbit-install-backups\/\S+ \.env-orbit\.smtp-copy\.XXXXXX 600$/u.test(call)), `no setpriv call writes the backed-up .env-orbit:\n${log}`).toBe(true);
+    expect(calls.some((call) => / docker-compose\.mail\.yml\.smtp-copy\.XXXXXX /u.test(call)), `no setpriv call writes the overlay copy:\n${log}`).toBe(true);
   });
 
-  it("test 5: a chown that fails on the dated folder refuses with the backup message and leaves no backup", () => {
+  it("test 5: a mkdir of the dated folder that fails as the folder's owner refuses with the backup message and leaves no backup", () => {
     const targetDir = withMail();
     const envPath = join(targetDir, ".env-orbit");
     const before = readFileSync(envPath);
-    const shims = rootShims({ chown: "fail-dated" });
+    const shims = rootShims({ setprivFail: '*" mkdir -m 700 -- orbit-install-backups/"*' });
     const result = runAsRoot(targetDir, shims);
     expect(result.stdout).not.toContain(DONE);
     expect(result.stderr).toContain("the backup of .env-orbit could not be made in orbit-install-backups");
@@ -960,12 +973,11 @@ describe("FIX-S1 (#1844): a root run of retire-smtp-lines does not follow a plan
     expect(existsSync(secretPath(targetDir))).toBe(true);
   });
 
-  // Audit v0.3.9-c sweep 2: each of the five guarded chowns, failing alone, stops the run. The rewritten copy and
-  // the backups root are covered above; these are the other three.
+  // Audit v0.3.9-c sweep 2: each guarded step of the backup chain, failing alone as the folder's owner (setpriv),
+  // stops the run. The rewritten copy and the backups root are covered above; these are the other three.
   const BACKUP_REFUSAL = "retire-smtp-lines refused, nothing was changed: the backup of .env-orbit could not be made in orbit-install-backups";
-  const DATED_COPY = /^orbit-install-backups\/\d{8}T\d{6}Z-repair(-\d)?\/\.env-orbit$/u;
 
-  /** A failed chown stopped the run before any change to .env-orbit, the secret or the stack. */
+  /** A failed owner step stopped the run before any change to .env-orbit, the secret or the stack. */
   function expectStoppedUnchanged(targetDir, result, before, message) {
     expect(result.stdout).not.toContain(DONE);
     expect(result.status).not.toBe(0);
@@ -979,41 +991,44 @@ describe("FIX-S1 (#1844): a root run of retire-smtp-lines does not follow a plan
     expect(composeUpCalls(result)).toEqual([]);
   }
 
-  it("sweep 2: a chown that fails on the dated backup folder alone stops the run with no change and no backup left", () => {
+  it("sweep 2: a mkdir of the dated backup folder that fails alone (as the folder's owner) stops the run with no change and no backup left", () => {
     const targetDir = withMail();
     const before = readFileSync(join(targetDir, ".env-orbit"));
-    const shims = rootShims({ chown: "fail-match", failWhen: DATED });
+    const shims = rootShims({ setprivFail: '*" mkdir -m 700 -- orbit-install-backups/"*' });
     const result = runAsRoot(targetDir, shims);
     expectStoppedUnchanged(targetDir, result, before, BACKUP_REFUSAL);
-    const calls = chownCalls(shims);
-    expect(calls.filter((call) => call.path !== null && DATED.test(call.path)).length, shims.calls().join("\n")).toBeGreaterThan(0);
+    const calls = shims.setprivCalls();
+    expect(calls.filter((call) => / mkdir -m 700 -- orbit-install-backups\/\d{8}T\d{6}Z-repair(-\d)?$/u.test(call)).length, calls.join("\n")).toBeGreaterThan(0);
+    expect(shims.calls(), "chown was run").toEqual([]);
     // The dated folder is removed with its copies; the backups root this run made may remain, empty.
     expect(envBackups(targetDir)).toEqual([]);
     expect(findCalls(["-path", join(targetDir, "orbit-install-backups", "*")], targetDir)).toEqual([]);
   });
 
-  it("sweep 2: a chown that fails on the backed-up .env-orbit alone stops the run with no change and no backup left", () => {
+  it("sweep 2: a write of the backed-up .env-orbit that fails alone (as the folder's owner) stops the run with no change and no backup left", () => {
     const targetDir = withMail();
     const before = readFileSync(join(targetDir, ".env-orbit"));
-    const shims = rootShims({ chown: "fail-match", failWhen: DATED_COPY });
+    const shims = rootShims({ setprivFail: '*" .env-orbit.smtp-copy.XXXXXX 600"' });
     const result = runAsRoot(targetDir, shims);
     expectStoppedUnchanged(targetDir, result, before, BACKUP_REFUSAL);
-    const calls = chownCalls(shims);
-    expect(calls.filter((call) => call.path !== null && DATED_COPY.test(call.path)).length, shims.calls().join("\n")).toBeGreaterThan(0);
-    // It stops at once: the dated folder and the backups root are never chowned.
-    expect(calls.filter((call) => call.path !== null && (DATED.test(call.path) || call.path === "orbit-install-backups")), shims.calls().join("\n")).toEqual([]);
+    const calls = shims.setprivCalls();
+    expect(calls.filter((call) => / \S+ \.env-orbit\.smtp-copy\.XXXXXX 600$/u.test(call)).length, calls.join("\n")).toBeGreaterThan(0);
+    expect(shims.calls(), "chown was run").toEqual([]);
+    // It stops at once: the overlay copy, the record and the rewrite are never written.
+    expect(calls.filter((call) => /docker-compose\.mail\.yml\.smtp-copy\.XXXXXX|\.orbit-smtp-retirement\.XXXXXX|\.env-orbit\.retire-smtp\.XXXXXX .*mv/u.test(call)), calls.join("\n")).toEqual([]);
     expect(envBackups(targetDir)).toEqual([]);
     expect(findCalls(["-path", join(targetDir, "orbit-install-backups", "*")], targetDir)).toEqual([]);
   });
 
-  it("sweep 2: a chown that fails on the step record alone stops the run with .env-orbit unchanged, keeping the backup it announced", () => {
+  it("sweep 2: a write of the step record that fails alone (as the folder's owner) stops the run with .env-orbit unchanged, keeping the backup it announced", () => {
     const targetDir = withMail();
     const before = readFileSync(join(targetDir, ".env-orbit"));
-    const shims = rootShims({ chown: "fail-match", failWhen: RECORD_TMP });
+    const shims = rootShims({ setprivFail: '*" . .orbit-smtp-retirement.XXXXXX 600"' });
     const result = runAsRoot(targetDir, shims);
     expectStoppedUnchanged(targetDir, result, before, "retire-smtp-lines left .env-orbit as it was: its step record could not be written");
-    const calls = chownCalls(shims);
-    expect(calls.filter((call) => call.path !== null && RECORD_TMP.test(call.path)).length, shims.calls().join("\n")).toBeGreaterThan(0);
+    const calls = shims.setprivCalls();
+    expect(calls.filter((call) => / \. \.orbit-smtp-retirement\.XXXXXX 600$/u.test(call)).length, calls.join("\n")).toBeGreaterThan(0);
+    expect(shims.calls(), "chown was run").toEqual([]);
     // Unlike the other four, this guard runs after the lasting backup is complete and named on stderr, and it
     // leaves that backup in place: one dated folder, mode 700, its .env-orbit without the password line.
     expect(result.stderr).toContain("retire-smtp-lines copied the lines it removes from .env-orbit (never SMTP_PASSWORD=)");
@@ -1025,30 +1040,6 @@ describe("FIX-S1 (#1844): a root run of retire-smtp-lines does not follow a plan
     const second = runAsRoot(targetDir, rootShims());
     expect(second.stdout, second.stderr).toContain(DONE);
     expect(existsSync(secretPath(targetDir))).toBe(false);
-  });
-
-  // FIX-S1's ordering: the dated folder, and a backups root this run made, change owner only once both copies are
-  // written in the dated folder. Test 5 holds either way; this one does not.
-  it("sweep 2: the dated folder and a new backups root are chowned only after both copies are in the dated folder", () => {
-    const targetDir = withMail();
-    const shims = rootShims();
-    const result = runAsRoot(targetDir, shims);
-    expect(result.stdout, result.stderr).toContain(DONE);
-    const contents = shims.contents();
-    const log = shims.calls().join("\n");
-    const dated = contents.filter((entry) => DATED.test(entry.path));
-    expect(dated, `the dated folder was not chowned once:\n${log}`).toHaveLength(1);
-    expect(dated[0].entries, `the dated folder changed owner before its copies were written:\n${log}`).toEqual(
-      expect.arrayContaining([".env-orbit:f", "docker-compose.mail.yml:f"]),
-    );
-    const root = contents.filter((entry) => entry.path === "orbit-install-backups");
-    expect(root, `the backups root this run made was not chowned once:\n${log}`).toHaveLength(1);
-    const name = dated[0].path.slice("orbit-install-backups/".length);
-    expect(root[0].entries, `the backups root changed owner before the copies were written:\n${log}`).toEqual(
-      expect.arrayContaining([`${name}:d`, `${name}/.env-orbit:f`, `${name}/docker-compose.mail.yml:f`]),
-    );
-    const paths = contents.map((entry) => entry.path);
-    expect(paths.indexOf("orbit-install-backups"), log).toBeGreaterThan(paths.indexOf(dated[0].path));
   });
 });
 
@@ -1095,5 +1086,285 @@ describe("FIX-S1 (#1844): the contract says nothing is written through a symlink
     const block = flat(source.slice(start, end).map((entry) => entry.replace(/^#\s?/u, "")).join(" "));
     expect(block).toContain("never through a symlink");
     expect(block).toContain("the deployment folder's owner");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #1848 O-F1 / O-F3 / O-S1: retire-smtp-lines runs behind the restore guard and
+// holds the backup/restore lock from before the rewrite to after the secret is
+// deleted, as start-services and recreate-services do. Written from the
+// specification (issue #1848, note 59822) alone, before the change.
+//
+// Helpers below are copied from repair-restore-guard.test.mjs (it exports
+// none): plantJournal, holdLock, flockShim, lockProbeEnv and their path helpers.
+// ---------------------------------------------------------------------------
+
+const backupsOf = (targetDir, backupDir) => backupDir ?? join(targetDir, "backups");
+const journalOf = (targetDir, backupDir) => join(backupsOf(targetDir, backupDir), ".orbit-restore", "restore.journal");
+const lockOf = (targetDir, backupDir) => join(backupsOf(targetDir, backupDir), ".orbit-backup-restore.lock");
+const markerOf = (targetDir) => join(targetDir, ".orbit-restore-pending");
+const recordOf = (targetDir) => join(targetDir, ".orbit-smtp-retirement");
+const envFor = (backupDir) => (backupDir ? { ORBIT_BACKUP_DIR: backupDir } : undefined);
+
+function plantJournal(targetDir, backupDir) {
+  mkdirSync(join(backupsOf(targetDir, backupDir), ".orbit-restore"), { recursive: true });
+  writeFileSync(journalOf(targetDir, backupDir), '{"step":"half-done"}\n');
+}
+
+function freeLock(targetDir) {
+  mkdirSync(join(targetDir, "backups"), { recursive: true });
+  writeFileSync(lockOf(targetDir), "");
+}
+
+// Holds `flock -x` on a lock file from a background process until released.
+async function holdLock(lockPath) {
+  mkdirSync(join(lockPath, ".."), { recursive: true });
+  // Its own process group: flock's child `sleep` inherits the locked descriptor,
+  // so release kills the whole group and waits until the lock is free again.
+  const holder = spawn("flock", ["-x", lockPath, "sleep", "60"], { stdio: "ignore", detached: true });
+  const deadline = Date.now() + 10_000;
+  while (spawnSync("flock", ["-n", lockPath, "true"]).status === 0) {
+    if (Date.now() > deadline) throw new Error("the background flock never took the lock");
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  return () => {
+    process.kill(-holder.pid, "SIGKILL");
+    const freeBy = Date.now() + 10_000;
+    while (spawnSync("flock", ["-n", lockPath, "true"]).status !== 0) {
+      if (Date.now() > freeBy) throw new Error("the background flock never let the lock go");
+      spawnSync("sleep", ["0.05"]);
+    }
+  };
+}
+
+// A fake `flock` ahead of the real one (for the repair child only).
+function flockShim(body, code) {
+  const shimDir = scratchDir("orbit-flock-shim-");
+  const shim = join(shimDir, "flock");
+  writeFileSync(shim, `#!/usr/bin/env bash\n${body}\nexit ${code}\n`);
+  chmodSync(shim, 0o755);
+  return { PATH: `${shimDir}:${process.env.PATH}` };
+}
+
+// A `printf` function injected through BASH_ENV into the fake docker wrapper
+// probes the lock with a second, independent `flock -n` when `compose ... up` runs.
+function lockProbeEnv(lockPath) {
+  const dir = scratchDir("orbit-lock-probe-");
+  const out = join(dir, "probe.log");
+  const rc = join(dir, "probe.sh");
+  writeFileSync(
+    rc,
+    `printf() {
+  if [[ -n "\${S:-}" && "\${1:-}" == '%s\\n' && "\${2:-}" == compose* && " \${2} " == *" up "* ]]; then
+    /usr/bin/flock -n '${lockPath}' true 2>/dev/null; case $? in 0) builtin printf 'free\\n' >> '${out}' ;; 1) builtin printf 'held\\n' >> '${out}' ;; *) builtin printf 'error\\n' >> '${out}' ;; esac
+  fi
+  builtin printf "$@"
+}
+`,
+  );
+  return { env: { BASH_ENV: rc }, probes: () => (existsSync(out) ? readFileSync(out, "utf8").split("\n").filter(Boolean) : []) };
+}
+
+const REFUSED = "Orbit repair: retire-smtp-lines refused, nothing was changed: ";
+const DONE_LINE = "execute action=retire-smtp-lines resolves=smtp-lines-retirable result=done";
+const FAILED_LINE = "execute action=retire-smtp-lines resolves=smtp-lines-retirable result=failed";
+const LOCK_REASON = "a backup, restore or export is running right now; wait for it to end, then re-run repair.";
+const CANT_CHECK = "repair can't check whether a backup, restore or export is running: the lock at";
+const JOURNAL_REFUSAL = "a restore has not been finished (journal at ";
+const RETIRE_OPTIONS = { ...IMPORTED };
+
+/** Every observable of a refused retire: lines, exit code, no compose up, nothing on disk changed. */
+function expectRefused(result, targetDir, before, reason) {
+  expect(result.stdout).toContain(FAILED_LINE);
+  expect(result.stdout).not.toContain(DONE_LINE);
+  expect(result.stdout).toContain("execution result=failed done=0 failed=1");
+  expect(result.status).toBe(4);
+  expect(stderrLines(result).join("\n")).toContain(`${REFUSED}${reason}`);
+  expect(composeUpCalls(result)).toEqual([]);
+  expect(treeSnapshot(targetDir)).toBe(before);
+  expect(envOf(targetDir)).toContain("SMTP_HOST=smtp.example.test");
+  expect(existsSync(secretPath(targetDir))).toBe(true);
+}
+
+/** A clean second run finishes: done, the secret and the finding gone. */
+function expectCleanRunFinishes(targetDir, env) {
+  const second = runRepair(targetDir, ["--execute", "--safe-only"], { ...IMPORTED, ...MACHINE, env: { ...MACHINE.env, ...env } });
+  expect(second.stdout).toContain(DONE_LINE);
+  expect(second.status).toBe(0);
+  expect(existsSync(secretPath(targetDir))).toBe(false);
+  expect(runRepair(targetDir, ["--check"], { ...IMPORTED, env }).stdout).not.toContain("smtp-lines-retirable");
+}
+
+describe("#1848 retire-smtp-lines is refused while a restore is unfinished", () => {
+  it("1: a journal planted at the confirmation prompt refuses with the restore-unfinished wording, changes nothing, exit 4", async () => {
+    const targetDir = withMail();
+    let before = "";
+    const result = await runRepairBetweenPlanAndExecute(targetDir, ["--execute", "--safe-only"], RETIRE_OPTIONS, () => {
+      plantJournal(targetDir);
+      before = treeSnapshot(targetDir);
+    });
+    expect(result.stdout).toContain("plan action=retire-smtp-lines resolves=smtp-lines-retirable");
+    expectRefused(result, targetDir, before, JOURNAL_REFUSAL);
+    expect(result.stderr).toContain(`${join(".orbit-restore", "restore.journal")}); run bash scripts/restore.sh --finish and follow what it says (it says when Orbit may be started), or --recover to roll it back.`);
+    expect(readFileSync(journalOf(targetDir), "utf8")).toBe('{"step":"half-done"}\n');
+  });
+
+  it("2: a .orbit-restore-pending marker planted at the prompt refuses the same way", async () => {
+    const targetDir = withMail();
+    const custom = scratchDir("orbit-backups-");
+    let before = "";
+    const result = await runRepairBetweenPlanAndExecute(targetDir, ["--execute", "--safe-only"], RETIRE_OPTIONS, () => {
+      plantJournal(targetDir, custom);
+      writeFileSync(markerOf(targetDir), `${journalOf(targetDir, custom)}\n`);
+      before = treeSnapshot(targetDir);
+    });
+    expect(result.stdout).toContain("plan action=retire-smtp-lines resolves=smtp-lines-retirable");
+    expectRefused(result, targetDir, before, JOURNAL_REFUSAL);
+    expect(result.stderr).toContain(journalOf(targetDir, custom));
+  });
+});
+
+describe("#1848 retire-smtp-lines is refused while the backup/restore lock cannot be had", () => {
+  it("3 and 6: a lock held by another process refuses with the running-right-now wording; once released a second run finishes", async () => {
+    const targetDir = withMail();
+    const release = await holdLock(lockOf(targetDir));
+    const before = treeSnapshot(targetDir);
+    try {
+      const result = runRepair(targetDir, ["--execute", "--safe-only"], { ...RETIRE_OPTIONS, ...MACHINE });
+      expectRefused(result, targetDir, before, LOCK_REASON);
+    } finally {
+      release();
+    }
+    expectCleanRunFinishes(targetDir);
+  });
+
+  it("3: the lock is looked for in ORBIT_BACKUP_DIR", async () => {
+    const targetDir = withMail();
+    const custom = scratchDir("orbit-backups-");
+    const release = await holdLock(lockOf(targetDir, custom));
+    const before = treeSnapshot(targetDir);
+    try {
+      const result = runRepair(targetDir, ["--execute", "--safe-only"], { ...RETIRE_OPTIONS, input: "y\n", env: { ...MACHINE.env, ...envFor(custom) } });
+      expectRefused(result, targetDir, before, LOCK_REASON);
+    } finally {
+      release();
+    }
+    expectCleanRunFinishes(targetDir, envFor(custom));
+  });
+
+  it("4: a lock that cannot be tested (flock exits 65) refuses with the can't-be-tested wording and changes nothing", () => {
+    const targetDir = withMail();
+    freeLock(targetDir);
+    const before = treeSnapshot(targetDir);
+    const shim = flockShim(`printf 'flock: %s: Bad file descriptor\\n' "\${@: -1}" >&2`, 65);
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], { ...RETIRE_OPTIONS, input: "y\n", env: { ...MACHINE.env, ...shim } });
+    expectRefused(result, targetDir, before, `${CANT_CHECK} ${lockOf(targetDir)} can't be tested on that filesystem (flock said: flock:`);
+    expect(result.stderr).toContain("Bad file descriptor");
+    expect(result.stderr).not.toContain("running right now");
+  });
+
+  it.skipIf(process.getuid?.() === 0)("5: a backups folder that cannot be searched is refused the same way and nothing changes", () => {
+    const targetDir = withMail();
+    const backups = join(targetDir, "backups");
+    mkdirSync(backups, { mode: 0o700 });
+    chmodSync(backups, 0o700);
+    const before = treeSnapshot(targetDir);
+    chmodSync(backups, 0o000);
+    try {
+      const result = runRepair(targetDir, ["--execute", "--safe-only"], { ...RETIRE_OPTIONS, ...MACHINE });
+      chmodSync(backups, 0o700);
+      expectRefused(result, targetDir, before, `repair can't check whether a backup, restore or export is running: ${backups} can't be searched`);
+    } finally {
+      chmodSync(backups, 0o700);
+    }
+  });
+});
+
+describe("#1848 the resume case goes through the same guard", () => {
+  it("7: a retirement interrupted at step=backed-up is refused while a journal exists, record and secret stay, and a later clean run finishes", () => {
+    const targetDir = withMail();
+    const crashed = runRepair(targetDir, ["--execute", "--safe-only"], { ...IMPORTED, upFails: true, ...MACHINE });
+    expect(crashed.stdout).not.toContain(DONE_LINE);
+    expect(existsSync(recordOf(targetDir))).toBe(true);
+    expect(envOf(targetDir)).not.toMatch(/^SMTP_/mu);
+    plantJournal(targetDir);
+    const before = treeSnapshot(targetDir);
+    const record = readFileSync(recordOf(targetDir), "utf8");
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], { ...IMPORTED, ...MACHINE });
+    expect(result.stdout).toContain(FAILED_LINE);
+    expect(result.stdout).toContain("execution result=failed done=0 failed=1");
+    expect(result.status).toBe(4);
+    expect(stderrLines(result).join("\n")).toContain(`${REFUSED}${JOURNAL_REFUSAL}`);
+    expect(composeUpCalls(result)).toEqual([]);
+    expect(treeSnapshot(targetDir)).toBe(before);
+    expect(readFileSync(recordOf(targetDir), "utf8")).toBe(record);
+    expect(existsSync(secretPath(targetDir))).toBe(true);
+    rmSync(join(targetDir, "backups", ".orbit-restore"), { recursive: true });
+    expectCleanRunFinishes(targetDir);
+    expect(existsSync(recordOf(targetDir))).toBe(false);
+  });
+});
+
+describe("#1848 the lock spans the whole retirement and is always released", () => {
+  it("8: the lock is held when compose up runs (flock -n fails) and is free after the run exits", () => {
+    const targetDir = withMail();
+    freeLock(targetDir);
+    const probe = lockProbeEnv(lockOf(targetDir));
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], { ...RETIRE_OPTIONS, input: "y\n", env: { ...MACHINE.env, ...probe.env } });
+    expect(result.stdout).toContain(DONE_LINE);
+    expect(probe.probes()).toEqual(["held"]);
+    expect(spawnSync("flock", ["-n", lockOf(targetDir), "true"]).status).toBe(0);
+  });
+
+  it("8: a refused run leaves the lock free too", async () => {
+    const targetDir = withMail();
+    const result = await runRepairBetweenPlanAndExecute(targetDir, ["--execute", "--safe-only"], RETIRE_OPTIONS, () => plantJournal(targetDir));
+    expect(result.status).toBe(4);
+    expect(spawnSync("flock", ["-n", lockOf(targetDir), "true"]).status).toBe(0);
+  });
+});
+
+describe("#1848 a refused retirement does not stop the batch, and leaks no lock", () => {
+  const permissionTrap = (targetDir) => chmodSync(join(targetDir, ".orbit-secrets", "session-secret"), 0o644);
+
+  it("10: another safe action in the same batch still shows result=done and the run exits 4", async () => {
+    const targetDir = withMail();
+    permissionTrap(targetDir);
+    const release = await holdLock(lockOf(targetDir));
+    try {
+      const result = runRepair(targetDir, ["--execute", "--safe-only"], { ...RETIRE_OPTIONS, ...MACHINE });
+      expect(result.stdout).toMatch(/^execute action=fix-permissions resolves=secret-permissions result=done$/mu);
+      expect(result.stdout).toContain(FAILED_LINE);
+      expect(result.stdout).toMatch(/^execution result=failed done=1 failed=1/mu);
+      expect(result.status).toBe(4);
+      expect(lstatSync(join(targetDir, ".orbit-secrets", "session-secret")).mode & 0o777).toBe(0o600);
+    } finally {
+      release();
+    }
+  });
+
+  // start-services needs Orbit's database stopped; the gate needs orbit-app running (a stopped app is no finding).
+  const BATCH = { db: "stopped", app: "running", mailStatus: answer("imported") };
+
+  it("12: a start-services in the same batch after a refused retirement is not refused as held (no lock handle leaks)", async () => {
+    const targetDir = withMail();
+    freeLock(targetDir);
+    // A refusal on retire's own checks (after the guard): the .env-orbit mode changes after the plan.
+    const result = await runRepairBetweenPlanAndExecute(targetDir, ["--execute", "--safe-only"], BATCH, () => chmodSync(join(targetDir, ".env-orbit"), 0o644));
+    expect(result.stdout).toContain(FAILED_LINE);
+    expect(result.stdout).toContain("execute action=start-services resolves=services-not-running result=done");
+    expect(result.stderr).not.toContain("running right now");
+    expect(result.stderr).not.toContain("start-services refused");
+    expect(spawnSync("flock", ["-n", lockOf(targetDir), "true"]).status).toBe(0);
+  });
+
+  it("12: a start-services in the same batch after a completed retirement is not refused as held", () => {
+    const targetDir = withMail();
+    freeLock(targetDir);
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], { ...BATCH, ...MACHINE });
+    expect(result.stdout).toContain(DONE_LINE);
+    expect(result.stdout).toContain("execute action=start-services resolves=services-not-running result=done");
+    expect(result.stderr).not.toContain("running right now");
+    expect(result.status).toBe(0);
   });
 });

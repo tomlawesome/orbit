@@ -83,7 +83,8 @@ Review fixes (2026-11-12, #1824): the handoff token is scoped to the
 and stripped from the live-test job (reach control on CE, not a fence:
 ADR-0020). The SBOM is bound by its sha256 into GitLab's signed predicate
 (ADR-0020) and checked before anything is copied, so a swapped SBOM is not
-attested on GHCR. `release-on-tag.yml` refuses a signed manifest whose commit
+attested on GHCR. (Since #1848, 43a, the SBOM is a signed attestation of its
+own, carried in the image archive rather than as a handoff file: ADR-0020.) `release-on-tag.yml` refuses a signed manifest whose commit
 is not the tagged commit or whose version is not the tag name. The `preview`
 channel tag moves only after GitLab's attestation is found on GHCR. Prune
 judges age by `published_at` and never deletes the current commit's handoff.

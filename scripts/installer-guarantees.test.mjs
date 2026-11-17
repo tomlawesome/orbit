@@ -457,3 +457,118 @@ describe("install.sh main-script citations in the guarantee catalogue (#1846)", 
     });
   }
 });
+
+/*
+ * #1859: every `repair.sh:` citation list in the catalogue, e.g.
+ * `repair.sh:2144-2161 (`read_compose_project_name`), 3101-3126 (`run_diagnosis`, Step 6)`
+ * (a list runs up to its " — " separator). Backticked names in a segment's
+ * parenthesis that resolve to a repair.sh function, or to a multi-line
+ * `readonly|declare -A|-a name=(` array (span: that line to the next line that
+ * is just `)`), are checked: the segment must overlap them, start at the first
+ * line / inside / inside the `#` comment block directly above, and end no later
+ * than the closing line. With several resolved names the range may span them:
+ * start >= the earliest comment-block start, end <= the latest closing line.
+ * A lowercase snake_case name (env vars like `ORBIT_X` are not checked) that resolves to nothing fails, unless written as
+ * `readonly `name``: those are single lines, and the cited lines must contain
+ * `name=`. `, Step X` additionally requires the cited start line to be that
+ * step's `# ---` header (`Steps 9 and 9b` / `Steps 1-3` mean the first named).
+ */
+describe("repair.sh function and step citations (#1859)", () => {
+  const repairLines = readFileSync(new URL("./repair.sh", import.meta.url), "utf8").split("\n");
+  const lineAt = (n) => repairLines[n - 1] ?? "";
+
+  function commentStart(first) {
+    let commentFrom = first;
+    while (commentFrom > 1 && lineAt(commentFrom - 1).trimStart().startsWith("#")) commentFrom -= 1;
+    return commentFrom;
+  }
+
+  function nameSpan(name) {
+    const fnFirst = repairLines.findIndex((l) => l.startsWith(`${name}() {`)) + 1;
+    if (fnFirst > 0) {
+      let last = fnFirst + 1;
+      while (last <= repairLines.length && !lineAt(last).startsWith("}")) last += 1;
+      return { first: fnFirst, commentFrom: commentStart(fnFirst), last };
+    }
+    const arrayHead = new RegExp(`^(?:readonly|declare) -[Aa] ${name}=\\(\\s*$`, "u");
+    const arrFirst = repairLines.findIndex((l) => arrayHead.test(l)) + 1;
+    if (arrFirst > 0) {
+      let last = arrFirst + 1;
+      while (last <= repairLines.length && lineAt(last).trim() !== ")") last += 1;
+      return { first: arrFirst, commentFrom: commentStart(arrFirst), last };
+    }
+    return null;
+  }
+
+  const segments = [];
+  const unresolved = [];
+  for (const line of catalogue.split("\n")) {
+    for (const list of line.matchAll(/repair\.sh:(.*?)(?: — |$)/gu)) {
+      const segmentPattern = /(\d+)(?:-(\d+))?\s*(?:\(((?:[^()]|\([^()]*\))*)\))?/gu;
+      for (const m of list[1].matchAll(segmentPattern)) {
+        const paren = m[3] ?? "";
+        const start = Number(m[1]);
+        const end = Number(m[2] ?? m[1]);
+        const text = m[0].trim();
+        const names = [];
+        const readonlyNames = [];
+        for (const n of paren.matchAll(/(readonly\s+)?`([A-Za-z_][A-Za-z0-9_]*)`/gu)) {
+          (n[1] ? readonlyNames : names).push(n[2]);
+        }
+        for (const name of readonlyNames) {
+          const hit = repairLines.slice(start - 1, end).some((l) => l.includes(`${name}=`));
+          if (!hit) unresolved.push(`${text}: readonly \`${name}\` - no line ${start}-${end} contains "${name}="`);
+        }
+        const spans = [];
+        for (const name of names) {
+          const span = nameSpan(name);
+          if (span) spans.push({ name, ...span });
+          else if (/^[a-z0-9]+(?:_[a-z0-9]+)+$/u.test(name)) unresolved.push(`${text}: \`${name}\` is neither a repair.sh function nor a multi-line array`);
+        }
+        if (spans.length === 0) continue;
+        segments.push({
+          text,
+          label: spans.map((s) => s.name).join(", "),
+          spans,
+          first: Math.min(...spans.map((s) => s.first)),
+          commentFrom: Math.min(...spans.map((s) => s.commentFrom)),
+          last: Math.max(...spans.map((s) => s.last)),
+          start,
+          end,
+          step: /,\s*Steps?\s+(\d+[a-z]?)(?![0-9A-Za-z])/u.exec(paren)?.[1],
+        });
+      }
+    }
+  }
+
+  it("finds function citations to check", () => {
+    expect(segments.length).toBeGreaterThanOrEqual(92) // 102 at #1859, minus ~10%;
+  });
+
+  it("every identifier-like name in a citation resolves", () => {
+    expect(unresolved).toEqual([]);
+  });
+
+  it("each citation covers its function or array and stays inside it", () => {
+    const problems = [];
+    for (const { text, label, spans, first, commentFrom, last, start, end } of segments) {
+      const real = spans.map((s) => `${s.name} is at repair.sh:${s.first}-${s.last} (comment from ${s.commentFrom})`).join("; ");
+      if (end < first || start > last) problems.push(`${text} [${label}]: does not overlap; ${real}`);
+      else if (start < commentFrom) problems.push(`${text} [${label}]: starts before the first name and its comment; ${real}`);
+      else if (end > last) problems.push(`${text} [${label}]: ends past the last closing line; ${real}`);
+    }
+    expect(problems).toEqual([]);
+  });
+
+  it("each `Step X` citation starts at that step's `# ---` header", () => {
+    const problems = [];
+    for (const { text, label, start, step } of segments) {
+      if (!step) continue;
+      const header = new RegExp(`^\\s*# ---.*\\bStep ${step}(?![0-9A-Za-z])`, "u");
+      if (!header.test(lineAt(start))) {
+        problems.push(`${text}: line ${start} of ${label} is not the "Step ${step}" header, it is: ${lineAt(start).trim()}`);
+      }
+    }
+    expect(problems).toEqual([]);
+  });
+});

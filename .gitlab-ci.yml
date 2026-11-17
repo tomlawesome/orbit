@@ -1156,6 +1156,63 @@ variables:
     su node -s /bin/bash -c "cd '$CI_PROJECT_DIR' && $1"
   }
 
+# --- release readiness ---------------------------------------------------------
+
+# A promotion merge request: `dev` into `preview`, or `preview` into `main`
+# (#1860). The same shape as the back-merge template's test, the other way
+# round; a hotfix into `main` and the back-merges are not promotions.
+.promotion_mr: &promotion_mr
+  if: $CI_PIPELINE_SOURCE == "merge_request_event" && (($CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == "dev" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "preview") || ($CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == "preview" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"))
+
+# Release readiness (#1860, owner 2026-11-16): first on every promotion merge
+# request, and everything else waits for it: `classify`, which has no `needs:`,
+# waits for it by stage, every job rooted at `classify` waits through it, and
+# the other jobs with no `needs:` wait by stage too. The three cheap static
+# checks (gitleaks, private-details, flake_check) keep `needs: []` and start
+# beside it (decided on #1860: under a minute each). Anything else that would
+# start beside it fails scripts/ci/release-readiness-ci.test.mjs. It runs every check scripts/release-readiness.mjs knows in one go and
+# ends with the list of every failure, so nothing long runs on a promotion that
+# was never ready (v0.3.9 lost two days to checks that only ran at the end).
+# The same script runs locally before the promotion is opened
+# (docs/releasing.md). On no other pipeline: its rule list ends in `never`,
+# and the `needs:` on it are optional, so those pipelines are unchanged.
+#
+# It reads earlier pipelines for the slow-gates check with the read-only
+# ORBIT_REUSE_TOKEN alone, as the reuse lookup does (#898), so it declares the
+# `ci-read-tokens` environment (owner 50a on #1860). It reads GHCR and the
+# handoff repository anonymously: both are public, and the handoff
+# repository's name comes from .github/workflows/publish-from-gitlab.yml.
+release_readiness:
+  stage: test
+  extends: .dind_service
+  image:
+    name: $NODE_IMAGE
+    pull_policy: if-not-present
+  timeout: 20m
+  # ORBIT_REUSE_TOKEN is scoped to this environment (owner, 2026-10-28; 50a on
+  # #1860). `prepare` records no deployment.
+  environment:
+    name: ci-read-tokens
+    action: prepare
+  rules:
+    - !reference [.dev-landing, job_rule]
+    - !reference [.backmerge-skip, job_rule]
+    - *batch_intake_skip
+    - *promotion_mr
+    - when: never
+  needs: []
+  variables:
+    # Full history: the record's signature is read from the last commit that
+    # touched it, and the containment check walks the target branch.
+    GIT_DEPTH: 0
+  script:
+    - *docker_cli
+    - |
+      set -eu
+      git fetch --quiet --tags origin \
+        "+refs/heads/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}:refs/remotes/origin/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}"
+      node scripts/release-readiness.mjs --target "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" --remote origin
+
 # --- classify ----------------------------------------------------------------
 
 # Selects the cheapest lane that still exercises every changed boundary, using
@@ -1196,6 +1253,9 @@ classify:
     - *nightly_browsers
     - *not_scheduled
     - when: on_success
+  # No `needs:`, on purpose: by stage order this waits for `release_readiness`
+  # (stage `test`) on a promotion merge request (#1860), and everything rooted
+  # here waits through it.
   variables:
     # Full history: the comparison below needs the base commit, and the
     # classifier reads two lockfile snapshots out of Git.
@@ -1464,12 +1524,12 @@ classify:
 fast:
   stage: fast
   extends: .node
-  # A hang detector, not a speed budget (#880, #1620). Set at 1.5x the 13m05s
-  # slowest green run of 2026-11-01, when this job also ran typecheck, lint and
-  # the web build (~4m); those moved to `fast_checks` (#1831), so 20m is now
-  # about 2x its Vitest share (~9m) and is kept until its runs are measured.
-  # This job runs test-backend.sh's `tests` phase.
-  timeout: 20m
+  # Still a hang detector, not a speed budget (#880, #1620). Measured: pipeline
+  # 4308 (2026-11-16) ran about 20m of wall time across 160 files on a
+  # changed-files run that touched repair.sh and install.sh, and hit the old
+  # 20m; 30m is about 1.5x that. Speeding up the slow repair and install tests
+  # is #1861. This job runs test-backend.sh's `tests` phase.
+  timeout: 30m
   rules:
     - !reference [.dev-landing, job_rule]
     - !reference [.backmerge-skip, job_rule]
@@ -4819,10 +4879,10 @@ sign_evidence:
     # this job's own checkout rather than read from the artifact.
     - job: record_image
       artifacts: true
-    # The SBOM, whose sha256 the attestation signs as sbomSha256 (#1824): the
-    # SBOM itself is not signed, so this is what makes a swapped one on the
-    # way to GitHub fail verification. handoff_to_github hands over the same
-    # artifact.
+    # The SBOM, attested itself as a second, spdxjson attestation over the
+    # same digest with the same key (D-S6 43a, #1848). It then travels inside
+    # the saved image layout, so a swapped one on the way to GitHub fails
+    # verification; nothing hands the file over separately.
     - job: supply_chain_image
       artifacts: true
   script:
@@ -4970,9 +5030,8 @@ handoff_to_github:
     # .sig is this job's artifact.
     - job: sign_evidence
       artifacts: true
-    # The SBOM.
-    - job: supply_chain_image
-      artifacts: true
+    # No supply_chain_image: the SBOM is an attestation sign_evidence made,
+    # carried in the saved layout (D-S6 43a).
     # The two launcher archives.
     - job: build_launcher
       artifacts: true
@@ -5013,10 +5072,13 @@ handoff_to_github:
       "$cosign" verify-attestation --local-image --key cosign.pub --type "$predicate_type" \
         --insecure-ignore-tlog=true "$ORBIT_HANDOFF_IMAGE_DIR" > /dev/null ||
         { echo "handoff_to_github: the saved image carries no attestation under cosign.pub; GitHub would refuse it" >&2; exit 1; }
+      # The SBOM travels the same way, as sign_evidence's spdxjson attestation.
+      "$cosign" verify-attestation --local-image --key cosign.pub --type spdxjson \
+        --insecure-ignore-tlog=true "$ORBIT_HANDOFF_IMAGE_DIR" > /dev/null ||
+        { echo "handoff_to_github: the saved image carries no SBOM (spdxjson) attestation under cosign.pub; GitHub would refuse it" >&2; exit 1; }
       tar -C "$ORBIT_HANDOFF_IMAGE_DIR" -cf "$ORBIT_HANDOFF_DIR/orbit-image.oci.tar" .
       for file in \
         .orbit-supply-chain/gitlab-tested-image.json \
-        .orbit-supply-chain/image.spdx.json \
         .orbit-supply-chain/orbit-release-manifest.json \
         .orbit-supply-chain/orbit-release-manifest.json.sig \
         .orbit-launcher-artifacts/orbit-launcher_linux_amd64.tar.gz \
@@ -5509,7 +5571,8 @@ install_bootstrap_latest:
 #                       evidence. Environment scope `ci-read-tokens` (owner,
 #                       2026-10-28), as are ORBIT_BASE_IMAGE_PULL_USER/_TOKEN:
 #                       only the jobs declaring that environment -- classify,
-#                       build_image, launch_timing -- receive them; scripts/gitlab-ci-lanes.test.mjs keeps that list
+#                       build_image, launch_timing, release_readiness (owner
+#                       50a, #1860) -- receive them; scripts/gitlab-ci-lanes.test.mjs keeps that list
 #                       and the readers equal.
 #                       Unset, every reuse verdict on a merge request
 #                       is "runs", the safe direction. The unset paths are covered by
