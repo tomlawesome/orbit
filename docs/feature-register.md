@@ -48,7 +48,9 @@ documents retained. Both sources use one editable draft-and-approval flow.
    verified against the SMTP envelope-recipient metadata preserved by the
    provider, must agree: an alias naming a different member leaves the message
    unattributed. An unsigned or unaligned `From` line never attributes a
-   message. Messages that match no one are held for association.
+   message. A message that matches no one is answered and deleted; one from a
+   listed address not yet checked is held until it is checked (ADR-0017
+   decision 4).
 3. Orbit places accepted messages into that user's private, durable ingestion
    queue. IMAP UIDVALIDITY and UID make reconnects and
    retries idempotent.
