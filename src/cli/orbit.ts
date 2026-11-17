@@ -34,7 +34,9 @@ import { isValidClientId, isValidOidcIssuer, normalizePublicOrigin } from "../li
 import { runConfigurationCommand } from "../lib/configuration-migration";
 import { readinessReport } from "../lib/deployment-readiness";
 import { InstallTransaction, type ManagedPath } from "../lib/install-transaction";
-import { createInContainerAdapter, preflightPostgresClient } from "../lib/in-container-adapter";
+import { createInContainerAdapter, createReadOnlyQuery, preflightPostgresClient } from "../lib/in-container-adapter";
+import { runUpdatePreflight } from "../db/contract-preconditions";
+import { MigrationIntegrityError } from "../db/migration-integrity";
 import {
   type BackupDockerAdapter,
   RecoveryBundleRefusal,
@@ -1493,6 +1495,40 @@ function writeInstallJournal(outcomePath: string | undefined): void {
   }
 }
 
+const UPDATE_PREFLIGHT_USAGE = "orbit: usage: orbit update --preflight --dir <deployment>";
+
+/**
+ * `orbit update --preflight --dir <deployment>` (#1779, note 58520 A): run by
+ * install.sh as a compose one-off on orbit-app, from the new image, while the
+ * old version still runs. Asks the live database whether this release's
+ * contract migrations would refuse. stdout: `update-preflight: ready` (exit
+ * 0), or a blocked line per precondition and its remedy (exit 1). Anything
+ * else is exit 2 with a bounded reason: no SQL, no connection string. Sends
+ * only reads.
+ */
+function commandUpdatePreflight(deployDirArg: string | undefined, args: string[]): void {
+  if (!isRunningAsEngineContainer()) fail("orbit: update runs only inside the Orbit image, started by scripts/install.sh.");
+  if (args.length !== 0) usageExit(UPDATE_PREFLIGHT_USAGE);
+  if (!deployDirArg) usageExit(`orbit: update --preflight requires --dir <deployment> (${UPDATE_PREFLIGHT_USAGE.slice("orbit: ".length)})`);
+  const targetDir = resolve(deployDirArg);
+  if (!existsSync(targetDir) || !statSync(targetDir).isDirectory()) usageExit("orbit: update --preflight: the deployment directory is not a directory.");
+  const unchecked = (reason: string): never => usageExit(`orbit: the database's readiness for this release could not be checked; ${reason}`);
+  runUpdatePreflight({
+    query: createReadOnlyQuery(),
+    migrationsFolder: resolve(process.env.DRIZZLE_MIGRATIONS_PATH ?? "drizzle"),
+  }).then(
+    (result) => {
+      process.stdout.write(`${result.lines.join("\n")}\n`);
+      process.exit(result.exitCode);
+    },
+    (error: unknown) => {
+      if (error instanceof RestoreEngineRefusal) unchecked(error.message);
+      if (error instanceof MigrationIntegrityError) unchecked("this image's migrations could not be read.");
+      unchecked("a query did not return the expected answer.");
+    },
+  );
+}
+
 function commandInstallOrUpdate(command: "install" | "update", deployDirArg: string | undefined, args: string[]): void {
   // F7: the engine runs inside its own image, never on a host.
   if (!isRunningAsEngineContainer()) {
@@ -1899,8 +1935,14 @@ function main(): void {
       case "configure":
         commandConfigure(deployDir, commandArgs);
         break;
-      case "install":
       case "update":
+        if (commandArgs.includes("--preflight")) {
+          commandUpdatePreflight(deployDirArg, commandArgs.filter((arg, index) => index !== commandArgs.indexOf("--preflight")));
+          break;
+        }
+        commandInstallOrUpdate(command, deployDirArg, commandArgs);
+        break;
+      case "install":
         commandInstallOrUpdate(command, deployDirArg, commandArgs);
         break;
       case "backup":
@@ -1958,7 +2000,7 @@ function main(): void {
 
 function failUsage(): never {
   fail(
-    "orbit: supported commands: check, configure [--init|--set-oidc-secret|--set-deployment-profile PRESET [MODEL]|--set-scanner on|off], backup, restore, export-recovery-bundle, import-recovery-bundle, end-maintenance, mail-sending-status, rewrap-kek --next-key-file <path>, auth recovery-link [--dir <deployment>] | install --dir <deployment> | update --dir <deployment>",
+    "orbit: supported commands: check, configure [--init|--set-oidc-secret|--set-deployment-profile PRESET [MODEL]|--set-scanner on|off], backup, restore, export-recovery-bundle, import-recovery-bundle, end-maintenance, mail-sending-status, rewrap-kek --next-key-file <path>, auth recovery-link [--dir <deployment>] | install --dir <deployment> | update --dir <deployment> | update --preflight --dir <deployment>",
   );
 }
 

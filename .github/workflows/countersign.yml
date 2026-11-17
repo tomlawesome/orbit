@@ -26,7 +26,9 @@ name: Countersign a stable release
 # digest gets before it must revalidate (#661). Here that window is measured
 # from the release's tag date, not today (#1644), so an older release can
 # still be countersigned after the fact; countersign straight after
-# promoting all the same.
+# promoting all the same. Not one published before #1824, though: its
+# attestation was never copied to GHCR, so this refuses it as missing.
+# Re-publish it first (docs/releasing.md, "Countersign the release").
 #
 # GitHub only offers a workflow_dispatch workflow once the file is on the
 # default branch, `main`, so this becomes available with the first stable
@@ -164,6 +166,7 @@ jobs:
           DIGEST: ${{ steps.release.outputs.digest }}
         run: |
           cosign="$(bash scripts/ci/ensure-cosign.sh)"
+          # cosign-public-upload: keyless countersign, public Rekor proof (ADR-0031)
           "${cosign}" sign --yes "${GHCR_IMAGE}@${DIGEST}"
 
       # Check the result the way an operator would, so a signature that landed
@@ -210,6 +213,7 @@ jobs:
       - name: Countersign the release manifest keyless
         run: |
           cosign="$(bash scripts/ci/ensure-cosign.sh)"
+          # cosign-public-upload: keyless countersign, public Rekor proof (ADR-0031)
           "${cosign}" sign-blob --yes \
             --bundle orbit-release-manifest.json.sigstore.json \
             orbit-release-manifest.json

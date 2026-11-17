@@ -1,11 +1,26 @@
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  CONFIGURATION_ROLLBACK_SUFFIX,
   classifyMigrationResult,
   installMigrateCommand,
+  migrateEnvironmentFile,
+  type MigrateEnvironmentFileOptions,
   runConfigurationMigration,
   runConfigurationPreflight,
   type ConfigurationMigrationTarget,
@@ -168,5 +183,215 @@ describe("classifyMigrationResult (#29)", () => {
       ok: false,
       message: "Configuration migration returned an unexpected result; restoring the previous deployment.",
     });
+  });
+});
+
+// #1834 slice 2: outside an install transaction the migration copies the
+// pre-migration file to `.env-orbit.orbit-config.rollback`. Once the new file
+// is confirmed good (strict re-parse, and the run's applied version, digest
+// and Compose project), all under the deploy lock, the copy is removed. If
+// any check fails the copy is kept, the live file is restored from it, and
+// the run fails with configuration_migration. No `docker compose config`
+// check: the engine runs in `docker run --network none` with no Docker
+// inside (issue note 59075).
+describe("standalone migration drops its rollback copy once the new file is confirmed (#1834)", () => {
+  const LEGACY = `ORBIT_IMAGE=${IMAGE}\n# operator comment\nSMTP_HOST=mail.example\n`;
+  const DIGEST = "sha256:" + "a".repeat(64);
+  const MIGRATED_STDOUT = `Orbit configuration: migrated from schema v0 version none digest none to schema v1 version v1.2.3 digest ${DIGEST}\n`;
+
+  function standalone(dir: string, extra: Partial<MigrateEnvironmentFileOptions> = {}): MigrateEnvironmentFileOptions {
+    return {
+      orbitImage: IMAGE,
+      appliedVersion: "v1.2.3",
+      appliedDigest: DIGEST,
+      composeProjectName: "orbit",
+      ...extra,
+    };
+  }
+
+  const envFile = (dir: string) => join(dir, ".env-orbit");
+  const copyOf = (dir: string) => `${envFile(dir)}${CONFIGURATION_ROLLBACK_SUFFIX}`;
+
+  it("removes the rollback copy after a confirmed migration, with stdout unchanged", () => {
+    const dir = deployment(LEGACY);
+    const result = migrateEnvironmentFile(envFile(dir), standalone(dir));
+    expect(result).toEqual({ status: 0, stdout: MIGRATED_STDOUT, stderr: "" });
+    expect(readFileSync(envFile(dir), "utf8")).toContain("COMPOSE_PROJECT_NAME=orbit\n");
+    expect(existsSync(copyOf(dir))).toBe(false);
+    expect(readdirSync(dir)).toEqual([".env-orbit"]);
+  });
+
+  function expectRestoredAndCopyKept(dir: string, result: { status: number; stdout: string; stderr: string }): void {
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toBe("configuration_migration\n");
+    expect(result.stdout).not.toMatch(/^Orbit configuration: migrated/);
+    expect(existsSync(copyOf(dir))).toBe(true);
+    expect(readFileSync(copyOf(dir), "utf8")).toBe(LEGACY);
+    expect(lstatSync(copyOf(dir)).mode & 0o777).toBe(0o600);
+    expect(readFileSync(envFile(dir), "utf8")).toBe(LEGACY);
+    expect(lstatSync(envFile(dir)).mode & 0o777).toBe(0o600);
+    expect(readdirSync(dir).filter((name) => name.includes("migrating"))).toEqual([]);
+    expect(existsSync(join(dir, ".orbit-engine.lock"))).toBe(false);
+  }
+
+  // The rename seam lands the scratch file and then spoils it, standing in for
+  // a write that did not produce what the migration meant to produce.
+  const spoilAfterRename = (spoil: (file: string) => void) => (from: string, to: string) => {
+    renameSync(from, to);
+    spoil(to);
+  };
+
+  it("keeps the copy and restores the live file when the new file fails the strict re-parse", () => {
+    const dir = deployment(LEGACY);
+    const result = migrateEnvironmentFile(
+      envFile(dir),
+      standalone(dir, { rename: spoilAfterRename((file) => appendFileSync(file, "not an assignment\n")) }),
+    );
+    expectRestoredAndCopyKept(dir, result);
+  });
+
+  it("keeps the copy and restores the live file when the new file holds a direct secret beside its _FILE twin", () => {
+    const dir = deployment(LEGACY);
+    const result = migrateEnvironmentFile(
+      envFile(dir),
+      standalone(dir, {
+        rename: spoilAfterRename((file) => appendFileSync(file, "SMTP_PASSWORD=direct\nSMTP_PASSWORD_FILE=/run/secrets/smtp\n")),
+      }),
+    );
+    expectRestoredAndCopyKept(dir, result);
+  });
+
+  it.each([
+    ["ORBIT_CONFIG_APPLIED_VERSION", "ORBIT_CONFIG_APPLIED_VERSION=v1.2.3", "ORBIT_CONFIG_APPLIED_VERSION=v9.9.9"],
+    ["ORBIT_CONFIG_APPLIED_DIGEST", `ORBIT_CONFIG_APPLIED_DIGEST=${DIGEST}`, `ORBIT_CONFIG_APPLIED_DIGEST=sha256:${"b".repeat(64)}`],
+    ["COMPOSE_PROJECT_NAME", "COMPOSE_PROJECT_NAME=orbit", "COMPOSE_PROJECT_NAME=another"],
+  ])("keeps the copy and restores the live file when the new file's %s is not this run's value", (_key, from, to) => {
+    const dir = deployment(LEGACY);
+    const result = migrateEnvironmentFile(
+      envFile(dir),
+      standalone(dir, {
+        rename: spoilAfterRename((file) => writeFileSync(file, readFileSync(file, "utf8").replace(from, to))),
+      }),
+    );
+    expectRestoredAndCopyKept(dir, result);
+  });
+
+  it("in transaction mode makes no copy and leaves an unrelated leftover copy untouched", () => {
+    const dir = deployment(LEGACY);
+    expect(migrateEnvironmentFile(envFile(dir), standalone(dir, { transaction: true })).status).toBe(0);
+    expect(existsSync(copyOf(dir))).toBe(false);
+
+    const withLeftover = deployment(LEGACY);
+    writeFileSync(copyOf(withLeftover), "ORBIT_IMAGE=something-else\n", { mode: 0o600 });
+    expect(migrateEnvironmentFile(envFile(withLeftover), standalone(withLeftover, { transaction: true })).status).toBe(0);
+    expect(readFileSync(copyOf(withLeftover), "utf8")).toBe("ORBIT_IMAGE=something-else\n");
+  });
+
+  it("an already-current file is reported, left untouched, and gets no copy", () => {
+    const dir = deployment(LEGACY);
+    expect(migrateEnvironmentFile(envFile(dir), standalone(dir)).status).toBe(0);
+    const migrated = readFileSync(envFile(dir), "utf8");
+    rmSync(copyOf(dir), { force: true });
+
+    const result = migrateEnvironmentFile(envFile(dir), standalone(dir));
+    expect(result).toEqual({
+      status: 0,
+      stdout: `Orbit configuration: already current schema v1 version v1.2.3 digest ${DIGEST}\n`,
+      stderr: "",
+    });
+    expect(readFileSync(envFile(dir), "utf8")).toBe(migrated);
+    expect(readdirSync(dir)).toEqual([".env-orbit"]);
+  });
+
+  it("an identical leftover from an interrupted run is replaced, and the successful run ends with no copy", () => {
+    const dir = deployment(LEGACY);
+    writeFileSync(copyOf(dir), LEGACY, { mode: 0o600 });
+    const result = migrateEnvironmentFile(envFile(dir), standalone(dir));
+    expect(result).toEqual({ status: 0, stdout: MIGRATED_STDOUT, stderr: "" });
+    expect(readdirSync(dir)).toEqual([".env-orbit"]);
+  });
+
+  // #1834 slice 4: a run killed between the rename and the confirm step, or one
+  // whose removal of the copy failed, leaves a current file and a copy that
+  // nothing points at. The re-run with the same target is "already current".
+  function currentWithLeftover(): { dir: string; migrated: string } {
+    const dir = deployment(LEGACY);
+    expect(migrateEnvironmentFile(envFile(dir), standalone(dir)).status).toBe(0);
+    const migrated = readFileSync(envFile(dir), "utf8");
+    return { dir, migrated };
+  }
+  const ALREADY_CURRENT = {
+    status: 0,
+    stdout: `Orbit configuration: already current schema v1 version v1.2.3 digest ${DIGEST}\n`,
+    stderr: "",
+  };
+
+  it("already current with a leftover copy (mode 600) byte-identical to a file that passes the strict parse: the copy is removed, the file untouched", () => {
+    const { dir, migrated } = currentWithLeftover();
+    writeFileSync(copyOf(dir), migrated, { mode: 0o600 });
+    const result = migrateEnvironmentFile(envFile(dir), standalone(dir));
+    expect(result).toEqual(ALREADY_CURRENT);
+    expect(existsSync(copyOf(dir))).toBe(false);
+    expect(readFileSync(envFile(dir), "utf8")).toBe(migrated);
+    expect(readdirSync(dir)).toEqual([".env-orbit"]);
+  });
+
+  // Review of a7aa25e5: a copy that differs (the pre-migration file a killed run leaves) is kept and named.
+  for (const [label, content] of [
+    ["the pre-migration file a killed run leaves", LEGACY],
+    ["some other content", "ORBIT_IMAGE=something-else\n"],
+  ] as const) {
+    it(`already current with a leftover copy that differs (${label}): kept, one stderr line names it and the next step, still "already current" with exit 0`, () => {
+      const { dir, migrated } = currentWithLeftover();
+      writeFileSync(copyOf(dir), content, { mode: 0o600 });
+      const result = migrateEnvironmentFile(envFile(dir), standalone(dir));
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe(ALREADY_CURRENT.stdout);
+      const lines = result.stderr.split("\n").filter(Boolean);
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain(copyOf(dir));
+      expect(lines[0]).toMatch(/remove/iu);
+      expect(lines[0]).toMatch(/working/iu);
+      expect(lines[0]).toMatch(/repair/iu);
+      expect(readFileSync(copyOf(dir), "utf8")).toBe(content);
+      expect(lstatSync(copyOf(dir)).mode & 0o777).toBe(0o600);
+      expect(readFileSync(envFile(dir), "utf8")).toBe(migrated);
+    });
+  }
+
+  it("already current with a leftover copy that is a symlink: refused, the link, its target and the file untouched", () => {
+    const { dir, migrated } = currentWithLeftover();
+    const outside = mkdtempSync(join(tmpdir(), "orbit-migration-outside-"));
+    dirs.push(outside);
+    const linkTarget = join(outside, "elsewhere");
+    // Byte-identical to the live file, so only the symlink rule can refuse it.
+    writeFileSync(linkTarget, migrated, { mode: 0o600 });
+    symlinkSync(linkTarget, copyOf(dir));
+    const result = migrateEnvironmentFile(envFile(dir), standalone(dir));
+    expect(result).toEqual({ status: 1, stdout: "", stderr: "configuration_migration\n" });
+    expect(lstatSync(copyOf(dir)).isSymbolicLink()).toBe(true);
+    expect(readFileSync(linkTarget, "utf8")).toBe(migrated);
+    expect(readFileSync(envFile(dir), "utf8")).toBe(migrated);
+  });
+
+  it("already current with a leftover copy that is not mode 600: refused, the copy and the file untouched", () => {
+    const { dir, migrated } = currentWithLeftover();
+    // Byte-identical to the live file, so only the mode rule can refuse it.
+    writeFileSync(copyOf(dir), migrated, { mode: 0o644 });
+    chmodSync(copyOf(dir), 0o644);
+    const result = migrateEnvironmentFile(envFile(dir), standalone(dir));
+    expect(result).toEqual({ status: 1, stdout: "", stderr: "configuration_migration\n" });
+    expect(readFileSync(copyOf(dir), "utf8")).toBe(migrated);
+    expect(lstatSync(copyOf(dir)).mode & 0o777).toBe(0o644);
+    expect(readFileSync(envFile(dir), "utf8")).toBe(migrated);
+  });
+
+  it("a leftover copy that differs from the file still refuses, changing neither file", () => {
+    const dir = deployment(LEGACY);
+    writeFileSync(copyOf(dir), "ORBIT_IMAGE=something-else\n", { mode: 0o600 });
+    const result = migrateEnvironmentFile(envFile(dir), standalone(dir));
+    expect(result).toEqual({ status: 1, stdout: "", stderr: "configuration_migration\n" });
+    expect(readFileSync(envFile(dir), "utf8")).toBe(LEGACY);
+    expect(readFileSync(copyOf(dir), "utf8")).toBe("ORBIT_IMAGE=something-else\n");
   });
 });

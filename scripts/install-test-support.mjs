@@ -287,6 +287,14 @@ function compose() {
     }
     exit(0);
   }
+  // #1779: the update readiness one-off (compose run, orbit-app, update --preflight).
+  // It records its argv and the ORBIT_IMAGE it was given, prints FAKE_READINESS_STDOUT / FAKE_READINESS_STDERR and exits FAKE_READINESS_EXIT (default 0).
+  if (sub === "run" && argv.includes("orbit-app")) {
+    if (env.FAKE_STATE_DIR) fs.appendFileSync(env.FAKE_STATE_DIR + "/readiness-oneoff.jsonl", JSON.stringify({ argv: argv.slice(1), orbitImage: env.ORBIT_IMAGE, composeFile: env.COMPOSE_FILE }) + "\\n");
+    if (env.FAKE_READINESS_STDOUT) out(env.FAKE_READINESS_STDOUT);
+    if (env.FAKE_READINESS_STDERR) process.stderr.write(env.FAKE_READINESS_STDERR);
+    exit(Number(env.FAKE_READINESS_EXIT ?? 0));
+  }
   // #1170: the scanner-off stop of a hidden orbit-clamav (compose rm -s -f).
   if (sub === "rm" && env.FAKE_COMPOSE_RM_FAIL === "1") exit(1);
   // #1542: a dropped service that cannot be stopped.
@@ -395,11 +403,17 @@ function compose() {
     // #1817: orbit mail-sending-status run in the app container. FAKE_MAIL_SENDING_STATUS is its stdout line, FAKE_MAIL_SENDING_STATUS_EXIT its exit status (default 0); unset, the command does not exist (an older image) and exits 1.
     if (text.includes("mail-sending-status")) {
       if (env.FAKE_MAIL_SENDING_STATUS === undefined) exit(1);
+      // #1834: FAKE_MAIL_SENDING_STATUS_AFTER_SECRET_GONE answers instead once .orbit-secrets/smtp-password is deleted: the re-check after the retirement (its exit status is FAKE_MAIL_SENDING_STATUS_AFTER_SECRET_GONE_EXIT, default 0).
+      if (env.FAKE_MAIL_SENDING_STATUS_AFTER_SECRET_GONE !== undefined && !fs.existsSync(".orbit-secrets/smtp-password")) {
+        out(env.FAKE_MAIL_SENDING_STATUS_AFTER_SECRET_GONE + "\\n");
+        exit(Number(env.FAKE_MAIL_SENDING_STATUS_AFTER_SECRET_GONE_EXIT ?? 0));
+      }
       out(env.FAKE_MAIL_SENDING_STATUS + "\\n");
       exit(Number(env.FAKE_MAIL_SENDING_STATUS_EXIT ?? 0));
     }
     const probe = ["orbit-tika", "orbit-ollama", "orbit-clamav", "orbit-db", "orbit-app"].find((name) => text.includes(name));
-    if (env.FAKE_HANG_PROBE && env.FAKE_HANG_PROBE === probe) hang("probe");
+    // FAKE_HANG_PROBE_AFTER_UP=1 hangs the probe only once up has been called, so a pre-engine readiness probe (#1779) is not caught.
+    if (env.FAKE_HANG_PROBE && env.FAKE_HANG_PROBE === probe && (env.FAKE_HANG_PROBE_AFTER_UP !== "1" || fs.existsSync((env.FAKE_STATE_DIR ?? "/nonexistent") + "/up-called"))) hang("probe");
     if (after.at(-1) === "true") exit(env.FAKE_APP_RUNNING === "1" ? 0 : 1);
     if ((env.FAKE_PROBE_FAIL ?? "").split(",").includes(probe)) exit(1);
     const transient = json("FAKE_PROBE_FAIL_TIMES", {})[probe];
@@ -682,6 +696,11 @@ export function runInstall(targetDir, envOverrides = {}, args = []) {
     ...result,
     calls: readOptional(join(logDir, "calls.log")),
     engineRuns: readOptional(join(logDir, "engine.log"))
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line)),
+    // #1779: the update readiness one-offs the fake docker recorded.
+    oneOffs: readOptional(join(logDir, "readiness-oneoff.jsonl"))
       .split("\n")
       .filter(Boolean)
       .map((line) => JSON.parse(line)),

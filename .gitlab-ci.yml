@@ -1585,6 +1585,8 @@ fast_checks:
     - pnpm install --frozen-lockfile
     # Unprivileged, as in `fast`. See .drop_to_node.
     - *drop_to_node
+    # No cosign telemetry, and no Rekor upload except the marked public proof (#1841).
+    - orbit_as_node 'node scripts/ci/check-cosign-calls.mjs'
     - orbit_as_node 'ORBIT_TEST_PHASE=checks bash scripts/test-backend.sh'
     # The render proof, run here as well as inside the image: the container
     # build is the authoritative gate but it is minutes away, and this fails in

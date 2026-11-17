@@ -106,6 +106,20 @@ This rule is for stable installs. A preview install (`ORBIT_CHANNEL=preview`,
 with a preview manifest) can update from any earlier version, and never to
 an older one ([Installing a preview build](installing-preview.md)).
 
+### The database is checked before anything changes
+
+Before it replaces anything, the installer asks Orbit's running database
+whether it is ready for the new release. Some releases remove data the
+previous version was still moving in the background, for example documents
+still being moved under the household key. Then the update stops with
+`update-preflight: blocked documents.content_sha256 rows=<n>` and says how
+many remain. Nothing has changed: leave Orbit running, and it finishes in the
+background, about 200 documents a minute. Run the update again later. If
+Orbit is locked because its household key is missing, restore the key and let
+Orbit run first. If the database was not running, the installer cannot ask:
+it says so on one line and goes on. To have it checked, start Orbit before you
+update.
+
 ## Go back after a failed update
 
 If Orbit has started on the new build but the database update or sign-in then

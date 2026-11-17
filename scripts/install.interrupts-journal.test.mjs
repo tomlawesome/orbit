@@ -910,6 +910,36 @@ describe("install.sh: the journal lists files, and the person's files are moved,
     expect(readOptional(join(stamp, "moved", "notes.txt"))).toBe(personNotes);
   });
 
+  // #1834 slice 4: a run killed hard leaves its originals/ (the operator's own
+  // pre-provisioned files) in its dated folder. Later runs name it and never
+  // delete it, as they do moved/.
+  it("slice 4 (#1834): an earlier killed run's originals/ is named and left byte for byte, by a success and by a failure", () => {
+    const plant = (targetDir) => {
+      const old = join(backupsDir(targetDir), "20200101T000000Z");
+      mkdirSync(join(old, "originals", ".orbit-secrets"), { recursive: true, mode: 0o700 });
+      chmodSync(backupsDir(targetDir), 0o700);
+      chmodSync(old, 0o700);
+      writeFileSync(join(old, "originals", ".env-orbit"), "OIDC_CLIENT_ID=from-an-earlier-run\n", { mode: 0o600 });
+      writeFileSync(join(old, "originals", ".orbit-secrets", "oidc-client-secret"), "earlier-run-secret", { mode: 0o600 });
+      return { originals: join(old, "originals"), oldBefore: treeSnapshot(old), old };
+    };
+    const names = (result, path) => `${result.stdout}\n${result.stderr}`.includes(path);
+
+    const succeeding = recoveryFixture();
+    const kept = plant(succeeding.targetDir);
+    const success = runInstall(succeeding.targetDir, succeeding.environment);
+    expect(success.status).toBe(0);
+    expect(treeSnapshot(kept.old)).toEqual(kept.oldBefore);
+    expect(names(success, kept.originals)).toBe(true);
+
+    const failing = recoveryFixture();
+    const keptToo = plant(failing.targetDir);
+    const failure = runInstall(failing.targetDir, { ...failing.environment, ...committedCanned(), ...personNotesWrite, FAKE_COMPOSE_UP_FAIL: "1" });
+    expect(failure.status).toBe(1);
+    expect(treeSnapshot(keptToo.old)).toEqual(keptToo.oldBefore);
+    expect(names(failure, keptToo.originals)).toBe(true);
+  });
+
   it.each([["a symlink"], ["a dangling symlink"], ["a regular file"]])("B9: %s at orbit-install-backups is refused before anything changes", (kind) => {
     const { targetDir, environment } = recoveryFixture();
     const linkTarget = scratchDir("backups-link-target");
