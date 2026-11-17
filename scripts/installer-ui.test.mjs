@@ -406,6 +406,44 @@ describe("installer semantic UI", () => {
     expect(result.stdout).toContain("CHOICE=update");
   });
 
+  it("echoes typed text on a dumb terminal that does not repaint (#1874 O-F1)", () => {
+    const result = runPty(
+      'source "$1"; exec 3<>/dev/tty; value="$(installer_ui_read_text 3 "Proceed (yes/N): " 64)"; printf "\\nVALUE=%s\\n" "$value"',
+      "yesplease\r",
+      { TERM: "dumb" },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("VALUE=yesplease");
+    // Once for the echo as typed, once for VALUE=.
+    expect(result.stdout.split("yesplease").length - 1).toBe(2);
+  });
+
+  it("erases the last typed character on a dumb terminal (#1874 O-F5)", () => {
+    const result = runPty(
+      'source "$1"; exec 3<>/dev/tty; value="$(installer_ui_read_text 3 "Answer: " 64)"; printf "\\nVALUE=%s\\n" "$value"',
+      "abcX\x7f\r",
+      { TERM: "dumb" },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toMatch(/VALUE=abc\r?\n/u);
+    expect(result.stdout).toContain("abcX\b \b");
+  });
+
+  it("does not echo a secret on a dumb terminal (#1874)", () => {
+    const secret = "not-echoed-dumb-value";
+    const result = runPty(
+      'source "$1"; exec 3<>/dev/tty; value="$(installer_ui_read_secret 3 "Secret: " 64)"; printf "\\nLENGTH=%s\\n" "${#value}"',
+      `${secret}\r`,
+      { TERM: "dumb" },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).not.toContain(secret);
+    expect(result.stdout).toContain(`LENGTH=${secret.length}`);
+  });
+
   it("treats Escape as cancellation in the numbered fallback", () => {
     const result = runPty(
       'source "$1"; exec 3<>/dev/tty; if choice="$(installer_ui_select 3 "Choose" install install Install update Update)"; then printf "CHOICE=%s\\n" "$choice"; else printf "STATUS=%s\\n" "$?"; fi',
