@@ -56,6 +56,12 @@ export default defineConfig({
     sveltekit({
       adapter: adapter(),
       csp,
+      /* A tab left open across an update finds out: kit checks for a new
+         version every five minutes (its default, 0, never checks) and sets
+         `updated.current`. That alone reloads nothing; the root layout's
+         beforeNavigate turns the next in-app navigation into a full page
+         load once it is set (#1738 A-F1). */
+      version: { pollInterval: 5 * 60 * 1000 },
       alias: {
         /* The engine's modules import each other as `@/lib/...`, a path alias in
            the root tsconfig that means nothing here. Declaring it to SvelteKit
