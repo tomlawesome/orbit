@@ -541,6 +541,9 @@
   $effect(() => {
     if (!leaveOpen && !leaving) { answer?.(false); answer = null; }
   });
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let resetLeaving;
+  onDestroy(() => clearTimeout(resetLeaving));
   function leave() {
     leaving = true;
     const resume = answer;
@@ -556,6 +559,9 @@
       /* The layout carries on to the address the held-back navigation was
          already going to. */
       setTimeout(() => resume?.(true), 0);
+      /* If the resumed navigation fails or stays here, leaving asks again
+         (as openHeld, M2): a landed one destroys this form first. */
+      resetLeaving = setTimeout(() => { leaving = false; }, 1500);
     };
     addEventListener("popstate", go);
     setTimeout(go, 350);

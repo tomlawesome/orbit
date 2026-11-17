@@ -16,14 +16,29 @@ export function holdUnsaved(isDirty, options = {}) {
   return () => { held.delete(entry); };
 }
 
+/** True once the page has agreed to be thrown away by a reload (#1879 review). */
+let leaving = false;
+
+/**
+ * The page is about to unload on purpose, after the reader said yes: until the
+ * returned undo runs, every holder reads clean, so no second prompt follows.
+ * @returns {() => void}
+ */
+export function markLeaving() {
+  leaving = true;
+  return () => { leaving = false; };
+}
+
 /** @returns {boolean} true while any held isDirty() is true */
 export function anyUnsaved() {
+  if (leaving) return false;
   for (const entry of held) if (entry.isDirty()) return true;
   return false;
 }
 
 /** @returns {(() => Promise<boolean>) | undefined} the first dirty holder's own ask; undefined when none is dirty or it has none */
 export function unsavedAsker() {
+  if (leaving) return undefined;
   for (const entry of held) if (entry.isDirty()) return entry.ask;
   return undefined;
 }

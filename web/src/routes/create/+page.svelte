@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
   import { resolve } from "$app/paths";
-  import { holdUnsaved } from "$lib/unsaved.js";
+  import { anyUnsaved, holdUnsaved } from "$lib/unsaved.js";
   import "./create.css";
   import { mountCreate } from "./create.behaviour.js";
   import { mountConstellations } from "$lib/backdrops/constellations.js";
@@ -139,7 +139,7 @@
       browser's own beforeunload prompt is the only honest warning left.
       @param {BeforeUnloadEvent} event */
   function onBeforeUnload(event) {
-    if (!form?.isDirty()) return;
+    if (!anyUnsaved()) return;
     event.preventDefault();
     event.returnValue = "";
   }

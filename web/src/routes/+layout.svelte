@@ -52,7 +52,7 @@
   import { onMount } from "svelte";
   import { page, updated } from "$app/state";
   import { beforeNavigate, goto } from "$app/navigation";
-  import { anyUnsaved, unsavedAsker } from "$lib/unsaved.js";
+  import { anyUnsaved, markLeaving, unsavedAsker } from "$lib/unsaved.js";
   import { reloadWhenUpdated } from "$lib/reload-when-updated.js";
   import { readSession, savePreferences } from "$lib/data/workspace.js";
   import { applyTheme } from "$lib/theme-swatches.js";
@@ -68,7 +68,8 @@
       isDirty: anyUnsaved,
       ask: () => confirm("Discard this entry? What you've typed will be lost."),
       holderAsk: unsavedAsker(),
-    }, (href) => goto(href));
+      leaving: markLeaving,
+    }, (href) => goto(href).catch(() => { /* a refused navigation leaves the page as it was */ }));
   });
 
   /* The server is the source of truth for theme and text size (#1180);

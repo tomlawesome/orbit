@@ -16,7 +16,7 @@
  * @param {{ willUnload: boolean, to: { url: URL } | null, cancel?: () => void }} navigation
  * @param {{ current: boolean }} updated  kit's `updated` from `$app/state`
  * @param {(href: string) => void} go  how to load a page; `location.href = ...` in the browser
- * @param {{ isDirty: () => boolean, ask: () => boolean, holderAsk?: () => Promise<boolean> }} [guard]
+ * @param {{ isDirty: () => boolean, ask: () => boolean, holderAsk?: () => Promise<boolean>, leaving?: () => unknown }} [guard]
  * @param {(href: string) => unknown} [goto]  an in-app navigation, for a holder's resumed one
  * @returns {Promise<void> | void}
  */
@@ -28,8 +28,10 @@ export function reloadWhenUpdated(navigation, updated, go, guard, goto) {
       navigation.cancel?.();
       return guard.holderAsk().then((yes) => {
         if (!yes) return;
-        if (updated.current) go(href);
-        else goto?.(href);
+        if (updated.current) {
+          guard.leaving?.();
+          go(href);
+        } else return goto?.(href);
       });
     }
     if (!guard.ask()) {
@@ -37,5 +39,9 @@ export function reloadWhenUpdated(navigation, updated, go, guard, goto) {
       return;
     }
   }
-  if (updated.current) go(href);
+  if (updated.current) {
+    /* A yes was given (or nothing was typed): the reload must not ask again. */
+    guard?.leaving?.();
+    go(href);
+  }
 }
