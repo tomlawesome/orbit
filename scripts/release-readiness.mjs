@@ -396,7 +396,7 @@ export function parseReleaseRecord(text) {
 // --- real lookups --------------------------------------------------------------
 
 /** spawnSync with a time limit; a process that runs out of time throws, naming the limit. */
-function run(command, args, options = {}) {
+export function runWithLimit(command, args, options = {}) {
   const timeout = options.timeout ?? SCRIPT_TIMEOUT_MS;
   const result = spawnSync(command, args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, ...options, timeout });
   if (result.error?.code === "ETIMEDOUT" || (result.signal === "SIGTERM" && result.status === null)) {
@@ -405,8 +405,18 @@ function run(command, args, options = {}) {
   return result;
 }
 
+/** Environment names a child script may see; everything else (tokens included) stays out. */
+const CHILD_ENV_NAMES = ["PATH", "HOME", "USER", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "TMPDIR", "XDG_RUNTIME_DIR", "DOCKER_CONFIG", "DOCKER_HOST", "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy"];
+
+/** The allowlisted environment for a child script, plus any values the lookup sets itself. */
+function scriptEnv(extra = {}) {
+  const env = {};
+  for (const name of CHILD_ENV_NAMES) if (process.env[name] !== undefined) env[name] = process.env[name];
+  return { ...env, ...extra };
+}
+
 function git(repoDir, args) {
-  const result = run("git", args, { cwd: repoDir, timeout: GIT_TIMEOUT_MS });
+  const result = runWithLimit("git", args, { cwd: repoDir, timeout: GIT_TIMEOUT_MS });
   if (result.status !== 0) {
     const said = (result.stderr || "").split("\n").map((line) => line.trim()).filter(Boolean);
     throw new Error(`git ${args[0]} failed: ${said.find((line) => /^(?:fatal|error):/u.test(line)) ?? said.at(-1) ?? `exit ${result.status}`}`);
@@ -414,7 +424,7 @@ function git(repoDir, args) {
   return result.stdout.trim();
 }
 
-const gitSucceeds = (repoDir, args) => run("git", args, { cwd: repoDir, timeout: GIT_TIMEOUT_MS }).status === 0;
+const gitSucceeds = (repoDir, args) => runWithLimit("git", args, { cwd: repoDir, timeout: GIT_TIMEOUT_MS }).status === 0;
 
 function pickRemote(repoDir, requested) {
   if (requested) return requested;
@@ -430,30 +440,60 @@ function scriptTail(result) {
 }
 
 /**
- * GET a JSON body with a time limit and a size cap. `what` names the call in
- * errors; the URL's query and the headers are never in them.
+ * GET a JSON body with a time limit that runs until the body is read and a size
+ * cap counted as bytes arrive. `what` names the call in errors; the URL's query
+ * and the headers are never in them.
  */
-export async function fetchJson(url, headers, what) {
+export async function fetchJson(url, headers, what, { timeoutMs = FETCH_TIMEOUT_MS, maxBytes = MAX_JSON_BYTES } = {}) {
+  const signal = AbortSignal.timeout(timeoutMs);
+  const timedOut = () => new Error(`${what} did not answer within ${timeoutMs / 1000}s`);
+  const tooBig = () => new Error(`${what} sent more than the ${maxBytes}-byte cap`);
+  // A stub or a stalled socket may ignore the signal, so every wait also races it.
+  const limited = (promise) =>
+    new Promise((resolve, reject) => {
+      if (signal.aborted) return reject(timedOut());
+      const onAbort = () => reject(timedOut());
+      signal.addEventListener("abort", onAbort, { once: true });
+      promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+    });
+  const isTimeout = (error) => error?.name === "TimeoutError" || error?.name === "AbortError";
   let response;
   try {
-    response = await fetch(url, { headers, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+    response = await limited(fetch(url, { headers, signal }));
   } catch (error) {
-    if (error?.name === "TimeoutError" || error?.name === "AbortError") {
-      throw new Error(`${what} did not answer within ${FETCH_TIMEOUT_MS / 1000}s`);
-    }
+    if (isTimeout(error) || signal.aborted) throw timedOut();
     throw new Error(`${what} could not be reached: ${errorText(error)}`);
   }
   if (!response.ok) throw new Error(`${what} answered ${response.status}`);
   const declared = Number(response.headers?.get?.("content-length"));
-  if (declared > MAX_JSON_BYTES) throw new Error(`${what} sent ${declared} bytes, over the ${MAX_JSON_BYTES}-byte cap`);
-  if (typeof response.text === "function") {
-    const text = await response.text();
-    if (Buffer.byteLength(text) > MAX_JSON_BYTES) throw new Error(`${what} sent more than the ${MAX_JSON_BYTES}-byte cap`);
-    return JSON.parse(text);
+  if (declared > maxBytes) throw new Error(`${what} sent ${declared} bytes, over the ${maxBytes}-byte cap`);
+  if (!response.body || typeof response.body.getReader !== "function") {
+    // No body stream (a stub that only parses): check the size after parsing.
+    const body = await limited(response.json());
+    if (Buffer.byteLength(JSON.stringify(body) ?? "") > maxBytes) throw tooBig();
+    return body;
   }
-  const body = await response.json();
-  if (Buffer.byteLength(JSON.stringify(body) ?? "") > MAX_JSON_BYTES) throw new Error(`${what} sent more than the ${MAX_JSON_BYTES}-byte cap`);
-  return body;
+  const reader = response.body.getReader();
+  const chunks = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await limited(reader.read());
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        reader.cancel().catch(() => {});
+        throw tooBig();
+      }
+      chunks.push(value);
+    }
+  } catch (error) {
+    if (error?.message === tooBig().message) throw error;
+    reader.cancel().catch(() => {});
+    if (isTimeout(error) || signal.aborted || error?.message === timedOut().message) throw timedOut();
+    throw new Error(`${what} could not be read: ${errorText(error)}`);
+  }
+  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
 /** The handoff repository's name, from the publish workflow (a non-secret source; #1824). */
@@ -520,7 +560,7 @@ async function newestSameTreeDevPipelineJobs({ repoDir, remote, sourceSha }) {
 }
 
 function resolveDigest(reference) {
-  const result = run("docker", ["buildx", "imagetools", "inspect", reference], { timeout: 2 * 60 * 1000 });
+  const result = runWithLimit("docker", ["buildx", "imagetools", "inspect", reference], { timeout: 2 * 60 * 1000 });
   if (result.error) throw new Error("docker buildx is not available to read GHCR");
   const match = new RegExp(`^Digest:\\s+(${ORBIT_DIGEST_TOKEN_PATTERN.source})\\s*$`, "mu").exec(result.stdout ?? "");
   return match ? match[1] : null;
@@ -540,7 +580,7 @@ export function realLookups({ repoDir, target, remote: requestedRemote }) {
     }
   };
   const show = (path) => {
-    const result = run("git", ["show", `HEAD:${path}`], { cwd: repoDir, timeout: GIT_TIMEOUT_MS });
+    const result = runWithLimit("git", ["show", `HEAD:${path}`], { cwd: repoDir, timeout: GIT_TIMEOUT_MS });
     return result.status === 0 ? result.stdout : null;
   };
   const stableTags = (tags) => {
@@ -555,8 +595,9 @@ export function realLookups({ repoDir, target, remote: requestedRemote }) {
 
   return {
     version: async () => {
-      const result = run(process.execPath, [join(repoDir, "scripts", "calculate-version.mjs"), "--channel", "preview"], {
+      const result = runWithLimit(process.execPath, [join(repoDir, "scripts", "calculate-version.mjs"), "--channel", "preview"], {
         cwd: repoDir,
+        env: scriptEnv(),
       });
       if (result.status !== 0) throw new Error(scriptTail(result) || "calculate-version.mjs failed");
       JSON.parse(readFileSync(join(repoDir, "scripts", "release-line.json"), "utf8"));
@@ -568,23 +609,23 @@ export function realLookups({ repoDir, target, remote: requestedRemote }) {
       return gitSucceeds(repoDir, ["merge-base", "--is-ancestor", targetRef, sourceSha]);
     },
     baseImageCurrent: async () => {
-      const result = run("bash", [join(repoDir, "scripts", "check-base-image-current.sh")], { cwd: repoDir, stdio: ["ignore", "pipe", "pipe"] });
+      const result = runWithLimit("bash", [join(repoDir, "scripts", "check-base-image-current.sh")], { cwd: repoDir, env: scriptEnv(), stdio: ["ignore", "pipe", "pipe"] });
       if (result.status !== 0) process.stderr.write(`base image: ${scriptTail(result)}\n`);
       return result.status === 0;
     },
     sidecarPinsCurrent: async () => {
-      const result = run(process.execPath, [join(repoDir, "scripts", "sidecar-pins.mjs"), "check", "--packages"], { cwd: repoDir });
+      const result = runWithLimit(process.execPath, [join(repoDir, "scripts", "sidecar-pins.mjs"), "check", "--packages"], { cwd: repoDir, env: scriptEnv() });
       if (result.status === 2) throw new Error(`sidecar-pins.mjs could not check every image: ${scriptTail(result)}`);
       if (result.status !== 0) process.stderr.write(`sidecar pins: ${scriptTail(result)}\n`);
       return result.status === 0;
     },
     upgradeMatrix: async () => {
-      const computed = run(process.execPath, [join(repoDir, "scripts", "ci", "upgrade-versions.mjs")], { cwd: repoDir });
+      const computed = runWithLimit(process.execPath, [join(repoDir, "scripts", "ci", "upgrade-versions.mjs")], { cwd: repoDir, env: scriptEnv() });
       if (computed.status !== 0) throw new Error(scriptTail(computed) || "upgrade-versions.mjs failed");
       const value = (name) => new RegExp(`^${name}=(.*)$`, "mu").exec(computed.stdout)?.[1] ?? "";
       // A CI/CD variable set to false switches the cells off whatever the diff says.
       const flag = (name) => (process.env[name] === "false" ? "false" : value(name));
-      const lists = run(process.execPath, [join(repoDir, "scripts", "ci", "upgrade-versions.mjs"), "--manifest-lists"], { cwd: repoDir });
+      const lists = runWithLimit(process.execPath, [join(repoDir, "scripts", "ci", "upgrade-versions.mjs"), "--manifest-lists"], { cwd: repoDir, env: scriptEnv() });
       if (lists.status !== 0) throw new Error(scriptTail(lists) || "upgrade-versions.mjs --manifest-lists failed");
       const updateFrom = JSON.parse(/"updateFrom": (\[.*\]),/u.exec(lists.stdout)?.[1] ?? "[]");
       const remoteTags = git(repoDir, ["ls-remote", "--tags", "--refs", remote, "refs/tags/v*"])
@@ -657,9 +698,9 @@ export function realLookups({ repoDir, target, remote: requestedRemote }) {
     evidenceAgeDays: async () => {
       const digest = resolveDigest(`ghcr.io/${GITHUB_REPOSITORY}:sha-${sourceSha}`);
       if (!digest) throw new Error(`GHCR has no :sha-${sourceSha} image to read evidence for`);
-      const result = run("bash", [join(repoDir, "scripts", "ci", "verify-validation-evidence.sh")], {
+      const result = runWithLimit("bash", [join(repoDir, "scripts", "ci", "verify-validation-evidence.sh")], {
         cwd: repoDir,
-        env: { ...process.env, ORBIT_IMAGE: `ghcr.io/${GITHUB_REPOSITORY}`, ORBIT_DIGEST: digest, ORBIT_COMMIT: sourceSha, ORBIT_REF: "preview" },
+        env: scriptEnv({ ORBIT_IMAGE: `ghcr.io/${GITHUB_REPOSITORY}`, ORBIT_DIGEST: digest, ORBIT_COMMIT: sourceSha, ORBIT_REF: "preview" }),
       });
       const recorded = /recorded(?: at)? (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)/u.exec(`${result.stdout}\n${result.stderr}`);
       if ((result.status === 0 || result.status === 13) && recorded) return daysSince(recorded[1]);
