@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { holdUnsaved, anyUnsaved } from "../../web/src/lib/unsaved.js";
+import { holdUnsaved, anyUnsaved, unsavedAsker } from "../../web/src/lib/unsaved.js";
 
 /*
  * #1879 W-S1: a shared unsaved-changes registry. The create form holds an
@@ -34,5 +34,30 @@ describe("unsaved registry (#1879 W-S1)", () => {
     release();
     expect(anyUnsaved()).toBe(false);
     expect(() => release()).not.toThrow();
+  });
+
+  it("unsavedAsker() gives the dirty holder's ask, undefined for a dirty holder without one", () => {
+    const ask = async () => true;
+    let dirty = false;
+    const withAsk = holdUnsaved(() => dirty, { ask });
+    expect(unsavedAsker()).toBeUndefined();
+    dirty = true;
+    expect(unsavedAsker()).toBe(ask);
+    withAsk();
+    expect(unsavedAsker()).toBeUndefined();
+    const plain = holdUnsaved(() => true);
+    expect(anyUnsaved()).toBe(true);
+    expect(unsavedAsker()).toBeUndefined();
+    plain();
+  });
+
+  it("unsavedAsker() ignores a clean holder's ask and a released one", () => {
+    const clean = holdUnsaved(() => false, { ask: async () => true });
+    const ask = async () => false;
+    const dirty = holdUnsaved(() => true, { ask });
+    expect(unsavedAsker()).toBe(ask);
+    dirty();
+    expect(unsavedAsker()).toBeUndefined();
+    clean();
   });
 });
