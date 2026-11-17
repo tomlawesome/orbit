@@ -98,6 +98,11 @@ function readConfiguration(file: string): ParseOutcome {
   } finally {
     closeSync(descriptor);
   }
+  return parseConfigurationBytes(raw);
+}
+
+/** parse_file on bytes already read: the strict UTF-8 decode, the shared grammar and the secret-pair refusal. */
+function parseConfigurationBytes(raw: Buffer): ParseOutcome {
   // Never decode lossily: the file is rebuilt from this string, so a replaced
   // byte would silently change a value on disk.
   const content = decodeUtf8Strict(raw);
@@ -183,6 +188,70 @@ function readLines(content: string): string[] {
   return lines;
 }
 
+type ManagedValues = Record<(typeof MANAGED_ORDER)[number], string>;
+
+/**
+ * The migrated text for a parsed file and its five managed values: each
+ * managed key written once, at its first line (#1847), the rest appended in
+ * MANAGED_ORDER, every other line kept byte for byte. Pure, so a migration can
+ * be replayed to prove where a leftover copy came from (#1877).
+ */
+function buildMigratedContent(parsed: ParsedConfiguration, managed: ManagedValues): string {
+  const newline = parsed.content.includes("\r") ? "\r\n" : "\n";
+  const written = new Set<string>();
+  let output = "";
+  for (const line of readLines(parsed.content)) {
+    const withoutCr = line.endsWith("\r") ? line.slice(0, -1) : line;
+    const key = MANAGED_ORDER.find((candidate) => withoutCr.startsWith(`${candidate}=`) || withoutCr === `# ${candidate}=`);
+    if (key) {
+      if (written.has(key)) continue;
+      output += `${key}=${managed[key]}${newline}`;
+      written.add(key);
+    } else {
+      output += `${line}\n`;
+    }
+  }
+  for (const key of MANAGED_ORDER) {
+    if (!written.has(key)) output += `${key}=${managed[key]}${newline}`;
+  }
+  return output;
+}
+
+/**
+ * #1877 roll-forward recovery after the commit point: true only when the
+ * leftover copy is a regular file (never a symlink) that passes the same
+ * strict parse as the file, and replaying the migration on it with the
+ * current file's five managed values gives the current file byte for byte.
+ * Such a copy is the pre-migration file of a run that got past its rename.
+ * Any read or parse error is not proof.
+ */
+function leftoverCopyIsFinishedMigration(copy: string, current: ParsedConfiguration): boolean {
+  const managed = {} as ManagedValues;
+  for (const key of MANAGED_ORDER) {
+    const value = current.values[key];
+    if (value === undefined) return false;
+    managed[key] = value;
+  }
+  let raw: Buffer;
+  let descriptor: number;
+  try {
+    descriptor = openSync(copy, constants.O_RDONLY | constants.O_NOFOLLOW);
+  } catch {
+    return false;
+  }
+  try {
+    if (!fstatSync(descriptor).isFile()) return false;
+    raw = readFileSync(descriptor);
+  } catch {
+    return false;
+  } finally {
+    closeSync(descriptor);
+  }
+  const outcome = parseConfigurationBytes(raw);
+  if (!outcome.ok) return false;
+  return Buffer.from(buildMigratedContent(outcome.parsed, managed), "utf8").equals(current.raw);
+}
+
 /**
  * migrate_file: stamps the schema, the applied image/version/digest and the
  * Compose project name into the file, preserving every other byte of every
@@ -190,8 +259,11 @@ function readLines(content: string): string[] {
  * already-current file is reported and left untouched. Outside an install
  * transaction the pre-migration file is first copied to
  * `<file>.orbit-config.rollback` (mode 600); a leftover copy byte-identical
- * to the file is an interrupted earlier run and is replaced, any other
- * leftover refuses (#1151 O1-R5). Once the new file is written it is read
+ * to the file is an interrupted earlier run and is replaced (#1151 O1-R5).
+ * A differing leftover is finished off by roll-forward recovery (#1877): the
+ * rename is the commit point, so a regular-file copy whose replayed migration,
+ * with the current file's managed values, equals the file byte for byte is
+ * removed and the run carries on; any other leftover refuses. Once the new file is written it is read
  * again under the same strict parse and must carry this run's applied
  * version, digest and Compose project; then the copy is removed. If not, the
  * file is restored from the copy, which is kept, and the run fails with
@@ -276,9 +348,10 @@ function migrateLocked(file: string, options: MigrateEnvironmentFileOptions, rel
     // #1834: a run killed after its rename, or one whose removal failed,
     // leaves a copy nothing points at. A symlink or a copy not at mode 600
     // refuses. A regular copy byte-identical to the file (which has just
-    // passed the strict parse) is dropped; one that differs may be the only
-    // good copy Repair's configuration-migration-interrupted class needs, so
-    // it is kept and named.
+    // passed the strict parse) is dropped, and so is one #1877's replay
+    // proves is the pre-migration file of a finished migration. Any other
+    // differing copy may be the only good copy Repair's
+    // configuration-migration-interrupted class needs, so it is kept and named.
     let stderr = "";
     if (!options.transaction) {
       const leftoverCopy = `${file}${CONFIGURATION_ROLLBACK_SUFFIX}`;
@@ -291,7 +364,7 @@ function migrateLocked(file: string, options: MigrateEnvironmentFileOptions, rel
         } catch {
           identical = false;
         }
-        if (identical) {
+        if (identical || leftoverCopyIsFinishedMigration(leftoverCopy, parsed)) {
           try {
             rmSync(leftoverCopy, { force: true });
           } catch {
@@ -313,7 +386,7 @@ function migrateLocked(file: string, options: MigrateEnvironmentFileOptions, rel
   // A first install's file carries no applied stamp yet.
   const priorVersion = appliedVersionPresent ? currentVersion : "none";
   const priorDigest = appliedDigestPresent ? currentDigest : "none";
-  const managed: Record<(typeof MANAGED_ORDER)[number], string> = {
+  const managed: ManagedValues = {
     ORBIT_IMAGE: desiredImage,
     ORBIT_CONFIG_SCHEMA_VERSION: String(ENV_ORBIT_SCHEMA_VERSION),
     ORBIT_CONFIG_APPLIED_VERSION: desiredVersion,
@@ -333,7 +406,10 @@ function migrateLocked(file: string, options: MigrateEnvironmentFileOptions, rel
           identical = false;
         }
       }
-      if (!identical) return failure("configuration_migration");
+      // #1877: a differing copy is removed only when replaying the migration
+      // proves it is the pre-migration file of a run that got past its
+      // rename; anything else still refuses.
+      if (!identical && !leftoverCopyIsFinishedMigration(backup, parsed)) return failure("configuration_migration");
       try {
         rmSync(backup, { force: true });
       } catch {
@@ -354,24 +430,7 @@ function migrateLocked(file: string, options: MigrateEnvironmentFileOptions, rel
     }
   }
 
-  const newline = parsed.content.includes("\r") ? "\r\n" : "\n";
-  const written = new Set<string>();
-  let output = "";
-  for (const line of readLines(parsed.content)) {
-    const withoutCr = line.endsWith("\r") ? line.slice(0, -1) : line;
-    const key = MANAGED_ORDER.find((candidate) => withoutCr.startsWith(`${candidate}=`) || withoutCr === `# ${candidate}=`);
-    if (key) {
-      // #1847: write each managed key once, at its first line; drop repeats.
-      if (written.has(key)) continue;
-      output += `${key}=${managed[key]}${newline}`;
-      written.add(key);
-    } else {
-      output += `${line}\n`;
-    }
-  }
-  for (const key of MANAGED_ORDER) {
-    if (!written.has(key)) output += `${key}=${managed[key]}${newline}`;
-  }
+  const output = buildMigratedContent(parsed, managed);
 
   // The `.env-orbit.migrating.*` scratch name is also matched by install.sh rollback_files.
   const scratch = join(dirname(file), `${basename(file)}.migrating.${randomBytes(6).toString("hex")}`);
@@ -417,7 +476,7 @@ function migrateLocked(file: string, options: MigrateEnvironmentFileOptions, rel
     try {
       rmSync(backup, { force: true });
     } catch {
-      /* a copy left behind is refused or replaced by the next run, never trusted */
+      /* a copy left behind is replaced, finished off (#1877) or refused by the next run, never trusted */
     }
   }
 
