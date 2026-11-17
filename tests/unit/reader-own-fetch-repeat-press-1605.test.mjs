@@ -59,7 +59,7 @@ const keyPress = async (/** @type {string} */ key, /** @type {() => void} */ flu
 describe("a repeat press on a page whose own fetch failed fetches it again (#1605 W-R10)", () => {
   it("page one fails: Home (a press on the page already shown) fetches page one a second time", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    const { target, flushSync, asked } = await mountReader(() => new Response("no", { status: 500 }));
+    const { flushSync, asked } = await mountReader(() => new Response("no", { status: 500 }));
     expect(document.body.textContent).toContain(UNDRAWN);
     expect(asked).toEqual([1]);
 
