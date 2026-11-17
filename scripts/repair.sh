@@ -1558,6 +1558,19 @@ fi
 # installer-simulation.sh; output is unconditionally plain regardless of it.
 : "$plain_mode"
 
+# #1858 T1: the one wall-clock limit on every step run as the deployment
+# folder's owner (as_folder_owner) and on root's reads of what that owner
+# controls: 60 s, or ORBIT_REPAIR_OWNER_STEP_TIMEOUT in whole seconds from 1
+# to 600. At the limit the step gets TERM, and KILL $owner_step_grace s
+# later. Any other value refuses here, before anything runs.
+owner_step_timeout="${ORBIT_REPAIR_OWNER_STEP_TIMEOUT:-60}"
+if ! [[ "$owner_step_timeout" =~ ^[1-9][0-9]{0,2}$ ]] || ((owner_step_timeout > 600)); then
+  printf 'Orbit repair: ORBIT_REPAIR_OWNER_STEP_TIMEOUT must be a whole number of seconds from 1 to 600; nothing was done.\n' >&2
+  exit 2
+fi
+readonly owner_step_timeout
+readonly owner_step_grace=5
+
 # docs/engine-events.md "Machine prompts (v0)", extended with a
 # repair-specific field/kind — see "Machine prompts (repair --execute)"
 # above. Opt-in only, checked ahead of TTY-ness, exactly like
@@ -3672,6 +3685,12 @@ lock_state_refusal() {
       # folder's owner, so that user, not root, must be able to create it.
       local owner="${smtp_owner_name:-uid ${smtp_folder_uid}}" pointed=""
       [[ -z "${ORBIT_BACKUP_DIR:-}" ]] || pointed=" (ORBIT_BACKUP_DIR points at it)"
+      if [[ "$owner_step_problem" == "timed out" ]]; then
+        # #1858 T5: the owner's step that makes them ran out of time.
+        printf "the step make-lock, which creates the backups folder %s and its lock file as the deployment folder's owner %s, timed out after %s s and was stopped; re-run repair" \
+          "$backup_directory" "$owner" "$owner_step_timeout"
+        return 0
+      fi
       printf "the deployment folder's owner %s can't create the backups folder %s%s or write its lock file there: run as root, repair makes the lock as the deployment folder's owner %s, so that user must be able to create it; run backup.sh once, or make the folder writable by %s, then re-run repair" \
         "$owner" "$backup_directory" "$pointed" "$owner" "$owner"
     elif [[ -n "${ORBIT_BACKUP_DIR:-}" ]]; then
@@ -4864,6 +4883,14 @@ clean_terminal_text() {
     LC_ALL=C tr -d '\000-\010\013-\037\177'
 }
 
+# owner_step_timed_out <step>: the #1858 T5 line for a step run as the
+# deployment folder's owner, or a read of what it controls, that ran out of
+# time and was stopped.
+owner_step_timed_out() {
+  printf "Orbit repair: %s: the step %s, run as the deployment folder's owner (%s), timed out after %s s and was stopped.\n" \
+    "$owner_action" "$1" "${smtp_owner_name:-uid ${smtp_folder_uid:-unknown}}" "$owner_step_timeout" >&2 || true
+}
+
 # as_folder_owner [--pipe] <cmd...> (#1848 FIX-S1): logrotate's `su`,
 # OpenSSH's temporarily_use_uid. As root in a folder another user owns, runs
 # <cmd> as that user, so a link they plant reaches only what they could
@@ -4883,10 +4910,20 @@ clean_terminal_text() {
 # clean_terminal_text (addendum 4 item 1); the caller prints the
 # line naming the step and path. With --pipe, stdin and stdout stay the
 # caller's pipes (smtp_owner_write reads and checks what comes back).
+# #1858 T1/T2: the child runs under `timeout`, $owner_step_timeout s, then
+# TERM (with CONT, so a stopped child ends too) and KILL $owner_step_grace s
+# later; root's read of its stderr is bounded by the same limit plus the
+# grace, so a grandchild that keeps the pipe open can't hold root either. A
+# time-out (status 124 or 137) prints one "Orbit repair:" line naming the
+# action and the step, and sets $owner_step_problem for a caller that
+# silences stderr.
 # Otherwise runs <cmd> as it is. Root without setpriv or setsid, or with no
 # user-database entry for the owner: returns 1.
+owner_step_problem=""
+owner_action="repair"
 as_folder_owner() {
-  local pipe=0 said="" status=0
+  local pipe=0 said="" status=0 step
+  owner_step_problem=""
   if [[ "${1:-}" == --pipe ]]; then
     pipe=1
     shift
@@ -4913,9 +4950,18 @@ as_folder_owner() {
           [[ ! -e /proc/"$BASHPID"/fd/"$fd" ]] || eval "exec $fd<&-"
         done
         exec env -i PATH="$PATH" LC_ALL=C HOME="$smtp_owner_home" USER="$smtp_owner_name" LOGNAME="$smtp_owner_name" \
+          timeout -k "$owner_step_grace" "$owner_step_timeout" \
           setsid --wait setpriv --reuid="$smtp_folder_uid" --regid="$smtp_owner_gid" --init-groups --no-new-privs -- "$@"
-      ) | LC_ALL=C head -c 4096 3>&- | clean_terminal_text 3>&-)" || status=$?
+      ) | LC_ALL=C timeout -k 1 "$((owner_step_timeout + owner_step_grace))" head -c 4096 3>&- | clean_terminal_text 3>&-)" || status=$?
   } 3>&1
+  if ((status == 124 || status == 137)); then
+    # The step's name: a `bash -c <script> <name>` child's own, else the command's.
+    step="${1##*/}"
+    [[ "$step" != bash || "${2:-}" != -c ]] || step="${4:-bash}"
+    owner_step_problem="timed out"
+    owner_step_timed_out "$step"
+    return "$status"
+  fi
   if [[ "$status" != 0 ]]; then
     said="${said//[$'\t\n']/ }"
     [[ -z "${said// /}" ]] ||
@@ -4942,13 +4988,34 @@ readonly smtp_owner_write_script='tmp=""; trap "[[ -z \$tmp ]] || rm -f -- \"\$t
 # status is left in $smtp_write_status: with pipefail it is the rightmost
 # failure, so it is <producer>'s own (smtp_env_rewrite's 3) only when the
 # owner's side succeeded; the owner's side exits 0 or 1 (setpriv 1 or 127).
+#
+# #1858: root's reads are bounded. <producer> feeds the owner through a
+# `cat` bounded by $owner_step_timeout plus the grace, so an owner that stops
+# reading can't hold it; the name is read through `head -c 4097` under the
+# same bound, and a name over 4096 bytes is refused before its shape check.
+# The reader's own status follows the name as a last line only root writes.
 smtp_write_status=0
 smtp_owner_write() {
-  local folder="$1" template="$2" mode="$3" target="$4" name="" status=0 prefix
+  local folder="$1" template="$2" mode="$3" target="$4" name="" status=0 prefix out reader bound
   shift 4
   prefix="$folder/${template%XXXXXX}"
-  name="$("$@" | as_folder_owner --pipe bash -c "$smtp_owner_write_script" smtp-owner-write "$folder" "$template" "$mode")" || status=$?
+  bound="$((owner_step_timeout + owner_step_grace))"
+  out="$("$@" | LC_ALL=C timeout -k 1 "$bound" cat |
+    as_folder_owner --pipe bash -c "$smtp_owner_write_script" smtp-owner-write "$folder" "$template" "$mode" |
+    { LC_ALL=C timeout -k 1 "$bound" head -c 4097; printf '\n%s' "$?"; })" || status=$?
+  reader="${out##*$'\n'}"
+  name="${out%$'\n'*}"
+  while [[ "$name" == *$'\n' ]]; do name="${name%$'\n'}"; done
+  if ((reader == 124 || reader == 137)) && ((status != 124 && status != 137)); then
+    owner_step_timed_out smtp-owner-write
+    status="$reader"
+  fi
   smtp_write_status="$status"
+  if (("$(LC_ALL=C; printf '%s' "${#name}")" > 4096)); then
+    printf "Orbit repair: %s: the name the step smtp-owner-write printed as the deployment folder's owner is too large (over 4096 bytes), so it was not used.\n" "$owner_action" >&2 || true
+    smtp_step_tmp=""
+    return 1
+  fi
   # The name comes from a process the owner could steer: only one of the
   # template's shape is used, and only by commands run as the owner.
   if [[ -n "$name" ]] && ! [[ "${name:0:${#prefix}}" == "$prefix" && "${name:${#prefix}}" =~ ^[A-Za-z0-9]{6}$ ]]; then
@@ -4964,9 +5031,40 @@ smtp_owner_write() {
   return 1
 }
 
-# smtp_read_file <path>: its bytes, never through a symlink (O_NOFOLLOW).
+# smtp_read_file <path>: its bytes, as root, from a file the deployment
+# folder's owner controls (#1858 T4). The lstat-open-fstat-compare pattern:
+# the path must be a regular file (lstat, no link followed), and the file
+# opened must be that same regular file (same device and inode, so a link or
+# a FIFO swapped in between is never read), at most 1 MiB before and after
+# the read. The whole read runs under $owner_step_timeout, TERM then KILL
+# $owner_step_grace s later, so a FIFO or a stalled file can't hold root.
+# A refusal prints one "Orbit repair:" line naming the action, the file and
+# the reason; any other failure returns 1 quietly, as dd did.
+readonly owner_read_cap=1048576
+# shellcheck disable=SC2016 # expanded by the child bash
+readonly owner_read_script='before="$(stat -c "%d:%i %F" -- "$1")" || exit 1
+case "${before#* }" in "regular file"|"regular empty file") ;; *) exit 3;; esac
+exec 3<"$1" || exit 1
+read -r id size type < <(stat -L -c "%d:%i %s %F" /dev/fd/3) || exit 1
+case "$type" in "regular file"|"regular empty file") ;; *) exit 3;; esac
+[[ "$id" == "${before%% *}" ]] || exit 5
+((size <= $2)) || exit 4
+head -c "$2" <&3 || exit 1
+size="$(stat -L -c %s /dev/fd/3)" || exit 1
+((size <= $2)) || exit 4'
 smtp_read_file() {
-  dd if="$1" iflag=nofollow status=none
+  local status=0 reason
+  LC_ALL=C timeout -k "$owner_step_grace" "$owner_step_timeout" bash -c "$owner_read_script" owner-read "$1" "$owner_read_cap" || status=$?
+  case "$status" in
+    0) return 0 ;;
+    3) reason="it is not a regular file" ;;
+    4) reason="it is too large (over 1 MiB)" ;;
+    5) reason="it changed while it was being opened" ;;
+    124 | 137) reason="reading it timed out after $owner_step_timeout s and was stopped" ;;
+    *) return 1 ;;
+  esac
+  printf 'Orbit repair: %s: %s was not read: %s.\n' "$owner_action" "$1" "$reason" >&2 || true
+  return 1
 }
 
 # The step record's lines for step $1.
@@ -6483,6 +6581,8 @@ run_safe_batch() {
     fi
 
     status=0
+    # #1858 T5: the action an owner step's failure line names.
+    owner_action="$action"
     case "$action" in
       fix-permissions) do_fix_permissions "$fclass" "$ftarget" || status=$? ;;
       restore-compose-file) do_restore_compose_file || status=$? ;;
