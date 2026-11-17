@@ -81,6 +81,17 @@ export function fileChangedSincePicked(error) {
 /** The card's words for that refusal. */
 export const FILE_CHANGED_WORDS = "the file changed after it was chosen — choose it again";
 
+/**
+ * Reads one byte of the picked file before it is sent (#1605 W-R12 review).
+ * A file whose disk copy changed throws NotReadableError here; inside the
+ * upload's FormData the same change only makes fetch reject with a bare
+ * TypeError, which cannot be told from a lost connection.
+ * @param {Blob} file
+ */
+export async function checkFileReadable(file) {
+  await file.slice(0, 1).arrayBuffer();
+}
+
 /** The v2 archive header (#1390, ADR-0045): "ORBITARC", then format version 2. */
 const V2_MAGIC = [0x4f, 0x52, 0x42, 0x49, 0x54, 0x41, 0x52, 0x43];
 const V2_HEADER_BYTES = 64;

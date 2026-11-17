@@ -13,7 +13,7 @@
     wordsOf,
     writePortableArchive,
   } from "$lib/data/workspace.js";
-  import { archiveFileProblem, exportFileName, FILE_CHANGED_WORDS, fileChangedSincePicked, passphraseFloor, passphraseLength, passphraseProblem, previewSlice } from "./archive.js";
+  import { archiveFileProblem, checkFileReadable, exportFileName, FILE_CHANGED_WORDS, fileChangedSincePicked, passphraseFloor, passphraseLength, passphraseProblem, previewSlice } from "./archive.js";
   import { tabArrows } from "$lib/tabs.js";
 
   /*
@@ -226,6 +226,7 @@
     inProblem = null;
     inPhase = "bringing";
     guarded(async (proof) => {
+      await checkFileReadable(chosen); // a file changed since it was picked stops here, not in the upload
       const result = await importPortableArchive(householdId, { file: chosen, passphrase: passIn, skip, currentPassword: proof || undefined });
       brought = result.importedItems;
       inPhase = "done";
