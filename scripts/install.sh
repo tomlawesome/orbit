@@ -3306,11 +3306,14 @@ retire_smtp_lines() {
     smtp_write_record backed-up || { smtp_retirement_note "the SMTP lines were left in .env-orbit: the step record could not be written."; return 0; }
   fi
   if smtp_lines_present || smtp_overlay_listed; then
-    rm -f -- "${environment_file}.retire-smtp.tmp"
-    if ! ( umask 077 && smtp_env_rewrite retire < "$environment_file" > "${environment_file}.retire-smtp.tmp" ) ||
-      ! chmod 600 -- "${environment_file}.retire-smtp.tmp" ||
-      ! mv -f -- "${environment_file}.retire-smtp.tmp" "$environment_file"; then
-      rm -f -- "${environment_file}.retire-smtp.tmp"
+    # #1848: a unique name beside the file (mktemp, as repair.sh does), then
+    # the same-folder rename; a fixed name could meet another run's file.
+    local retire_tmp=""
+    if ! retire_tmp="$(mktemp "${environment_file}.retire-smtp.XXXXXX")" ||
+      ! ( umask 077 && smtp_env_rewrite retire < "$environment_file" > "$retire_tmp" ) ||
+      ! chmod 600 -- "$retire_tmp" ||
+      ! mv -f -- "$retire_tmp" "$environment_file"; then
+      [[ -z "$retire_tmp" ]] || rm -f -- "$retire_tmp"
       smtp_retirement_note "the SMTP lines were left in .env-orbit: its COMPOSE_FILE line could not be rewritten safely; remove docker-compose.mail.yml from it by hand."
       return 0
     fi

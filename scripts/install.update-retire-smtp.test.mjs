@@ -584,3 +584,19 @@ describe("the retired docker-compose.mail.yml overlay (audit Low D-S3)", () => {
     expect(active).not.toMatch(/\.orbit-secrets\/smtp-password/u);
   });
 });
+
+describe("the .env-orbit rewrite's scratch file (#1848 retire_smtp_lines)", () => {
+  it("uses a unique name beside the file, so an entry at the old fixed name neither blocks the retirement nor is touched", () => {
+    const targetDir = withSmtpLines(installedFolder());
+    // An entry the old fixed name would have met: rm -f cannot remove a folder, and the rewrite could not write to it.
+    const fixedName = join(targetDir, ".env-orbit.retire-smtp.tmp");
+    mkdirSync(fixedName);
+    writeFileSync(join(fixedName, "keep"), "not the installer's\n");
+    const result = update(targetDir, line("imported", true));
+    expect(result.status).toBe(0);
+    const env = envOf(targetDir);
+    for (const key of SMTP_KEYS) expect(env).not.toMatch(new RegExp(`^${key}=`, "mu"));
+    expect(readFileSync(join(fixedName, "keep"), "utf8")).toBe("not the installer's\n");
+    expect(readdirSync(targetDir).filter((name) => name.startsWith(".env-orbit.retire-smtp.") && name !== ".env-orbit.retire-smtp.tmp")).toEqual([]);
+  }, PROCESS_TEST_TIMEOUT_MS);
+});
