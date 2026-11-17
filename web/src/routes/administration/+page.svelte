@@ -56,7 +56,7 @@
    * real facts (collection domain, systems aboard, crew) come off this
    * screen's own data rather than the sheet's hard-coded literals.
    */
-  /** @type {{ data: { fixtures: boolean } }} */
+  /** @type {{ data: { fixtures: boolean, user?: { displayName: string, isInstanceAdmin: boolean } } }} */
   let { data } = $props();
   /** @type {Awaited<ReturnType<typeof readAdminScreen>> | null} */
   let view = $state(null);
