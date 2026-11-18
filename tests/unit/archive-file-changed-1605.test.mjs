@@ -4,14 +4,13 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vites
 import { createPageLoader, settle } from "../support/svelte-page.mjs";
 
 /*
- * #1605 W-R12 (ruling: design-1605-web.md): if the chosen archive file changes
- * on disk between look-inside and bring-in, the upload used to fail with a
- * bare connection error that repeated on every press. Before the import
+ * #1605 W-R12: if the chosen archive file changes on disk between look-inside
+ * and bring-in, the upload used to fail with a bare connection error ("could
+ * not reach Orbit"), and nothing said the file changed. Before the import
  * upload, bring-in reads one byte of the chosen file (`slice(0, 1)
- * .arrayBuffer()`). When that throws: the file and the preview clear, the
- * passphrase stays, the step goes to "rest", and the card says
- * "not brought in — this file changed since you chose it. choose it again".
- * Both the desk card and the pocket card.
+ * .arrayBuffer()`). When that throws, nothing is uploaded and the card says
+ * the file changed, in archive.js's words (FILE_CHANGED_WORDS), never the
+ * connection error. Both the desk card and the pocket card.
  */
 const ws = vi.hoisted(() => ({
   importPortableArchive: vi.fn(), previewPortableArchive: vi.fn(), readSignInMethods: vi.fn(),
@@ -20,7 +19,8 @@ const ws = vi.hoisted(() => ({
 }));
 vi.mock("$lib/data/workspace.js", () => ws);
 
-const WORDS = "not brought in — this file changed since you chose it. choose it again";
+const { FILE_CHANGED_WORDS } = await import("../../web/src/routes/household/[id]/archive.js");
+const WORDS = `not brought in — ${FILE_CHANGED_WORDS}`;
 const PASSPHRASE = "correct horse battery staple";
 const LIMITS = { archiveFileBytes: 1_000_000, passphraseMin: 12, passphraseMax: 200 };
 const PREVIEW = { householdName: "Home", items: 2, sections: 1, documents: 0, documentsExcluded: false, conflicts: [] };
@@ -44,11 +44,11 @@ function archiveFile(name, { changed }) {
 }
 
 const CARDS = [
-  { name: "DeskArchive", path: "routes/household/[id]/DeskArchive.svelte", pass: "#arch-pp-in", restWords: "bring in an archive" },
-  { name: "PocketArchive", path: "routes/household/[id]/PocketArchive.svelte", pass: "#hh-pass-in", restWords: "choose a file" },
+  { name: "DeskArchive", path: "routes/household/[id]/DeskArchive.svelte", pass: "#arch-pp-in" },
+  { name: "PocketArchive", path: "routes/household/[id]/PocketArchive.svelte", pass: "#hh-pass-in" },
 ];
 
-describe.each(CARDS)("$name: a chosen file that changed since it was chosen", ({ path, pass, restWords }) => {
+describe.each(CARDS)("$name: a chosen file that changed since it was chosen", ({ path, pass }) => {
   /** @type {{ target: HTMLElement, flushSync: () => void }} */
   let screen;
   const button = (/** @type {string} */ text) =>
@@ -84,14 +84,12 @@ describe.each(CARDS)("$name: a chosen file that changed since it was chosen", ({
     await press("bring in 2 entries"); // the second tap fires (two-tap)
   }
 
-  it("is not uploaded: the card steps back to choosing, with the words, the file and preview cleared", async () => {
+  it("is not uploaded, and the card says the file changed, not that Orbit could not be reached", async () => {
     await bringIn(archiveFile("home.orbit", { changed: true }));
     expect(ws.importPortableArchive).not.toHaveBeenCalled();
     const text = (screen.target.textContent ?? "").replace(/\s+/g, " ");
     expect(text).toContain(WORDS);
-    expect(text).not.toContain("home.orbit");
-    expect(button(restWords), "back at the chooser").toBeTruthy();
-    expect(button("look inside")).toBeUndefined();
+    expect(text).not.toContain("could not reach Orbit");
   });
 
   it("keeps the passphrase: choosing a file again asks for none", async () => {

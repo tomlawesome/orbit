@@ -5,8 +5,9 @@ import { createPageLoader, settle } from "../support/svelte-page.mjs";
 
 /*
  * #1605 W-R10: where the Reader fetches pages itself (no `picture` prop, as
- * StagedPage.svelte mounts it), a repeat press on a page whose fetch failed
- * must fetch it again. It must not just clear the failure line and show the
+ * StagedPage.svelte mounts it), a page whose fetch failed can be asked for
+ * again without leaving it: #1870's "try again" on the lost page fetches the
+ * same page once more. It must not just clear the failure line and show the
  * old page (the comment at the stage: "the old page never stays up under the
  * new number"). Mounted in happy-dom with fetch stubbed per page.
  */
@@ -49,25 +50,27 @@ async function mountReader(plan) {
   return { ...mounted, asked };
 }
 
-/** A repeat of the same press: the key that goes to the page the reader is already on. @param {string} key */
-const keyPress = async (/** @type {string} */ key, /** @type {() => void} */ flushSync) => {
-  window.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+/** The lost page's own control (#1870): "try again", labelled for the page. @param {number} n */
+const tryAgain = async (/** @type {number} */ n, /** @type {() => void} */ flushSync) => {
+  const button = /** @type {HTMLButtonElement | null} */ (document.querySelector(`[aria-label="Try page ${n} again"]`));
+  expect(button, `a "try again" for page ${n}`).not.toBeNull();
+  /** @type {HTMLButtonElement} */ (button).click();
   flushSync();
   await quiet();
 };
 
-describe("a repeat press on a page whose own fetch failed fetches it again (#1605 W-R10)", () => {
-  it("page one fails: Home (a press on the page already shown) fetches page one a second time", async () => {
+describe("a page whose own fetch failed is fetched again from the page itself (#1605 W-R10)", () => {
+  it("page one fails: its try again fetches page one a second time", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const { flushSync, asked } = await mountReader(() => new Response("no", { status: 500 }));
     expect(document.body.textContent).toContain(UNDRAWN);
     expect(asked).toEqual([1]);
 
-    await keyPress("Home", flushSync);
+    await tryAgain(1, flushSync);
     expect(asked, "the press fetched page one again").toEqual([1, 1]);
   });
 
-  it("page two (the last) fails: End fetches page two again, and never leaves the old page under the failed number", async () => {
+  it("page two (the last) fails: its try again fetches page two again, and never leaves the old page under the failed number", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const { target, flushSync, asked } = await mountReader((n) => (n === 1 ? ok() : new Response("no", { status: 500 })));
     /** @type {HTMLButtonElement} */ (target.ownerDocument.querySelector('[aria-label="Next page"]')).click();
@@ -76,7 +79,7 @@ describe("a repeat press on a page whose own fetch failed fetches it again (#160
     expect(asked).toEqual([1, 2]);
     expect(document.body.textContent).toContain(UNDRAWN);
 
-    await keyPress("End", flushSync);
+    await tryAgain(2, flushSync);
     expect(asked, "the press fetched page two again").toEqual([1, 2, 2]);
     const shown = document.body.textContent ?? "";
     const img = document.querySelector(".rd-stage img");

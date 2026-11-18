@@ -101,7 +101,7 @@ describe("a busy page turn is retried once, quietly (#1446 decision 3)", () => {
     expect(target.textContent).not.toContain(LOST);
   });
 
-  it("a second busy is the lost state, and a repeat press tries again, with no third request before it", async () => {
+  it("a second busy is the lost state, and its try again asks again, with no third request before it", async () => {
     const { target, flushSync, asked } = await mountReader((n) => Promise.resolve(n === 3 ? busy("1") : ok()));
     await press(target, flushSync, "Next page");
     await press(target, flushSync, "Next page");
@@ -116,11 +116,9 @@ describe("a busy page turn is retried once, quietly (#1446 decision 3)", () => {
     await quiet();
     expect(asked.filter((n) => n === 3), "one request and one retry, no more, until pressed").toHaveLength(2);
 
-    /* The existing way to try again (#1605): a repeat press on the lost page. */
-    window.dispatchEvent(new KeyboardEvent("keydown", { key: "End", bubbles: true, cancelable: true }));
-    flushSync();
-    await quiet();
-    expect(asked.filter((n) => n === 3), "a repeat press fetches the page again").toHaveLength(3);
+    /* The lost state's way to try again (#1870): the page's own button. */
+    await press(target, flushSync, "Try page 3 again");
+    expect(asked.filter((n) => n === 3), "try again fetches the page again").toHaveLength(3);
   });
 
   it("clamps a long Retry-After to 10 s for the wait", async () => {
