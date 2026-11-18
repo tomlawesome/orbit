@@ -125,7 +125,9 @@ export function privShims(targetDir, { root = true, setpriv = true, setprivFail 
     // The group options are not checked here (acceptance 3 reads the log); the user and no-new-privs are.
     write(
       "setpriv",
-      `printf '%s\\n' "$*" >> '${privLog}'
+      `# A setpriv call with only --pdeathsig is not a privilege drop (#1893): pass it through, unlogged.
+case " $* " in *" --reuid"*|*" --regid"*|*" --init-groups "*|*" --clear-groups "*) ;; *" --pdeathsig"*) while [[ $# -gt 0 && "$1" != -- ]]; do shift; done; shift; exec "$@";; esac
+printf '%s\\n' "$*" >> '${privLog}'
 ok=0
 [[ " $* " == *" --reuid=${UID} "* && " $* " == *" --regid=${dbGid} "* && " $* " == *" --no-new-privs "* ]] && ok=1
 if [[ $ok -ne 1 ]]; then printf 'BAD %s\\n' "$*" >> '${privLog}'; exit 99; fi

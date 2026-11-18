@@ -1522,6 +1522,14 @@ usage() {
   printf 'Orbit repair: writing the exact --check/--plan stream plus one identity line to a file.\n' >&2
 }
 
+# #1893: set only by the lock holder (hold_lock_and_run_worker), to its own
+# pid, on the --execute worker it starts, which already runs under the
+# holder's folder lock. The worker honours it only when it names its parent
+# (execute_repair); any other value is ignored and the lock taken as usual.
+# Unset at once, so nothing the worker starts sees it.
+repair_run_lock_held="${ORBIT_REPAIR_RUN_LOCK_HELD:-}"
+unset ORBIT_REPAIR_RUN_LOCK_HELD
+
 plain_mode=0
 safe_only=0
 dangerous=0
@@ -1599,6 +1607,9 @@ fi
 # Force cwd to this script's own containing installation directory, exactly
 # like configure.sh, so `bash scripts/repair.sh --check`/`--plan`/`--execute`
 # is safe regardless of the caller's working directory.
+# #1893: this script's absolute path, saved before the cd for the lock
+# holder's re-exec of the run as its worker (hold_lock_and_run_worker).
+repair_script_path="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/$(basename -- "${BASH_SOURCE[0]}")"
 repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_dir"
 
@@ -5779,7 +5790,10 @@ do_retire_smtp_lines() {
 
   # 2. Start the stack on the rewritten file. Until it is up, the running
   # containers may still mount the secret, so it stays.
-  detail="$(set -o pipefail
+  detail="$(
+    # #1893: repair's own process holds the backup/restore lock; the compose child does not.
+    [[ -z "$held_lock_fd" ]] || exec {held_lock_fd}<&-
+    set -o pipefail
     trap '' INT TERM HUP
     timeout --signal=TERM --kill-after=10s "${docker_compose_up_timeout_seconds}s" \
       docker compose --project-name "$project" --env-file "$environment_file" up -d --no-build \
@@ -5963,7 +5977,10 @@ do_recreate_services() {
     "$folder_old_path" >&2
   # #1804 point 4: Docker's words on a failure, bounded and control-free, as
   # start-services gives them; stdout stays enum-only.
-  detail="$(set -o pipefail
+  detail="$(
+    # #1893: repair's own process holds the backup/restore lock; the compose child does not.
+    [[ -z "$held_lock_fd" ]] || exec {held_lock_fd}<&-
+    set -o pipefail
     trap '' INT TERM HUP
     timeout --signal=TERM --kill-after=10s "$docker_recreate_timeout" \
       docker compose --project-name "$project" --env-file "$environment_file" \
@@ -6054,7 +6071,10 @@ do_start_services() {
     printf 'Orbit repair: start-services refused, nothing was changed: %s.\n' "$refusal" >&2
     return 1
   fi
-  detail="$(set -o pipefail
+  detail="$(
+    # #1893: repair's own process holds the backup/restore lock; the compose child does not.
+    [[ -z "$held_lock_fd" ]] || exec {held_lock_fd}<&-
+    set -o pipefail
     trap '' INT TERM HUP
     timeout --signal=TERM --kill-after=10s "${docker_compose_up_timeout_seconds}s" \
       docker compose --project-name "$project" --env-file "$environment_file" up -d --no-build --no-recreate \
@@ -7107,7 +7127,9 @@ is_removable_checkpoint_dir() {
 # file, so nothing to plant or leave behind) and keeps it open, not
 # in a subshell, until the process exits (the descriptor is never closed). Held: refuses with exit 6 and
 # changes nothing. No flock, or one that cannot lock the folder: says so on
-# stderr and carries on without the lock.
+# stderr and carries on without the lock. A taken lock's descriptor is left
+# in $repair_run_lock_fd for the lock holder (#1893).
+repair_run_lock_fd=""
 acquire_repair_run_lock() {
   local fd status=0 words
   if ! command -v flock >/dev/null 2>&1; then
@@ -7120,7 +7142,10 @@ acquire_repair_run_lock() {
   fi
   words="$(flock -n -x "$fd" 2>&1 >/dev/null)" || status=$?
   # Taken: $fd stays open (never closed) until the process exits.
-  [[ "$status" == 0 ]] && return 0
+  if [[ "$status" == 0 ]]; then
+    repair_run_lock_fd="$fd"
+    return 0
+  fi
   exec {fd}<&-
   if [[ "$status" == 1 && -z "$words" ]]; then
     printf 'execution result=refused done=0 failed=0 reason=repair-running\n'
@@ -7136,6 +7161,68 @@ acquire_repair_run_lock() {
   return 0
 }
 
+# #1893 (design note 63866): the lock holder, the `flock -o cmd` shape with a
+# signal-forwarding supervisor and a parent-death signal (the init/tini
+# shape). It holds the #1849 folder lock taken on $repair_run_lock_fd, does
+# no work and runs no $(...), and starts the run itself again as its worker
+# with the descriptor closed, so only the holder ever holds the lock: when the
+# holder dies, the folder is free at once. The worker (stdin kept, marked by
+# ORBIT_REPAIR_RUN_LOCK_HELD) dies with the holder: setpriv --pdeathsig
+# (util-linux 2.33+) sends it TERM when the holder dies, even of KILL; without
+# it only INT, TERM and HUP are passed on, and a KILLed holder's worker runs
+# all its remaining steps with the lock free. The holder exits with the
+# worker's status, or dies of the signal the worker died of (of INT, when INT
+# ended the run), so the exit code and stdout are the worker's. Never returns.
+#
+# INT reaches the worker as TERM: a bash that receives INT while it waits for
+# a foreground child (the compose $(...) subshells ignore INT) acts on it only
+# once that child ends, so an INT would leave the run going for as long as the
+# docker call takes. TERM ends it at once, as it did before the holder.
+hold_lock_and_run_worker() {
+  local worker_pid status rewait holder_signal=""
+  # The subshell resets INT, which bash ignores in a background job (so a
+  # Ctrl-C to the whole process group still reaches the worker), and execs
+  # the worker; it never holds the lock.
+  if command -v setpriv >/dev/null 2>&1 &&
+    setpriv --pdeathsig=TERM -- true {repair_run_lock_fd}<&- </dev/null >/dev/null 2>&1; then
+    (
+      trap - INT
+      ORBIT_REPAIR_RUN_LOCK_HELD="$$" exec setpriv --pdeathsig=TERM -- "$BASH" "$repair_script_path" "$@"
+    ) {repair_run_lock_fd}<&- <&0 &
+  else
+    (
+      trap - INT
+      ORBIT_REPAIR_RUN_LOCK_HELD="$$" exec "$BASH" "$repair_script_path" "$@"
+    ) {repair_run_lock_fd}<&- <&0 &
+  fi
+  worker_pid=$!
+  trap 'holder_signal=INT; kill -TERM "$worker_pid" 2>/dev/null || true' INT
+  trap 'kill -TERM "$worker_pid" 2>/dev/null || true' TERM
+  trap 'kill -HUP "$worker_pid" 2>/dev/null || true' HUP
+  for (( ; ; )); do
+    status=0
+    wait "$worker_pid" || status=$?
+    if ((status > 128)); then
+      # A trapped signal ends the wait early while the worker lives on: wait again.
+      kill -0 "$worker_pid" 2>/dev/null && continue
+      # The worker ended meanwhile: its saved status, not the signal's.
+      rewait=0
+      wait "$worker_pid" || rewait=$?
+      ((rewait == 127)) || status="$rewait"
+    fi
+    break
+  done
+  # A worker that died of a signal: the holder dies of the same one (of INT,
+  # when INT ended the run), so the caller sees what it saw before (#1893
+  # note 63872). The holder has nothing of its own to clean up.
+  if [[ -n "$holder_signal" ]] || ((status > 128)); then
+    [[ -n "$holder_signal" ]] || holder_signal="$((status - 128))"
+    trap - EXIT "$holder_signal" 2>/dev/null || true
+    kill -s "$holder_signal" "$$" 2>/dev/null || true
+  fi
+  exit "$status"
+}
+
 execute_repair() {
   local entry action fclass ftarget
 
@@ -7145,7 +7232,12 @@ execute_repair() {
   checkpoint_bundle_path=""
   safe_batch_exit_code=0
   dangerous_exit_code=0
-  acquire_repair_run_lock
+  # #1893: the worker runs under its holder's lock; a run that took the lock
+  # becomes its holder. With no lock taken, the run carries on as itself.
+  if [[ -z "$repair_run_lock_held" || "$repair_run_lock_held" != "$PPID" ]]; then
+    acquire_repair_run_lock
+    [[ -z "$repair_run_lock_fd" ]] || hold_lock_and_run_worker "$@"
+  fi
   snapshot_run_checkpoints
 
   run_diagnosis
@@ -7363,7 +7455,7 @@ export_diagnostics_repair() {
 
 case "$mode" in
   execute)
-    execute_repair
+    execute_repair "$@"
     ;;
   export-diagnostics)
     export_diagnostics_repair
