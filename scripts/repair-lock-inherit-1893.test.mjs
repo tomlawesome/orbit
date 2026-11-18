@@ -79,7 +79,7 @@ async function startRunWithChild(targetDir) {
   const { merged, stateDir } = prepareRepair(targetDir, { ...STOPPED, env: sleepHook(pidFile) });
   const run = spawn("bash", [join(targetDir, "scripts", "repair.sh"), ...SAFE], { cwd: targetDir, env: merged, stdio: "ignore", detached: true });
   started.push({ pid: run.pid, group: run.pid });
-  const exited = new Promise((resolve) => run.once("close", resolve));
+  const exited = new Promise((resolve) => run.once("close", (code, signal) => resolve({ code, signal })));
   const childPid = await until(() => existsSync(pidFile) && Number(readFileSync(pidFile, "utf8").trim()) > 0 && Number(readFileSync(pidFile, "utf8").trim()), "the sleeping docker child");
   started.push({ pid: childPid, group: null });
   return { run, childPid, exited, stateDir };
@@ -95,12 +95,15 @@ const fdTargets = (pid) =>
   });
 
 describe("#1893 K2: a killed run frees the folder lock while its child lives on", () => {
-  for (const signal of ["SIGTERM", "SIGKILL", "SIGINT"]) {
+  for (const signal of ["SIGTERM", "SIGKILL", "SIGINT", "SIGHUP"]) {
     it(`${signal}: a second run started at once is not refused with repair-running`, async () => {
       const targetDir = makeFixture();
       const { run, childPid, exited } = await startRunWithChild(targetDir);
       run.kill(signal);
-      await exited;
+      // Note 63872: the lock holder dies of the signal it was sent, so the caller sees what it saw before the fix.
+      const end = await exited;
+      expect(end.signal, "the run should end by the signal it was sent").toBe(signal);
+      expect(end.code, "a run ended by a signal has no exit code").toBeNull();
       expect(alive(childPid), "the docker child should outlive the killed run").toBe(true);
       const second = runRepair(targetDir, SAFE, STOPPED);
       expect(alive(childPid), "the docker child should still be alive when the second run started").toBe(true);
