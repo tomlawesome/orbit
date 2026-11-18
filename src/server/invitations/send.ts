@@ -144,28 +144,55 @@ export interface InvitationSendOutcome {
   maybeDelivered: boolean;
 }
 
-/** nodemailer codes for a failure the mail provably did not survive: the server answered, or was never reached (#1896). */
-const NOT_DELIVERED_CODES: ReadonlySet<string> = new Set([
-  "EAUTH",
-  "EENVELOPE",
-  "EMESSAGE",
-  "ECONNREFUSED",
-  "ENOTFOUND",
-  "ENETUNREACH",
-  "EHOSTUNREACH",
-]);
+/** nodemailer codes for a failure the mail provably did not survive: the server answered or refused it (#1896). */
+const NOT_DELIVERED_CODES: ReadonlySet<string> = new Set(["EAUTH", "EENVELOPE", "EMESSAGE"]);
+
+/** System codes of a connection that never opened: refused, or no route or address to try (#1896). */
+const NEVER_CONNECTED_CODES: ReadonlySet<string> = new Set(["ECONNREFUSED", "ENOTFOUND", "ENETUNREACH", "EHOSTUNREACH"]);
+
+/**
+ * The codes nodemailer's smtp-connection (10.x `_formatError`) puts over a
+ * system error, keeping the system code in `originalCode`: ESOCKET for a
+ * socket error, ECONNECTION for a failed connect() call, EDNS for its own
+ * hostname lookup.
+ */
+const NODEMAILER_WRAPPER_CODES: ReadonlySet<string> = new Set(["ESOCKET", "ECONNECTION", "EDNS"]);
+
+/**
+ * Node's `syscall` on a system error that failed before a socket opened. One
+ * on an open socket says "read" or "write", and an established connection can
+ * still end in EHOSTUNREACH once an ICMP error outlives the retransmissions.
+ */
+const PRE_CONNECTION_SYSCALLS: ReadonlySet<string> = new Set(["connect", "getaddrinfo"]);
+
+/**
+ * Whether `error` shows a connection that never opened, bare (a Node system
+ * error) or as nodemailer shapes it. nodemailer labels every socket error
+ * `command: "CONN"`, before and after the greeting alike, so `syscall` is the
+ * field that tells them apart; any other command means a session was open.
+ */
+function neverConnected(error: { code?: unknown; originalCode?: unknown; command?: unknown; syscall?: unknown }): boolean {
+  const { code, originalCode, command, syscall } = error;
+  if (command !== undefined && command !== "CONN") return false;
+  if (syscall !== undefined && !(typeof syscall === "string" && PRE_CONNECTION_SYSCALLS.has(syscall))) return false;
+  if (typeof code !== "string") return false;
+  if (NEVER_CONNECTED_CODES.has(code)) return true;
+  return NODEMAILER_WRAPPER_CODES.has(code) && typeof originalCode === "string" && NEVER_CONNECTED_CODES.has(originalCode);
+}
 
 /**
  * Reads a provider failure as "maybe delivered" unless it carries a numbered
- * reply or one of the codes above (#1896 ruling, note 65074). nodemailer
- * labels a socket timeout the same way whichever command was in flight, so
- * anything unproven counts as possibly arrived.
+ * reply, one of the codes above, or shows a connection that never opened
+ * (#1896 ruling, note 65074). nodemailer labels a socket timeout the same way
+ * whichever command was in flight, so anything unproven counts as possibly
+ * arrived.
  */
 function failureMaybeDelivered(error: unknown): boolean {
   if (typeof error !== "object" || error === null) return true;
-  const { code, responseCode } = error as { code?: unknown; responseCode?: unknown };
-  if (typeof responseCode === "number" && Number.isFinite(responseCode)) return false;
-  return !(typeof code === "string" && NOT_DELIVERED_CODES.has(code));
+  const fields = error as { code?: unknown; responseCode?: unknown; originalCode?: unknown; command?: unknown; syscall?: unknown };
+  if (typeof fields.responseCode === "number" && Number.isFinite(fields.responseCode)) return false;
+  if (typeof fields.code === "string" && NOT_DELIVERED_CODES.has(fields.code)) return false;
+  return !neverConnected(fields);
 }
 
 /**
