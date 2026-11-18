@@ -764,3 +764,15 @@ describe("helpers", () => {
     expect((await run(["frobnicate"], {})).code).toBe(2);
   });
 });
+
+describe("moved reads only what it needs (#1604 b1 ci-nightly-1)", () => {
+  it("stops at the newest counted nightly: older pipelines' jobs and logs are never requested", async () => {
+    const pipelines = [95, 94, 93, 92, 91].map((id) => ({ id, sha: OTHER_SHA, status: "success" }));
+    const api = await start({ pipelines });
+    expect((await run(["moved"], base(api))).out).toBe("run");
+    const read = seen.requests.filter((request) => /\/pipelines\/\d+\/jobs|\/jobs\/\d+\/trace/u.test(request));
+    const pipelinesRead = new Set(read.map((request) => /\/pipelines\/(\d+)\/jobs/u.exec(request)?.[1]).filter(Boolean));
+    expect([...pipelinesRead]).toEqual(["95"]);
+    expect(read.filter((request) => request.includes("/trace"))).toHaveLength(1);
+  });
+});

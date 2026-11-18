@@ -871,6 +871,13 @@ describe("runConfigurePreflight", () => {
     expect(runConfigurePreflight(deployDir)).toEqual({ ok: false, code: "preflight-failed" });
   });
 
+  it("P-36: names the unknown key when preflight fails on it", () => {
+    writeFileSync(envPath(), "ORBIT_CONFIG_SCHEMA_VERSION=1\nAPP_URL=https://orbit.example.com\nORBIT_NOT_A_REAL_KEY_XYZ=1\n", { mode: 0o600 });
+    const outcome = runConfigurePreflight(deployDir);
+    expect(outcome.ok).toBe(false);
+    expect(JSON.stringify(outcome)).toContain("ORBIT_NOT_A_REAL_KEY_XYZ");
+  });
+
   it("succeeds for a fully current schema-versioned file", () => {
     writeFileSync(envPath(), "ORBIT_CONFIG_SCHEMA_VERSION=1\nAPP_URL=https://orbit.example.com\n", { mode: 0o600 });
     expect(runConfigurePreflight(deployDir)).toEqual({ ok: true });
@@ -942,6 +949,21 @@ describe("runConfigureApply (bare flow, minus ensure_vapid_keys)", () => {
     );
     expect(() => runConfigureApply(deployDir, undefined)).toThrow(ConfigureEngineRefusal);
     expect(lstatOrNull(join(deployDir, SECRETS_DIRECTORY_NAME))).toBeNull();
+  });
+
+  // Audit Low Config PR-22: a first configure killed after writing one secret
+  // looks like an existing deployment; the advice must say it was interrupted.
+  it("PR-22: a lone leftover secret from a killed first configure is called an interrupted run, not a lost backup", () => {
+    mkdirSync(join(deployDir, SECRETS_DIRECTORY_NAME), { mode: 0o700 });
+    writeFileSync(join(deployDir, SECRETS_DIRECTORY_NAME, "session-secret"), `${"a".repeat(64)}\n`, { mode: 0o600 });
+    let message = "";
+    try {
+      runConfigureApply(deployDir, "orbit-local:abcdef123456");
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message).not.toBe("");
+    expect(message).toMatch(/interrupt/i);
   });
 
   // O1-S1/SS1-S2 end-to-end: on an existing deployment (recognized by a

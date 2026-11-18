@@ -25,7 +25,7 @@
 // secret is gone; otherwise it is kept and named, and the next run removes it.
 
 import { spawnSync } from "node:child_process";
-import { appendFileSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { beforeAll, describe, expect, it, vi } from "vitest";
@@ -391,8 +391,12 @@ describe("install.sh --plain --update: the SMTP undo copy (#1834 slice 1)", () =
 
   it("a status command that fails afterwards (non-zero exit) also keeps the copy", () => {
     const targetDir = withSmtpLines(installedFolder());
-    // The first answer is good; once the secret is gone the command answers nothing usable.
-    const result = update(targetDir, line("imported", true), { FAKE_MAIL_SENDING_STATUS_AFTER_SECRET_GONE: "mail-sending source=imported" });
+    // The first answer is good; once the secret is gone the command prints an
+    // answer that would pass the gate on its own but exits non-zero.
+    const result = update(targetDir, line("imported", true), {
+      FAKE_MAIL_SENDING_STATUS_AFTER_SECRET_GONE: line("imported", true),
+      FAKE_MAIL_SENDING_STATUS_AFTER_SECRET_GONE_EXIT: "1",
+    });
     expect(result.status).toBe(0);
     expect(undoCopies(targetDir)).toHaveLength(1);
   });
@@ -580,4 +584,73 @@ describe("install.sh --plain --update: adopting a killed run's SMTP copy never w
       expect(readFileSync(victim, "utf8")).toBe("the operator's own notes\n");
     });
   }
+});
+
+describe("the retired docker-compose.mail.yml overlay (#1789 D-S3)", () => {
+  // The overlay still declares ./.orbit-secrets/smtp-password as a secret file, so Compose cannot start while it is missing.
+  // Dropping the secret would lose the password on the one-time import, so a missing file is recreated empty.
+  const dropSecret = (targetDir) => rmSync(secretPath(targetDir));
+  const modeOf = (path) => statSync(path).mode & 0o7777;
+
+  it("--update recreates a missing smtp-password as an empty 0600 file owned like the other secrets, before Compose starts", () => {
+    const targetDir = withSmtpLines(installedFolder());
+    dropSecret(targetDir);
+    const result = update(targetDir, undefined);
+    expect(`${result.stdout}\n${result.stderr}`).not.toMatch(/smtp-password not found/u);
+    expect(result.status).toBe(0);
+    expect(existsSync(secretPath(targetDir))).toBe(true);
+    expect(readFileSync(secretPath(targetDir))).toHaveLength(0);
+    expect(modeOf(secretPath(targetDir))).toBe(0o600);
+    const other = statSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"));
+    expect(statSync(secretPath(targetDir)).uid).toBe(other.uid);
+    expect(statSync(secretPath(targetDir)).gid).toBe(other.gid);
+    for (const start of upTrace(result)) expect(start.secretPresent).toBe(true);
+  });
+
+  it("--install recreates a missing smtp-password when the overlay is listed in COMPOSE_FILE", () => {
+    const targetDir = makeTarget();
+    makePreprovisionedDeployment(targetDir, ["COMPOSE_FILE=docker-compose.yml:docker-compose.mail.yml"]);
+    expect(existsSync(secretPath(targetDir))).toBe(false);
+    const result = runInstall(targetDir, {}, ["--plain", "--install"]);
+    expect(`${result.stdout}\n${result.stderr}`).not.toMatch(/smtp-password not found/u);
+    expect(result.status).toBe(0);
+    expect(readFileSync(secretPath(targetDir))).toHaveLength(0);
+    expect(modeOf(secretPath(targetDir))).toBe(0o600);
+  });
+
+  it("--update never touches an existing smtp-password: its content stays byte for byte and its mode stays", () => {
+    const targetDir = withSmtpLines(installedFolder());
+    const content = Buffer.from([0x70, 0x00, 0x77, 0x0a, 0xff, 0x20]);
+    writeFileSync(secretPath(targetDir), content, { mode: 0o640 });
+    chmodSync(secretPath(targetDir), 0o640);
+    const result = update(targetDir, undefined);
+    expect(result.status).toBe(0);
+    expect(readFileSync(secretPath(targetDir)).equals(content)).toBe(true);
+    expect(modeOf(secretPath(targetDir))).toBe(0o640);
+  });
+
+  it("--install never touches an existing smtp-password either", () => {
+    const targetDir = makeTarget();
+    makePreprovisionedDeployment(targetDir, ["COMPOSE_FILE=docker-compose.yml:docker-compose.mail.yml"]);
+    writeFileSync(secretPath(targetDir), FAKE_PASSWORD, { mode: 0o600 });
+    const result = runInstall(targetDir, {}, ["--plain", "--install"]);
+    expect(result.status).toBe(0);
+    expect(readFileSync(secretPath(targetDir), "utf8")).toBe(FAKE_PASSWORD);
+  });
+});
+
+describe("the .env-orbit rewrite's scratch file (#1848 retire_smtp_lines)", () => {
+  it("uses a unique name beside the file, so an entry at the old fixed name neither blocks the retirement nor is touched", () => {
+    const targetDir = withSmtpLines(installedFolder());
+    // An entry the old fixed name would have met: rm -f cannot remove a folder, and the rewrite could not write to it.
+    const fixedName = join(targetDir, ".env-orbit.retire-smtp.tmp");
+    mkdirSync(fixedName);
+    writeFileSync(join(fixedName, "keep"), "not the installer's\n");
+    const result = update(targetDir, line("imported", true));
+    expect(result.status).toBe(0);
+    const env = envOf(targetDir);
+    for (const key of SMTP_KEYS) expect(env).not.toMatch(new RegExp(`^${key}=`, "mu"));
+    expect(readFileSync(join(fixedName, "keep"), "utf8")).toBe("not the installer's\n");
+    expect(readdirSync(targetDir).filter((name) => name.startsWith(".env-orbit.retire-smtp.") && name !== ".env-orbit.retire-smtp.tmp")).toEqual([]);
+  }, PROCESS_TEST_TIMEOUT_MS);
 });

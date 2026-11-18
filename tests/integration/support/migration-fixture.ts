@@ -64,7 +64,7 @@ export const EXPECTED_TABLE_COLUMNS: Record<string, string[]> = {
   document_jobs: ["id", "document_id", "kind", "generation", "status", "attempts", "next_attempt_at", "locked_at", "lease_expires_at", "lease_token", "last_error", "completed_at", "created_at", "updated_at"],
   document_previews: ["document_id", "page", "status", "refusal", "attempts", "renderer", "media_type", "width", "height", "plaintext_size", "ciphertext_size", "storage_key", "envelope_version", "content_iv", "content_auth_tag", "wrapped_dek", "wrap_iv", "wrap_auth_tag", "key_id", "created_at", "updated_at"],
   document_staging_objects: ["document_id", "storage_key", "purpose", "ciphertext_size", "envelope_version", "content_iv", "content_auth_tag", "wrapped_dek", "wrap_iv", "wrap_auth_tag", "key_id", "status", "recovery_expires_at", "purge_attempts", "purge_failure_code", "created_at", "updated_at"],
-  documents: ["id", "household_id", "item_id", "uploaded_by_user_id", "display_name", "media_type", "size_bytes", "content_sha256", "content_sha256_sealed", "content_index", "lifecycle", "scan_status", "failure_code", "delete_after", "deleted_at", "available_at", "version", "sealed_item_id", "page_count", "created_at", "updated_at"],
+  documents: ["id", "household_id", "item_id", "uploaded_by_user_id", "display_name", "media_type", "size_bytes", "content_sha256", "content_sha256_sealed", "content_index", "lifecycle", "scan_status", "failure_code", "delete_after", "bound_at", "deleted_at", "available_at", "version", "sealed_item_id", "page_count", "created_at", "updated_at"],
   due_events: ["id", "household_id", "item_id", "kind", "due_date", "completed_at", "completed_by_user_id", "completion_key", "next_event_id", "created_at"],
   external_identities: ["id", "user_id", "issuer", "subject", "last_login_at", "created_at", "updated_at"],
   household_invitations: ["id", "household_id", "email_enc", "email_index", "role", "invited_by_user_id", "token_digest", "expires_at", "sent_at", "send_error", "redeemed_at", "redeemed_by_user_id", "revoked_at", "revoked_by_user_id", "created_at"],
@@ -109,10 +109,12 @@ export const EXPECTED_TABLE_COLUMNS: Record<string, string[]> = {
   // Check-mail send log, kept when a row is removed (#1650, 0016).
   mail_in_sender_check_sends: ["id", "user_id", "sent_at"],
   mail_in_unattributed_replies: ["address_sha256", "last_replied_at", "created_at", "updated_at"],
-  local_credentials: ["user_id", "password_hash", "failed_attempt_count", "locked_until", "last_verified_at", "password_changed_at", "created_at", "updated_at"],
+  // The "must change password" mark a refused sign-in leaves (#1881, 0021).
+  local_credentials: ["user_id", "password_hash", "failed_attempt_count", "locked_until", "last_verified_at", "password_changed_at", "password_change_required_at", "created_at", "updated_at"],
   credential_setup_tokens: ["id", "user_id", "token_hash", "purpose", "expires_at", "consumed_at", "created_by_user_id", "created_at"],
   step_up_proofs: ["id", "session_id", "intent", "expires_at", "consumed_at", "created_at"],
-  sign_in_approvals: ["id", "user_id", "token_hash", "claim_hash", "user_agent", "client_address", "expires_at", "consumed_at", "outcome", "decided_at", "send_count", "last_sent_at", "notice_shown_at", "created_at"],
+  sign_in_approvals: ["id", "user_id", "token_hash", "claim_hash", "user_agent", "client_address", "expires_at", "consumed_at", "outcome", "decided_at", "send_count", "last_sent_at", "created_at"],
+  sign_in_approval_sends: ["id", "approval_id", "user_id", "sent_at"],
 };
 for (const columns of Object.values(EXPECTED_TABLE_COLUMNS)) columns.sort();
 
@@ -120,6 +122,7 @@ type ExpectedIndex = { table: string; columns: string[]; unique: boolean };
 export const EXPECTED_INDEXES: Record<string, ExpectedIndex> = {
   audit_household_activity_idx: { table: "audit_log", columns: ["household_id", "entity_type", "created_at"], unique: false },
   audit_household_entity_idx: { table: "audit_log", columns: ["household_id", "entity_type", "entity_id"], unique: false },
+  audit_relay_rotation_idx: { table: "audit_log", columns: ["actor_user_id", "action", "created_at"], unique: false },
   document_crypto_storage_key_unique: { table: "document_crypto", columns: ["storage_key"], unique: true },
   document_household_content_index_idx: { table: "documents", columns: ["household_id", "content_index"], unique: false },
   document_household_item_created_idx: { table: "documents", columns: ["household_id", "item_id", "created_at"], unique: false },
@@ -207,6 +210,8 @@ export const EXPECTED_INDEXES: Record<string, ExpectedIndex> = {
   credential_setup_tokens_user_idx: { table: "credential_setup_tokens", columns: ["user_id"], unique: false },
   step_up_proofs_session_idx: { table: "step_up_proofs", columns: ["session_id"], unique: false },
   sign_in_approvals_user_idx: { table: "sign_in_approvals", columns: ["user_id"], unique: false },
+  sign_in_approval_sends_user_sent_idx: { table: "sign_in_approval_sends", columns: ["user_id", "sent_at"], unique: false },
+  sign_in_approval_sends_approval_idx: { table: "sign_in_approval_sends", columns: ["approval_id"], unique: false },
 };
 
 type ExpectedConstraint = {
@@ -366,6 +371,9 @@ export const EXPECTED_CONSTRAINTS: Record<string, ExpectedConstraint> = {
   sign_in_approvals_token_hash_unique: unique("sign_in_approvals", ["token_hash"]),
   sign_in_approvals_claim_hash_unique: unique("sign_in_approvals", ["claim_hash"]),
   sign_in_approvals_user_id_users_id_fk: foreign("sign_in_approvals", ["user_id"], "users", ["id"], "cascade"),
+  sign_in_approval_sends_pkey: primary("sign_in_approval_sends", ["id"]),
+  sign_in_approval_sends_approval_id_sign_in_approvals_id_fk: foreign("sign_in_approval_sends", ["approval_id"], "sign_in_approvals", ["id"], "cascade"),
+  sign_in_approval_sends_user_id_users_id_fk: foreign("sign_in_approval_sends", ["user_id"], "users", ["id"], "cascade"),
 };
 
 type PostgresClient = ReturnType<typeof postgres>;

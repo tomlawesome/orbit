@@ -9,8 +9,9 @@
  * browser that typed the password collects it. Opening the link decides
  * nothing (mail scanners follow links); only the claim cookie's holder can
  * collect; a spent approval collects once; "this wasn't me" turns the sign-in
- * away, counts against the credential and leaves the account holder one notice
- * for their next successful sign-in; and a provider (OIDC) sign-in is never
+ * away, counts against the credential and marks the password, so the next
+ * sign-in must choose a new one before it gets a session (#1881); and a
+ * provider (OIDC) sign-in is never
  * asked. Moved here from tests/e2e/second-factor.spec.ts (#1612, ADR-0039),
  * which keeps what the door, the waiting card and the approval page look like.
  *
@@ -24,7 +25,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { auditLog, instanceAuthority, localCredentials, signInApprovals, users } from "@/db/schema";
-import { pendingSignInCookieName, sessionCookieName, transactionCookieName } from "@/lib/auth/cookies";
+import { passwordChangeCookieName, pendingSignInCookieName, sessionCookieName, transactionCookieName } from "@/lib/auth/cookies";
 import * as oidc from "@/lib/auth/oidc";
 import type { OidcMetadata, VerifiedIdentity } from "@/lib/auth/oidc";
 import { hashPassword } from "@/lib/auth/password";
@@ -78,6 +79,7 @@ const { POST: collect } = await loadRoute("auth/local/login/pending");
 const { POST: decide } = await loadRoute("auth/approve");
 const { GET: sessionStatus } = await loadRoute("auth/session");
 const { GET: signInNotice } = await loadRoute("auth/sign-in-notice");
+const { POST: saveNewPassword } = await loadRoute("auth/local/login/new-password");
 const { GET: startProviderLogin } = await loadRoute("auth/login");
 const { GET: providerCallback } = await loadRoute("auth/callback");
 
@@ -285,7 +287,7 @@ describe("a password with a mail relay (ADR-0027 §1, §4)", () => {
 });
 
 describe("\"this wasn't me\" (ADR-0027 §8 and consequences)", () => {
-  it("turns the sign-in away, counts it against the credential, and tells the account holder once, next time", async () => {
+  it("turns the sign-in away, counts it against the credential, and makes the next sign-in choose a new password", async () => {
     const account = await seedAccount("refused");
     const typed = await typePassword(account.email);
     const claim = claimOf(typed);
@@ -309,19 +311,31 @@ describe("\"this wasn't me\" (ADR-0027 §8 and consequences)", () => {
       .where(and(eq(auditLog.entityId, account.id), eq(auditLog.action, "sign_in_refused")));
     expect(trail).toHaveLength(1);
 
-    // The next sign-in that does work carries the notice, once.
+    // #1881: the next approved sign-in gets no session, only the change-password
+    // hold; saving a new password signs it in, and the mark is gone with it.
     mail.sent.length = 0;
     const again = await typePassword(account.email);
     await press(mailedToken(), "approved");
-    const session = sessionCookieOf(await collectWith(claimOf(again)));
+    const held = await collectWith(claimOf(again));
+    expect(await held.json()).toEqual({ state: "password_change_required", refusedAt: expect.any(String) });
+    expect(sessionCookieOf(held)).toBeUndefined();
+    const hold = readSetCookie(held, passwordChangeCookieName(getAuthConfig()))?.value;
+    expect(hold).toBeTruthy();
+    const NEW_PASSWORD = "a-different-local-password";
+    const saved = await post(
+      saveNewPassword,
+      "/api/auth/local/login/new-password",
+      { password: NEW_PASSWORD, passwordAgain: NEW_PASSWORD },
+      `${passwordChangeCookieName(getAuthConfig())}=${hold}`,
+    );
+    expect(await saved.json()).toEqual({ authenticated: true });
+    const session = sessionCookieOf(saved);
     expect(session).toBeDefined();
 
     const asked = () => callRoute(signInNotice, {
       url: `${ORIGIN}/api/auth/sign-in-notice`,
       headers: { cookie: `${sessionCookieName(getAuthConfig())}=${session}` },
     });
-    const first = (await (await asked()).json()) as { notice: { deniedAt: string } | null };
-    expect(first.notice?.deniedAt).toEqual(expect.any(String));
     expect(await (await asked()).json()).toEqual({ notice: null });
   });
 

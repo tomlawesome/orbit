@@ -49,7 +49,7 @@ async function retireUnboundUploads(): Promise<void> {
     with expired as (
       update documents
       set lifecycle = 'pending_deletion', version = version + 1, updated_at = now()
-      where lifecycle = 'available' and item_id is null and delete_after <= now()
+      where lifecycle = 'available' and item_id is null and bound_at is null and delete_after <= now()
       returning id, version
     )
     insert into document_jobs (document_id, kind, generation)

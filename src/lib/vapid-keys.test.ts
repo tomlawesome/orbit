@@ -64,6 +64,8 @@ describe("ensureVapidKeys", () => {
   it("keeps an existing non-empty key and never touches .env-orbit", () => {
     mkdirSync(join(deployDir, ".orbit-secrets"), { mode: 0o700 });
     writeFileSync(keyPath(), "existing\n", { mode: 0o644 });
+    // A recorded public key: with it empty, P-15 repairs .env-orbit.
+    writeFileSync(envPath(), "APP_URL=https://orbit.vapid.invalid\nVAPID_PUBLIC_KEY=pub-existing\nVAPID_PRIVATE_KEY_FILE=\n", { mode: 0o600 });
     const before = readFileSync(envPath(), "utf8");
     const result = ensureVapidKeys(deployDir, () => {
       throw new Error("must not generate");
@@ -72,6 +74,17 @@ describe("ensureVapidKeys", () => {
     expect(readFileSync(keyPath(), "utf8")).toBe("existing\n");
     expect(statSync(keyPath()).mode & 0o777).toBe(0o600);
     expect(readFileSync(envPath(), "utf8")).toBe(before);
+  });
+
+  // Audit Low Config P-15: a non-empty private key returned early, so a
+  // missing VAPID_PUBLIC_KEY was never repaired.
+  it("P-15: repairs a missing VAPID_PUBLIC_KEY when a valid private key is already on disk", () => {
+    const pair = generateVapidKeyPair();
+    mkdirSync(join(deployDir, ".orbit-secrets"), { mode: 0o700 });
+    writeFileSync(keyPath(), `${pair.privateKey}\n`, { mode: 0o600 });
+    ensureVapidKeys(deployDir);
+    expect(readFileSync(keyPath(), "utf8")).toBe(`${pair.privateKey}\n`);
+    expect(readFileSync(envPath(), "utf8")).toContain(`VAPID_PUBLIC_KEY=${pair.publicKey}\n`);
   });
 
   it("replaces an empty key file", () => {

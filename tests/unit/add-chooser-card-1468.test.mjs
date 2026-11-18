@@ -109,7 +109,7 @@ describe("desk Add: key date, repeat and reminder are pressed values (#1468, Q)"
     const chips = card(/^Choose reminders/iu);
     expect(chips, "reminders open the day chips").not.toBeNull();
     expect([...chips?.querySelectorAll("button[aria-pressed]") ?? []].map((one) => one.textContent?.trim()))
-      .toEqual(["7d", "14d", "30d", "60d", "90d"]);
+      .toEqual(["1d", "3d", "7d", "14d", "30d", "60d", "90d"]); // #1892: one scale
     expect(chips?.querySelector('[role="group"]')?.getAttribute("aria-label")).toBe("Remind me this many days before");
   });
 });

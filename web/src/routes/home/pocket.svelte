@@ -266,7 +266,7 @@
      owner, 2026-10-08 ("Yeah, ideally"): the phone amends the way the desk
      does (drawer-acts.svelte.js's startAmend, both screens'). `review &
      amend →` puts the row's lines into editing (EditRows); the choosers are
-     the bottom sheet, as a filed item's are. `add to orbit` sends the rows
+     the bottom sheet, as a filed item's are. The amend button (`add to orbit`, or `add without it` when a file is flagged) sends the rows
      as the amended item on the two-tap decision's own operation id (home's
      amendReceipt, as `onamend`); `cancel` puts the readings back. The
      review sheet that rose here is gone. */
@@ -1023,7 +1023,7 @@
         {#each view.suggestions as s (s.id)}
           {@const amending = modes.edit.id === s.id}
           <!-- #1319: while amended, the title is live in the row's head and
-               `add to orbit` / `cancel` (SuggestionDrawer) replace the two
+               the amend button / `cancel` (SuggestionDrawer) replace the two
                decisions -->
           {#snippet liveTitle()}{#if modes.edit.draft}<b class="ed" contenteditable="plaintext-only" spellcheck="false" role="textbox" tabindex="0"
              aria-label="title" data-ed="title" bind:textContent={modes.edit.draft.title}></b>{/if}{/snippet}

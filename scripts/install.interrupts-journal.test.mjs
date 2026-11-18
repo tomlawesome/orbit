@@ -167,6 +167,50 @@ describe("install.sh: an engine killed hard on a fresh install is rolled back (O
   });
 });
 
+describe("install.sh: what the closing line claims when nothing was created (audit Lows O-F3, O-F5)", () => {
+  it("O-F3: an engine that dies having written nothing does not claim containers and volumes were removed", () => {
+    const { targetDir, environment } = privateStateFixture();
+    const result = runInstall(targetDir, { ...environment, FAKE_ENGINE_EXIT: "137" });
+    expect(result.status).toBe(1);
+    expect(result.stderr).not.toContain("containers and volumes it created are removed");
+  });
+
+  it("O-F5: cancelling at the engine's menu (exit 130, nothing written) runs no rollback and does not report a failed install", () => {
+    const { targetDir, environment, before } = privateStateFixture();
+    const result = runInstall(targetDir, { ...environment, FAKE_ENGINE_EXIT: "130" });
+    expect(treeSnapshot(targetDir)).toEqual(before);
+    expect(result.stdout.split("\n").some((line) => /^phase=rollback /u.test(line))).toBe(false);
+    expect(result.stderr).not.toContain("rolled back");
+  });
+});
+
+describe("install.sh: rollback restore and copy release (audit Lows O-R4, O-S2)", () => {
+  it("O-R4: when putting an original back fails, what was in its place is not deleted first", () => {
+    const { targetDir, environment } = privateStateFixture();
+    const result = runInstall(targetDir, { ...environment, ...committedCanned(), FAKE_COMPOSE_UP_FAIL: "1", FAKE_CP_FAIL_RESTORE: "1" });
+    expect(result.status).not.toBe(0);
+    expect(existsSync(join(targetDir, ".env-orbit"))).toBe(true);
+  });
+
+  it("O-S2: a successful install whose originals copy cannot be deleted says so and still exits 0", () => {
+    const { targetDir, environment } = privateStateFixture();
+    let result;
+    try {
+      result = runInstall(targetDir, { ...environment, ...committedCanned(), FAKE_LOCK_ORIGINALS: "1" });
+    } finally {
+      // Make the scratch folder removable again.
+      for (const stamp of readdirSync(join(targetDir, "orbit-install-backups"), { withFileTypes: true })) {
+        if (stamp.isDirectory() && existsSync(join(targetDir, "orbit-install-backups", stamp.name, "originals"))) {
+          chmodSync(join(targetDir, "orbit-install-backups", stamp.name, "originals"), 0o700);
+        }
+      }
+    }
+    expect(result.stderr).toContain("could not remove the copy of this folder's original files");
+    expect(result.stdout).toContain("Orbit is ready.");
+    expect(result.status).toBe(0);
+  });
+});
+
 describe("install.sh: an interrupt while the engine runs, empty folder (redesign r1)", () => {
   it("SIGTERM after the engine committed: the folder is empty again, the output says it was rolled back, and a rerun installs", async () => {
     const targetDir = makeTarget();

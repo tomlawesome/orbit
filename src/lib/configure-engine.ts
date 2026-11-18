@@ -1,7 +1,11 @@
 import { randomBytes } from "node:crypto";
 import {
   chmodSync,
+  closeSync,
+  constants as fsConstants,
+  fsyncSync,
   lstatSync,
+  openSync,
   mkdirSync,
   readFileSync,
   renameSync,
@@ -27,7 +31,7 @@ import {
 } from "./config-contract";
 import { acquireDeployLock as acquireSharedDeployLock } from "./deploy-lock";
 import { HostOwnershipError, applyHostOwnership } from "./host-ownership";
-import { NOT_UTF8_FAILURE_MESSAGE, isNotUtf8Failure, preflightEnvironmentFile } from "./configuration-migration";
+import { NOT_UTF8_FAILURE_MESSAGE, isNotUtf8Failure, preflightEnvironmentFile, preflightFailureMessage } from "./configuration-migration";
 import { decodeUtf8Strict } from "./env-orbit-file";
 import { ensureVapidKeys } from "./vapid-keys";
 
@@ -145,6 +149,8 @@ function atomicWriteFile(finalPath: string, content: string | Buffer, mode: numb
     chmodSync(tmpPath, mode);
     // #1258: handed to the host operator before it takes its final name.
     applyHostOwnership(tmpPath);
+    // P-16: the bytes reach the disk before the rename can make them the live file.
+    syncPath(tmpPath, fsConstants.O_RDONLY);
   } catch (error) {
     try {
       rmSync(tmpPath, { force: true });
@@ -162,6 +168,21 @@ function atomicWriteFile(finalPath: string, content: string | Buffer, mode: numb
       /* best effort cleanup */
     }
     refuse(`Could not persist ${finalPath}.`, "write-failed");
+  }
+  // P-16: and the rename itself survives a power cut. Best effort: the file is already in place.
+  try {
+    syncPath(dir, fsConstants.O_RDONLY | fsConstants.O_DIRECTORY);
+  } catch {
+    /* a folder that cannot be opened for sync still holds the renamed file */
+  }
+}
+
+function syncPath(path: string, flags: number): void {
+  const descriptor = openSync(path, flags);
+  try {
+    fsyncSync(descriptor);
+  } finally {
+    closeSync(descriptor);
   }
 }
 
@@ -535,7 +556,13 @@ function secretFilePathInfo(path: string): { info: PathInfo; statErrorCode?: str
  * hard refusal unconditionally, fresh install or not: it is never evidence
  * that the file doesn't exist, only that this process could not find out.
  */
-export function ensureSecretFile(deployDir: string, relativePath: string, isFreshInstall: boolean): EnsureSecretFileResult {
+export function ensureSecretFile(
+  deployDir: string,
+  relativePath: string,
+  isFreshInstall: boolean,
+  // PR-22: the caller saw only some generated secrets and no applied stamp, the mark of a first configure killed part-way.
+  interruptedFirstRun = false,
+): EnsureSecretFileResult {
   const path = join(deployDir, relativePath);
   const { info, statErrorCode } = secretFilePathInfo(path);
   if (info.existsFollowing) {
@@ -557,6 +584,13 @@ export function ensureSecretFile(deployDir: string, relativePath: string, isFres
   if (statErrorCode !== undefined && statErrorCode !== "ENOENT") {
     refuse(
       `Could not check ${relativePath} (${statErrorCode}); refusing to guess whether it exists rather than possibly generating a replacement secret.`,
+      "secret-file-invalid",
+    );
+  }
+
+  if (!isFreshInstall && interruptedFirstRun) {
+    refuse(
+      `${relativePath} is missing, but other Orbit secrets are already in ${SECRETS_DIRECTORY_NAME} and ${ENVIRONMENT_FILE_NAME} has no applied-configuration stamp: an earlier first \`orbit configure\` was probably interrupted. Refusing to generate a replacement in case this deployment has run. If it has never run, remove ${SECRETS_DIRECTORY_NAME} and run \`orbit configure\` again; if it has, restore ${relativePath} from backup (or Orbit's recovery bundle) to the exact path ${path}.`,
       "secret-file-invalid",
     );
   }
@@ -980,7 +1014,8 @@ export function runConfigurePreflight(deployDir: string): ConfigurePreflightOutc
   if (!pathInfo(envPath).existsFollowing && !pathInfo(envPath).isSymlink) return { ok: true };
   const result = preflightEnvironmentFile(envPath);
   if (isNotUtf8Failure(result)) return { ok: false, code: "preflight-failed", message: NOT_UTF8_FAILURE_MESSAGE };
-  if (result.status !== 0) return { ok: false, code: "preflight-failed" };
+  // P-36: name the offending key where the parser knows it, rather than only "preflight failed".
+  if (result.status !== 0) return result.key === undefined ? { ok: false, code: "preflight-failed" } : { ok: false, code: "preflight-failed", message: preflightFailureMessage(result) };
   if (/^safely_migratable ORBIT_CONFIG_SCHEMA_VERSION$/m.test(result.stdout)) {
     return { ok: false, code: "configuration-migration-required" };
   }
@@ -1025,10 +1060,11 @@ export function runConfigureApply(
   // the first is generated, so writing one cannot make the next look existing.
   // hadEnvironmentFile is only for persist_orbit_image's rule below.
   const hadEnvironmentFile = pathInfo(join(deployDir, ENVIRONMENT_FILE_NAME)).existsFollowing;
-  let isFreshInstall = !GENERATED_SECRET_RELATIVE_PATHS.some((relativePath) => {
+  const presentGeneratedSecrets = GENERATED_SECRET_RELATIVE_PATHS.filter((relativePath) => {
     const info = pathInfo(join(deployDir, relativePath));
     return info.existsFollowing || info.isSymlink;
-  });
+  }).length;
+  let isFreshInstall = presentGeneratedSecrets === 0;
 
   const envResult = ensureEnvironmentFile(deployDir);
   if (envResult.message) messages.push(envResult.message);
@@ -1051,6 +1087,9 @@ export function runConfigureApply(
   if (stampedBeforeThisRun) {
     isFreshInstall = false;
   }
+  // PR-22: some but not all generated secrets and no stamp is a first run that was killed part-way, not a lost backup.
+  const interruptedFirstRun =
+    !stampedBeforeThisRun && presentGeneratedSecrets > 0 && presentGeneratedSecrets < GENERATED_SECRET_RELATIVE_PATHS.length;
 
   // persist_orbit_image's rule (configure.sh): an existing deployment only
   // changes its pinned image through the installer, which says so with
@@ -1075,7 +1114,7 @@ export function runConfigureApply(
   const releaseSecretsLock = acquireDeployLock(deployDir, "orbit configure");
   try {
     for (const relativePath of GENERATED_SECRET_RELATIVE_PATHS) {
-      const result = ensureSecretFile(deployDir, relativePath, isFreshInstall);
+      const result = ensureSecretFile(deployDir, relativePath, isFreshInstall, interruptedFirstRun);
       if (result.message) messages.push(result.message);
     }
   } finally {
