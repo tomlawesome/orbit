@@ -4512,7 +4512,8 @@ restore_transaction_fail() {
 # happens to hold flock on the file. #1897: the lock is opened read-write
 # only, never read-only, whoever runs repair, as the backup/restore lock is
 # (#1890): a FIFO swapped in after the checks opens at once instead of
-# waiting for a writer, and the descriptor must be the regular file stat saw.
+# waiting for a writer; stat must still see a regular file just before the
+# open, and the descriptor must be that same regular file.
 # A lock that will not open read-write, or that is not that file, leaves
 # $engine_lock_problem `unwritable`, and the caller refuses the action.
 readonly engine_lock_path=".orbit-engine.lock"
@@ -4528,6 +4529,10 @@ engine_lock_idle() {
   if command -v flock >/dev/null 2>&1; then
     before="$(stat -c '%d:%i %F' -- "$engine_lock_path" 2>/dev/null)" || before=""
     { exec {fd}<>"$engine_lock_path"; } 2>/dev/null || fd=""
+    case "${before#* }" in
+      "regular file" | "regular empty file") ;;
+      *) before="" ;;
+    esac
     opened=""
     [[ -z "$fd" ]] || opened="$(stat -L -c '%d:%i %F' -- "/dev/fd/$fd" 2>/dev/null)" || opened=""
     if [[ -z "$fd" || -z "$before" || "$opened" != "$before" ]]; then
@@ -4551,18 +4556,20 @@ engine_lock_idle() {
 # shellcheck disable=SC2016 # expanded by the child bash
 readonly tree_modes_script='set -o pipefail; cd -- "$1" && find . -mindepth 1 -printf "%P %y %m\n" | LC_ALL=C sort'
 restore_transaction_tree_modes() {
-  local out
+  local out status=0
   if [[ "${2:-}" != live || "$(id -u)" != 0 ]]; then
     (set -o pipefail && cd -- "$1" && find . -mindepth 1 -printf '%P %y %m\n' | LC_ALL=C sort)
     return
   fi
   out="$(set -o pipefail
     as_folder_owner --pipe bash -c "$tree_modes_script" tree-modes "$1" </dev/null |
-      LC_ALL=C timeout -k 1 "$((owner_step_timeout + owner_step_grace))" head -c "$((owner_read_cap + 1))")" || return 1
+      LC_ALL=C timeout -k 1 "$((owner_step_timeout + owner_step_grace))" head -c "$((owner_read_cap + 1))")" || status=$?
+  # The size first: a flood also fails the pipeline, and the line says why.
   if (("$(LC_ALL=C; printf '%s' "${#out}")" > owner_read_cap)); then
     printf "Orbit repair: %s: what the step tree-modes printed as the deployment folder's owner is too large (over 1 MiB), so it was not used.\n" "$owner_action" >&2 || true
     return 1
   fi
+  [[ "$status" == 0 ]] || return 1
   printf '%s\n' "$out"
 }
 

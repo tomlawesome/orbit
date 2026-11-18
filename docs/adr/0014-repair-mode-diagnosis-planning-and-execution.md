@@ -530,6 +530,6 @@ that opens with `O_NONBLOCK` (python3, perl or node), which repair.sh does
 not depend on today.
 The same holds for the engine's `.orbit-engine.lock` (#1897): repair opens
 it read-write only before it removes a staging folder, and a lock that
-will not open that way, or opens as anything but the regular file checked,
-is never taken as idle; restore-transaction refuses, saying the lock "could
+will not open that way, is not a regular file at the stat just before the
+open, or opens as anything but that same file, is never taken as idle; restore-transaction refuses, saying the lock "could
 not be opened for writing".
