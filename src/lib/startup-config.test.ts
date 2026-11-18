@@ -55,6 +55,27 @@ describe("startup configuration", () => {
   });
 
   it.each([
+    ["WORKER_POLL_SECONDS", "5"],
+    ["WORKER_POLL_SECONDS", "4000"],
+    ["NOTIFICATION_MAX_ATTEMPTS", "0"],
+    ["NOTIFICATION_MAX_ATTEMPTS", "21"],
+  ])("A-D1 (#1879): %s=%s is reported as a non-blocking mail issue, not left to fail at use", (name, value) => {
+    expect(() => validateStartupConfiguration({ ...baseEnvironment(), [name]: value })).not.toThrow();
+    expect(getConfigurationProblems().map((problem) => problem.setting)).toContain("mail");
+    expect(getConfigurationProblems()).toContainEqual(expect.objectContaining({ setting: "mail", code: "configuration_optional" }));
+  });
+
+  it.each([
+    ["WORKER_POLL_SECONDS", "10"],
+    ["WORKER_POLL_SECONDS", "3600"],
+    ["NOTIFICATION_MAX_ATTEMPTS", "1"],
+    ["NOTIFICATION_MAX_ATTEMPTS", "20"],
+  ])("A-D1 (#1879): %s=%s in range raises nothing", (name, value) => {
+    expect(() => validateStartupConfiguration({ ...baseEnvironment(), [name]: value })).not.toThrow();
+    expect(getConfigurationProblems().map((problem) => problem.setting)).not.toContain("mail");
+  });
+
+  it.each([
     ["version", { ORBIT_CONFIG_SCHEMA_VERSION: "2" }, "ORBIT_CONFIG_SCHEMA_VERSION"],
     ["missing secret file", { SESSION_SECRET: undefined, SESSION_SECRET_FILE: "/missing/runtime-secret" }, "authentication"],
   ])("rejects invalid core %s before database access", (_label, changes, field) => {

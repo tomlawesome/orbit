@@ -24,7 +24,7 @@ import { openDocumentStorage } from "@/server/documents/storage";
  * - a remembered refusal answers what the drawing answered, with no child;
  * - a page past the first 100 of a document stored under the old 1,000-page
  *   cap is never drawn ahead, only here, when viewed (owner answer 10a);
- * - Orbit's own failure to draw (a full quarantine, no renderer) answers 503
+ * - Orbit's own failure to draw (a full quarantine, no renderer, a full view queue) answers 503
  *   `document_preview_busy` with Retry-After and is never remembered;
  * - a kept page whose object is missing or fails its check is discarded and
  *   the page drawn now, as if never kept (read repair, #1803);
@@ -101,7 +101,7 @@ export async function readDocumentPagePreview(
     const draw = await drawDocumentPage(plaintext, record.mediaType, page, "view", { pageCount: storedCount === undefined });
     // Orbit's own side could not draw (a full quarantine, no renderer): a
     // 503 to retry, and nothing remembered about the page (D20).
-    if (draw.outcome === "busy") throw previewBusyError();
+    if (draw.outcome === "busy") throw previewBusyError(draw.retryAfterSeconds);
     if (draw.outcome === "page_not_found") {
       if (storedCount === undefined) await fillPageCount(documentId, draw.pageCount);
       throw documentPreviewPageNotFound();

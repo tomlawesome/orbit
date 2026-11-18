@@ -131,6 +131,9 @@
   /* #1605 W-F8: a waiting attachment is not yet in Orbit, so its lost page
      says so; the mail it came with may have been decided meanwhile. */
   const STAGED_UNDRAWN = "this page of the waiting attachment could not be drawn";
+  const BUSY = "busy — trying this page again";
+  /* #1446: the server said busy for the page asked for; it is asked once more. */
+  let busy = $state(false);
 
   /** @param {number} next */
   function turnTo(next) {
@@ -193,24 +196,41 @@
     const wanted = pageNo;
     void retryTick;
     const controller = new AbortController();
-    loadStagedPage(previewPageHref(source, wanted), controller.signal).then((result) => {
-      if (controller.signal.aborted) {
-        if (result.kind === "page") URL.revokeObjectURL(result.url);
-        return;
-      }
-      if (result.kind !== "page") { ownLost = true; ownRetrying = false; ownRuns++; return; }
-      showPage(result.url);
-      ownLost = false;
-      ownRetrying = false;
-      shownPage = wanted;
-      if (result.pageCount !== null) pageCount = result.pageCount;
-    }).catch((error) => {
-      if (error instanceof DOMException && error.name === "AbortError") return;
-      ownLost = true;
-      ownRetrying = false;
-      ownRuns++;
-    });
-    return () => controller.abort();
+    /** @type {ReturnType<typeof setTimeout> | undefined} */
+    let timer;
+    /** @param {boolean} again */
+    function ask(again) {
+      loadStagedPage(previewPageHref(source, wanted), controller.signal).then((result) => {
+        if (controller.signal.aborted) {
+          if (result.kind === "page") URL.revokeObjectURL(result.url);
+          return;
+        }
+        if (result.kind === "busy" && !again) {
+          /* #1446: the page on show stays; one quiet retry after Retry-After. */
+          busy = true;
+          timer = setTimeout(() => { busy = false; ask(true); }, result.retryAfterSeconds * 1000);
+          return;
+        }
+        if (result.kind !== "page") { busy = false; ownLost = true; ownRetrying = false; ownRuns++; return; }
+        showPage(result.url);
+        ownLost = false;
+        ownRetrying = false;
+        shownPage = wanted;
+        if (result.pageCount !== null) pageCount = result.pageCount;
+      }).catch((error) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        busy = false;
+        ownLost = true;
+        ownRetrying = false;
+        ownRuns++;
+      });
+    }
+    ask(false);
+    return () => {
+      controller.abort();
+      clearTimeout(timer);
+      busy = false;
+    };
   });
 
   const fitScale = $derived(
@@ -388,6 +408,9 @@
                brokenSrc = shownSrc;
              }} />
         {/if}
+        {#if busy && !lost}
+          <p class="rd-busy" role="alert">{BUSY}</p>
+        {/if}
       </div>
       <!-- #1300: either side of the page, only where there is a page that way. -->
       {#if turn.back}
@@ -446,6 +469,7 @@
     box-shadow:0 18px 44px rgba(0,0,0,.45)}
   .rd-stage.zoomed img{max-width:none;max-height:none}
   .rd-lost{margin:0;text-align:center}
+  .rd-busy{margin:0;text-align:center;opacity:.7}
   .rd-stage:has(.rd-lost){grid-auto-flow:row;place-content:center;gap:4px}
   .rd-retry{justify-self:center;font:0.65625rem var(--mono);color:var(--ink-quiet);background:none;border:0;
     cursor:pointer;padding:0 8px;min-height:44px;letter-spacing:.02em}
