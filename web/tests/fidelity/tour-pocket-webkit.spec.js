@@ -1686,3 +1686,134 @@ test.describe("the phone's callouts sit on the sky line and on the sheet (#1895)
     });
   }
 });
+
+
+/* ---- #1895 (ruling, issue note 63948): the sheet lines opt in ---------------
+   `item-read` and `item-calendar` are the only lines that sit inside their
+   anchor (a sheet), hung from its top edge, side `bottom`, from the first
+   frame to the last. Every other held mark's line lies wholly outside its
+   anchor, takes the same side at every phone width (unless the §3.2 flip
+   fires for want of room), and never changes side during its hold. Played
+   under NORMAL motion: the preview sheet grows 900ms after it rises, and a
+   per-frame "is it a surface now" re-check made `item-read` jump mid-hold. */
+const SHEET_MARKS = new Set(["item-read", "item-calendar"]);
+/* `time-toast` is pinned into the band over its anchor (o.pin, chapter 4's
+   toast), the one line the ruling leaves where it is; not judged "outside". */
+const PINNED_INSIDE = "time-toast";
+const ABOVE_OR_BELOW = ["relay-addr", "inbox-lane-review", "item-edit"];
+
+/** Records every side each callout element wears, from its first frame on.
+ *  @param {import("@playwright/test").Page} page */
+async function recordSides(page) {
+  await page.evaluate(() => {
+    const w = /** @type {any} */ (window);
+    if (w.__sideSeen) return;
+    w.__sideSeen = new WeakMap();
+    const rec = () => {
+      for (const el of document.querySelectorAll(".tourfilm-callout")) {
+        const side = /** @type {HTMLElement} */ (el).dataset.tourfilmSide;
+        if (!side) continue;
+        const seen = w.__sideSeen.get(el) ?? [];
+        if (seen[seen.length - 1] !== side) { seen.push(side); w.__sideSeen.set(el, seen); }
+      }
+    };
+    new MutationObserver(rec).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-tourfilm-side"] });
+    const tick = () => { rec(); requestAnimationFrame(tick); };
+    requestAnimationFrame(tick);
+  });
+}
+
+test.describe("every phone callout but the two sheet lines stays outside its anchor, and none changes side (#1895 normal motion)", () => {
+  test("#1895 normal motion at 430, 390 and 360: sheet lines inside, every other line outside, one side per hold and per width", async ({ browser }) => {
+    test.setTimeout(2_400_000);
+    /** @type {string[]} */
+    const wrong = [];
+    /** @type {Map<string, Map<number, { side: string, box: any, anchor: any, vh: number }>>} */
+    const byMark = new Map();
+    const coverFaults = (/** @type {string[]} */ fs) => fs.filter((f) => /covers the text|misses its anchor|past the screen|under the top chrome|pointing at nothing/u.test(f));
+    const PREVIEW = "[data-preview-card]";
+    const ordered = MARKS.flatMap(([, marks], ci) => /** @type {string[]} */ (marks).map((m, k) => /** @type {[string, number, number]} */ ([m, ci, k])));
+
+    for (const phone of PHONES) {
+      const context = await browser.newContext({
+        viewport: { width: phone.width, height: phone.height }, isMobile: true, hasTouch: true, deviceScaleFactor: 2,
+        reducedMotion: "no-preference",
+      });
+      const page = await context.newPage();
+      await openFilm(page);
+      await recordSides(page);
+      for (const [mark, ci, k] of ordered) {
+        const w = `${phone.width}`;
+        const read = await holdAndRead(page, mark, k === 0 ? ci : null, [PREVIEW]).catch(() => null);
+        if (!read) {
+          /* most marks hold no line (a ring, a beat): only the sheet lines must be up */
+          if (SHEET_MARKS.has(mark)) wrong.push(`${w} ${mark}: no callout up at the hold`);
+          continue;
+        }
+        const first = await page.evaluate(() => {
+          const el = [...document.querySelectorAll(".tourfilm-callout")].find((c) => /** @type {HTMLElement} */ (c).style.opacity !== "0");
+          return el ? /** @type {any} */ (window).__sideSeen.get(el) ?? [] : [];
+        });
+        /* the sheet's late growth (900ms) and the line's own follow-on */
+        await page.waitForTimeout(1500);
+        await settled(page);
+        const later = await page.evaluate(() => {
+          const el = [...document.querySelectorAll(".tourfilm-callout")].find((c) => /** @type {HTMLElement} */ (c).style.opacity !== "0");
+          if (!el) return null;
+          const r = el.getBoundingClientRect();
+          const d = /** @type {HTMLElement} */ (el).dataset;
+          const stem = el.querySelector("i");
+          const sb = (stem ?? el).getBoundingClientRect();
+          const sheet = document.querySelector("[data-preview-card]")?.getBoundingClientRect();
+          return {
+            side: d.tourfilmSide ?? "", anchor: d.tourfilmAnchor ?? "",
+            seen: /** @type {any} */ (window).__sideSeen.get(el) ?? [],
+            box: { x: r.left, y: r.top, w: r.width, h: r.height, right: r.right, bottom: r.bottom },
+            tipY: sb.top,
+            sheet: sheet ? { x: sheet.left, y: sheet.top, right: sheet.right, bottom: sheet.bottom } : null,
+          };
+        });
+        if (!later) { wrong.push(`${w} ${mark}: the callout went away during the hold`); continue; }
+        const sides = [...new Set([...first, ...later.seen])];
+        if (sides.length > 1) wrong.push(`${w} ${mark}: the side changed during the hold (${sides.join(" -> ")})`);
+        const b = later.box;
+        const a = later.anchor === "none" || later.anchor === "point" || !later.anchor ? null : anchorBox(later.anchor);
+        if (SHEET_MARKS.has(mark)) {
+          if (later.side !== "bottom" || first[0] !== "bottom") wrong.push(`${w} ${mark}: side ${first[0]} then ${later.side}, not bottom from the first frame`);
+          if (!a) wrong.push(`${w} ${mark}: no anchor box`);
+          else {
+            if (b.x < a.x - 0.5 || b.right > a.right + 0.5 || b.y < a.y - 0.5 || b.bottom > a.bottom + 0.5) wrong.push(`${w} ${mark}: the callout (${Math.round(b.y)}-${Math.round(b.bottom)}) is not wholly inside its anchor (${Math.round(a.y)}-${Math.round(a.bottom)})`);
+            if (Math.abs(later.tipY - a.y) > 12) wrong.push(`${w} ${mark}: the stem's tip (${Math.round(later.tipY)}) is not on the anchor's top edge (${Math.round(a.y)})`);
+          }
+          if (mark === "item-read" && later.sheet && a && !sameBox(a, { x: later.sheet.x, y: later.sheet.y, w: later.sheet.right - later.sheet.x, h: later.sheet.bottom - later.sheet.y })) wrong.push(`${w} ${mark}: anchored on ${later.anchor}, not the settled sheet`);
+          const s = await page.evaluate(sample);
+          wrong.push(...coverFaults(s?.faults ?? []).map((f) => `${w} ${mark}: ${f}`));
+        } else if (a && mark !== PINNED_INSIDE) {
+          if (b.x < a.right - 0.5 && b.right > a.x + 0.5 && b.y < a.bottom - 0.5 && b.bottom > a.y + 0.5) wrong.push(`${w} ${mark}: the callout (${Math.round(b.y)}-${Math.round(b.bottom)}) lies on its anchor (${Math.round(a.y)}-${Math.round(a.bottom)}), not outside it`);
+          if (ABOVE_OR_BELOW.includes(mark) && later.side !== "top" && later.side !== "bottom") wrong.push(`${w} ${mark}: side ${later.side}, not above or below its anchor`);
+          if (ABOVE_OR_BELOW.includes(mark) && !(b.bottom <= a.y + 0.5 || b.y >= a.bottom - 0.5)) wrong.push(`${w} ${mark}: not above or below its anchor`);
+        }
+        if (!byMark.has(mark)) byMark.set(mark, new Map());
+        byMark.get(mark)?.set(phone.width, { side: later.side, box: b, anchor: a, vh: phone.height });
+      }
+      await context.close();
+    }
+
+    /* One side per mark at every width, unless the §3.2 flip fires for want of
+       room: judged generously (the band's own limits are not visible here, so
+       any width where the viewport edge leaves less than the box and its gap
+       plus 140px of chrome counts as no room). */
+    for (const [mark, widths] of byMark) {
+      if (SHEET_MARKS.has(mark)) continue;
+      const sides = new Set([...widths.values()].map((v) => v.side));
+      if (sides.size <= 1) continue;
+      const flipped = [...widths.values()].some((v) => {
+        if (!v.anchor) return false;
+        const roomAbove = v.anchor.y, roomBelow = v.vh - v.anchor.bottom;
+        return Math.min(roomAbove, roomBelow) - 140 < v.box.h + CALLOUT_GAP;
+      });
+      if (!flipped) wrong.push(`${mark}: the side differs by width (${[...widths].map(([w, v]) => `${w}:${v.side}`).join(", ")}) with room to spare`);
+    }
+    expect(wrong, "the sheet lines sit inside, every other line outside, steady in a hold and across widths").toEqual([]);
+  });
+});
