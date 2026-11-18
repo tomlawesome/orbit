@@ -3750,11 +3750,11 @@ probe_backup_restore_lock() {
   # take a swapped-in file. The lock is opened read-write only (#1890),
   # which on a FIFO swapped in after the checks above returns at once
   # instead of waiting for a writer; then the descriptor must be the very
-  # regular file lstat saw (same device and inode), so a link or a FIFO
-  # swapped in is closed again and refused as `unreadable`, with no wait.
-  before="$(stat -c '%d:%i %F' -- "$backup_restore_lock_path" 2>/dev/null)" || before=""
+  # regular file lstat saw (same device, inode and change time), so a link
+  # or a FIFO swapped in is closed and refused as `unreadable`, with no wait.
+  before="$(stat -c '%d:%i %F %.9Z' -- "$backup_restore_lock_path" 2>/dev/null)" || before=""
   case "${before#* }" in
-    "regular file" | "regular empty file") ;;
+    "regular file "* | "regular empty file "*) ;;
     *)
       lock_probe_state=unreadable
       return 0
@@ -3768,7 +3768,7 @@ probe_backup_restore_lock() {
     lock_probe_state=unwritable
     return 0
   fi
-  opened="$(stat -L -c '%d:%i %F' -- "/dev/fd/$fd" 2>/dev/null)" || opened=""
+  opened="$(stat -L -c '%d:%i %F %.9Z' -- "/dev/fd/$fd" 2>/dev/null)" || opened=""
   if [[ "$opened" != "$before" ]]; then
     own_created_lock "$fd" "$backup_restore_lock_path"
     exec {fd}<&-
@@ -4739,8 +4739,8 @@ restore_transaction_fail() {
 # happens to hold flock on the file. #1897: the lock is opened read-write
 # only, never read-only, whoever runs repair, as the backup/restore lock is
 # (#1890): a FIFO swapped in after the checks opens at once instead of
-# waiting for a writer; stat must still see a regular file just before the
-# open, and the descriptor must be that same regular file.
+# waiting for a writer; stat must see a regular file just before the open,
+# and the descriptor must be that file (same device, inode and change time).
 # A lock that will not open read-write, or that is not that file, leaves
 # $engine_lock_problem `unwritable`, and the caller refuses the action.
 readonly engine_lock_path=".orbit-engine.lock"
@@ -4755,14 +4755,14 @@ engine_lock_idle() {
   mtime="$(stat -c %Y -- "$engine_lock_path" 2>/dev/null)" && now="$(date +%s)" || return 1
   ((now - mtime > engine_lock_stale_seconds)) || return 1
   if command -v flock >/dev/null 2>&1; then
-    before="$(stat -c '%d:%i %F' -- "$engine_lock_path" 2>/dev/null)" || before=""
+    before="$(stat -c '%d:%i %F %.9Z' -- "$engine_lock_path" 2>/dev/null)" || before=""
     { exec {fd}<>"$engine_lock_path"; } 2>/dev/null || fd=""
     case "${before#* }" in
-      "regular file" | "regular empty file") ;;
+      "regular file "* | "regular empty file "*) ;;
       *) before="" ;;
     esac
     opened=""
-    [[ -z "$fd" ]] || opened="$(stat -L -c '%d:%i %F' -- "/dev/fd/$fd" 2>/dev/null)" || opened=""
+    [[ -z "$fd" ]] || opened="$(stat -L -c '%d:%i %F %.9Z' -- "/dev/fd/$fd" 2>/dev/null)" || opened=""
     if [[ -z "$fd" || -z "$before" || "$opened" != "$before" ]]; then
       [[ -z "$fd" || "$opened" == "$before" ]] || own_created_lock "$fd" "$engine_lock_path"
       [[ -z "$fd" ]] || exec {fd}<&-
