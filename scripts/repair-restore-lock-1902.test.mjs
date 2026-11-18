@@ -3,7 +3,7 @@ import { chmodSync, existsSync, readFileSync, readdirSync, symlinkSync, writeFil
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
-import { ACTIONS, runOwner } from "./repair-owner-fixtures.mjs";
+import { ACTIONS, IMAGE_COMPOSE, runOwner } from "./repair-owner-fixtures.mjs";
 import { privShims, realTool } from "./repair-priv-shims.mjs";
 import { scratchDir } from "./repair-test-harness.mjs";
 
@@ -48,6 +48,55 @@ describe("#1902 L1: the compose-restore lock does not lapse silently", () => {
       const held = seen.length > 0 && seen.every((line) => line === "held");
       const loud = result.status !== 0 && !result.stdout.includes(compose.done) && orbitLines(result).some((line) => /lock/iu.test(line));
       expect(held || loud, `the lock lapsed silently (probes: ${JSON.stringify(seen)}, status ${result.status}):\n${result.stderr.slice(0, 1500)}`).toBe(true);
+    } finally {
+      shims.cleanup();
+    }
+  });
+});
+
+describe("#1902 L1: a lock lost mid-restore fails the restore loudly", () => {
+  /** An owner-side shim for `tool` that, on the scratch file, kills the owner-lock holder (before or after the real tool). */
+  function killHolder(tool, when) {
+    const dir = scratchDir("orbit-1902-kill-");
+    const kill = `pkill -KILL -f owner-lock; sleep 1`;
+    writeFileSync(join(dir, tool), [
+      "#!/usr/bin/env bash",
+      `if [[ "\${ORBIT_TEST_PRIVDROP:-0}" == 1 && "$*" == *.repair.* ]]; then`,
+      when === "before" ? `  ${kill}` : `  '${realTool(tool)}' "$@"; rc=$?; ${kill}; exit $rc`,
+      "fi",
+      `exec '${realTool(tool)}' "$@"`,
+      "",
+    ].join("\n"));
+    chmodSync(join(dir, tool), 0o755);
+    return dir;
+  }
+
+  it("as root, a holder that ends before the rename fails the restore with a lost-lock line and no rename", () => {
+    const { targetDir, state, fakeBin } = compose.make();
+    const dir = killHolder("sync", "before");
+    const shims = privShims(targetDir);
+    try {
+      const result = runOwner(targetDir, { shims, state, fakeBin, env: { PATH: `${dir}:${shims.env.PATH}` }, capSeconds: 40 });
+      expect(result.hung, result.stderr.slice(0, 600)).toBe(false);
+      expect(result.stdout).not.toContain(compose.done);
+      expect(orbitLines(result).some((line) => /lock/iu.test(line) && /lost/iu.test(line)), `no lost-lock line:\n${result.stderr.slice(0, 1500)}`).toBe(true);
+      expect(existsSync(join(targetDir, "docker-compose.yml")), "the rename happened without the lock").toBe(false);
+      expect(readdirSync(targetDir).filter((name) => name.startsWith(".docker-compose.yml.repair")), "a scratch file was left behind").toEqual([]);
+    } finally {
+      shims.cleanup();
+    }
+  });
+
+  it("as root, a holder that ends after the rename landed fails the restore with the 'already in place' line, the restored file kept", () => {
+    const { targetDir, state, fakeBin } = compose.make();
+    const dir = killHolder("mv", "after");
+    const shims = privShims(targetDir);
+    try {
+      const result = runOwner(targetDir, { shims, state, fakeBin, env: { PATH: `${dir}:${shims.env.PATH}` }, capSeconds: 40 });
+      expect(result.hung, result.stderr.slice(0, 600)).toBe(false);
+      expect(result.stdout).not.toContain(compose.done);
+      expect(orbitLines(result).some((line) => /lock/iu.test(line) && /already in place/iu.test(line)), `no 'already in place' line:\n${result.stderr.slice(0, 1500)}`).toBe(true);
+      expect(Buffer.compare(readFileSync(join(targetDir, "docker-compose.yml")), Buffer.from(IMAGE_COMPOSE))).toBe(0);
     } finally {
       shims.cleanup();
     }
