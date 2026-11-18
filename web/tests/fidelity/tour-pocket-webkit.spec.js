@@ -1747,7 +1747,7 @@ test.describe("every phone callout but the two sheet lines stays outside its anc
         const read = await holdAndRead(page, mark, k === 0 ? ci : null, [PREVIEW]).catch(() => null);
         if (!read) {
           /* most marks hold no line (a ring, a beat): only the sheet lines must be up */
-          if (SHEET_MARKS.has(mark)) wrong.push(`${w} ${mark}: no callout up at the hold`);
+          if (SHEET_MARKS.has(mark) || mark === "relay-addr") wrong.push(`${w} ${mark}: no callout up at the hold`);
           continue;
         }
         const first = await page.evaluate(() => {
@@ -1769,7 +1769,8 @@ test.describe("every phone callout but the two sheet lines stays outside its anc
             side: d.tourfilmSide ?? "", anchor: d.tourfilmAnchor ?? "",
             seen: /** @type {any} */ (window).__sideSeen.get(el) ?? [],
             box: { x: r.left, y: r.top, w: r.width, h: r.height, right: r.right, bottom: r.bottom },
-            tipY: sb.top,
+            tipY: sb.top, tipBottom: sb.bottom,
+            addr: (() => { const e = document.querySelector("#p-mail .st-address"); if (!e) return null; const q = e.getBoundingClientRect(); return { x: q.left, y: q.top, w: q.width, h: q.height, right: q.right, bottom: q.bottom }; })(),
             sheet: sheet ? { x: sheet.left, y: sheet.top, right: sheet.right, bottom: sheet.bottom } : null,
           };
         });
@@ -1792,6 +1793,19 @@ test.describe("every phone callout but the two sheet lines stays outside its anc
           if (b.x < a.right - 0.5 && b.right > a.x + 0.5 && b.y < a.bottom - 0.5 && b.bottom > a.y + 0.5) wrong.push(`${w} ${mark}: the callout (${Math.round(b.y)}-${Math.round(b.bottom)}) lies on its anchor (${Math.round(a.y)}-${Math.round(a.bottom)}), not outside it`);
           if (ABOVE_OR_BELOW.includes(mark) && later.side !== "top" && later.side !== "bottom") wrong.push(`${w} ${mark}: side ${later.side}, not above or below its anchor`);
           if (ABOVE_OR_BELOW.includes(mark) && !(b.bottom <= a.y + 0.5 || b.y >= a.bottom - 0.5)) wrong.push(`${w} ${mark}: not above or below its anchor`);
+          if (mark === "relay-addr") {
+            /* ruling 1895c: chapter 6's phone line points at the address row, not the card */
+            if (!later.addr) wrong.push(`${w} ${mark}: no relay address row on the screen`);
+            else {
+              if (!sameBox(a, later.addr)) wrong.push(`${w} ${mark}: anchored on ${later.anchor}, not the address row's box (${Math.round(later.addr.x)},${Math.round(later.addr.y)},${Math.round(later.addr.w)},${Math.round(later.addr.h)})`);
+              if (!(b.bottom <= later.addr.y + 0.5 || b.y >= later.addr.bottom - 0.5)) wrong.push(`${w} ${mark}: the callout (${Math.round(b.y)}-${Math.round(b.bottom)}) is not wholly above or below the address row (${Math.round(later.addr.y)}-${Math.round(later.addr.bottom)})`);
+              const edge = later.side === "top" ? later.addr.y : later.addr.bottom;
+              const tip = later.side === "top" ? later.tipBottom : later.tipY;
+              if (Math.abs(tip - edge) > 12) wrong.push(`${w} ${mark}: the stem's tip (${Math.round(tip)}) is not on the address row's ${later.side === "top" ? "top" : "bottom"} edge (${Math.round(edge)})`);
+            }
+            const rs = await page.evaluate(sample);
+            wrong.push(...coverFaults(rs?.faults ?? []).map((f) => `${w} ${mark}: ${f}`));
+          }
         }
         if (!byMark.has(mark)) byMark.set(mark, new Map());
         byMark.get(mark)?.set(phone.width, { side: later.side, box: b, anchor: a, vh: phone.height });
