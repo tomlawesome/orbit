@@ -221,6 +221,7 @@
     const input = /** @type {HTMLInputElement} */ (event.currentTarget);
     const next = input.files?.[0] ?? null;
     input.value = "";
+    if (inPhase === "bringing") return;
     if (!next) return;
     inProblem = archiveFileProblem(next, limits);
     preview = null;
@@ -411,7 +412,7 @@
             </div>
           </div>
           {#if challengeOpen && retryIntent === "archive_import"}{@render challenge()}{/if}
-        {:else if preview}
+        {:else if preview && inPhase !== "bringing"}
           <div class="inside">
             <ul class="man" aria-label="What the file holds">
               <li class="head"><b>{preview.householdName}</b></li>
