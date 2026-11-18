@@ -81,25 +81,37 @@ describe("scripts/ci/verify-sbom-referrer.mjs (#1848 D-S2)", () => {
   });
 });
 
-describe("publish-from-gitlab copies an SBOM referrer only after it is verified by key (#1848 D-S2)", () => {
+// #1862 (decided 2026-11-17) replaced the per-SBOM verifier call: in "Copy the
+// exact tested digest" every labelled referrer, SPDX ones included, is checked
+// by cosign under cosign.pub before anything, image included, is copied, and
+// the step fails closed. The runtime cases are in
+// scripts/publish-from-gitlab-workflow.test.mjs; these pin the step's text.
+describe("publish-from-gitlab verifies each SBOM referrer under cosign.pub before any copy (#1862)", () => {
   const start = workflow.indexOf("- name: Copy the exact tested digest");
   const step = workflow.slice(start, workflow.indexOf("\n      - name:", start + 1));
+  const verify = step.indexOf('"${cosign_cmd}" verify-blob-attestation');
+  const loop = step.lastIndexOf('for referrer in "${referrers[@]}"; do', verify);
+  const loopEnd = step.indexOf("\n          done", verify);
+  const call = step.slice(verify, step.indexOf("refuse", verify));
 
-  it("calls the referrer verifier before the referrer copy", () => {
-    const verify = step.indexOf("verify-sbom-referrer.mjs");
-    const copy = step.indexOf('crane copy "${THROWAWAY_IMAGE}@${referrer}"');
+  it("shortlists SPDX referrers and puts each to cosign with --key cosign.pub, its exact label as --type and the image --digest, before the first copy", () => {
+    expect(step).toContain('"https://spdx.dev/Document"');
     expect(verify).toBeGreaterThan(-1);
-    expect(copy).toBeGreaterThan(verify);
+    expect(loop).toBeGreaterThan(-1);
+    expect(loopEnd).toBeGreaterThan(verify);
+    expect(call).toContain("--key cosign.pub");
+    expect(call).toContain('--type "${label}"');
+    expect(call).toContain('--digest "${DIGEST#sha256:}"');
+    const firstCopy = step.indexOf("crane copy");
+    expect(firstCopy).toBeGreaterThan(loopEnd);
   });
 
-  it("copies only the referrers it has proven, never the raw list", () => {
-    const copy = step.indexOf('crane copy "${THROWAWAY_IMAGE}@${referrer}"');
-    const loop = step.lastIndexOf("for referrer in", copy);
-    expect(step.slice(loop, copy)).toContain('"${to_copy[@]}"');
-    expect(step.slice(loop, copy)).not.toContain("${referrers}");
-    // An SPDX referrer joins the list only after the verifier passed.
-    const verify = step.indexOf("verify-sbom-referrer.mjs");
-    const add = step.indexOf('to_copy+=("${referrer}")', step.indexOf("not verified by the committed key"));
-    expect(add).toBeGreaterThan(verify);
+  it("fails closed: a failed verification exits before any copy, image or referrer", () => {
+    expect(step.slice(verify, loopEnd)).toMatch(/\|\|\s*\n\s*refuse /u);
+    const refuse = step.slice(step.indexOf("refuse() {"), step.indexOf("\n          }", step.indexOf("refuse() {")));
+    expect(refuse).toContain("copying nothing");
+    expect(refuse).toContain("exit 1");
+    expect(step.slice(0, loopEnd)).not.toContain("crane copy");
+    expect(step.slice(loopEnd)).toContain('crane copy "${SOURCE}"');
   });
 });
