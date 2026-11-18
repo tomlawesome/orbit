@@ -527,3 +527,7 @@ timeout on this one case rather than a global raise.
 ## scripts/install.rollback.test.mjs "install.sh: an interrupt rolls a fresh install back (#1456) > emits one well-formed terminal `failed` event after the rollback events, even though the exit was not a planned failure"
 
 - 2026-11-15 · fix/1834-undo-copies 605f583e (a one-line change in install.sh's SMTP undo copy, not on the interrupt path) · pipeline 4220 / fast (job 51469) · failed in the same loaded job that hit the 20-minute limit; it passed in pipeline 4212 / fast (job 51358) on cb70f4e1, and passed twice locally on 605f583e. First sighting.
+
+## src/server/documents/image-sandbox.test.ts "accepts a 1x1 JPEG/PNG padded to the size limit ..." (:185)
+
+- 2026-11-18 · !1371 batch-a 5866edd4 (the batch-a dev gate: pins and exceptions only, nowhere near the image sandbox) · pipeline 4563 / fast (job 55116) · "expected 'structure_check_unavailable' to be 'supported_structure'" in a 1320 s job on a loaded runner: the child decode did not answer in time. The image-sandbox files are unchanged since, and the fast job passed on !1371's next pipeline and on !1395. First sighting.
