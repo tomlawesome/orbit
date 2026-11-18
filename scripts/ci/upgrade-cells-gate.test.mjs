@@ -672,7 +672,7 @@ describe("any doubt writes run, and the script never throws", () => {
 
     const result = await gate({
       env: slotEnv,
-      fetchImpl: fakeFetch({ pipelines: [passedRun(base, 299, gateText)] }),
+      fetchImpl: fakeFetch({ pipelines: [passedRun(base, 299, gateText + SLOTS)] }),
     });
 
     expectRun(result);
