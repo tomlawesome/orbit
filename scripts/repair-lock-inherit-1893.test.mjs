@@ -76,13 +76,13 @@ async function until(check, what) {
 // Starts a --execute run whose docker call sleeps; resolves once the sleeping child exists.
 async function startRunWithChild(targetDir) {
   const pidFile = join(scratchDir("orbit-lock-inherit-pid-"), "child.pid");
-  const { merged } = prepareRepair(targetDir, { ...STOPPED, env: sleepHook(pidFile) });
+  const { merged, stateDir } = prepareRepair(targetDir, { ...STOPPED, env: sleepHook(pidFile) });
   const run = spawn("bash", [join(targetDir, "scripts", "repair.sh"), ...SAFE], { cwd: targetDir, env: merged, stdio: "ignore", detached: true });
   started.push({ pid: run.pid, group: run.pid });
   const exited = new Promise((resolve) => run.once("close", resolve));
   const childPid = await until(() => existsSync(pidFile) && Number(readFileSync(pidFile, "utf8").trim()) > 0 && Number(readFileSync(pidFile, "utf8").trim()), "the sleeping docker child");
   started.push({ pid: childPid, group: null });
-  return { run, childPid, exited };
+  return { run, childPid, exited, stateDir };
 }
 
 const fdTargets = (pid) =>
@@ -108,6 +108,20 @@ describe("#1893 K2: a killed run frees the folder lock while its child lives on"
       expect(second.stderr).not.toMatch(/another Repair run is working on this folder/iu);
       expect(second.status).not.toBe(6);
     });
+
+    it(`${signal}: no repair step runs on after the kill, once the sleeping docker child ends`, async () => {
+      const targetDir = makeFixture();
+      const { run, childPid, exited, stateDir } = await startRunWithChild(targetDir);
+      const dockerCalls = () => (existsSync(join(stateDir, "argv.log")) ? readFileSync(join(stateDir, "argv.log"), "utf8") : "");
+      const before = dockerCalls();
+      run.kill(signal);
+      await exited;
+      // Let the already-started docker child end; a worker that outlived the run would now go on to its next step.
+      process.kill(childPid, "SIGKILL");
+      await until(() => !alive(childPid), "the docker child to end");
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      expect(dockerCalls(), "a repair step ran after the run was killed").toBe(before);
+    });
   }
 });
 
@@ -118,7 +132,8 @@ describe("#1893 K1: a child holds no descriptor of the folder lock", () => {
     const folder = realpathSync(targetDir);
     const links = fdTargets(childPid);
     expect(links.length, "the child's descriptors could not be read").toBeGreaterThan(0);
-    expect(links.filter((link) => link === folder || link === targetDir)).toEqual([]);
+    // The folder is the #1849 lock; a `.orbit-backup-restore.lock` link is the backup/restore lock (K4).
+    expect(links.filter((link) => link === folder || link === targetDir || link.endsWith(".orbit-backup-restore.lock"))).toEqual([]);
   });
 });
 
