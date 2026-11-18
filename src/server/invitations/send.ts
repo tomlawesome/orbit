@@ -133,6 +133,39 @@ async function senderForSuppliedMailer(): Promise<{ from: string; security: Noti
 export interface InvitationSendOutcome {
   sentAt: Date | null;
   sendError: InvitationSendError | null;
+  /**
+   * Whether the mail may have reached the recipient (#1896). False only when
+   * no provider was reached or the provider answered: a numbered SMTP reply
+   * is the server's word that it did not take the message, and a refused or
+   * unroutable connection never opened one. True for a send that resolved
+   * and for every other failure, because silence after DATA (a timeout, a
+   * reset) cannot be told apart from a lost acknowledgement.
+   */
+  maybeDelivered: boolean;
+}
+
+/** nodemailer codes for a failure the mail provably did not survive: the server answered, or was never reached (#1896). */
+const NOT_DELIVERED_CODES: ReadonlySet<string> = new Set([
+  "EAUTH",
+  "EENVELOPE",
+  "EMESSAGE",
+  "ECONNREFUSED",
+  "ENOTFOUND",
+  "ENETUNREACH",
+  "EHOSTUNREACH",
+]);
+
+/**
+ * Reads a provider failure as "maybe delivered" unless it carries a numbered
+ * reply or one of the codes above (#1896 ruling, note 65074). nodemailer
+ * labels a socket timeout the same way whichever command was in flight, so
+ * anything unproven counts as possibly arrived.
+ */
+function failureMaybeDelivered(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return true;
+  const { code, responseCode } = error as { code?: unknown; responseCode?: unknown };
+  if (typeof responseCode === "number" && Number.isFinite(responseCode)) return false;
+  return !(typeof code === "string" && NOT_DELIVERED_CODES.has(code));
 }
 
 /**
@@ -158,8 +191,8 @@ export async function sendBoundedMail(
   try {
     if (viaRow) {
       const resolved = await defaultMailer();
-      if (resolved.state === "locked") return { sentAt: null, sendError: "smtp_unavailable" };
-      if (resolved.state !== "ready") return { sentAt: null, sendError: "smtp_unconfigured" };
+      if (resolved.state === "locked") return { sentAt: null, sendError: "smtp_unavailable", maybeDelivered: false };
+      if (resolved.state !== "ready") return { sentAt: null, sendError: "smtp_unconfigured", maybeDelivered: false };
       ({ mailer: provider, from, security } = resolved);
     } else {
       provider = mailer;
@@ -168,10 +201,11 @@ export async function sendBoundedMail(
   } catch {
     /* A sending row this instance cannot even read is the same fact to an
        owner as no sending set up at all. */
-    return { sentAt: null, sendError: "smtp_unconfigured" };
+    return { sentAt: null, sendError: "smtp_unconfigured", maybeDelivered: false };
   }
-  if (!provider) return { sentAt: null, sendError: "smtp_unconfigured" };
+  if (!provider) return { sentAt: null, sendError: "smtp_unconfigured", maybeDelivered: false };
 
+  let sent = false;
   try {
     await provider.sendEmail({
       from,
@@ -181,8 +215,9 @@ export async function sendBoundedMail(
       ...(mail.html ? { html: mail.html } : {}),
       tlsMode: security,
     });
+    sent = true;
     if (viaRow) await noteMailSent(mail.what ?? "a message", now);
-    return { sentAt: now, sendError: null };
+    return { sentAt: now, sendError: null, maybeDelivered: true };
   } catch (error) {
     const category = categorizeProviderError("email", error);
     const sendError: InvitationSendError = category === "smtp_rejected"
@@ -190,7 +225,8 @@ export async function sendBoundedMail(
       : category === "smtp_unavailable"
         ? "smtp_unavailable"
         : "unknown";
-    return { sentAt: null, sendError };
+    /* A send that resolved went, whatever noting it afterwards did. */
+    return { sentAt: null, sendError, maybeDelivered: sent || failureMaybeDelivered(error) };
   }
 }
 
