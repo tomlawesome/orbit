@@ -41,6 +41,7 @@ import { and, eq, gt, isNull, lt, sql } from "drizzle-orm";
 import { base64url } from "jose";
 import { getDb } from "@/db";
 import { auditLog, signInApprovalSends, signInApprovals, users } from "@/db/schema";
+import { userAddressLockKey } from "@/lib/auth/authority-locks";
 import { describeDevice } from "@/lib/auth/device";
 import { AuthError } from "@/lib/auth/errors";
 import { log } from "@/lib/logger";
@@ -48,6 +49,7 @@ import { recordLocalCredentialFailure } from "@/server/local-credentials";
 import { absoluteAppLink, sendBoundedMail, type InvitationMailer, type InvitationSendError } from "@/server/invitations/send";
 import { sendingConfigured } from "@/server/mail-in/sending-settings";
 import { openInstanceMetadataReader } from "@/server/metadata/fields";
+import type { MetadataExecutor } from "@/server/metadata/keys";
 import { renderApprovalMail } from "@/server/sign-in-approvals/mail";
 
 /** Ten minutes (ADR-0027 §6): long enough to reach a phone, short enough that
@@ -246,8 +248,10 @@ interface Recipient {
   displayName: string;
 }
 
-async function readRecipient(userId: string): Promise<Recipient | null> {
-  const db = getDb();
+async function readRecipient(
+  userId: string,
+  db: MetadataExecutor = getDb(),
+): Promise<Recipient | null> {
   const [row] = await db
     .select({
       id: users.id,
@@ -395,20 +399,29 @@ export async function startSignInApproval(
   const claim = createSecret();
 
   await sweepExpiredApprovals(now);
-  const recipient = await readRecipient(userId);
   const limited = await sendsInWindow(userId, now) >= APPROVAL_SENDS_PER_HOUR;
 
   const db = getDb();
-  const [row] = await db.insert(signInApprovals).values({
-    userId,
-    tokenHash: secretDigest(token),
-    claimHash: secretDigest(claim),
-    userAgent: facts.userAgent ? facts.userAgent.slice(0, 256) : null,
-    clientAddress: facts.clientAddress,
-    expiresAt,
-    sendCount: 0,
-    lastSentAt: null,
-  }).returning({ id: signInApprovals.id });
+  /* The address is read and the row written under the per-user address lock
+     an administrator's address change takes (#1869). A change that commits
+     before this reads the new address; one that commits after it finds this
+     row and expires it, so the link mailed below can only work while it
+     goes to the address the account still has. */
+  const { recipient, row } = await db.transaction(async (transaction) => {
+    await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${userAddressLockKey(userId)}, 0))`);
+    const recipient = await readRecipient(userId, transaction);
+    const [row] = await transaction.insert(signInApprovals).values({
+      userId,
+      tokenHash: secretDigest(token),
+      claimHash: secretDigest(claim),
+      userAgent: facts.userAgent ? facts.userAgent.slice(0, 256) : null,
+      clientAddress: facts.clientAddress,
+      expiresAt,
+      sendCount: 0,
+      lastSentAt: null,
+    }).returning({ id: signInApprovals.id });
+    return { recipient, row };
+  });
 
   /* An account that vanished between the password check and this read is a
      send that did not happen, never a send that silently counted: `sent`

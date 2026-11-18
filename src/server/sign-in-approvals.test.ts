@@ -276,6 +276,9 @@ vi.mock("@/db", async () => {
        order, which is what these tests are about. Rollback is PostgreSQL's
        to prove, and the integration suite's to check. */
     transaction: (body: (executor: unknown) => unknown) => Promise.resolve(body(db)),
+    /* The only raw statement the module runs is the per-user address lock
+       (#1869); one process has nobody to wait for. */
+    execute: () => Promise.resolve([]),
   };
   return { getDb: () => db };
 });
