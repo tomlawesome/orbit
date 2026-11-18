@@ -56,10 +56,10 @@
       "id": "CVE-2026-111943",
       "package": "stdlib",
       "owner": "Orbit maintainers",
-      "expiresOn": "2026-12-04",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794,
       "installedVersion": "v1.24.6",
-      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; the newest 18-alpine build and gosu 1.19 are still on Go 1.24.6. Clears only when upstream rebuilds gosu on a fixed Go. Checked 2026-10-21: no published release carries a fixed Go (1.26.10 or 1.27.3); owner granted on that condition, 2026-10-21."
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; the newest 18-alpine build and gosu 1.19 are still on Go 1.24.6. Clears only when upstream rebuilds gosu on a fixed Go. Checked 2026-10-21: no published release carries a fixed Go (1.26.10 or 1.27.3); owner granted on that condition, 2026-10-21. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18."
     },
     {
       "kind": "vulnerability",
@@ -67,10 +67,10 @@
       "id": "CVE-2026-111943",
       "package": "stdlib",
       "owner": "Orbit maintainers",
-      "expiresOn": "2026-12-04",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794,
       "installedVersion": "v1.26.7",
-      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.2.0-full; 4.1.0-1-full and 4.2.0-SNAPSHOT-full are still on Go 1.26.7. Clears when a Tika image ships pebble on a fixed Go. Checked 2026-10-21: no published release carries a fixed Go (1.26.10 or 1.27.3); owner granted on that condition, 2026-10-21."
+      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.2.0-full; 4.1.0-1-full and 4.2.0-SNAPSHOT-full are still on Go 1.26.7. Clears when a Tika image ships pebble on a fixed Go. Checked 2026-10-21: no published release carries a fixed Go (1.26.10 or 1.27.3); owner granted on that condition, 2026-10-21. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18."
     },
     {
       "kind": "vulnerability",
@@ -79,8 +79,8 @@
       "package": "stdlib",
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -90,8 +90,8 @@
       "package": "stdlib",
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -101,8 +101,8 @@
       "package": "stdlib",
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -112,8 +112,8 @@
       "package": "stdlib",
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -123,8 +123,8 @@
       "package": "stdlib",
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -134,8 +134,8 @@
       "package": "stdlib",
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -145,8 +145,8 @@
       "package": "stdlib",
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -156,8 +156,8 @@
       "package": "stdlib",
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -167,8 +167,8 @@
       "package": "stdlib",
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -178,8 +178,8 @@
       "package": "stdlib",
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -189,8 +189,8 @@
       "package": "stdlib",
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -200,8 +200,8 @@
       "package": "stdlib",
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -211,8 +211,8 @@
       "package": "stdlib",
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -222,8 +222,8 @@
       "package": "stdlib",
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -233,8 +233,8 @@
       "package": "stdlib",
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -244,8 +244,8 @@
       "package": "stdlib",
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -255,8 +255,8 @@
       "package": "stdlib",
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -266,8 +266,8 @@
       "package": "stdlib",
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -277,8 +277,8 @@
       "package": "stdlib",
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -288,8 +288,8 @@
       "package": "stdlib",
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -299,8 +299,8 @@
       "package": "stdlib",
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -310,8 +310,8 @@
       "package": "stdlib",
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -321,8 +321,8 @@
       "package": "stdlib",
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. gosu 1.19 (2025-09-23, Go 1.24.6) is still its newest release, and the 18-alpine tag has not moved since 2026-09-21 (#1366).",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. gosu 1.19 (2025-09-23, Go 1.24.6) is still its newest release, and the 18-alpine tag has not moved since 2026-09-21 (#1366). Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -332,8 +332,8 @@
       "package": "stdlib",
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. gosu 1.19 (2025-09-23, Go 1.24.6) is still its newest release, and the 18-alpine tag has not moved since 2026-09-21 (#1366).",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. gosu 1.19 (2025-09-23, Go 1.24.6) is still its newest release, and the 18-alpine tag has not moved since 2026-09-21 (#1366). Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -343,8 +343,8 @@
       "package": "stdlib",
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. gosu 1.19 (2025-09-23, Go 1.24.6) is still its newest release, and the 18-alpine tag has not moved since 2026-09-21 (#1366).",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. gosu 1.19 (2025-09-23, Go 1.24.6) is still its newest release, and the 18-alpine tag has not moved since 2026-09-21 (#1366). Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -354,8 +354,8 @@
       "package": "stdlib",
       "installedVersion": "v1.26.7",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.2.0-full; clears only when the image is rebuilt on a newer pebble. 4.2.0-full still carries pebble on Go 1.26.7 (local scan, 2026-11-03).",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.2.0-full; clears only when the image is rebuilt on a newer pebble. 4.2.0-full still carries pebble on Go 1.26.7 (local scan, 2026-11-03). Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -365,8 +365,8 @@
       "package": "stdlib",
       "installedVersion": "v1.26.7",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.2.0-full; clears only when the image is rebuilt on a newer pebble. 4.2.0-full still carries pebble on Go 1.26.7 (local scan, 2026-11-03).",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.2.0-full; clears only when the image is rebuilt on a newer pebble. 4.2.0-full still carries pebble on Go 1.26.7 (local scan, 2026-11-03). Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -376,8 +376,8 @@
       "package": "stdlib",
       "installedVersion": "v1.26.7",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.2.0-full; clears only when the image is rebuilt on a newer pebble. 4.2.0-full still carries pebble on Go 1.26.7 (local scan, 2026-11-03).",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.2.0-full; clears only when the image is rebuilt on a newer pebble. 4.2.0-full still carries pebble on Go 1.26.7 (local scan, 2026-11-03). Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -387,8 +387,8 @@
       "package": "brace-expansion",
       "installedVersion": "5.0.9",
       "owner": "Orbit maintainers",
-      "rationale": "Bundled with npm inside node:24-alpine; the 2026-10 rebuild moved it to a newer version that is still affected, and only a further rebuild replaces it. Owner granted, 2026-10-20.",
-      "expiresOn": "2026-12-04",
+      "rationale": "Bundled with npm inside node:24-alpine; the 2026-10 rebuild moved it to a newer version that is still affected, and only a further rebuild replaces it. Owner granted, 2026-10-20. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -398,8 +398,8 @@
       "package": "brace-expansion",
       "installedVersion": "5.0.9",
       "owner": "Orbit maintainers",
-      "rationale": "Bundled with npm inside node:24-alpine; the 2026-10 rebuild moved it to a newer version that is still affected, and only a further rebuild replaces it. Owner granted, 2026-10-20.",
-      "expiresOn": "2026-12-04",
+      "rationale": "Bundled with npm inside node:24-alpine; the 2026-10 rebuild moved it to a newer version that is still affected, and only a further rebuild replaces it. Owner granted, 2026-10-20. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -409,20 +409,20 @@
       "package": "undici",
       "installedVersion": "6.28.0",
       "owner": "Orbit maintainers",
-      "rationale": "Bundled with npm inside node:24-alpine; the 2026-10 rebuild moved it to a newer version that is still affected, and only a further rebuild replaces it. Owner granted, 2026-10-20.",
-      "expiresOn": "2026-12-04",
+      "rationale": "Bundled with npm inside node:24-alpine; the 2026-10 rebuild moved it to a newer version that is still affected, and only a further rebuild replaces it. Owner granted, 2026-10-20. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
       "kind": "vulnerability",
       "scope": "image",
       "owner": "Orbit maintainers",
-      "expiresOn": "2026-12-04",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794,
       "id": "CVE-2026-109869",
       "package": "undici",
       "installedVersion": "6.28.0",
-      "rationale": "Bundled with npm inside node:24-alpine; fixed in undici 6.29.1, but the pinned tag is still the current upstream build, so only an upstream rebuild replaces it. Owner granted, 2026-10-27."
+      "rationale": "Bundled with npm inside node:24-alpine; fixed in undici 6.29.1, but the pinned tag is still the current upstream build, so only an upstream rebuild replaces it. Owner granted, 2026-10-27. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18."
     },
     {
       "kind": "vulnerability",
