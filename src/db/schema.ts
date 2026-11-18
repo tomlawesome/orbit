@@ -493,7 +493,7 @@ export const signInApprovals = pgTable("sign_in_approvals", {
      a restart: how many links this pending sign-in has put in the post, and
      when the last one went. "Resend after 60 s" is this timestamp; "five per
      account per hour" is counted from sign_in_approval_sends, one row per
-     mail (#1604 P-20). */
+     mail sent or reserved to send (#1604 P-20, #1882). */
   sendCount: integer("send_count").notNull().default(0),
   lastSentAt: timestamp("last_sent_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -503,8 +503,10 @@ export const signInApprovals = pgTable("sign_in_approvals", {
 ]);
 
 /**
- * One row per approval mail actually sent, so "five per account per hour"
- * counts the sends inside the hour and nothing older (#1604 P-20). The
+ * One row per approval mail sent or about to be sent, so "five per account
+ * per hour" counts the sends inside the hour and nothing older (#1604 P-20).
+ * A row is written under the per-user lock as a reservation before its mail
+ * goes, and deleted again if the mail does not go (#1882). The
  * approval's own send_count and last_sent_at stay what they were; this table
  * is only the hour's tally, swept with the approvals it belongs to.
  */
