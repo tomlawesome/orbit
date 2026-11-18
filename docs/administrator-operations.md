@@ -617,7 +617,7 @@ stderr with its path, date and size, and removes them only when you ask.
 A folder is offered only when it holds nothing but the installer's and
 `repair.sh`'s undo-copy files (`.env-orbit`, `docker-compose.mail.yml`,
 `.orbit-smtp-undo`, `.env-orbit.smtp-copy.tmp`, and the temporary files a
-stopped `repair.sh` run can leave, `.env-orbit.smtp-copy.XXXXXX` and
+stopped `repair.sh` or install run can leave, `.env-orbit.smtp-copy.XXXXXX` and
 `docker-compose.mail.yml.smtp-copy.XXXXXX`), all plain files. A dated
 folder holding anything else, a sub-folder or a link is listed as "not
 removed" and left alone, even when nothing else is listed: it may hold an old
