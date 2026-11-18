@@ -100,7 +100,7 @@ export const DOCUMENT_PREVIEW_QUEUED_RETRY_SECONDS = 5;
 
 /**
  * Orbit could not draw for a reason of its own: the quarantine tmpfs is
- * full, or the renderer cannot start. Nothing is known about the file, so it
+ * full, the renderer cannot start, or the view render queue is full (#1446). Nothing is known about the file, so it
  * is a 503 with Retry-After and never a remembered refusal (#1433 D20).
  */
 export function previewBusyError(retryAfterSeconds?: number): AppError {
