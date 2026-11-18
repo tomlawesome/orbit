@@ -4574,7 +4574,17 @@ restore_transaction_originals_match_live() {
         cmp -s -- "$backup_path" "$path" || return 1
       fi
     elif [[ -d "$backup_path" ]]; then
-      [[ -d "$path" ]] && diff -r --no-dereference -q -- "$backup_path" "$path" >/dev/null 2>&1 || return 1
+      [[ -d "$path" ]] || return 1
+      # #1887 R1: as root, `diff -r` runs as the folder's owner
+      # (as_folder_owner: the owner-step timeout, its stderr capped and
+      # shown), never as root over the owner's tree; a time-out, a stop,
+      # an unreadable entry or any error is "cannot check", never "same".
+      # Not root, as it was.
+      if [[ "$(id -u)" == 0 ]]; then
+        as_folder_owner diff -r --no-dereference -q -- "$backup_path" "$path" || return 1
+      else
+        diff -r --no-dereference -q -- "$backup_path" "$path" >/dev/null 2>&1 || return 1
+      fi
       [[ "$(restore_transaction_tree_modes "$backup_path")" == "$(restore_transaction_tree_modes "$path")" ]] || return 1
     else
       return 1
@@ -5566,9 +5576,13 @@ foreign_owner_refusal() {
 }
 
 # A checksum of .env-orbit's bytes, to see that nothing edited it between the
-# read and the rename.
+# read and the rename (#1887 R2/R3): its SHA-256 (folder_file_checksum), as
+# root through the bounded no-follow read (smtp_read_file), never CRC32,
+# which the folder's owner can forge. A failed read prints nothing and
+# returns non-zero, so it never matches an earlier sum: the first read
+# refuses, and a later one counts the file as changed.
 smtp_env_sum() {
-  cksum < "$environment_file"
+  folder_file_checksum "$environment_file"
 }
 
 # Step 1 of retire-smtp-lines, run under the lock do_retire_smtp_lines holds:
