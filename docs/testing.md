@@ -257,6 +257,16 @@ bash scripts/test-frontend.sh
 bash scripts/test-all.sh
 ```
 
+Run one full suite at a time: the host is shared, and two full runs at once
+push each other past the 5 s test timeout. Without `CI` set, Vitest runs at
+most `min(8, max(1, floor(availableParallelism / 2)))` workers, half the CPUs
+and never more than 8 (#1864). `ORBIT_TEST_WORKERS=<1 to 64>` replaces that cap
+in any environment, and a bad value stops the run at config load; an explicit
+`--maxWorkers` wins over both. CI sets no cap. Before a full run,
+`scripts/test-backend.sh` prints a load warning when the 1-minute load average
+is above the CPU count. A failure that is only a timeout, seen under that
+warning, is re-run once the host is quiet, not trusted.
+
 The frontend script targets `http://127.0.0.1:3000` by default; set
 `PLAYWRIGHT_BASE_URL` to test another non-production deployment. Use
 `ORBIT_SKIP_E2E=true bash scripts/test-all.sh` for the fast static and unit
