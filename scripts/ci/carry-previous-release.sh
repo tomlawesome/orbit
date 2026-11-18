@@ -299,14 +299,15 @@ fi
 # directory, readable only by us, and removed on exit (trap above).
 umask 077
 header_file="$(mktemp "${TMPDIR:-/tmp}/carry-previous-header.XXXXXX")" ||
-  fail "cannot make the token header file under ${TMPDIR:-/tmp}"
+  fail "could not create the token header file under ${TMPDIR:-/tmp}"
 printf 'JOB-TOKEN: %s\n' "$CI_JOB_TOKEN" > "$header_file" ||
-  fail "cannot write the token header file ${header_file}"
+  fail "could not write the token header file ${header_file}"
 
-mkdir -p .orbit-supply-chain || fail "cannot make the .orbit-supply-chain folder"
-rm -rf -- "$stage" || fail "cannot clear the staging folder ${stage}"
-mkdir -p -- "$stage/predecessor" "$stage/carried" || fail "cannot make the staging folders under ${stage}"
-stage_abs="$(pwd -P)/$stage"
+mkdir -p .orbit-supply-chain || fail "could not create .orbit-supply-chain"
+rm -rf -- "$stage" || fail "could not clear the staging folder ${stage}"
+mkdir -p -- "$stage/predecessor" "$stage/carried" || fail "could not create the staging folder ${stage}"
+stage_abs="$(pwd -P)" || fail "could not read the working directory"
+stage_abs="${stage_abs}/${stage}"
 
 ref="$(jq -rn --arg ref "$CI_COMMIT_REF_NAME" '$ref | @uri')"
 api="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}"

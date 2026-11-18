@@ -144,19 +144,23 @@ run_node() { "${PROMOTE_NODE:-node}" "$@"; }
 #
 # A tag that does not exist makes `inspect` fail; under pipefail that would end
 # the script with no message (#1482), so a missing tag resolves to nothing and
-# the caller names it. An inspect that fails for any other reason (DNS, network,
-# auth) is not a missing tag: GHCR is unreachable, and that is said as such
-# (group 6 D-S1). Called in a command substitution, so it returns 3 for that
-# case and the caller, which must run it as a plain assignment, fails on it.
+# the caller names it. An inspect that fails for any other reason (registry
+# unreachable, auth) is not a missing tag (#1604 D-S1): it ends the script
+# naming the registry and the error. Call it as an assignment, not inside a
+# condition, so that exit is seen.
 resolve_digest() {
-  local out rc=0
-  out="$(docker buildx imagetools inspect "$1" 2>&1)" || rc=$?
-  if [[ "$rc" -ne 0 ]] && [[ -n "$out" ]] &&
-    ! grep -qiE 'not found|manifest unknown|no such manifest|name unknown' <<< "$out"; then
-    printf 'promote-stable: GHCR unreachable or inspect failed for %s: %s\n' "$1" "${out%%$'\n'*}" >&2
-    return 3
-  fi
-  first_inspect_digest "$ORBIT_DIGEST_AWK_PATTERN" <<< "$out"
+  local out err
+  err="$(mktemp)" || fail "could not create a temporary file"
+  out="$(docker buildx imagetools inspect "$1" 2> "$err")" || {
+    if [[ -s "$err" ]] && ! grep -Eiq 'not found|manifest unknown|no such manifest|404' "$err"; then
+      printf 'promote-stable: registry unreachable or inspect failed for %s: %s\n' "$1" "$(tr '\n' ' ' < "$err")" >&2
+      rm -f "$err"
+      exit 1
+    fi
+    out=""
+  }
+  rm -f "$err"
+  printf '%s\n' "$out" | first_inspect_digest "$ORBIT_DIGEST_AWK_PATTERN"
 }
 
 main_head="$(git ls-remote "$remote" refs/heads/main | cut -f1)"
@@ -169,15 +173,15 @@ main_head="$(git ls-remote "$remote" refs/heads/main | cut -f1)"
 # An octopus merge or a single-parent main without an image is refused as
 # having no published image.
 tested_commit="$main_head"
-main_head_digest="$(resolve_digest "${image}:sha-${main_head}")" || exit 1
-if [[ -z "$main_head_digest" ]]; then
+head_resolved="$(resolve_digest "${image}:sha-${main_head}")"
+if [[ -z "$head_resolved" ]]; then
   parents_line="$(git rev-list --parents -n 1 "$main_head")" ||
     fail "cannot read the parents of main's head ${main_head}; is it in this checkout?"
   read -r -a main_line <<< "$parents_line"
   if [[ "${#main_line[@]}" -eq 3 ]]; then
     second_parent="${main_line[2]}"
-    second_parent_digest="$(resolve_digest "${image}:sha-${second_parent}")" || exit 1
-    if [[ -n "$second_parent_digest" ]]; then
+    parent_resolved="$(resolve_digest "${image}:sha-${second_parent}")"
+    if [[ -n "$parent_resolved" ]]; then
       git diff --quiet "${second_parent}^{tree}" "${main_head}^{tree}" ||
         fail "main (${main_head}) is a merge commit but its tree differs from the tested commit ${second_parent}'s tree"
       tested_commit="$second_parent"
@@ -356,7 +360,8 @@ ORBIT_PREVIEW_SOURCE_BRANCH="${source_branch}" \
 # between the GHCR tags and the GitLab tag can finish the job.
 resuming=false
 if docker buildx imagetools inspect "${image}:${version}" > /dev/null 2>&1; then
-  if [[ "$(resolve_digest "${image}:${version}")" == "${PREVIEW_DIGEST}" ]]; then
+  version_resolved="$(resolve_digest "${image}:${version}")"
+  if [[ "$version_resolved" == "${PREVIEW_DIGEST}" ]]; then
     printf 'promote-stable: %s:%s already tagged at this digest; resuming the promotion\n' "$image" "$version"
     resuming=true
   else

@@ -564,10 +564,9 @@ describe("command line (#1510)", () => {
   });
 });
 
-describe("an unknown registry finding names where to record an exception (group 6 L-S3)", () => {
-  it("the reason names .github/image-cache-exceptions.json", () => {
-    const findings = ci("job:\n  image: lscr.io/x/y:1\n");
-    expect(findings).toHaveLength(1);
-    expect(findings[0].reason).toContain(".github/image-cache-exceptions.json");
+describe("the error for an unknown registry names the exceptions file (#1604 b1 L-S3)", () => {
+  it("points at .github/image-cache-exceptions.json when the registry has no cache prefix", () => {
+    const [finding] = scan("docker-compose.yml", "services:\n  a:\n    image: registry.example.com:5000/team/tool:2\n");
+    expect(finding.reason).toContain(".github/image-cache-exceptions.json");
   });
 });

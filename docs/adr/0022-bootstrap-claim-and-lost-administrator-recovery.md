@@ -195,7 +195,7 @@ readers could have claimed first.
   shipped application records."
 - The installer's contract changes: a fresh install is secure with no
   provider configured; its completion screen tells the operator to run
-  `docker compose logs orbit-app` and open the last line. No new secret file,
+  `docker compose logs orbit-app` and open the claim link there. No new secret file,
   Compose secret or configuration key.
 - The claim never being in the database means a database backup never
   contains a live claim, and restoring a backup into another deployment does

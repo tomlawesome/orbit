@@ -765,20 +765,14 @@ describe("helpers", () => {
   });
 });
 
-// Group 6 ci-nightly-1: `moved` only needs the newest counted nightly, so it
-// stops reading jobs and traces at the first one.
-describe("moved reads no further than the newest counted nightly (group 6)", () => {
-  it("lists the jobs of the first counted pipeline only", async () => {
-    const api = await start({
-      pipelines: [
-        { id: 90, sha: SHA, status: "success" },
-        { id: 80, sha: OTHER_SHA, status: "success" },
-        { id: 70, sha: OTHER_SHA, status: "success" },
-      ],
-    });
-    expect((await run(["moved"], base(api))).out).toBe("idle");
-    const jobLists = seen.requests.filter((request) => /\/pipelines\/\d+\/jobs/u.test(request));
-    expect(jobLists).toHaveLength(1);
-    expect(jobLists[0]).toContain("/pipelines/90/jobs");
+describe("moved reads only what it needs (#1604 b1 ci-nightly-1)", () => {
+  it("stops at the newest counted nightly: older pipelines' jobs and logs are never requested", async () => {
+    const pipelines = [95, 94, 93, 92, 91].map((id) => ({ id, sha: OTHER_SHA, status: "success" }));
+    const api = await start({ pipelines });
+    expect((await run(["moved"], base(api))).out).toBe("run");
+    const read = seen.requests.filter((request) => /\/pipelines\/\d+\/jobs|\/jobs\/\d+\/trace/u.test(request));
+    const pipelinesRead = new Set(read.map((request) => /\/pipelines\/(\d+)\/jobs/u.exec(request)?.[1]).filter(Boolean));
+    expect([...pipelinesRead]).toEqual(["95"]);
+    expect(read.filter((request) => request.includes("/trace"))).toHaveLength(1);
   });
 });
