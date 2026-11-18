@@ -218,16 +218,18 @@ describe("#1887 R2: smtp_env_sum reads .env-orbit through the bounded read and d
     expect(orbitLines(result).some((line) => /too large|not read|refused/u.test(line)), `no refusal line:\n${result.stderr.slice(0, 1200)}`).toBe(true);
   });
 
-  /** A mktemp in front of the harness's: the first time the retirement makes its rewrite copy (after the first sum), .env-orbit is replaced in place by `twin`, a different file with the same length and cksum. */
-  function swapMktemp(targetDir, twin) {
-    const dir = scratchDir("orbit-1887-mktemp-");
+  /** A cksum and a sha256sum in front of the harness's: right after the first sum of .env-orbit (read on stdin; cksum before #1887, sha256sum after), .env-orbit is replaced in place by `twin`, a different file with the same length and cksum. */
+  function swapAfterSum(targetDir, twin) {
+    const dir = scratchDir("orbit-1887-sum-");
     const outside = scratchDir("orbit-1887-twin-");
     writeFileSync(join(outside, "twin"), twin);
-    writeFileSync(
-      join(dir, "mktemp"),
-      `#!/usr/bin/env bash\ncase "$*" in *retire-smtp*) if [[ ! -e '${outside}/done' ]]; then : > '${outside}/done'; cat '${outside}/twin' > '${join(targetDir, ".env-orbit")}'; fi;; esac\nexec '${realTool("mktemp")}' "$@"\n`,
-    );
-    chmodSync(join(dir, "mktemp"), 0o755);
+    for (const tool of ["cksum", "sha256sum"]) {
+      writeFileSync(
+        join(dir, tool),
+        `#!/usr/bin/env bash\n'${realTool(tool)}' "$@"; rc=$?\nif [[ $# -eq 0 && ! -e '${outside}/done' ]]; then : > '${outside}/done'; cat '${outside}/twin' > '${join(targetDir, ".env-orbit")}'; fi\nexit $rc\n`,
+      );
+      chmodSync(join(dir, tool), 0o755);
+    }
     return dir;
   }
 
@@ -242,7 +244,7 @@ describe("#1887 R2: smtp_env_sum reads .env-orbit through the bounded read and d
   it("a .env-orbit swapped for a different file with the same CRC32 and length counts as changed (root)", () => {
     const { targetDir, twin } = twinFolder();
     const shims = shimsFor(targetDir);
-    const result = run(shims, targetDir, { env: { PATH: `${swapMktemp(targetDir, twin)}:${shims.env.PATH}` } });
+    const result = run(shims, targetDir, { env: { PATH: `${swapAfterSum(targetDir, twin)}:${shims.env.PATH}` } });
     expect(result.hung).toBe(false);
     expect(result.stdout, "a same-cksum swap was counted as unchanged and the file retired").not.toContain(MAIL_DONE);
     expect(orbitLines(result).some((line) => /changed while it was being (read|rewritten)/u.test(line)), `no 'changed' line:\n${result.stderr.slice(0, 1200)}`).toBe(true);
