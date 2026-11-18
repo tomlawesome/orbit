@@ -6,6 +6,8 @@
     { "path": ".gitlab-ci.yml", "reference": "mcr.microsoft.com/}", "reason": "the ${2#mcr.microsoft.com/} expansion in the same mapping; not a pull" },
     { "path": "Dockerfile", "reference": "ghcr.io/tomlawesome", "reason": "public default for building from source without credentials; build_image passes ORBIT_BASE_IMAGE_REGISTRY (#1101)" },
     { "path": "scripts/sidecar-pins.mjs", "reference": "ghcr.io/tomlawesome/orbit-base-image", "reason": "the policy entry's name, used to recognise it; this tool pulls nothing" },
-    { "path": "scripts/repair-test-harness.mjs", "reference": "ghcr.io/tomlawesome/orbit@${FIXTURE_IMAGE_DIGEST}", "reason": "the repair tests' fake FIXTURE_IMAGE (a digest of d's) handed to a Docker shim; a test helper, not a pull" }
+    { "path": "scripts/repair-test-harness.mjs", "reference": "ghcr.io/tomlawesome/orbit@${FIXTURE_IMAGE_DIGEST}", "reason": "the repair tests' fake FIXTURE_IMAGE (a digest of d's) handed to a Docker shim; a test helper, not a pull" },
+    { "path": "scripts/release-readiness.mjs", "reference": "ghcr.io/${GITHUB_REPOSITORY}", "reason": "registry API lookups of Orbit's own published tags (docker buildx imagetools inspect, and the cosign attestation read in verify-validation-evidence.sh); asks GHCR what a tag points at now, which a cache could answer stale; pulls nothing (#1888)" },
+    { "path": "scripts/release-readiness.mjs", "reference": "ghcr.io/${GITHUB_REPOSITORY}:sha-${sourceSha}", "reason": "the :sha- tag whose digest the same imagetools inspect lookup reads; pulls nothing (#1888)" }
   ]
 }
