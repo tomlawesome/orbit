@@ -600,6 +600,17 @@ describe("'about' and installer-ui.sh citations in the guarantee catalogue (#188
     ]);
   });
 
+  it("reports an 'about' range that ends well before the function does", () => {
+    const long = `f() {\n${"  :\n".repeat(10)}}\n`;
+    const problems = aboutCitationProblems(entry("fake.sh `f` (about 1-3)"), { "fake.sh": long });
+    expect(problems.map((p) => p.problem)).toEqual(["function ends at line 12, outside the range"]);
+  });
+
+  it("reports a named function whose first line no citation holds, even if a range overlaps its body", () => {
+    const problems = fileNamedFunctionProblems(entry("`b`. fake.sh:6-9"), fake, "fake.sh");
+    expect(problems.map((p) => p.citation)).toEqual(["fake.sh:6-9 [b]"]);
+  });
+
   it("reports a content citation whose lines lack the code", () => {
     const problems = fileCitationContentProblems(entry("x. fake.sh:1-3, 5-6"), fake, "fake.sh", [
       { guarantee: "fake.sh #1", index: 0, contains: ["a() {"] },
@@ -629,10 +640,12 @@ describe("'about' and installer-ui.sh citations in the guarantee catalogue (#188
     { guarantee: "installer-ui.sh #3", index: 0, contains: ["installer_ui_emit() {", "$# -eq 5 || $# -eq 6"] },
     { guarantee: "installer-ui.sh #4", index: 0, contains: ["[SIMULATION] "] },
     { guarantee: "installer-ui.sh #4", index: 1, contains: ["simulation=true"] },
-    { guarantee: "installer-ui.sh #5", index: 0, contains: ["subshell per keystroke"] },
+    { guarantee: "installer-ui.sh #5", index: 0, contains: ["installer_ui_read_key() {", '-u "$terminal_fd" raw_key'] },
     { guarantee: "installer-ui.sh #6", index: 0, contains: ["osc_index < 256", "sequence_index < 32"] },
     { guarantee: "installer-ui.sh #7", index: 0, contains: ["installer_ui_read_paste() {", "[[:cntrl:]]", "return 2"] },
-    { guarantee: "installer-ui.sh #8", index: 0, contains: ["${#value} -le maximum", "[[:cntrl:]]", "return 2"] },
+    { guarantee: "installer-ui.sh #8", index: 0, contains: ["installer_ui_read_value() {"] },
+    { guarantee: "installer-ui.sh #8", index: 1, contains: ["${#value} -le maximum", "[[:cntrl:]]", "return 2"] },
+    { guarantee: "installer-ui.sh #8", index: 2, contains: ["installer_ui_read_text() {", "installer_ui_read_secret() {"] },
     { guarantee: "installer-ui.sh #9", index: 0, contains: ["installer_ui_menu_render() {"] },
     { guarantee: "installer-ui.sh #9", index: 1, contains: ["installer_ui_select() {"] },
     { guarantee: "installer-ui.sh #9", index: 2, contains: ['printf \'%s\\n\\n\' "$prompt" >&"$terminal_fd"'] },

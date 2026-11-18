@@ -269,7 +269,7 @@ export function fileCitationContentProblems(docText, fileText, fileName, expecta
 
 /**
  * #1880: in a guarantee of `<fileName>`'s own section, every backticked name
- * that the script defines as a function must overlap at least one of the
+ * that the script defines as a function must have its first line inside one of the
  * guarantee's `<fileName>:` citation segments. Returns `{ guarantee, citation,
  * problem }` for each one that overlaps none.
  */
@@ -290,11 +290,11 @@ export function fileNamedFunctionProblems(docText, fileText, fileName) {
     const names = new Set([...text.matchAll(/`([A-Za-z_]\w*)`/gu)].map((m) => m[1]));
     for (const name of names) {
       const span = spans.get(name);
-      if (span && !ranges.some(([first, last]) => last >= span.start && first <= span.end)) {
+      if (span && !ranges.some(([first, last]) => span.start >= first && span.start <= last)) {
         problems.push({
           guarantee,
           citation: `${fileName}:${ranges.map(([a, b]) => (a === b ? a : `${a}-${b}`)).join(",")} [${name}]`,
-          problem: `lines do not overlap the function (at ${span.start}-${span.end})`,
+          problem: `no cited range holds the function's first line (at ${span.start}-${span.end})`,
         });
       }
     }
@@ -309,6 +309,9 @@ export function fileNamedFunctionProblems(docText, fileText, fileName) {
  * `scriptTexts` maps a script name to its text. Returns `{ guarantee,
  * citation, problem }`.
  */
+/** Lines past an "about" range within which the function's closing line may fall. */
+const ABOUT_END_SLACK = 3;
+
 export function aboutCitationProblems(docText, scriptTexts) {
   const spansByScript = new Map(
     Object.entries(scriptTexts).map(([name, text]) => [name, functionSpans(text)]),
@@ -334,6 +337,9 @@ export function aboutCitationProblems(docText, scriptTexts) {
       if (!span) problems.push({ guarantee, citation, problem: "function not defined" });
       else if (span.start < first || span.start > last) {
         problems.push({ guarantee, citation, problem: `function starts at line ${span.start}, outside the range` });
+      }
+      else if (span.end < first || span.end > last + ABOUT_END_SLACK) {
+        problems.push({ guarantee, citation, problem: `function ends at line ${span.end}, outside the range` });
       }
     }
   }
