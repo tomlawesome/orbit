@@ -3682,9 +3682,33 @@ lock_probe_state=""
 lock_made_as_owner=0
 # shellcheck disable=SC2016 # expanded by the child bash
 readonly lock_make_script='umask 077 && mkdir -p -- "$1" && : >>"$2"'
+# #1899 (note 64000): bash's `<>` creates a lock that vanished between the
+# stat and the open. That file is kept (a lock file is never deleted: that
+# would split later holders across two inodes) and made the owner's lock:
+# when the descriptor is a regular empty file with one link that is still at
+# <path>, it is made 0600 and, as root, chowned to the deployment folder's
+# owner, as lock_make_script makes one. The caller still refuses. A failed
+# chmod or chown leaves its words in $lock_own_problem for the refusal line.
+lock_own_problem=""
+own_created_lock() {
+  local fd="$1" path="$2" got now owner
+  lock_own_problem=""
+  got="$(stat -L -c '%d:%i %F %h' -- "/dev/fd/$fd" 2>/dev/null)" || return 0
+  now="$(stat -c '%d:%i' -- "$path" 2>/dev/null)" || return 0
+  [[ "$got" == "$now regular empty file 1" ]] || return 0
+  chmod 600 -- "/dev/fd/$fd" 2>/dev/null || lock_own_problem="; repair's open created that lock and could not make it mode 0600"
+  [[ "$(id -u)" == 0 ]] || return 0
+  [[ -n "$smtp_folder_uid" ]] || smtp_owner_init || true
+  owner="${smtp_folder_uid:-}"
+  [[ "$owner" != 0 ]] || return 0
+  if [[ -z "$owner" ]] || ! chown -- "$owner${smtp_owner_gid:+:$smtp_owner_gid}" "/dev/fd/$fd" 2>/dev/null; then
+    lock_own_problem="; repair's open created that lock as root and could not chown it to the deployment folder's owner ${smtp_owner_name:-uid ${owner:-unknown}}, so remove it or chown it to that user"
+  fi
+}
 probe_backup_restore_lock() {
   local fd="" status=0 words before opened
   lock_probe_state=""
+  lock_own_problem=""
   command -v flock >/dev/null 2>&1 || return 0
   if [[ ! -e "$backup_restore_lock_path" && ! -L "$backup_restore_lock_path" ]]; then
     # A probe needs no file: nobody holds a lock that does not exist. An
@@ -3731,6 +3755,7 @@ probe_backup_restore_lock() {
   fi
   opened="$(stat -L -c '%d:%i %F' -- "/dev/fd/$fd" 2>/dev/null)" || opened=""
   if [[ "$opened" != "$before" ]]; then
+    own_created_lock "$fd" "$backup_restore_lock_path"
     exec {fd}<&-
     lock_probe_state=unreadable
     return 0
@@ -3762,8 +3787,8 @@ release_backup_restore_lock() {
 lock_state_refusal() {
   local lock_state="$1"
   if [[ "$lock_state" == unreadable ]]; then
-    printf "repair can't check whether a backup, restore or export is running: the lock at %s can't be read" \
-      "$backup_restore_lock_path"
+    printf "repair can't check whether a backup, restore or export is running: the lock at %s can't be read%s" \
+      "$backup_restore_lock_path" "$lock_own_problem"
   elif [[ "$lock_state" == unwritable ]]; then
     # #1873 X3, #1890: the read-write open (the only one) was refused.
     printf "repair can't check whether a backup, restore or export is running: the lock at %s could not be opened for writing by the user running repair (repair opens it read-write so that the open can never wait); run repair as root or as the owner of the backups folder, or make the lock file writable for the user running repair" \
@@ -3834,7 +3859,6 @@ lock_words_excerpt() {
 # Prints why start-services / recreate-services must not run right now
 # because of a restore, backup or export (#1804), or nothing.
 restore_guard_refusal() {
-  local lock_state
   if backup_directory_unsearchable; then
     printf "repair can't check whether a backup, restore or export is running: %s can't be searched" \
       "$backup_directory"
@@ -3842,8 +3866,9 @@ restore_guard_refusal() {
     printf 'a restore has not been finished (journal at %s); run bash scripts/restore.sh --finish and follow what it says (it says when Orbit may be started), or --recover to roll it back' \
       "$(restore_journal_named)"
   else
-    lock_state="$(backup_restore_lock_state)"
-    lock_state_refusal "$lock_state"
+    # #1899: in this shell, so $lock_own_problem reaches the refusal.
+    probe_backup_restore_lock
+    lock_state_refusal "$lock_probe_state"
   fi
 }
 
@@ -4522,6 +4547,7 @@ engine_lock_problem=""
 engine_lock_idle() {
   local fd="" mtime now status=0 before opened
   engine_lock_problem=""
+  lock_own_problem=""
   [[ -e "$engine_lock_path" || -L "$engine_lock_path" ]] || return 0
   [[ ! -L "$engine_lock_path" && -f "$engine_lock_path" && -r "$engine_lock_path" ]] || return 1
   mtime="$(stat -c %Y -- "$engine_lock_path" 2>/dev/null)" && now="$(date +%s)" || return 1
@@ -4536,6 +4562,7 @@ engine_lock_idle() {
     opened=""
     [[ -z "$fd" ]] || opened="$(stat -L -c '%d:%i %F' -- "/dev/fd/$fd" 2>/dev/null)" || opened=""
     if [[ -z "$fd" || -z "$before" || "$opened" != "$before" ]]; then
+      [[ -z "$fd" || "$opened" == "$before" ]] || own_created_lock "$fd" "$engine_lock_path"
       [[ -z "$fd" ]] || exec {fd}<&-
       engine_lock_problem=unwritable
       return 1
@@ -4660,8 +4687,8 @@ do_restore_transaction() {
     return 0
   fi
   if [[ "$engine_lock_problem" == unwritable ]]; then
-    printf "Orbit repair: refusing restore-transaction; repair can't check whether an install is running: the engine lock at %s could not be opened for writing by the user running repair (repair opens it read-write so that the open can never wait, and only as the regular file it checked); make sure no install or update is running, then run repair as root or as the deployment folder's owner, or make the lock file writable for the user running repair.\n" \
-      "$engine_lock_path" >&2
+    printf "Orbit repair: refusing restore-transaction; repair can't check whether an install is running: the engine lock at %s could not be opened for writing by the user running repair (repair opens it read-write so that the open can never wait, and only as the regular file it checked); make sure no install or update is running, then run repair as root or as the deployment folder's owner, or make the lock file writable for the user running repair%s.\n" \
+      "$engine_lock_path" "$lock_own_problem" >&2
     return 1
   fi
 
