@@ -167,8 +167,10 @@ export const plateOfName = (name) => {
  */
 function stagedDocsOf(suggestion) {
   const arrived = suggestion.receivedAt ? longDate(suggestion.receivedAt) : "unknown";
-  /* #1398: a file the scanner flagged is never offered to open or attach. */
-  const named = suggestion.attachments?.filter((a) => a.scanState !== "flagged").map((a) => ({
+  /* #1795: a file the scanner flagged stays in the list, as `flagged: true`, so
+     the drawer can say why it is left out; it is never offered to open, and the
+     server never adds it. */
+  const named = suggestion.attachments?.map((a) => ({
     name: a.displayName ?? "forwarded document",
     size: sizeWords(a.sizeBytes),
     clean: a.scanState === "clean",
@@ -190,6 +192,7 @@ function stagedDocsOf(suggestion) {
     type: plateOfName(paper.name),
     plate: plateOfName(paper.name),
     clean: paper.clean,
+    flagged: paper.flagged,
     scan: paper.clean ? "clean" : null,
     href: "",
     // receiptId and id are the same value on a ReceiptSuggestion (used for
