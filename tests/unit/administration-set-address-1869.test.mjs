@@ -54,8 +54,8 @@ describe("People rows offer to set or change an address (#1869)", () => {
   });
 
   it("offers the form's two buttons: 'set it' and cancel", () => {
-    expect(page).toMatch(/<button type="submit"[^>]*>set it<\/button>/u);
-    expect(page).toMatch(/<button type="button" onclick=\{\(\) => \(addressFor = null\)\}>cancel<\/button>/u);
+    expect(page).toMatch(/<button type="submit"[^>]*>\{[^<]*: "set it"\}<\/button>/u);
+    expect(page).toMatch(/<button type="button" onclick=\{\(\) => \{ addressFor = null; addressArmed = ""; \}\}>cancel<\/button>/u);
   });
 
   it("puts the address to /api/admin/users/<id>/email with PUT, with the password when the actor has one", () => {
