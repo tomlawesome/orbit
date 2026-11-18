@@ -3645,29 +3645,6 @@ restore_journal_named() {
   printf '%s' "${named:-$restore_journal_path}"
 }
 
-# #1804 point 1, execution only: the backup/restore lock, held by backup.sh,
-# restore.sh and a recovery-bundle export (their engine). Prints `held`,
-# `unreadable`, `unwritable`, `untestable <flock's words>` or nothing (an
-# acquire can also leave `uncreatable`: the backups folder or lock file
-# could not be made). A lock that is anything but a regular, non-symlink,
-# readable file is `unreadable` and never opened (review 5). A regular file
-# is opened read-write only, never read-only, whoever runs repair (#1890):
-# a read-write open of a FIFO swapped in meanwhile returns at once (POSIX),
-# where a read-only one would wait for a writer. The descriptor must still
-# be the file checked (#1873 X3), else it is `unreadable`; a lock that will
-# not open read-write is `unwritable` (never reopened read-only). The open
-# writes, truncates and changes nothing. A non-blocking lock has three
-# outcomes (audit v0.3.9-b O-R1): taken (prints nothing); held by another
-# process, which flock reports only as a silent exit 1 (`held`); or not
-# takeable at all, e.g. a filesystem refusing an exclusive lock, which
-# flock reports with a sysexits code and its words (`untestable`, never
-# `held`). Without flock on PATH the lock is not checked (the journal still
-# is).
-backup_restore_lock_state() {
-  probe_backup_restore_lock
-  printf '%s' "$lock_probe_state"
-}
-
 # #1823 O-R2: acquire, act, release. With `keep`, a taken lock is kept on
 # $held_lock_fd (no subshell, so the descriptor survives) until
 # release_backup_restore_lock; the caller holds it across its compose call.
@@ -3688,7 +3665,8 @@ readonly lock_make_script='umask 077 && mkdir -p -- "$1" && : >>"$2"'
 # when the descriptor is a regular empty file with one link that is still at
 # <path>, it is made 0600 and, as root, chowned to the deployment folder's
 # owner, as lock_make_script makes one. The caller still refuses. A failed
-# chmod or chown leaves its words in $lock_own_problem for the refusal line.
+# chmod or chown, or a chown with no group (no user-database entry), leaves
+# its words in $lock_own_problem for the refusal line.
 lock_own_problem=""
 own_created_lock() {
   local fd="$1" path="$2" got now owner
@@ -3703,8 +3681,33 @@ own_created_lock() {
   [[ "$owner" != 0 ]] || return 0
   if [[ -z "$owner" ]] || ! chown -- "$owner${smtp_owner_gid:+:$smtp_owner_gid}" "/dev/fd/$fd" 2>/dev/null; then
     lock_own_problem="; repair's open created that lock as root and could not chown it to the deployment folder's owner ${smtp_owner_name:-uid ${owner:-unknown}}, so remove it or chown it to that user"
+  elif [[ -z "$smtp_owner_gid" ]]; then
+    # No user-database entry (getent passwd): the uid only, never the
+    # folder's group (#1848 addendum 2 item 3), and said.
+    lock_own_problem="; repair's open created that lock as root and gave it to uid $owner, but could not look up that user's group (getent passwd), so its group is still root's; chgrp it to that user's group"
   fi
 }
+# #1804 point 1, execution only: the backup/restore lock, held by backup.sh,
+# restore.sh and a recovery-bundle export (their engine). Leaves `held`,
+# `unreadable`, `unwritable`, `untestable <flock's words>` or nothing in
+# $lock_probe_state (an
+# acquire can also leave `uncreatable`: the backups folder or lock file
+# could not be made). A lock that is anything but a regular, non-symlink,
+# readable file is `unreadable` and never opened (review 5). A regular file
+# is opened read-write only, never read-only, whoever runs repair (#1890):
+# a read-write open of a FIFO swapped in meanwhile returns at once (POSIX),
+# where a read-only one would wait for a writer. The descriptor must still
+# be the file checked (#1873 X3), else it is `unreadable`; a lock that will
+# not open read-write is `unwritable` (never reopened read-only). The open
+# writes and truncates nothing; one that created the lock (removed after the
+# check) makes it 0600 and, as root, the deployment folder's owner's, and
+# changes nothing else (#1899, own_created_lock). A non-blocking lock has three
+# outcomes (audit v0.3.9-b O-R1): taken (prints nothing); held by another
+# process, which flock reports only as a silent exit 1 (`held`); or not
+# takeable at all, e.g. a filesystem refusing an exclusive lock, which
+# flock reports with a sysexits code and its words (`untestable`, never
+# `held`). Without flock on PATH the lock is not checked (the journal still
+# is).
 probe_backup_restore_lock() {
   local fd="" status=0 words before opened
   lock_probe_state=""
@@ -3791,7 +3794,7 @@ lock_state_refusal() {
       "$backup_restore_lock_path" "$lock_own_problem"
   elif [[ "$lock_state" == unwritable ]]; then
     # #1873 X3, #1890: the read-write open (the only one) was refused.
-    printf "repair can't check whether a backup, restore or export is running: the lock at %s could not be opened for writing by the user running repair (repair opens it read-write so that the open can never wait); run repair as root or as the owner of the backups folder, or make the lock file writable for the user running repair" \
+    printf "repair can't check whether a backup, restore or export is running: the lock at %s could not be opened for writing by the user running repair (repair opens it read-write so that the open can never wait); run repair as root or as the owner of the backups folder (the deployment folder's owner, who owns a lock repair makes as root), or make the lock file writable for the user running repair" \
       "$backup_restore_lock_path"
   elif [[ "$lock_state" == uncreatable ]]; then
     if [[ "$lock_made_as_owner" == 1 && "$(id -u)" == 0 && "${smtp_folder_uid:-0}" != 0 ]]; then
