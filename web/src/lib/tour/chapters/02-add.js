@@ -78,8 +78,8 @@ export const SELECTORS = Object.freeze({
     card: "#pocket-entry .pc-form > .pc-card:first-child",
     /** What to call it. */
     name: '#pocket-entry input[id$="-name"]',
-    /** When it's due — always drawn: an item has no type (ADR-0044). */
-    due: '#pocket-entry input[id$="-due"]',
+    /** When it's due — always drawn (ADR-0044); a button that opens the calendar (#1468, #1760). */
+    due: '#pocket-entry button[id$="-due"]',
     /** A day in the calendar the due button opens. */
     day: '[data-iso$="-15"]',
     /** What it costs. */

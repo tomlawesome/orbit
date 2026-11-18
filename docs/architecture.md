@@ -264,6 +264,7 @@ are for people working on Orbit, not for running it.
 | `DELETE` | `/api/auth/methods/local`, `/api/auth/methods/oidc/:identityId` | Removes a sign-in method, refused if it is the last one. |
 | `POST` | `/api/admin/users` | Administrator: creates a local user and emails the setup link. |
 | `POST` | `/api/admin/users/:userId/setup-link` | Administrator: re-issues and re-sends a setup or recovery link. |
+| `PUT` | `/api/admin/users/:userId/email` | Administrator: sets a member's registered address (step-up intent `email_address_set`), retires their pending links and approvals, and notifies the old address when it was readable (#1869). |
 | `GET` | `/api/workspace` | Returns the caller&apos;s authorized households and records. |
 | `POST` | `/api/workspace/commands` | Applies one validated, authorized workspace mutation. |
 | `PUT` | `/api/preferences` | Saves the caller&apos;s appearance preferences. |

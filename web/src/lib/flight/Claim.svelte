@@ -57,12 +57,12 @@
         onfocusin={ringFocusIn} onfocusout={ringFocusOut}
         onsubmit={(event) => { event.preventDefault(); onsubmit(); }}>
     <div class="field">
-      <label for="claimcode">claim code</label>
+      <label for="claimcode">claim link</label>
       <!-- autocomplete off and no name: this value is a one-use secret and
            has no business in a browser's saved-form store. -->
       <input id="claimcode" type="text" autocomplete="off" spellcheck="false"
              autocapitalize="characters" autocorrect="off" enterkeyhint="go"
-             placeholder="ABCD-EFGH-…" aria-label="Claim code"
+             placeholder="ABCD-EFGH-…" aria-label="Claim link"
              bind:value={claim} />
       <p class="err" class:shown={Boolean(message)} role="alert">{message}</p>
     </div>
@@ -70,7 +70,7 @@
     <!-- The one line the card says by itself: the exact command, because
          "check the logs" is not an instruction anyone can follow at 2am on a
          machine they installed an hour ago. -->
-    <p class="note">Run <b>docker compose logs orbit-app</b> and use the claim code it prints.</p>
+    <p class="note">Run <b>docker compose logs orbit-app</b> and use the claim link it prints.</p>
 
     <button class="act" id="claimbtn" type="submit" disabled={!typed || busy}>Continue</button>
   </form>

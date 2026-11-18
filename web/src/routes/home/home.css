@@ -369,6 +369,8 @@
   .itemview .doc small{display:block;font:0.65625rem var(--mono);color:var(--ink-mid)}
   /* #1419, P: held, not wrong -- the belt's snooze tone */
   .itemview .doc small .held{color:var(--warm-text)}
+  /* #1795: flagged, not wrong-looking: the scanner's line, in the overdue tone */
+  .itemview .doc small .flag{color:var(--overdue-text)}
   /* #1319 (design/v19/belt-purpose/round-3): THE DOCUMENT ROW OPENS THE
      PREVIEW. Home's own .doc row, whole-row, a button now; the words at its
      right are the register `manage this item →` had. While its preview is

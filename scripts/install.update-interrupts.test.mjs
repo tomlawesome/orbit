@@ -120,6 +120,25 @@ describe("install.sh: an interrupt after an update's commit ends like a failure 
   });
 });
 
+describe("install.sh: a stop that arrives with a real failure keeps the cause (audit Low O-S3)", () => {
+  it("an update stopped during `compose up` that then fails for its own reason still shows Docker's reason", async () => {
+    const { targetDir, environment } = updateFixture();
+    const result = await runInstallSignalled(
+      targetDir,
+      {
+        ...environment,
+        FAKE_UP_DELAY: "3",
+        FAKE_COMPOSE_UP_FAIL: "1",
+        FAKE_COMPOSE_UP_STDERR: "Error: no space left on device\n",
+        ORBIT_INSTALLER_READINESS_TIMEOUT_SECONDS: "60",
+      },
+      { signal: "SIGTERM", marker: "hung-up" },
+    );
+    expect(result.signalSent).toBe(true);
+    expect(result.stderr).toContain("no space left on device");
+  });
+});
+
 describe("install.sh: `compose up` is never cut by an interrupt (#1518)", () => {
   it("an update: the start runs to its end, then the run ends as a failed start (repair), with nothing rolled back and no waits", async () => {
     const { targetDir, stateDir, environment } = updateFixture();

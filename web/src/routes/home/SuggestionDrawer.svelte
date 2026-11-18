@@ -43,6 +43,9 @@
   const readings = $derived(readingsOf(suggestion));
   const papers = $derived(suggestionPapersOf(suggestion)
     .map((paper) => ({ ...paper, itemId: suggestion.id, itemTitle: suggestion.title })));
+  /* #1795: the flagged papers' line ids, which the amending add button is tied to. */
+  const flaggedIds = $derived(papers.flatMap((paper, i) => (paper.flagged ? [`${suggestion.id}-flag-${i}`] : [])));
+  const without = $derived(flaggedIds.length > 1 ? "add without them" : "add without it");
   const amending = $derived(Boolean(acts && acts.modes.edit.id === suggestion.id));
   const adding = $derived(amending && Boolean(acts?.modes.edit.busy));
 </script>
@@ -57,18 +60,27 @@
 {/if}
 <!-- The paper's name where the data holds one (review round §6.f, round 3
      §2), no size; else the count the list gives. -->
-{#each papers as paper (paper.id)}
+{#each papers as paper, i (paper.id)}
   {@const on = showingPaper === paper.id}
+  {#if paper.flagged}
+    <!-- #1795 (note 63499): nothing to open; the line sits under the name. -->
+    <div class="attached flagged" id="{suggestion.id}-flag-{i}">
+      <span class="p-paper" aria-hidden="true">◆</span><span class="name">{paper.name}</span>
+      <span class="flag">The scanner flagged a virus or malware inside attachment: "{paper.name}"</span>
+    </div>
+  {:else}
   <button type="button" class="attached" class:showing={on} data-doc-row aria-haspopup="dialog"
           aria-current={on ? "true" : undefined} aria-label="Open {paper.name}"
           onclick={(event) => onopenpaper?.(paper, event.currentTarget)}>
     <span class="p-paper" aria-hidden="true">◆</span><span class="name">{paper.name}</span>{#if paper.clean}<span class="clean">scanned clean</span>{/if}
   </button>
+  {/if}
 {/each}
 {#if acts && amending}
   <div class="p-pills amend" role="group" aria-label="Amending {suggestion.title}">
     <button type="button" class="p-pill filled" disabled={adding} aria-disabled={acts.modes.edit.refused ? "true" : undefined}
-            onclick={() => { if (!acts.modes.edit.refused) acts.onaccept?.(); }}>{adding ? "adding…" : "add to orbit"}</button>
+            aria-describedby={flaggedIds.length ? flaggedIds.join(" ") : undefined}
+            onclick={() => { if (!acts.modes.edit.refused) acts.onaccept?.(); }}>{adding ? "adding…" : flaggedIds.length ? without : "add to orbit"}</button>
     <button type="button" class="p-pill" class:danger={acts.modes.discardArmed} class:armed={acts.modes.discardArmed}
             disabled={adding} onclick={acts.oncancel}>{acts.modes.discardArmed ? "discard changes?" : "cancel"}</button>
   </div>
@@ -97,6 +109,8 @@
   .attached.showing .name{color:var(--accent-text)}
   .attached .name{min-width:0;overflow-wrap:anywhere}
   .clean{color:var(--ok-text)}
+  /* #1795: the scanner's line, a block under the name */
+  .flag{flex-basis:100%;color:var(--overdue-text)}
   .clean::before{content:"· ";color:var(--ink-quiet)}
   .amend{margin-top:12px}
 </style>

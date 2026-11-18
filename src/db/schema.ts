@@ -693,6 +693,12 @@ export const documents = pgTable("documents", {
   scanStatus: documentScanStatus("scan_status").notNull().default("pending"),
   failureCode: text("failure_code"),
   deleteAfter: timestamp("delete_after", { withTimezone: true }),
+  /**
+   * When an item claimed the document (#1871). Null means a staged upload no
+   * item has claimed yet; it is what tells a kept document whose item is gone
+   * from an unclaimed upload once both are deleted.
+   */
+  boundAt: timestamp("bound_at", { withTimezone: true }),
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
   availableAt: timestamp("available_at", { withTimezone: true }),
   /**

@@ -91,6 +91,11 @@ interface Recipient {
   id: string;
   email: string | null;
   displayName: string;
+  /**
+   * The stored blind index of `email`. The link is written only while the
+   * account still holds this index (#1869): see `issueAndSend`.
+   */
+  emailIndex: string | null;
 }
 
 /**
@@ -135,6 +140,13 @@ export function unreadableAddressError(state: MetadataFieldState | undefined): A
  * reach them", because the token table deliberately stores nothing about
  * delivery. It names the user and the purpose and nothing else: no address,
  * and never the link.
+ *
+ * The address is read before the send and the link written after it, so an
+ * administrator can set a new address in between (#1869). Holding the
+ * per-user lock across an SMTP exchange is not an option, so the write is
+ * optimistic instead: `persistSetupToken` writes only while the account still
+ * holds the address index read here, and otherwise refuses 409
+ * `address_changed`, leaving the link that went to the old mailbox dead.
  */
 async function issueAndSend(
   recipient: Recipient,
@@ -185,7 +197,10 @@ async function issueAndSend(
   /* "Nothing live to retire" is persistSetupToken's own decision, under its
      per-user lock, so a concurrent send that has just written its delivered
      link is never superseded by this one that went nowhere. */
-  await persistSetupToken(recipient.id, minted, actorUserId, { onlyIfNoLiveLink: Boolean(outcome.sendError) });
+  await persistSetupToken(recipient.id, minted, actorUserId, {
+    onlyIfNoLiveLink: Boolean(outcome.sendError),
+    sentToAddressIndex: recipient.emailIndex,
+  });
 
   return { sentTo: email, expiresAt: minted.expiresAt, sendError: outcome.sendError };
 }
@@ -214,7 +229,10 @@ export async function createLocalUserAndSendSetupLink(
      must refuse the request rather than leave a user behind with no link. */
   assertSetupTokenLifetime(options.expiresInDays);
   const user = await createLocalUser(draft, { createdByUserId: actorUserId });
-  const delivery = await issueAndSend(user, "setup", actorUserId, options);
+  /* Mailed to the address as stored, read back with its ciphertext, so the
+     link is tied to it the same way a resend's is (#1869). */
+  const stored = await readRecipient(user.id);
+  const delivery = await issueAndSend(stored.recipient, "setup", actorUserId, options, stored.addressState);
   return { user, ...delivery };
 }
 
@@ -234,12 +252,23 @@ export async function sendSetupLink(
   userId: string,
   options: SendSetupLinkOptions = {},
 ): Promise<SetupLinkDelivery> {
+  const { recipient, addressState, hasCredential } = await readRecipient(userId);
+  return issueAndSend(recipient, hasCredential ? "recovery" : "setup", actorUserId, options, addressState);
+}
+
+/** The account as a link is sent to it: its address decrypted, with its blind index. */
+async function readRecipient(userId: string): Promise<{
+  recipient: Recipient;
+  addressState: MetadataFieldState | undefined;
+  hasCredential: boolean;
+}> {
   const db = getDb();
-  const [recipient] = await db
+  const [row] = await db
     .select({
       id: users.id,
       /* Read from `email_enc` only (#1403 Q3). */
       emailEnc: users.emailEnc,
+      emailIndex: users.emailIndex,
       displayName: users.displayName,
       credential: localCredentials.userId,
     })
@@ -247,17 +276,15 @@ export async function sendSetupLink(
     .leftJoin(localCredentials, eq(localCredentials.userId, users.id))
     .where(eq(users.id, userId))
     .limit(1);
-  if (!recipient) {
+  if (!row) {
     throw new AppError("user_not_found", "That registered Orbit user is no longer available", 404);
   }
 
   const address = (await openInstanceMetadataReader(db))
-    .text("users.email", recipient.id, { encrypted: recipient.emailEnc });
-  return issueAndSend(
-    { ...recipient, email: address.value },
-    recipient.credential ? "recovery" : "setup",
-    actorUserId,
-    options,
-    address.state,
-  );
+    .text("users.email", row.id, { encrypted: row.emailEnc });
+  return {
+    recipient: { id: row.id, displayName: row.displayName, email: address.value, emailIndex: row.emailIndex },
+    addressState: address.state,
+    hasCredential: Boolean(row.credential),
+  };
 }
