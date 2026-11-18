@@ -95,15 +95,18 @@ function failedPreview(reason: OperationalReason = "parser_output_invalid"): App
 
 /** How long a view is told to wait when Orbit's own side could not draw (D20). */
 export const DOCUMENT_PREVIEW_BUSY_RETRY_SECONDS = 30;
+/** How long a view is told to wait when the view render queue turned its draw away (#1446). */
+export const DOCUMENT_PREVIEW_QUEUED_RETRY_SECONDS = 5;
 
 /**
  * Orbit could not draw for a reason of its own: the quarantine tmpfs is
- * full, or the renderer cannot start. Nothing is known about the file, so it
+ * full, the renderer cannot start, or the view render queue is full (#1446). Nothing is known about the file, so it
  * is a 503 with Retry-After and never a remembered refusal (#1433 D20).
  */
-export function previewBusyError(): AppError {
-  log.warn({ event: "document.preview", state: "degraded", reason: "processing_interrupted", action: "inspect_admin_diagnostics", impact: "application_degraded" });
-  return new RetryLaterError("document_preview_busy", "Orbit is busy; try again shortly", DOCUMENT_PREVIEW_BUSY_RETRY_SECONDS);
+export function previewBusyError(retryAfterSeconds?: number): AppError {
+  // A refused queue place is load, not a fault: the sandbox has already logged it.
+  if (retryAfterSeconds === undefined) log.warn({ event: "document.preview", state: "degraded", reason: "processing_interrupted", action: "inspect_admin_diagnostics", impact: "application_degraded" });
+  return new RetryLaterError("document_preview_busy", "Orbit is busy; try again shortly", retryAfterSeconds ?? DOCUMENT_PREVIEW_BUSY_RETRY_SECONDS);
 }
 
 function boundedCanvasSize(width: number, height: number, allowUpscale: boolean): { width: number; height: number } {
@@ -161,6 +164,7 @@ async function renderPdfPage(input: { bytes: Buffer } | DocumentFileOnDisk, page
     case "page_not_found":
       throw documentPreviewPageNotFound();
     case "failed":
+      if (rendered.stop === "queue_full") throw previewBusyError(DOCUMENT_PREVIEW_QUEUED_RETRY_SECONDS);
       if (rendered.stop === "unavailable") throw previewBusyError();
       throw failedPreview(rendered.stop === "timeout" || rendered.stop === "memory" ? "processing_interrupted" : undefined);
   }
@@ -190,6 +194,7 @@ async function renderImagePage(bytes: Buffer, mediaType: DocumentPreviewMediaTyp
     case "refused":
       throw unsupportedPreview(rendered.reason);
     case "failed":
+      if (rendered.stop === "queue_full") throw previewBusyError(DOCUMENT_PREVIEW_QUEUED_RETRY_SECONDS);
       if (rendered.stop === "unavailable") throw previewBusyError();
       throw failedPreview(rendered.stop === "timeout" || rendered.stop === "memory" ? "processing_interrupted" : undefined);
   }
@@ -254,9 +259,10 @@ export type PreviewDraw =
   | { outcome: "drawn"; bytes: Buffer; mediaType: DocumentPreviewMediaType; width: number; height: number; pageCount?: number }
   | { outcome: "refused"; refusal: PreviewRefusal; structure?: OperationalReason }
   | { outcome: "page_not_found"; pageCount: number }
-  | { outcome: "busy" };
+  | { outcome: "busy"; retryAfterSeconds?: number };
 
-function failedDraw(stop: "timeout" | "memory" | "crash" | "unavailable" | undefined): PreviewDraw {
+function failedDraw(stop: "timeout" | "memory" | "crash" | "unavailable" | "queue_full" | undefined): PreviewDraw {
+  if (stop === "queue_full") return { outcome: "busy", retryAfterSeconds: DOCUMENT_PREVIEW_QUEUED_RETRY_SECONDS };
   if (stop === "unavailable") return { outcome: "busy" };
   return { outcome: "refused", refusal: stop ?? "parser" };
 }

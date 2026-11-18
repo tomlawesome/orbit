@@ -28,7 +28,7 @@ export const SUGGESTION = {
 };
 
 /** The fixture's failed message that carries no document, and the words it says. */
-export const FAILED_MESSAGE = { id: "r-no-document", words: "It carried no document Orbit can read" };
+export const FAILED_MESSAGE = { id: "r-no-document", words: "nothing to collect · no PDF attached" };
 
 /** Orbit's own shape of an unexpected failure (src/lib/app-error.ts
  *  `appErrorResponse`): a mocked shape the backend cannot produce proves
