@@ -555,7 +555,7 @@ async function reserveDocumentMetadata(input: {
       const [{ total: staged }] = await transaction
         .select({ total: sql<number>`count(*)` })
         .from(documents)
-        .where(and(eq(documents.uploadedByUserId, input.userId), isNull(documents.itemId), inArray(documents.lifecycle, ["quarantined", "scanning", "available"])));
+        .where(and(eq(documents.uploadedByUserId, input.userId), isNull(documents.itemId), isNull(documents.boundAt), inArray(documents.lifecycle, ["quarantined", "scanning", "available"])));
       if (Number(staged) >= STAGED_UPLOADS_PER_MEMBER_LIMIT) {
         throw new AppError(
           "document_staged_limit",
@@ -1304,8 +1304,9 @@ export async function restoreDocument(userId: string, documentId: string): Promi
       itemId: documents.itemId,
       sealedItemId: documents.sealedItemId,
       uploadedByUserId: documents.uploadedByUserId,
+      boundAt: documents.boundAt,
     }).from(documents).where(eq(documents.id, documentId)).limit(1);
-    if (row && row.itemId === null && row.sealedItemId !== null && row.uploadedByUserId !== null) {
+    if (row && row.itemId === null && row.boundAt === null && row.sealedItemId !== null && row.uploadedByUserId !== null) {
       await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended('orbit:document-instance-quota', 0))`);
       await transaction.execute(
         sql`select pg_advisory_xact_lock(hashtextextended(${`orbit:document-household-quota:${record.householdId}`}, 0))`,
@@ -1316,6 +1317,7 @@ export async function restoreDocument(userId: string, documentId: string): Promi
         .where(and(
           eq(documents.uploadedByUserId, row.uploadedByUserId),
           isNull(documents.itemId),
+          isNull(documents.boundAt),
           inArray(documents.lifecycle, ["quarantined", "scanning", "available"]),
         ));
       if (Number(staged) >= STAGED_UPLOADS_PER_MEMBER_LIMIT) {
