@@ -35,11 +35,18 @@ export function reloadWhenUpdated(navigation, updated, go, guard, goto) {
   if (guard?.isDirty()) {
     if (guard.holderAsk) {
       navigation.cancel?.();
-      return guard.holderAsk().then((yes) => {
+      return guard.holderAsk().then(async (yes) => {
         if (!yes) return;
-        if (updated.current) return reload();
+        if (updated.current) {
+          reload();
+          return;
+        }
         const undo = guard.leaving?.();
-        return Promise.resolve(goto?.(href)).finally(() => { if (typeof undo === "function") undo(); });
+        try {
+          await goto?.(href);
+        } finally {
+          if (typeof undo === "function") undo();
+        }
       });
     }
     if (!guard.ask()) {
