@@ -229,6 +229,10 @@
   let addressDraft = $state("");
   let addressPassword = $state("");
   const addressCard = $state(card());
+  /** The address the own row's first "set it" armed, "" when disarmed (as on the desk). */
+  let addressArmed = $state("");
+  const ownAddress = $derived(/** @type {Person | null} */ (addressFor)?.id === meId);
+  const ownAddressArmed = $derived(addressArmed !== "" && addressArmed === addressDraft.trim());
 
   /** @param {Person} person */
   function openAddress(person) {
@@ -237,6 +241,7 @@
       addressFor = person;
       addressDraft = "";
       addressPassword = "";
+      addressArmed = "";
       addressCard.problem = null;
       addressOpen = true;
     }, (message) => (peopleCard.problem = message), { address: { personId: person.id, email: "" } });
@@ -245,9 +250,10 @@
   async function saveAddress() {
     const person = addressFor;
     if (!person) return;
+    if (ownAddress && !ownAddressArmed) { addressArmed = addressDraft.trim(); return; }
     await setAddress(person, addressDraft, addressPassword, {
-      card: addressCard, actorHasPassword, reread, wake,
-      landed: () => { addressOpen = false; addressPassword = ""; spent(); },
+      card: addressCard, actorHasPassword, own: ownAddress, reread, wake,
+      landed: () => { addressOpen = false; addressPassword = ""; addressArmed = ""; spent(); },
     });
   }
 
@@ -1291,10 +1297,12 @@
     {/snippet}
   </Sheet>
 
-  <Sheet bind:open={addressOpen} size="callout" title="Their address">
+  <Sheet bind:open={addressOpen} size="callout" title={ownAddress ? "Your address" : "Their address"}>
     {#if addressFor}
       <form id="ad-address-form" onsubmit={(event) => { event.preventDefault(); saveAddress(); }}>
-        <p class="p-prose ad-sheet-say">Sets the address {addressFor.displayName} is registered with. Their pending setup links and sign-in approvals stop working. No link is sent; send a new one afterwards.</p>
+        <p class="p-prose ad-sheet-say">{ownAddress
+          ? "Sets the address you sign in with. Your next sign-in waits on an approval mailed to it, so a mistyped address locks you out once this session ends. Check it, then press again."
+          : `Sets the address ${addressFor.displayName} is registered with. Their pending setup links and sign-in approvals stop working. No link is sent; send a new one afterwards.`}</p>
         <label class="ad-label" for="ad-addr-email">address</label>
         <input id="ad-addr-email" class="p-input" type="email" autocomplete="off" enterkeyhint="send"
                bind:value={addressDraft} required>
@@ -1308,7 +1316,8 @@
     {/if}
     {#snippet foot()}
       {#if addressFor}
-        <button class="p-pill filled" type="submit" form="ad-address-form" disabled={addressCard.busy}>{addressCard.busy ? "setting…" : "set it"}</button>
+        <button class="p-pill filled" type="submit" form="ad-address-form" disabled={addressCard.busy}>{addressCard.busy ? "setting…" : ownAddress && ownAddressArmed ? `set my address to ${addressArmed}` : "set it"}</button>
+        {#if ownAddressArmed}<button class="p-pill" type="button" onclick={() => (addressArmed = "")}>cancel</button>{/if}
       {/if}
     {/snippet}
   </Sheet>

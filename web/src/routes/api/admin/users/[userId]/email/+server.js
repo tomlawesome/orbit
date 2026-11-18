@@ -18,6 +18,8 @@ const bodySchema = z.object({
    * challenged with a step-up proof cookie instead.
    */
   currentPassword: z.string().optional(),
+  /** The address again, sent on the armed press; required for the actor's own account (#1869). */
+  confirmEmail: z.string().optional(),
 });
 
 /**
@@ -26,6 +28,9 @@ const bodySchema = z.object({
  * retires the account's live setup links and pending sign-in approvals,
  * tells the OLD address when it could be read, and sends no setup link; the
  * administrator sends one afterwards from the row.
+ *
+ * For the actor's own account it needs `confirmEmail` (a trimmed, case-blind
+ * match of `email`), else 422 `address_confirmation_required`, nothing written.
  *
  * Re-challenged first, under its own intent `email_address_set`, so a proof
  * taken for a setup link cannot pay for it.
@@ -39,7 +44,9 @@ export const PUT = write(async (event, session) => {
   const submitted = bodySchema.parse(await event.request.json());
   await requireRecentAuthentication(event, session, submitted, "email_address_set");
 
-  const { noticeError } = await setUserAddress(session.user.id, userId, submitted.email);
+  const { noticeError } = await setUserAddress(session.user.id, userId, submitted.email, {
+    ...(submitted.confirmEmail === undefined ? {} : { confirmEmail: submitted.confirmEmail }),
+  });
   const user = await readInstanceUser(userId);
   if (!user) throw new AppError("user_not_found", "That registered Orbit user is no longer available", 404);
 

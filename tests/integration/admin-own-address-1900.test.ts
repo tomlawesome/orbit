@@ -1,31 +1,20 @@
-import { createHash } from "node:crypto";
-import { and, eq, gt, isNull, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { auditLog, credentialSetupTokens, externalIdentities, localCredentials, signInApprovals, users } from "@/db/schema";
-import { ACCOUNT_LIFECYCLE_LOCK_KEY } from "@/lib/auth/authority-locks";
 import { hashPassword } from "@/lib/auth/password";
-import { sealStepUpProof, stepUpProofCookieName } from "@/lib/auth/recent-auth";
-import { getAuthConfig } from "@/lib/env";
-import { invitationSendErrors } from "@/server/invitations/send";
-import { setUserAddress } from "@/server/local-credentials/address";
-import { requireInstanceMetadataWriter } from "@/server/metadata/fields";
-import { createLocalUserAndSendSetupLink, sendSetupLink } from "@/server/local-credentials/setup-mail";
-import { collectSignInApproval, startSignInApproval } from "@/server/sign-in-approvals";
+import { createLocalUserAndSendSetupLink } from "@/server/local-credentials/setup-mail";
 import type { SmtpNotification } from "@/server/notification-worker";
 import { ORIGIN } from "./support/auth";
-import { deferred } from "./support/concurrency";
 import {
   accountAddressColumns,
   cleanupIntegrationEnvironment,
   createIntegrationFixture,
-  damageEnvelope,
-  lockTheInstance,
   type IntegrationFixture,
   type IntegrationSession,
 } from "./support/fixtures";
-import { clearMailState, fakeTransporter, setUpSending } from "./support/mail-sending-1629";
-import { callRoute, callRouteForSession, loadRoute } from "./support/request-event";
+import { clearMailState, fakeTransporter } from "./support/mail-sending-1629";
+import { callRouteForSession, loadRoute } from "./support/request-event";
 
 /**
  * AN ADMINISTRATOR CHANGES THEIR OWN ADDRESS (#1900 findings W-S4, W-S5; design
@@ -54,13 +43,9 @@ vi.mock("nodemailer", async (importOriginal) => {
   return { ...replaced, default: { ...actual.default, createTransport: mocks.createTransport } };
 });
 
-const { GET: listUsers } = await loadRoute("admin/users");
 const { PUT: setAddress } = await loadRoute("admin/users/[userId]/email");
-const { POST: reissueSetupLink } = await loadRoute("admin/users/[userId]/setup-link");
-const { POST: consumeSetup } = await loadRoute("auth/local/setup");
 
 const ADMIN_PASSWORD = "the-administrators-own-password";
-const NEW_PASSWORD = "a-freshly-chosen-password";
 
 let fixture: IntegrationFixture;
 let sendMail: ReturnType<typeof vi.fn>;
@@ -119,12 +104,6 @@ async function localTarget(address: string, displayName = "Target Person") {
   return { id: created.user.id, address, token: decodeURIComponent(link[1]) };
 }
 
-/** What #1604 left behind: ciphertext that no longer opens, index intact. */
-async function damageAddress(userId: string): Promise<void> {
-  const [row] = await getDb().select({ enc: users.emailEnc }).from(users).where(eq(users.id, userId));
-  await getDb().update(users).set({ emailEnc: damageEnvelope(row.enc as string) }).where(eq(users.id, userId));
-}
-
 async function put(
   session: IntegrationSession,
   userId: string,
@@ -143,17 +122,6 @@ async function put(
 
 const errorCode = (body: Record<string, unknown>) => (body.error as { code: string } | undefined)?.code;
 
-/** The route answers the refreshed user row; tolerate it being wrapped as `{ user }`. */
-function answeredUser(body: Record<string, unknown>): Record<string, unknown> {
-  return (body.user as Record<string, unknown> | undefined) ?? body;
-}
-
-async function listedUser(admin: IntegrationSession, userId: string) {
-  const response = await callRouteForSession(listUsers, admin, { url: `${ORIGIN}/api/admin/users`, method: "GET" });
-  const list = (await response.json()) as { users: Array<Record<string, unknown>> };
-  return list.users.find((entry) => entry.id === userId);
-}
-
 async function stored(userId: string) {
   const [row] = await getDb()
     .select({ enc: users.emailEnc, index: users.emailIndex, verified: users.emailVerified })
@@ -165,26 +133,11 @@ async function indexOf(address: string): Promise<string | null> {
   return (await accountAddressColumns(fixture.users.admin.id, address)).emailIndex;
 }
 
-async function unchanged(userId: string, before: Awaited<ReturnType<typeof stored>>) {
-  expect(await stored(userId)).toEqual(before);
-}
-
 async function auditFor(userId: string) {
   const rows = await getDb().select({ action: auditLog.action, changes: auditLog.changes, actorUserId: auditLog.actorUserId })
     .from(auditLog).where(eq(auditLog.action, "email_address_set"));
   return rows.filter((row) => (row.changes as { userId?: string } | null)?.userId === userId);
 }
-
-async function redeem(token: string) {
-  const response = await callRoute(consumeSetup, {
-    url: `${ORIGIN}/api/auth/local/setup`,
-    method: "POST",
-    headers: { "content-type": "application/json", origin: ORIGIN, "sec-fetch-site": "same-origin" },
-    body: JSON.stringify({ token, password: NEW_PASSWORD }),
-  });
-  return { status: response.status, body: (await response.clone().json()) as Record<string, unknown> };
-}
-
 
 const ADMIN_NEW = "own-new@example.invalid";
 
