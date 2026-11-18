@@ -324,11 +324,32 @@ async function reserveSend(
  * spends the hour's allowance, as before #1882. Under the same lock, so the
  * count another request reads never sees a reservation half undone.
  */
-async function releaseSend(reservationId: string, userId: string): Promise<void> {
+async function releaseSend(
+  reservationId: string,
+  userId: string,
+  restore?: ResendRestore,
+): Promise<void> {
   await getDb().transaction(async (transaction) => {
     await lockUser(transaction, userId);
     await transaction.delete(signInApprovalSends).where(eq(signInApprovalSends.id, reservationId));
+    if (restore) {
+      /* A resend that did not go puts the approval back as it was: the
+         reader's previous link works again and the minute runs from the
+         last mail that actually went (#1891). Only while the row still
+         carries this resend's digest, so nothing written since is undone. */
+      await transaction.update(signInApprovals)
+        .set({ tokenHash: restore.previousTokenHash, lastSentAt: restore.previousLastSentAt })
+        .where(and(eq(signInApprovals.id, restore.approvalId), eq(signInApprovals.tokenHash, restore.tokenHash)));
+    }
   });
+}
+
+/** What a resend wrote under the lock, so a send that fails can be undone (#1891). */
+interface ResendRestore {
+  approvalId: string;
+  tokenHash: string;
+  previousTokenHash: string;
+  previousLastSentAt: Date | null;
 }
 
 /** How long a finished or lapsed approval is kept before it is swept. */
@@ -764,59 +785,94 @@ export async function resendSignInApproval(
   const now = options.now ?? new Date();
   const db = getDb();
 
-  const [row] = await db
+  const approvalFields = {
+    id: signInApprovals.id,
+    userId: signInApprovals.userId,
+    tokenHash: signInApprovals.tokenHash,
+    userAgent: signInApprovals.userAgent,
+    clientAddress: signInApprovals.clientAddress,
+    createdAt: signInApprovals.createdAt,
+    expiresAt: signInApprovals.expiresAt,
+    outcome: signInApprovals.outcome,
+    consumedAt: signInApprovals.consumedAt,
+    lastSentAt: signInApprovals.lastSentAt,
+  };
+  const claimHash = secretDigest(claim);
+  const pendingIn = (row: { outcome: unknown; consumedAt: Date | null; expiresAt: Date } | undefined) =>
+    !!row && !row.outcome && !row.consumedAt && row.expiresAt.getTime() > now.getTime();
+
+  /* Read once unlocked only to learn whose lock to take. */
+  const [found] = await db
     .select({
-      id: signInApprovals.id,
       userId: signInApprovals.userId,
-      userAgent: signInApprovals.userAgent,
-      clientAddress: signInApprovals.clientAddress,
-      createdAt: signInApprovals.createdAt,
-      expiresAt: signInApprovals.expiresAt,
       outcome: signInApprovals.outcome,
       consumedAt: signInApprovals.consumedAt,
-      lastSentAt: signInApprovals.lastSentAt,
+      expiresAt: signInApprovals.expiresAt,
     })
     .from(signInApprovals)
-    .where(eq(signInApprovals.claimHash, secretDigest(claim)))
+    .where(eq(signInApprovals.claimHash, claimHash))
     .limit(1);
+  if (!found || !pendingIn(found)) return { state: "unknown" };
 
-  if (!row || row.outcome || row.consumedAt || row.expiresAt.getTime() <= now.getTime()) {
-    return { state: "unknown" };
-  }
+  const token = createSecret();
+  const tokenHash = secretDigest(token);
 
-  if (row.lastSentAt && now.getTime() - row.lastSentAt.getTime() < APPROVAL_RESEND_INTERVAL_MS) {
-    return { state: "too_soon", canResendAt: new Date(row.lastSentAt.getTime() + APPROVAL_RESEND_INTERVAL_MS) };
-  }
-  /* Atomic check-and-reserve under the per-user lock (#1882), committed
-     before the mail goes. */
+  /* Check-then-act as one locked step (#1891): the row is read again under
+     the per-user lock (#1869, #1882), and the minute check, the hourly
+     reservation and the record of this send -- its time and the digest of
+     the link about to be mailed -- commit together before the mail goes.
+     A resend queued behind this one reads the send time written here and
+     answers too_soon, so one mail goes and its link is the live one. The
+     lock is not held across the network send. */
   const reserved = await db.transaction(async (transaction) => {
-    await lockUser(transaction, row.userId);
+    await lockUser(transaction, found.userId);
+    const [row] = await transaction
+      .select(approvalFields)
+      .from(signInApprovals)
+      .where(eq(signInApprovals.claimHash, claimHash))
+      .limit(1);
+    if (!row || !pendingIn(row)) return "unknown" as const;
+    if (row.lastSentAt && now.getTime() - row.lastSentAt.getTime() < APPROVAL_RESEND_INTERVAL_MS) {
+      return { state: "too_soon", canResendAt: new Date(row.lastSentAt.getTime() + APPROVAL_RESEND_INTERVAL_MS) } as const;
+    }
     if (await sendsInWindow(row.userId, now, transaction) >= APPROVAL_SENDS_PER_HOUR) return "limited" as const;
     const recipient = await readRecipient(row.userId, transaction);
     if (!recipient) return "unknown" as const;
     const reservation = await reserveSend(transaction, row.id, row.userId, now);
-    return reservation ? { recipient, reservation } : "limited" as const;
+    if (!reservation) return "limited" as const;
+    await transaction
+      .update(signInApprovals)
+      .set({ tokenHash, lastSentAt: now })
+      .where(eq(signInApprovals.id, row.id));
+    const restore: ResendRestore = {
+      approvalId: row.id,
+      tokenHash,
+      previousTokenHash: row.tokenHash,
+      previousLastSentAt: row.lastSentAt,
+    };
+    return { state: "reserved", row, recipient, reservation, restore } as const;
   });
   if (reserved === "limited") return { state: "limited" };
   if (reserved === "unknown") return { state: "unknown" };
-  const { recipient, reservation } = reserved;
+  if (reserved.state === "too_soon") return reserved;
+  const { row, recipient, reservation, restore } = reserved;
 
-  const token = createSecret();
-  const sendError = await mailApproval(recipient, token, row, row.createdAt, row.expiresAt, options);
+  let sendError: ApprovalSendError | null;
+  try {
+    sendError = await mailApproval(recipient, token, row, row.createdAt, row.expiresAt, options);
+  } catch (error) {
+    await releaseSend(reservation, row.userId, restore);
+    throw error;
+  }
   if (sendError === null) {
-    /* The new link only becomes the live one once it is actually in the post:
-       replacing the digest first would kill the reader's working link to
-       replace it with one that never arrived. */
     await db
       .update(signInApprovals)
-      .set({
-        tokenHash: secretDigest(token),
-        sendCount: sql`${signInApprovals.sendCount} + 1`,
-        lastSentAt: now,
-      })
+      .set({ sendCount: sql`${signInApprovals.sendCount} + 1` })
       .where(eq(signInApprovals.id, row.id));
   } else {
-    await releaseSend(reservation, row.userId);
+    /* The new link never arrived, so the old one is put back: a failed
+       resend never leaves the reader with no working link. */
+    await releaseSend(reservation, row.userId, restore);
   }
 
   return {
