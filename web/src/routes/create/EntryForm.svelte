@@ -7,7 +7,7 @@
   import { IMPORTANCE_CHOICES } from "$lib/editing/importance.js";
   import { sectionColourOf } from "$lib/option-colour.js";
   import Reticle from "$lib/reading/Reticle.svelte";
-  import Sheet from "$lib/pocket/Sheet.svelte";
+  import DayChips from "$lib/editing/DayChips.svelte";
   import StagedPage from "$lib/pocket/StagedPage.svelte";
   import { stagedPreviewHref } from "$lib/pocket/review.js";
   import { DAMAGED, DAMAGED_PLACEHOLDER } from "$lib/data/metadata-status.js";
@@ -15,7 +15,7 @@
   import { ALREADY_HEAD, NOTHING_READ, RENEW_ADD, YOU_HOLD, addedDay, dueWords, keptWords } from "$lib/data/already-held.js";
   import AlreadyHeldRow from "$lib/pocket/AlreadyHeldRow.svelte";
   import {
-    RECURRENCE_MAX, REMINDER_CHOICES, recurrenceWords, stepRecurrence, toggleReminder,
+    RECURRENCE_MAX, recurrenceWords, stepRecurrence, toggleReminder,
   } from "./entry.js";
   const uid = $props.id();
 
@@ -110,8 +110,24 @@
     entry.sectionId = null;
   }
 
-  /* ---- reminders: two chips, editable in a callout (§2.5) -------------- */
+  /* ---- reminders: tags, editable in the chooser card (§2.5, #1892) ------ */
   let remindOpen = $state(false);
+  /** @type {HTMLElement | undefined} */
+  let remindButton = $state();
+  /** @param {boolean} refocus */
+  function closeRemind(refocus) {
+    remindOpen = false;
+    if (refocus) tick().then(() => remindButton?.focus({ preventScroll: true }));
+  }
+  /** #1892: a press toggles a day; the card stays. @param {string} day */
+  function pickRemind(day) {
+    entry.reminderDays = toggleReminder(entry.reminderDays, Number(day));
+    entry = { ...entry }; // a fresh object, so a host that passes a plain entry repaints too
+  }
+  const remindAsk = $derived({
+    key: /** @type {const} */ ("reminders"), label: "reminders", heading: "reminders",
+    value: null, choices: [], days: entry.reminderDays, due: entry.dueDate || null, today: todayIso(),
+  });
   const remindWords = $derived(entry.reminderDays.length ? entry.reminderDays.map((d) => `${d}d`) : ["none"]);
 
   /* ---- the document picker (§2.5, item 3) ------------------------------ */
@@ -356,7 +372,7 @@
     <div class="pc-field" class:sugg={marked.includes("dueDate")}>
         <label for="{uid}-due">due date <span class="pc-from">◆ from document</span></label>
         <button type="button" id="{uid}-due" class="pc-val mono" bind:this={dueButton} {disabled} aria-haspopup="dialog"
-                aria-expanded={dueOpen} onclick={() => { dueOpen = !dueOpen; }}>{entry.dueDate ? dayMonthYear(entry.dueDate) : "choose a date"}<span class="pc-ch">change</span></button>
+                aria-expanded={dueOpen} onclick={() => { remindOpen = false; dueOpen = !dueOpen; }}>{entry.dueDate ? dayMonthYear(entry.dueDate) : "choose a date"}<span class="pc-ch">change</span></button>
       </div>
 
     <div class="pc-field" role="group" aria-labelledby="{uid}-recur">
@@ -390,16 +406,16 @@
 
     <div class="pc-field" role="group" aria-labelledby="{uid}-remind">
       <div class="pc-label" id="{uid}-remind">reminders</div>
-      <button type="button" class="pc-remind" aria-expanded={remindOpen} {disabled}
+      <button type="button" class="pc-remind" aria-haspopup="dialog" aria-expanded={remindOpen} {disabled} bind:this={remindButton}
               aria-label="Reminders: {entry.reminderDays.length ? entry.reminderDays.map((d) => `${d} days`).join(', ') + ' before' : 'none'}. Change"
-              onclick={() => { remindOpen = !remindOpen; }}>
+              onclick={() => { if (remindOpen) closeRemind(true); else { dueOpen = false; remindOpen = true; } }}>
         {#each remindWords as word (word)}<span class="pc-tag">{word}</span>{/each}
         <span class="pc-before">before</span>
         <span class="pc-change">change</span>
       </button>
       {#if nested && remindOpen}
         <div class="pc-remind-pick">
-          {@render remindChoices()}
+          <DayChips days={entry.reminderDays} due={entry.dueDate || null} onpick={pickRemind} />
         </div>
       {/if}
     </div>
@@ -445,15 +461,6 @@
       </div>
     {/each}
   {/snippet}
-  {#snippet remindChoices()}
-    <div class="pc-strip pc-remind-choices" role="group" aria-label="Remind me this many days before">
-      {#each REMINDER_CHOICES as day (day)}
-        <button type="button" class="pc-chip pc-mini" aria-pressed={entry.reminderDays.includes(day)}
-                onclick={() => { entry.reminderDays = toggleReminder(entry.reminderDays, day); }}>{day}d</button>
-      {/each}
-    </div>
-    <p class="pc-hint">days before it is due · as many as you like, or none</p>
-  {/snippet}
 
   {#if dueOpen}
     <div class="pc-chseat" data-chooser-card use:holdSeat>
@@ -462,13 +469,11 @@
     </div>
   {/if}
 
-  {#if !nested}
-    <Sheet bind:open={remindOpen} size="callout" title="Reminders">
-      {@render remindChoices()}
-      {#snippet foot()}
-        <button type="button" class="p-pill filled" onclick={() => { remindOpen = false; }}>done</button>
-      {/snippet}
-    </Sheet>
+  {#if !nested && remindOpen}
+    <div class="pc-chseat" data-chooser-card use:holdSeat>
+      <div class="pc-chscrim" aria-hidden="true" onclick={() => closeRemind(false)}></div>
+      <ChooserCard ask={remindAsk} layout="sheet" onpick={pickRemind} onclose={() => closeRemind(true)} />
+    </div>
   {/if}
 </div>
 
@@ -570,7 +575,6 @@
   .pc-before{font:var(--p-type-meta)/1 var(--mono);color:var(--ink-quiet)}
   .pc-change{margin-left:auto;font:var(--p-type-meta)/1 var(--mono);color:var(--accent-text)}
   .pc-remind-pick{margin-top:10px}
-  .pc-remind-choices{flex-wrap:wrap;overflow:visible;margin:0;padding:0}
 
   /* The reading card: something Orbit proposes, so the desk's dashed pen. In
      review mode each row is a button (#1155) that unfolds its page in place;

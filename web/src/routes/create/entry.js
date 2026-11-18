@@ -16,6 +16,7 @@
  */
 
 import { every } from "$lib/format.js";
+import { REMINDER_PRESETS } from "$lib/editing/reminder-days.js";
 
 /** #1463: the three levels, low to high. */
 export const IMPORTANCE_LEVELS = /** @type {const} */ (["low", "normal", "high"]);
@@ -27,8 +28,8 @@ export const CHOOSE_IMPORTANCE = "not yet — choose an importance";
 export const RECURRENCE_MAX = 120;
 /** A new entry comes round yearly unless told otherwise, as on the desk. */
 export const RECURRENCE_DEFAULT = 12;
-/** Reminder days offered in the reminders callout, furthest first. */
-export const REMINDER_CHOICES = [90, 60, 30, 21, 14, 7, 3, 1];
+/** The preset reminder days, ascending, the same on desk and phone (#1892). */
+export const REMINDER_CHOICES = REMINDER_PRESETS;
 /**
  * The two reminders a new entry starts with: the engine's own pair
  * (src/lib/preferences.ts DEFAULT_FIRST/FINAL_WARNING_DAYS), so a new entry
