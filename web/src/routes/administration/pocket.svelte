@@ -273,7 +273,9 @@
   const addressAct = (person) => view?.failed.session || view?.metadata?.locked ? [] : [
     person.metadataStatus?.email === "metadata_integrity_failed"
       ? { label: "set address", name: `Set the address of ${person.displayName}`, tone: "accent", onact: () => openAddress(person) }
-      : { label: "address", name: `Change the address of ${person.displayName}`, tone: "accent", onact: () => openAddress(person) },
+      : person.id === meId
+        ? { label: "change my address…", name: "change your address", tone: "accent", onact: () => openAddress(person) }
+        : { label: "address", name: `Change the address of ${person.displayName}`, tone: "accent", onact: () => openAddress(person) },
   ];
   /**
    * The acts behind a person's row (§2.12, review round §2.6): a tap opens
