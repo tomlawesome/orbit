@@ -90,14 +90,14 @@ function runPlain(args, cwd, envOverrides = {}) {
  * to terminate. The timeout below is a backstop for a genuine hang, and says
  * so rather than surfacing as a bare null status.
  */
-function runPty(cwd, input, args = []) {
+function runPty(cwd, input, args = [], extraEnv = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(
       "script",
       ["-qeE", "never", "-c", `bash '${simulationScript}' ${args.join(" ")}`, "/dev/null"],
       {
         cwd,
-        env: { PATH: `${fakeBinDir()}:${process.env.PATH}`, TERM: "xterm" },
+        env: { PATH: `${fakeBinDir()}:${process.env.PATH}`, TERM: "xterm", ...extraEnv },
       },
     );
 
@@ -338,6 +338,22 @@ describe("scripts/installer-simulation.sh", () => {
       expect(result.stdout).toContain(expectedReason);
       expect(result.stdout).toContain("No deployment occurred.");
     }
+  }, PTY_TEST_TIMEOUT_MS);
+
+  it("O-F4: the simulated health-timeout check command names the compose project", async () => {
+    const result = await runPty(scratchDir(), failureInput("install", 2));
+    expect(result.status).toBe(0);
+    expect(result.stdout.replace(/\r/gu, "")).toContain("Check: docker compose");
+    expect(result.stdout.replace(/\r/gu, "")).toMatch(/docker compose --project-name \S+ --env-file \.env-orbit ps/u);
+  }, PTY_TEST_TIMEOUT_MS);
+
+  it("O-Q2/X-F1: the simulated health-timeout names the configured wait, not a fixed 180 s", async () => {
+    const result = await runPty(scratchDir(), failureInput("install", 2), [], { ORBIT_INSTALLER_READINESS_TIMEOUT_SECONDS: "300" });
+    expect(result.status).toBe(0);
+    const text = result.stdout.replace(/\r/gu, "");
+    expect(text).toContain("did not report ready within");
+    expect(text).toContain("300 s");
+    expect(text).not.toContain("180 s");
   }, PTY_TEST_TIMEOUT_MS);
 
   it("plain success starts services as its own preparation step before the database", () => {

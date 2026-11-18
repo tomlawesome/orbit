@@ -204,8 +204,9 @@ export function fsyncPath(path: string, hook?: () => void): void {
 export function writeSecretFileDurably(path: string, content: string | Buffer, mode: number = SECURE_FILE_MODE): void {
   const temporaryPath = `${path}.tmp`;
   rmSync(temporaryPath, { force: true }); // a leftover (or a planted link) never becomes the key
-  writeSecretFile(temporaryPath, content, mode);
   try {
+    // Inside the try: a write that fails after the temp was created (disk full) removes it too.
+    writeSecretFile(temporaryPath, content, mode);
     fsyncPath(temporaryPath);
     renameSync(temporaryPath, path);
   } catch (error) {

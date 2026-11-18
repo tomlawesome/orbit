@@ -495,3 +495,15 @@ household when its attachments are held.
 - **A ciphertext side table:** a join on every item read, and a row whose
   crypto can drift from it; `document_crypto` needed one because document
   ciphertext lives on disk — these values are small and belong in the row.
+
+## Amendment (2026-11-17, #1789)
+
+The "Alerting" paragraph of the #1405 amendment is superseded for the locked
+alert by #1629: while the key is unusable nothing is mailed, because the
+sending password is encrypted under the same key (`src/server/key-alert.ts`).
+The fault is logged and shown on Administration and in the launcher's health
+check. The 24 h repeat and the `audit_log` "already sent" row are gone: the
+fault is recorded once, as an `encryption_key_alert_held` row per fault, and
+`OPERATOR_ALERT_ADDRESS` (with sending set up) gets one "working again" mail
+on the first clean start after it. What still holds: the notice never goes to
+the public contact address.

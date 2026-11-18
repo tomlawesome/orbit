@@ -18,7 +18,7 @@
    *   - `review & amend →` puts the drawer's own rows into editing
    *     (EditRows.svelte, the item drawer's grammar: the labels stay, only
    *     the value is live, the choosers stand beside), the proposal standing
-   *     in for the item it would become; `add to orbit` and `cancel` take
+   *     in for the item it would become; the amend button (`add to orbit`, or `add without it` when a file was flagged) and `cancel` take
    *     the decisions' place, and the title edits in the row's head;
    *   - a locked proposal (#941) cannot be amended, only dismissed.
    *
@@ -67,6 +67,9 @@
   /* The papers by name where the list names them (#467), else the count,
      each the belt's staged row, so the preview card can open it. */
   const papers = $derived(suggestionPapersOf(suggestion));
+  /* #1795: the flagged papers' line ids, which the amending add button is tied to. */
+  const flaggedIds = $derived(papers.flatMap((paper, i) => (paper.flagged ? [`${row.id}-flag-${i}`] : [])));
+  const without = $derived(flaggedIds.length > 1 ? "add without them" : "add without it");
   const busy = $derived(busyReceipt === row.id);
   /* A fixture suggestion (#454) has no mail behind it and nothing to decide. */
   const decidable = $derived(Boolean(suggestion.receiptId));
@@ -93,8 +96,15 @@
     <!-- #1319: the paper it came in opens the preview card beside the
          drawer, as a filed item's documents do; the card says itself when
          Orbit has no page for it. -->
-    {#each papers as paper (paper.id)}
+    {#each papers as paper, i (paper.id)}
       {@const on = showingDoc === paper.id}
+      {#if paper.flagged}
+        <!-- #1795 (note 63499): nothing to open; the line sits in the meta slot. -->
+        <div class="doc flagged" id="{row.id}-flag-{i}">
+          <span class="mark" aria-hidden="true">◆</span>
+          <span class="name">{paper.name}<small><span class="flag">The scanner flagged a virus or malware inside attachment: "{paper.name}"</span></small></span>
+        </div>
+      {:else}
       <button type="button" class="doc" class:showing={on} data-doc-row aria-haspopup="dialog"
               aria-current={on ? "true" : undefined} aria-label="Open {paper.name}"
               onclick={(event) => onOpenDoc(paper, event.currentTarget)}>
@@ -102,18 +112,20 @@
         <span class="name">{paper.name}<small>{paper.meta}</small></span>
         <em class="go" aria-hidden="true">{on ? "showing" : "open →"}</em>
       </button>
+      {/if}
     {/each}
   {/if}
   {#if unreadable}
     <p class="unread">{unreadable}</p>
   {/if}
   {#if decidable && amending}
-    <!-- #1319: while the rows are amended, `add to orbit` and `cancel` take
+    <!-- #1319: while the rows are amended, the amend button (`add to orbit`, or `add without it` when a file was flagged) and `cancel` take
          the decisions' place, as save and cancel take the pills' in a filed
          item's drawer. -->
     <div class="actions" role="group" aria-label="Amending {row.title}">
       <button class="yes" disabled={adding} aria-disabled={acts.modes.edit.refused ? "true" : undefined}
-              onclick={() => { if (!acts.modes.edit.refused) acts.onaccept?.(); }}>{adding ? "adding…" : "add to orbit"}</button>
+              aria-describedby={flaggedIds.length ? flaggedIds.join(" ") : undefined}
+              onclick={() => { if (!acts.modes.edit.refused) acts.onaccept?.(); }}>{adding ? "adding…" : flaggedIds.length ? without : "add to orbit"}</button>
       <button disabled={adding} class:armed={acts.modes.discardArmed} onclick={acts.oncancel}
               >{acts.modes.discardArmed ? "discard changes?" : "cancel"}</button>
     </div>
