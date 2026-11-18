@@ -39,6 +39,7 @@ import {
   instanceAuthority,
   localCredentials,
   sessions,
+  signInApprovals,
   userPreferences,
   users,
 } from "@/db/schema";
@@ -779,6 +780,20 @@ async function applyPasswordChange(
   if (replaced) {
     const removed = await executor.delete(sessions).where(eq(sessions.userId, userId)).returning({ id: sessions.id });
     sessionsRevoked = removed.length;
+    /* #1898: sign-in approvals still waiting (or approved but not yet
+       collected) were asked for the OLD password; expire them in this same
+       transaction, the way an approval lapses by time, so a late Approve is
+       the existing "expired" answer and the waiting tab polls "unknown".
+       Rows are kept, as expired ones already are, until the retention sweep. */
+    const now = new Date();
+    await executor
+      .update(signInApprovals)
+      .set({ expiresAt: now })
+      .where(and(
+        eq(signInApprovals.userId, userId),
+        isNull(signInApprovals.consumedAt),
+        gt(signInApprovals.expiresAt, now),
+      ));
   }
   await executor.insert(auditLog).values({
     householdId: null,

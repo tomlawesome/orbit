@@ -1012,7 +1012,8 @@ describe("a stale approval cannot mark a password it was never for (#1881 fix re
     const { token } = await issueSetupToken(account.id, "recovery");
     await expectSavedAndSignedIn(await post(consumeSetup, "/api/auth/local/setup", { token, password: NEW_PASSWORD }), account.id);
 
-    expect(await (await press(staleToken, "denied")).json()).toEqual({ recorded: true, decision: "denied" });
+    // Since #1898 the password change has cancelled the approval: the press is the "expired" answer.
+    expect(await (await press(staleToken, "denied")).json()).toEqual({ recorded: false, decision: "denied" });
     expect(await markOf(account.id), "a refusal of the old password's approval marked the new password").toBeNull();
 
     // The new password signs in as ever: approved, and a session.
