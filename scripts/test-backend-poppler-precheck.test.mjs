@@ -61,6 +61,7 @@ beforeEach(() => {
   mkdirSync(stubs);
   mkdirSync(sysbin);
   copyFileSync(SCRIPT, join(repo, "scripts", "test-backend.sh"));
+  copyFileSync(join(HERE, "test-load-warning.sh"), join(repo, "scripts", "test-load-warning.sh"));
   writeFileSync(join(repo, "pnpm-lock.yaml"), "");
   const git = (...a) => {
     const r = spawnSync("git", a, { cwd: repo, encoding: "utf8" });
