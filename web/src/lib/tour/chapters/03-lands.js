@@ -118,12 +118,14 @@ export default {
     /* Owner's words (2026-10-01, #1174): the desk sizes a body by its cost,
        the pocket draws every body one size, so only the desk says so. The
        second line, "The nearer the ring, the sooner.", was cut the same day. */
-    await callout(
-      pocket ? "Bodies orbit by when they're due." : "Bodies orbit by when they're due, higher value events are larger.",
-      body,
-      "top",
-      { mark: "lands-body" },
-    );
+    if (pocket) {
+      /* A sky line (#1083 §3.3, as chapters 1 and 5): anchored to the sun,
+         under it in the dial's empty lower half; the body stays ringed. */
+      const sun = ctl({ sel: SELECTORS.POCKET.sun, round: true });
+      await callout("Bodies orbit by when they're due.", sun, "bottom", { dy: 30, mark: "lands-body" });
+    } else {
+      await callout("Bodies orbit by when they're due, higher value events are larger.", body, "top", { mark: "lands-body" });
+    }
     unlight(body);
     dropCallout();
 

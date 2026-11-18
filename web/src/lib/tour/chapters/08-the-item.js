@@ -320,7 +320,7 @@ export default {
       pocket ? "That’s a preview. Tap it to read the whole thing." : "That’s a preview. Click it to read the whole thing.",
       at(card, drawer, sun),
       "top",
-      { mark: "item-read" },
+      { mark: "item-read", surface: pocket },
     );
     dropCallout();
     unlight(card);
@@ -372,7 +372,7 @@ export default {
       pocket ? "Tap the date and pick a new one from the calendar." : "Click the date and pick a new one from the calendar.",
       at(calendar, drawer, sun),
       "top",
-      { mark: "item-calendar" },
+      { mark: "item-calendar", surface: pocket },
     );
     dropCallout();
     unlight(calendar);

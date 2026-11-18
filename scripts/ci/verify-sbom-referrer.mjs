@@ -2,8 +2,8 @@
 // Verifies one SBOM referrer's Sigstore bundle by the committed public key
 // (#1848 D-S2): the DSSE envelope's signature, that it is an SPDX in-toto
 // statement, and that its subject is the image digest being published. The
-// publish workflow runs it on each SBOM referrer before copying it to GHCR, so
-// no referrer is copied on its annotation alone.
+// publish workflow no longer runs it: its cosign check on each referrer
+// replaced this (#1862).
 //
 // Usage: verify-sbom-referrer.mjs <bundle.json> <public-key.pem> <sha256:digest>
 import { createPublicKey, verify } from "node:crypto";
