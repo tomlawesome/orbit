@@ -4912,8 +4912,8 @@ restart_compose_service() {
 # stderr to a 4 KiB pipe root prints on failure, a cleared environment, and
 # every other descriptor closed, the held lock's included. That includes the backup/restore lock: a missing
 # backups folder or lock file is made as the owner (wherever ORBIT_BACKUP_DIR
-# points), and root only opens the existing lock (read-write when it may
-# write it, else read-only, #1873 X3) and takes flock on it. Root
+# points), and root only opens the existing lock (read-write only, never
+# read-only, #1873 X3, #1890) and takes flock on it. Root
 # reads, decides and runs docker; it creates, writes, chmods, renames and
 # removes nothing under the folder, so never through a symlink. In a
 # root-owned folder root writes directly. Either way a .orbit-secrets or its
