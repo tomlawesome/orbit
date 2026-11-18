@@ -1,4 +1,4 @@
-import { CONTENT_INDEX_BACKFILL_BATCH_SIZE, DOCUMENT_WORKER_POLL_MS } from "@/server/document-maintenance/backfill-rate";
+import { CONTENT_INDEX_BACKFILL_BATCH_SIZE, DOCUMENT_WORKER_POLL_MS } from "../server/document-maintenance/backfill-rate";
 import { readExpectedMigrationHashes } from "./migration-integrity";
 
 // Contract migrations and what must be true before each may run (#1779,
