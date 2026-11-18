@@ -2274,10 +2274,10 @@ read_image_deployment_asset() {
 # (restore-compose-file streams it to the folder's owner, #1857 S3).
 image_deployment_asset_bytes() {
   local image="$1" asset="$2" assets_root
-  assets_root="$(timeout "$docker_probe_timeout" docker image inspect \
+  assets_root="$(timeout -k "$owner_step_grace" "$docker_probe_timeout" docker image inspect \
     --format '{{index .Config.Labels "io.orbit.deployment-assets"}}' "$image" 2>/dev/null)" || return 1
   [[ "$assets_root" == "$deployment_assets_root" ]] || return 1
-  timeout "$docker_image_read_timeout" docker run --rm --pull never --network none --entrypoint cat \
+  timeout -k "$owner_step_grace" "$docker_image_read_timeout" docker run --rm --pull never --network none --entrypoint cat \
     "$image" "${deployment_assets_root}/${asset}" 2>/dev/null
 }
 
@@ -4434,7 +4434,8 @@ do_fix_permissions() {
 # the owner sweeps a killed run's scratch file (b1 O-S2, #1603); the
 # deployment folder's owner makes a same-folder temporary file with the
 # installer's mode 0644 (smtp_owner_write) and an owner child holds a flock
-# on it while it exists (hold_compose_restore_lock); root re-checks that nothing
+# on it (hold_compose_restore_lock), which root checks is still held before
+# and after the rename (#1902 L1); root re-checks that nothing
 # exists at the name, so a file that appeared since the diagnosis stops it
 # before the image is read again (#1558); root reads the image's bytes
 # (streamed, no shell text handling, so trailing blank lines, trailing
@@ -4451,7 +4452,8 @@ do_fix_permissions() {
 # restore with a line saying it is too large (#1873 X4). Root writes,
 # renames and chowns nothing in the folder; as root in a folder another
 # user owns, check_folder_owner refuses first. Returns 1 with nothing left
-# behind when any step fails; the caller reports `failed`.
+# behind when any step fails (except a lock lost while the rename ran: the
+# renamed file stays and the line says so); the caller reports `failed`.
 # shellcheck disable=SC2016 # expanded by the child bash
 readonly owner_fill_script='head -c "$2" > "$1" || exit 1; size="$(wc -c < "$1")" || exit 1; '\
 '((size > 0)) || exit 1; ((size < $2)) || exit 4'
@@ -4467,20 +4469,33 @@ readonly owner_fill_script='head -c "$2" > "$1" || exit 1; size="$(wc -c < "$1")
 # so root never deletes in a folder another user owns, and rm removes a link
 # itself, never what it points at (a link is skipped anyway). Best effort:
 # a sweep that fails or times out does not stop the restore.
+# #1902 L3: root's listing is one `find -P` (never follows a link: the name
+# test comes first and -type f checks the entry itself) under the owner-step
+# limit, and passes at most $compose_restore_sweep_cap names to the owner;
+# past that cap an "Orbit repair:" line says so and the rest stay.
+readonly compose_restore_sweep_cap=64
 # shellcheck disable=SC2016 # expanded by the child bash
 readonly owner_sweep_script='for f in "$@"; do [[ -f "$f" && ! -L "$f" ]] || continue; '\
 '{ exec {fd}<"$f"; } 2>/dev/null || continue; '\
 'if flock -n "$fd" 2>/dev/null; then rm -f -- "$f" || true; fi; exec {fd}<&-; done'
 sweep_compose_restore_scratch() {
-  local leftover
+  local leftover more=0
   local scratch_prefix="./.${compose_file}.repair."
   local -a candidates=()
   command -v flock >/dev/null 2>&1 || return 0
-  for leftover in "$scratch_prefix"*; do
+  while IFS= read -r -d '' leftover; do
     [[ "${leftover#"$scratch_prefix"}" =~ ^[A-Za-z0-9]{6}$ ]] || continue
-    [[ -f "$leftover" && ! -L "$leftover" ]] || continue
+    if ((${#candidates[@]} >= compose_restore_sweep_cap)); then
+      more=1
+      break
+    fi
     candidates+=("$leftover")
-  done
+  done < <(LC_ALL=C timeout -k "$owner_step_grace" "$owner_step_timeout" \
+    find -P . -mindepth 1 -maxdepth 1 -name "${scratch_prefix#./}*" -type f -print0 2>/dev/null)
+  if ((more)); then
+    printf 'Orbit repair: restore-compose-file: more than %s leftover scratch files (%s*) were found; this sweep takes the first %s and leaves the rest in place.\n' \
+      "$compose_restore_sweep_cap" "${scratch_prefix#./}" "$compose_restore_sweep_cap" >&2
+  fi
   ((${#candidates[@]} > 0)) || return 0
   as_folder_owner bash -c "$owner_sweep_script" owner-sweep "${candidates[@]}" || true
 }
@@ -4489,22 +4504,53 @@ sweep_compose_restore_scratch() {
 # child (as_folder_owner) that opens the file without creating it, takes a
 # non-blocking flock and keeps it until root closes its stdin, or root dies
 # (the pipe's write end is root's alone: bash keeps coproc descriptors out of
-# the programs it runs). It is a step like any other, so it holds the lock
-# for at most $owner_step_timeout s. Exit 75 only when another run holds the
-# lock (a sweep that won the race and is removing the file): give up. Any
-# other flock failure, such as a filesystem without locks (ENOLCK), or no
-# flock at all, means no lock: the restore goes ahead unlocked, and every
-# sweep there keeps the file because it can't lock it.
+# the programs it runs). As root it is an owner step with its own limit,
+# $compose_restore_lock_limit s, which covers the restore's bounded steps
+# after it (#1858: still time-limited; #1902 L1: one step's limit, as
+# before, ran out mid-restore); not root (or root in a folder root owns),
+# it runs as the caller with no limit and ends only on that EOF. Either
+# way, before the rename the restore checks that the holder still runs and,
+# when it has a limit, that the limit outlasts the rename step's worst
+# case, and after the rename that it still runs (compose_restore_lock_lost);
+# otherwise the restore fails with a line saying the lock was lost, never
+# silently. Exit 75 only when another run holds the lock (a sweep that won
+# the race and is removing the file): give up. Any other flock failure,
+# such as a filesystem without locks (ENOLCK), or no flock at all, means no
+# lock: the restore goes ahead unlocked, and every sweep there keeps the
+# file because it can't lock it.
 # shellcheck disable=SC2016 # expanded by the child bash
 readonly owner_lock_script='exec 3<"$1" || exit 1; s=0; '\
 'if command -v flock >/dev/null 2>&1; then flock -n -E 75 3 2>/dev/null || s=$?; fi; '\
 '((s != 75)) || exit 75; [[ -f "$1" && ! -L "$1" ]] || exit 1; printf "locked\n"; read -r _ || true'
 compose_restore_lock_pid=""
+compose_restore_lock_since=0
+# The holder's limit, which starts as root starts waiting for its word: that
+# wait (one owner step with its grace), the image's probe and read (5 s and
+# 30 s, each with the grace) and, alongside the read, the fill, then the
+# sync and the rename (each an owner step with its grace). The fill ends with
+# the read or within its own limit, so the larger of the two counts; both
+# are counted here, the simpler and safe bound.
+readonly compose_restore_lock_limit=$((35 + 2 * owner_step_grace + 4 * (owner_step_timeout + owner_step_grace)))
+# Slack at the limit for the margin check (compose_restore_lock_lost).
+readonly compose_restore_lock_slack=3
+# monotonic_seconds: whole seconds since boot (/proc/uptime), which a clock
+# step does not move, as timeout(1) counts; SECONDS where it can't be read.
+monotonic_seconds() {
+  local up=""
+  { read -r up _ </proc/uptime; } 2>/dev/null || up=""
+  up="${up%%.*}"
+  if [[ "$up" =~ ^[0-9]+$ ]]; then
+    printf '%s' "$up"
+  else
+    printf '%s' "$SECONDS"
+  fi
+}
 # hold_compose_restore_lock <scratch-file>: 0 once the holder says it holds
 # the lock (or goes ahead without one), 1 otherwise (it is stopped first).
 # Root's wait for that word is bounded like any owner step.
 hold_compose_restore_lock() {
   local line=""
+  compose_restore_lock_since="$(monotonic_seconds)"
   # The holder's own shell closes every descriptor above 2 it inherited
   # from root (the held locks' included) before the owner step starts.
   coproc compose_restore_lock {
@@ -4512,7 +4558,7 @@ hold_compose_restore_lock() {
       fd="${fd##*/}"
       [[ "$fd" =~ ^[0-9]+$ ]] && ((fd > 2)) && [[ -e /proc/"$BASHPID"/fd/"$fd" ]] && eval "exec $fd>&-"
     done
-    as_folder_owner --pipe bash -c "$owner_lock_script" owner-lock "$1" 2>/dev/null
+    as_folder_owner --pipe --limit "$compose_restore_lock_limit" bash -c "$owner_lock_script" owner-lock "$1" 2>/dev/null
   }
   # shellcheck disable=SC2154 # set by coproc
   compose_restore_lock_pid="$compose_restore_lock_PID"
@@ -4522,6 +4568,34 @@ hold_compose_restore_lock() {
   [[ "$line" == locked ]] && return 0
   release_compose_restore_lock
   return 1
+}
+
+# compose_restore_lock_lost [<seconds>]: 0 when the holder has ended, so the
+# scratch file's lock is gone, or, with <seconds> given and a holder that
+# has a limit (root in a folder another user owns), when that limit could
+# run out within that many seconds, plus $compose_restore_lock_slack s; 1
+# otherwise. The start was read (monotonic_seconds) before the holder
+# started, so the margin errs early. Bash unsets the coproc's
+# descriptors once it has reaped it; before that, the holder's stdout says
+# nothing after its one word, so anything readable on it (end of file
+# included) means every process holding it has ended.
+compose_restore_lock_lost() {
+  local fd="${compose_restore_lock[0]:-}" _
+  [[ -n "$compose_restore_lock_pid" && -n "$fd" ]] || return 0
+  kill -0 "$compose_restore_lock_pid" 2>/dev/null || return 0
+  if [[ -n "${1:-}" && "$(id -u)" == 0 && "$smtp_folder_uid" != 0 ]] &&
+    (($(monotonic_seconds) - compose_restore_lock_since + $1 + 1 + compose_restore_lock_slack >= compose_restore_lock_limit)); then
+    return 0
+  fi
+  read -r -t 0 -u "$fd" _
+}
+
+# compose_restore_lock_lost_line <scratch-file> <landed>: the #1902 L1 line.
+compose_restore_lock_lost_line() {
+  local landed=""
+  [[ "$2" != 1 ]] || landed="; ${compose_file} was already in place, so check it before relying on it"
+  printf "Orbit repair: restore-compose-file: the lock on its scratch file %s was lost before the restore finished (the holder, run as the deployment folder's owner, ended, or as root its %s s limit could run out before the rename finished), so the restore failed%s.\n" \
+    "$1" "$compose_restore_lock_limit" "$landed" >&2
 }
 
 # Ends the holder: closes its stdin and waits for it. Bash closes and unsets
@@ -4539,7 +4613,7 @@ release_compose_restore_lock() {
 }
 
 do_restore_compose_file() {
-  local image tmp status=0
+  local image tmp status=0 landed
   if [[ "$(id -u)" == 0 ]] && ! check_folder_owner; then
     printf 'Orbit repair: restore-compose-file refused, nothing was changed: %s.\n' "$owner_refusal" >&2
     return 1
@@ -4566,18 +4640,30 @@ do_restore_compose_file() {
       as_folder_owner sync -- "$tmp" 2>/dev/null || true
       # mv -nT leaves the source in place when the target appeared in the
       # meantime (and, in newer coreutils, says so with exit 1).
-      as_folder_owner mv -nT -- "$tmp" "$compose_file" || true
-      if [[ "$owner_step_problem" == "timed out" ]]; then
-        # #1873 X2: a rename is atomic, so a step stopped after it landed
-        # leaves the temporary name gone and docker-compose.yml a regular
-        # file (mv -nT never replaces one that appeared): that restore is
-        # done. Anything else stays failed.
-        if [[ -e "$tmp" || -L "$tmp" ]] || ! is_regular_non_symlink_file "$compose_file"; then
+      # #1902 L1: no rename once the lock is gone or could lapse during it,
+      # and a lock lost while the rename ran fails the restore too.
+      if compose_restore_lock_lost "$((owner_step_timeout + owner_step_grace))"; then
+        compose_restore_lock_lost_line "$tmp" 0
+        status=1
+      else
+        as_folder_owner mv -nT -- "$tmp" "$compose_file" || true
+        if compose_restore_lock_lost; then
+          landed=0
+          [[ -e "$tmp" || -L "$tmp" ]] || ! is_regular_non_symlink_file "$compose_file" || landed=1
+          compose_restore_lock_lost_line "$tmp" "$landed"
+          status=1
+        elif [[ "$owner_step_problem" == "timed out" ]]; then
+          # #1873 X2: a rename is atomic, so a step stopped after it landed
+          # leaves the temporary name gone and docker-compose.yml a regular
+          # file (mv -nT never replaces one that appeared): that restore is
+          # done. Anything else stays failed.
+          if [[ -e "$tmp" || -L "$tmp" ]] || ! is_regular_non_symlink_file "$compose_file"; then
+            status=1
+          fi
+        elif [[ -e "$tmp" || -L "$tmp" ]] || ! is_regular_non_symlink_file "$compose_file"; then
+          printf 'Orbit repair: restore-compose-file: %s appeared while it was being restored (a file, a link or a folder), so the restored copy was not moved onto it.\n' "$compose_file" >&2
           status=1
         fi
-      elif [[ -e "$tmp" || -L "$tmp" ]] || ! is_regular_non_symlink_file "$compose_file"; then
-        printf 'Orbit repair: restore-compose-file: %s appeared while it was being restored (a file, a link or a folder), so the restored copy was not moved onto it.\n' "$compose_file" >&2
-        status=1
       fi
     fi
   fi
@@ -5301,12 +5387,12 @@ clean_terminal_text() {
     LC_ALL=C tr -d '\000-\010\013-\037\177'
 }
 
-# owner_step_timed_out <step>: the #1858 T5 line for a step run as the
+# owner_step_timed_out <step> [<limit>]: the #1858 T5 line for a step run as the
 # deployment folder's owner, or a read of what it controls, that ran out of
 # time and was stopped.
 owner_step_timed_out() {
   printf "Orbit repair: %s: the step %s, run as the deployment folder's owner (%s), timed out after %s s and was stopped.\n" \
-    "$owner_action" "$1" "${smtp_owner_name:-uid ${smtp_folder_uid:-unknown}}" "$owner_step_timeout" >&2 || true
+    "$owner_action" "$1" "${smtp_owner_name:-uid ${smtp_folder_uid:-unknown}}" "${2:-$owner_step_timeout}" >&2 || true
 }
 
 # as_folder_owner [--pipe] <cmd...> (#1848 FIX-S1): logrotate's `su`,
@@ -5328,6 +5414,8 @@ owner_step_timed_out() {
 # clean_terminal_text (addendum 4 item 1); the caller prints the
 # line naming the step and path. With --pipe, stdin and stdout stay the
 # caller's pipes (smtp_owner_write reads and checks what comes back).
+# With --limit <s> (after --pipe), the step's limit is <s> instead: only the
+# compose-restore lock holder, whose limit covers the restore (#1902 L1).
 # #1858 T1/T2: the child runs under `timeout`, $owner_step_timeout s, then
 # TERM (with CONT, so a stopped child ends too) and KILL $owner_step_grace s
 # later; root's read of its stderr is bounded by the same limit plus the
@@ -5340,11 +5428,15 @@ owner_step_timed_out() {
 owner_step_problem=""
 owner_action="repair"
 as_folder_owner() {
-  local pipe=0 said="" status=0 step
+  local pipe=0 said="" status=0 step limit="$owner_step_timeout"
   owner_step_problem=""
   if [[ "${1:-}" == --pipe ]]; then
     pipe=1
     shift
+  fi
+  if [[ "${1:-}" == --limit ]]; then
+    limit="$2"
+    shift 2
   fi
   if [[ "$(id -u)" != 0 || "$smtp_folder_uid" == 0 ]]; then
     "$@"
@@ -5368,16 +5460,16 @@ as_folder_owner() {
           [[ ! -e /proc/"$BASHPID"/fd/"$fd" ]] || eval "exec $fd<&-"
         done
         exec env -i PATH="$PATH" LC_ALL=C HOME="$smtp_owner_home" USER="$smtp_owner_name" LOGNAME="$smtp_owner_name" \
-          timeout -k "$owner_step_grace" "$owner_step_timeout" \
+          timeout -k "$owner_step_grace" "$limit" \
           setsid --wait setpriv --reuid="$smtp_folder_uid" --regid="$smtp_owner_gid" --init-groups --no-new-privs -- "$@"
-      ) | LC_ALL=C timeout -k 1 "$((owner_step_timeout + owner_step_grace))" head -c 4096 3>&- | clean_terminal_text 3>&-)" || status=$?
+      ) | LC_ALL=C timeout -k 1 "$((limit + owner_step_grace))" head -c 4096 3>&- | clean_terminal_text 3>&-)" || status=$?
   } 3>&1
   if ((status == 124 || status == 137)); then
     # The step's name: a `bash -c <script> <name>` child's own, else the command's.
     step="${1##*/}"
     [[ "$step" != bash || "${2:-}" != -c ]] || step="${4:-bash}"
     owner_step_problem="timed out"
-    owner_step_timed_out "$step"
+    owner_step_timed_out "$step" "$limit"
     return "$status"
   fi
   if [[ "$status" != 0 ]]; then
