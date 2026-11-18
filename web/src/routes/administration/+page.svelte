@@ -410,15 +410,21 @@
   let addressDraft = $state("");
   let addressPassword = $state("");
   const addressCard = $state(card());
+  /** The address the own row's first "set it" armed, "" when disarmed. Another row never arms: it cannot lock you out. */
+  let addressArmed = $state("");
+  const ownAddressArmed = $derived(addressArmed !== "" && addressArmed === addressDraft.trim());
   /** What the last change said, for the line under the roster. @type {{ text: string, failure: boolean } | null} */
   let addressSaid = $state(null);
 
   /** @param {{ id: string, displayName: string }} person */
-  const setAddressNow = (person) => setAddress(person, addressDraft, addressPassword, {
-    card: addressCard, actorHasPassword, reread,
-    landed: () => { addressFor = null; addressDraft = ""; addressPassword = ""; provenIntent = ""; },
+  const setAddressNow = (person) => {
+    if (person.id === view?.user?.id && !ownAddressArmed) { addressArmed = addressDraft.trim(); return; }
+    return setAddress(person, addressDraft, addressPassword, {
+    card: addressCard, actorHasPassword, own: person.id === view?.user?.id, reread,
+    landed: () => { addressFor = null; addressDraft = ""; addressPassword = ""; addressArmed = ""; provenIntent = ""; },
     wake: (text, options) => (addressSaid = { text, failure: options?.failure === true }),
-  });
+    });
+  };
   /** @type {import("./acts.svelte.js").Delivery | null} */
   let resendDelivery = $state(null);
 
@@ -470,6 +476,7 @@
     addressFor = addressFor === person.id ? null : person.id;
     addressDraft = "";
     addressPassword = "";
+    addressArmed = "";
     addressSaid = null;
   }, (message) => (addressCard.problem = message), { address: { personId: person.id, email: "" } }); };
 
@@ -1076,7 +1083,7 @@
             {#if !view.failed.session && !view.metadata?.locked
                  && person.metadataStatus?.email !== "metadata_integrity_failed"}
               <button class="place" onclick={() => openAddress(person)} aria-expanded={addressFor === person.id}
-                      aria-label={`change the address of ${person.displayName}`}>change address…</button>
+                      aria-label={person.id === view.user?.id ? "change your address" : `change the address of ${person.displayName}`}>{person.id === view.user?.id ? "change my address…" : "change address…"}</button>
             {/if}
           </div>
           {#if placing === person.id}
@@ -1107,6 +1114,9 @@
           {/if}
           {#if addressFor === person.id}
             <form class="localuser resend" onsubmit={(event) => { event.preventDefault(); setAddressNow(person); }}>
+              <p class="mailboxnote">{person.id === view.user?.id
+                ? "Sets the address you sign in with. Your next sign-in waits on an approval mailed to it, so a mistyped address locks you out once this session ends. Check it, then press again."
+                : `Sets the address ${person.displayName} is registered with. Their pending setup links and sign-in approvals stop working. No link is sent; send a new one afterwards.`}</p>
               <label for="address-email">address</label>
               <input id="address-email" type="email" autocomplete="off" placeholder="their@example.com"
                      bind:value={addressDraft} required />
@@ -1116,8 +1126,8 @@
                        bind:value={addressPassword} required />
               {/if}
               <div class="placerow localuserrow">
-                <button type="submit" disabled={addressCard.busy}>set it</button>
-                <button type="button" onclick={() => (addressFor = null)}>cancel</button>
+                <button type="submit" disabled={addressCard.busy}>{person.id === view.user?.id && ownAddressArmed ? `set my address to ${addressArmed}` : "set it"}</button>
+                <button type="button" onclick={() => { addressFor = null; addressArmed = ""; }}>cancel</button>
               </div>
             </form>
           {/if}
