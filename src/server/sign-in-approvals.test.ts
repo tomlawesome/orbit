@@ -719,6 +719,83 @@ describe("a send is reserved before it is mailed (#1879 A-R2)", () => {
     await resendSignInApproval(pending.claim, { mailer, now: at(NINE, 2 * APPROVAL_RESEND_INTERVAL_MS) });
     expect(store.sends).toHaveLength(3);
   });
+
+  /* Ruling on #1879 (note 64435), point 2: stage then switch. The send time
+     is written under the lock, the new link only once the mail is accepted. */
+  it("resending: the send time is stamped and the old link still reads open while the mailer runs", async () => {
+    const pending = await startSignInApproval(USER, { userAgent: CHROME, clientAddress: null }, { mailer, now: NINE });
+    const oldToken = tokenFromLatestMail();
+    const oldDigest = store.approvals[0].tokenHash;
+    const now = at(NINE, APPROVAL_RESEND_INTERVAL_MS);
+    /* Noted, not asserted, inside the mailer: a throw there would read as a
+       failed send rather than a failed test. */
+    const during: { lastSentAt?: unknown; tokenHash?: unknown; oldLink?: string | null } = {};
+    const watcher = {
+      async sendEmail(notification: { to: string; subject: string; text: string }) {
+        during.lastSentAt = store.approvals[0].lastSentAt;
+        during.tokenHash = store.approvals[0].tokenHash;
+        during.oldLink = (await readSignInApproval(oldToken))?.state ?? null;
+        posted.push({ to: notification.to, subject: notification.subject, text: notification.text });
+      },
+    };
+
+    const outcome = await resendSignInApproval(pending.claim, { mailer: watcher, now });
+
+    expect(outcome).toMatchObject({ state: "sent", sendError: null });
+    expect(during.lastSentAt).toEqual(now);
+    expect(during.tokenHash).toBe(oldDigest);
+    expect(during.oldLink).toBe("open");
+    /* Once the mail is in the post the link switches. */
+    expect(await readSignInApproval(oldToken)).toBeNull();
+    expect((await readSignInApproval(tokenFromLatestMail()))?.state).toBe("open");
+  });
+
+  it("a resend asked for while another is in the post answers too_soon", async () => {
+    const pending = await startSignInApproval(USER, { userAgent: CHROME, clientAddress: null }, { mailer, now: NINE });
+    const now = at(NINE, APPROVAL_RESEND_INTERVAL_MS);
+    let inner: unknown;
+    const watcher = {
+      async sendEmail(notification: { to: string; subject: string; text: string }) {
+        inner = await resendSignInApproval(pending.claim, { mailer, now });
+        posted.push({ to: notification.to, subject: notification.subject, text: notification.text });
+      },
+    };
+
+    const outcome = await resendSignInApproval(pending.claim, { mailer: watcher, now });
+
+    expect(outcome).toMatchObject({ state: "sent", sendError: null });
+    expect(inner).toMatchObject({ state: "too_soon" });
+    /* The opening mail and one resend: the inner request sent nothing. */
+    expect(posted).toHaveLength(2);
+  });
+
+  /* Ruling on #1879 (note 64435), point 1: the limit counts attempts. */
+  it("five failed sends in an hour answer limited", async () => {
+    const failing = watchingMailer(true);
+    const pending = await startSignInApproval(USER, { userAgent: CHROME, clientAddress: null }, { mailer: failing, now: NINE });
+    expect(pending.sendError).not.toBeNull();
+    for (let attempt = 1; attempt < APPROVAL_SENDS_PER_HOUR; attempt += 1) {
+      const outcome = await resendSignInApproval(pending.claim, {
+        mailer: failing,
+        now: at(NINE, attempt * APPROVAL_RESEND_INTERVAL_MS),
+      });
+      expect(outcome.state, `attempt ${attempt + 1}`).toBe("sent");
+    }
+    expect(failing.seen).toHaveLength(APPROVAL_SENDS_PER_HOUR);
+
+    const sixth = await resendSignInApproval(pending.claim, {
+      mailer,
+      now: at(NINE, APPROVAL_SENDS_PER_HOUR * APPROVAL_RESEND_INTERVAL_MS),
+    });
+    expect(sixth).toEqual({ state: "limited" });
+    const opened = await startSignInApproval(
+      USER,
+      { userAgent: CHROME, clientAddress: null },
+      { mailer, now: at(NINE, (APPROVAL_SENDS_PER_HOUR + 1) * APPROVAL_RESEND_INTERVAL_MS) },
+    );
+    expect(opened.limited).toBe(true);
+    expect(posted).toHaveLength(0);
+  });
 });
 
 describe("send limits (ADR-0027 §8)", () => {
