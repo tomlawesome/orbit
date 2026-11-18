@@ -303,8 +303,8 @@ async function sendsInWindow(
  * per-user advisory lock, which the caller's `transaction` must already hold
  * (#1882). Requests arriving together queue on the lock, so each one counts
  * the reservations committed before it and no sixth mail is ever reserved.
- * Null when the hour's allowance is spent; otherwise the reservation, which
- * the caller commits before the mail goes. It is kept whether or not the mail
+ * False when the hour's allowance is spent; true once the reservation is
+ * written, which the caller commits before the mail goes. It is kept whether or not the mail
  * goes: the limit counts attempts, not successes (#1879 ruling, note 64435),
  * because a "failed" send can still have reached the provider and the inbox.
  */
