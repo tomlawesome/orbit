@@ -95,7 +95,7 @@ const fdTargets = (pid) =>
   });
 
 describe("#1893 K2: a killed run frees the folder lock while its child lives on", () => {
-  for (const signal of ["SIGTERM", "SIGKILL"]) {
+  for (const signal of ["SIGTERM", "SIGKILL", "SIGINT"]) {
     it(`${signal}: a second run started at once is not refused with repair-running`, async () => {
       const targetDir = makeFixture();
       const { run, childPid, exited } = await startRunWithChild(targetDir);
@@ -153,4 +153,24 @@ describe("#1893 K3: pin, two live runs refuse the second", () => {
     expect(second.stdout).toContain(`execution result=refused done=0 failed=0 ${REFUSED}`);
     expect(second.status).toBe(6);
   });
+});
+
+describe("#1893 review: a caller-set ORBIT_REPAIR_RUN_LOCK_HELD does not skip the folder lock", () => {
+  for (const marker of ["1", "4242"]) {
+    it(`marker ${marker} in the environment: a second run is still refused with repair-running`, async () => {
+      const targetDir = makeFixture();
+      const { run, childPid } = await startRunWithChild(targetDir);
+      expect(alive(run.pid)).toBe(true);
+      const second = spawnSync("bash", [join(targetDir, "scripts", "repair.sh"), ...SAFE], {
+        cwd: targetDir,
+        encoding: "utf8",
+        env: { ...prepareRepair(targetDir, STOPPED).merged, ORBIT_REPAIR_RUN_LOCK_HELD: marker },
+        timeout: PROCESS_DEADLINE_MS,
+        killSignal: "SIGKILL",
+      });
+      expect(alive(childPid)).toBe(true);
+      expect(second.stdout).toContain(`execution result=refused done=0 failed=0 ${REFUSED}`);
+      expect(second.status).toBe(6);
+    });
+  }
 });
