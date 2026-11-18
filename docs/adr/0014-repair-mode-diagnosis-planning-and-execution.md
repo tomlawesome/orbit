@@ -112,7 +112,7 @@ via `docker exec -e PGPASSWORD`, never argv); application container identity
 and health, with an unhealthy container's own log classified into
 `database-schema-mismatch` or `database-below-floor` (#437) because those are
 not restartable and must not masquerade as `application-unhealthy`.
-[Superseded: the code now pipes the password over stdin into `docker exec -i` on the database container, not `docker exec -e PGPASSWORD` (#610) — repair.sh:4051-4054.]
+[Superseded: the code now pipes the password over stdin into `docker exec -i` on the database container, not `docker exec -e PGPASSWORD` (#610) — repair.sh:4079-4082.]
 
 The reason classes cover every distinction #261 names: `secret-missing`,
 `database-credential-mismatch`, `database-unreachable`,
@@ -533,3 +533,4 @@ it read-write only before it removes a staging folder, and a lock that
 will not open that way, is not a regular file at the stat just before the
 open, or opens as anything but that same file, is never taken as idle; restore-transaction refuses, saying the lock "could
 not be opened for writing".
+#1899 (note 64000): `<>` creates a lock that vanished between the stat and the open, and no shell open avoids that, so the file is kept (a lock file is never deleted, which would split holders across two inodes) and made the owner's: empty, mode 0600 and, as root, chowned to the deployment folder's owner; the action still refuses, and a failed chown is named in the refusal.
