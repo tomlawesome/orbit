@@ -207,3 +207,102 @@ describe("the same, with a wide gap in the reservation transaction (#1891)", () 
     expect(await decideSignInApproval(tokenIn(delivered[1]), "approved")).toEqual({ recorded: true });
   }, 60_000);
 });
+
+/* A failed send puts the approval back as it was (#1891). */
+const sha = (value: string) => createHash("sha256").update(value, "utf8").digest("hex");
+
+/** A pending approval whose current link is known, last mailed ten minutes ago. */
+async function pendingWithLink(userId: string): Promise<{ id: string; claim: string; oldToken: string; lastSentAt: Date }> {
+  const claim = crypto.randomUUID();
+  const oldToken = crypto.randomUUID();
+  const lastSentAt = new Date(Date.now() - 600_000);
+  const [row] = await getDb().insert(signInApprovals).values({
+    userId,
+    tokenHash: sha(oldToken),
+    claimHash: sha(claim),
+    expiresAt: new Date(Date.now() + 3_600_000),
+    sendCount: 1,
+    lastSentAt,
+  }).returning({ id: signInApprovals.id });
+  return { id: row.id, claim, oldToken, lastSentAt };
+}
+
+async function stateOf(id: string) {
+  const [row] = await getDb().select({ tokenHash: signInApprovals.tokenHash, lastSentAt: signInApprovals.lastSentAt })
+    .from(signInApprovals).where(eq(signInApprovals.id, id));
+  return row;
+}
+
+describe("a resend whose send fails undoes itself and nothing more (#1891)", () => {
+  it("the previous link approves again, the new one does not, and the send time is back", async () => {
+    const userId = await account();
+    const approval = await pendingWithLink(userId);
+    let attempted = "";
+    const failing = {
+      async sendEmail(notification: SmtpNotification) {
+        attempted = tokenIn(notification);
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        throw new Error("relay refused");
+      },
+    };
+
+    const result = await resendSignInApproval(approval.claim, { mailer: failing });
+
+    expect(result).toMatchObject({ state: "sent" });
+    expect((result as { sendError: unknown }).sendError).not.toBeNull();
+    expect(attempted).not.toBe("");
+    const after = await stateOf(approval.id);
+    expect(after.lastSentAt?.getTime()).toBe(approval.lastSentAt.getTime());
+    expect(after.tokenHash).toBe(sha(approval.oldToken));
+    expect(await decideSignInApproval(attempted, "approved")).toEqual({ recorded: false });
+    expect(await decideSignInApproval(approval.oldToken, "approved")).toEqual({ recorded: true });
+    expect(await outcomeOf(approval.id)).toBe("approved");
+  }, 60_000);
+
+  it("the minute runs from the last mail that went, so a retry sends at once", async () => {
+    const userId = await account();
+    const approval = await pendingWithLink(userId);
+    const failing = { async sendEmail() { throw new Error("relay refused"); } };
+
+    await resendSignInApproval(approval.claim, { mailer: failing });
+    const retry = await resend(approval.claim);
+
+    expect(retry).toMatchObject({ state: "sent", sendError: null });
+    expect(delivered).toHaveLength(1);
+    expect(await decideSignInApproval(tokenIn(delivered[0]), "approved")).toEqual({ recorded: true });
+  }, 60_000);
+
+  it("a failure of resend A after resend B committed leaves B's row and link alone", async () => {
+    const userId = await account();
+    const approval = await pendingWithLink(userId);
+    let aInMailer!: () => void;
+    const aStarted = new Promise<void>((resolve) => { aInMailer = resolve; });
+    let releaseA!: () => void;
+    const aGate = new Promise<void>((resolve) => { releaseA = resolve; });
+    const failingA = {
+      async sendEmail() {
+        aInMailer();
+        await aGate;
+        throw new Error("relay refused");
+      },
+    };
+
+    const a = resendSignInApproval(approval.claim, { mailer: failingA });
+    await aStarted;
+    /* B is a later request, a minute on from A's send, so it passes the check. */
+    const bNow = new Date(Date.now() + 61_000);
+    const b = await resendSignInApproval(approval.claim, { mailer: slowMailer, now: bNow });
+    expect(b).toMatchObject({ state: "sent", sendError: null });
+    const committed = await stateOf(approval.id);
+
+    releaseA();
+    const aResult = await a;
+
+    expect((aResult as { sendError: unknown }).sendError).not.toBeNull();
+    const after = await stateOf(approval.id);
+    expect(after).toEqual(committed);
+    expect(after.tokenHash).not.toBe(sha(approval.oldToken));
+    expect(delivered).toHaveLength(1);
+    expect(await decideSignInApproval(tokenIn(delivered[0]), "approved")).toEqual({ recorded: true });
+  }, 60_000);
+});
