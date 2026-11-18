@@ -16,5 +16,7 @@ import { env } from "$env/dynamic/private";
 export function load({ locals }) {
   if (env.ORBIT_FIXTURES === "1") return {};
   if (!locals.session?.user?.isInstanceAdmin) error(404, "Not found");
-  return {};
+  // Only what the desk header shows; no csrf token or other session fields.
+  const { displayName, isInstanceAdmin } = locals.session.user;
+  return { user: { displayName, isInstanceAdmin } };
 }
