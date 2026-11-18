@@ -111,8 +111,10 @@ page reads to learn the instance is locked), signing out (`/api/auth/logout`
 and the goodbye page `/logout`) and `/maintenance`, which is the locked page
 itself. `/login` and `/auth/error` are static pages that load even while
 locked; the script on `/login` then sends the reader to `/maintenance`, and
-`/auth/error` stays where it is. The container log states the fault, and an
-alert goes to `OPERATOR_ALERT_ADDRESS` when it is set. Fixing the key on the
+`/auth/error` stays where it is. The container log states the fault; nothing is mailed while the key is
+missing (the sending password is under it too), and when
+`OPERATOR_ALERT_ADDRESS` and sending are set, that address gets one mail once
+the key is back. Fixing the key on the
 host and restarting is the way out. If the key **and** the recovery bundle are
 both gone, the addresses cannot be recovered at all and nobody can sign in;
 there is deliberately no command that clears what cannot be read, so the way

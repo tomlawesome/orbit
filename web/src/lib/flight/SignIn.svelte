@@ -10,7 +10,7 @@
   import { fetchFlightAhead } from "./fetch-ahead.js";
   import { isFirstVisit } from "./door-seen.js";
   import {
-    APPROVAL_BACKSTOP_MS, CLAIM, DOOR, LOCAL, LOCKED, STARTING, STARTING_BACKSTOP_MS, STARTING_POLL_MS,
+    APPROVAL_BACKSTOP_MS, CLAIM, RENEW_HOLD_MS, DOOR, LOCAL, LOCKED, STARTING, STARTING_BACKSTOP_MS, STARTING_POLL_MS,
     applyStartingBackstop, availabilityOf, cardMessageFor, claimFromHash, doorMessageFor,
     doorModeOf, nextDoorState, phaseOf, readinessOf,
   } from "./door-state.js";
@@ -165,6 +165,24 @@
   let email = $state("");
   let displayName = $state("");
   let password = $state("");
+  let again = $state("");
+
+  /*
+   * THE NEW-PASSWORD STEP (#1881, design/v19/password-after-refusal/round-1/,
+   * direction R, owner verdict 2026-11-17). A sign-in whose password somebody
+   * refused gets no session: the server hands this browser a change-password
+   * hold instead, and the card in the ring becomes the setup card's two fields
+   * with one sentence saying when the refusal was. Saving is the launch.
+   */
+  /** The refusal's moment in the mail's words, or null. */
+  let refusedAt = $state(/** @type {string | null} */ (null));
+  /** The hold ran out before a password was saved. */
+  let renewLapsed = $state(false);
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let renewTimer;
+  /** The error code of the last refused POST, for the one refusal that
+      changes the card rather than its line (`password_change_lapsed`). */
+  let lastCode = /** @type {unknown} */ (undefined);
 
   /**
    * Raises or drops the card layer. `showform` is the same class the arrival
@@ -259,9 +277,11 @@
       } catch {
         code = undefined;
       }
+      lastCode = code;
       message = cardMessageFor(code);
       return null;
     } catch {
+      lastCode = undefined;
       message = cardMessageFor(undefined);
       return null;
     } finally {
@@ -314,6 +334,9 @@
       waitForApproval(answer.pending);
       return;
     }
+    /* No factor here, so a marked password is refused outright
+       (password_recovery_required, #1881 review) and lands in `present`'s
+       message: there is no verified channel to renew it through. */
     markLaunch();
     location.href = returnTo;
   }
@@ -380,6 +403,12 @@
         location.href = returnTo;
         return;
       }
+      if (answer?.state === "password_change_required") {
+        /* Approved, but the password is marked: no session came with this
+           answer, only the hold, which runs ten minutes from now (#1881). */
+        chooseNewPassword(answer.refusedAt, Date.now() + RENEW_HOLD_MS);
+        return;
+      }
       if (answer?.state === "denied") {
         pendingState = "denied";
         return;
@@ -407,6 +436,50 @@
     if (answer.state === "limited") limited = true;
     else if (answer.state === "unknown") pendingState = "lapsed";
     else canResendAt = Date.parse(answer.canResendAt) || 0;
+  }
+
+  /**
+   * Puts the new-password card in the ring (#1881): it takes the place of
+   * whatever card stood there -- the waiting card, the sign-in card, or on a
+   * provider's return the bare door -- and lapses by itself when the hold
+   * does, rather than waiting for a press to be told.
+   *
+   * @param {unknown} refusedAtIso the newest refusal, ISO 8601
+   * @param {number} lapsesAt epoch ms
+   */
+  function chooseNewPassword(refusedAtIso, lapsesAt) {
+    message = "";
+    password = "";
+    again = "";
+    refusedAt = typeof refusedAtIso === "string" ? refusedAtIso : null;
+    renewLapsed = false;
+    card = "renew";
+    showCard(true);
+    clearTimeout(renewTimer);
+    renewTimer = setTimeout(() => { renewLapsed = true; message = ""; }, Math.max(0, lapsesAt - Date.now()));
+  }
+
+  /** Saves the new password; saving is the launch (#1881). */
+  async function submitNewPassword() {
+    if (busy || renewLapsed) return;
+    fetchFlightAhead({ hurry: true });
+    if (await present("/api/auth/local/login/new-password", { password, passwordAgain: again })) {
+      clearTimeout(renewTimer);
+      password = "";
+      again = "";
+      markLaunch();
+      location.href = returnTo;
+      return;
+    }
+    if (lastCode === "password_change_lapsed") {
+      renewLapsed = true;
+      message = "";
+    }
+  }
+
+  /** The lapsed card's quiet line: back to the door, fresh. */
+  function signInAgain() {
+    location.assign("/login");
   }
 
   /** Mixed mode's quiet line: the same card, opened rather than offered. */
@@ -483,6 +556,20 @@
      */
     const linkClaim = claimFromHash(location.hash);
     if (linkClaim) history.replaceState(null, "", location.pathname + location.search);
+
+    /* A provider sign-in for a marked account comes back here with the hold
+       already in its cookie (#1881): `password=new`, and the refusal's moment
+       for the card. Both are taken out of the address bar before anything is
+       drawn, so a reload or a bookmark is the plain door. */
+    const asked = new URLSearchParams(location.search);
+    const renewAsked = asked.get("password") === "new";
+    const renewRefusedAt = asked.get("refusedAt");
+    if (renewAsked) {
+      asked.delete("password");
+      asked.delete("refusedAt");
+      const rest = asked.toString();
+      history.replaceState(null, "", location.pathname + (rest ? `?${rest}` : ""));
+    }
 
     /** @type {ReturnType<typeof setTimeout>[]} */
     const timers = [];
@@ -597,7 +684,8 @@
         return;
       }
       if (first.state === DOOR) {
-        wearFace(first.face);
+        if (renewAsked) chooseNewPassword(renewRefusedAt, Date.now() + RENEW_HOLD_MS);
+        else wearFace(first.face);
         readyWhenDrawn();
         return;
       }
@@ -640,6 +728,7 @@
       disposed = true;
       approvalStopped = true;
       clearTimeout(approvalTimer);
+      clearTimeout(renewTimer);
       clearTimeout(pollTimer);
       timers.forEach(clearTimeout);
       document.body.classList.remove("loading", "lit", "switched", "returning", "returned");
@@ -715,6 +804,9 @@
       <Claim bind:claim={claimCode} {busy} {message} onsubmit={submitClaim} />
     {:else if card === "waiting"}
       <Waiting phase={pendingState} {canResendAt} {limited} {busy} {message} onresend={resendApproval} />
+    {:else if card === "renew"}
+      <Identity mode="renew" bind:password bind:again {busy} {message} {refusedAt}
+                lapsed={renewLapsed} onsignin={signInAgain} onsubmit={submitNewPassword} />
     {:else if card === "create"}
       <Identity mode="create" bind:email bind:displayName bind:password
                 provider={providerOffered} {busy} {message}

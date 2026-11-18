@@ -23,7 +23,7 @@
     SENDING_HOW_HREF, SENDING_NOT_SET, blankSendDraft, importSkippedWords, mailboxSubmissionHost, sendDraftOf, sendingOutcomeWords, sendingRowsOf,
   } from "./words.js";
   import {
-    card, commandMail, deleteSystemNow, inviteLocalUser, issueSetupLink, makeSystem, placePerson, restoreSystem,
+    card, commandMail, deleteSystemNow, inviteLocalUser, issueSetupLink, makeSystem, placePerson, restoreSystem, setAddress,
     runMailTest, retryJob, saveSending, setArchiveStorage, setContact, setMailLimit, setUploadLimit,
   } from "./acts.svelte.js";
   import {
@@ -56,7 +56,7 @@
    * real facts (collection domain, systems aboard, crew) come off this
    * screen's own data rather than the sheet's hard-coded literals.
    */
-  /** @type {{ data: { fixtures: boolean } }} */
+  /** @type {{ data: { fixtures: boolean, user?: { displayName: string, isInstanceAdmin: boolean } } }} */
   let { data } = $props();
   /** @type {Awaited<ReturnType<typeof readAdminScreen>> | null} */
   let view = $state(null);
@@ -322,6 +322,9 @@
       phone layout's own sheet — it keeps a whole Person, not just an id,
       so it looks this up once `view` loads (#1151 A1-F2). */
   let resumedResendPersonId = $state(/** @type {string | null} */ (null));
+  /** The same for an "email_address_set" step-up (#1869): whose address,
+      and what was typed, so the phone reopens its own sheet. */
+  let resumedAddress = $state(/** @type {{ personId: string, email: string } | null} */ (null));
 
   /**
    * The typed draft, carried across a step-up (#915). Leaving for the provider
@@ -341,7 +344,7 @@
   /** @param {string} intent */
   /**
    * @param {string} intent
-   * @param {{ resend?: { personId: string, days: number } | null }} [about]
+   * @param {{ resend?: { personId: string, days: number } | null, address?: { personId: string, email: string } | null }} [about]
    */
   function stashDraft(intent, about = {}) {
     // `about` names what the challenged tap was opening: it is stashed
@@ -352,6 +355,7 @@
       local: localDraft,
       systemName: systemName ?? "",
       resend: about.resend ?? (resendFor ? { personId: resendFor, days: resendDays } : null),
+      ...(about.address ?? addressFor ? { address: about.address ?? { personId: addressFor, email: addressDraft } } : {}),
       // #1604 G11-FR1: a stale draft is an abandoned errand; see restoreDraft.
       at: Date.now(),
     };
@@ -384,6 +388,11 @@
         resendDays = draft.resend.days ?? SETUP_LINK_DAYS.fallback;
         resumedResendPersonId = draft.resend.personId;
       }
+      if (draft.intent === "email_address_set" && draft.address?.personId) {
+        addressFor = draft.address.personId;
+        addressDraft = draft.address.email ?? "";
+        resumedAddress = { personId: draft.address.personId, email: draft.address.email ?? "" };
+      }
     } catch { /* nothing held, or unreadable: the form starts empty */ }
   }
 
@@ -392,6 +401,24 @@
   let resendDays = $state(SETUP_LINK_DAYS.fallback);
   let resendPassword = $state("");
   const resendCard = $state(card());
+
+  /* SETTING A MEMBER'S ADDRESS (#1869): the same inline form as the resend
+     one, behind its own intent `email_address_set` so a proof for a setup
+     link cannot pay for it. */
+  /** Which person's "set their address" form is open, by user id. @type {string | null} */
+  let addressFor = $state(null);
+  let addressDraft = $state("");
+  let addressPassword = $state("");
+  const addressCard = $state(card());
+  /** What the last change said, for the line under the roster. @type {{ text: string, failure: boolean } | null} */
+  let addressSaid = $state(null);
+
+  /** @param {{ id: string, displayName: string }} person */
+  const setAddressNow = (person) => setAddress(person, addressDraft, addressPassword, {
+    card: addressCard, actorHasPassword, reread,
+    landed: () => { addressFor = null; addressDraft = ""; addressPassword = ""; provenIntent = ""; },
+    wake: (text, options) => (addressSaid = { text, failure: options?.failure === true }),
+  });
   /** @type {import("./acts.svelte.js").Delivery | null} */
   let resendDelivery = $state(null);
 
@@ -407,7 +434,7 @@
    * @param {string} intent
    * @param {() => void} openField
    * @param {(message: string) => void} [report]
-   * @param {{ resend?: { personId: string, days: number } | null }} [about] what the tap is opening, for stashDraft
+   * @param {{ resend?: { personId: string, days: number } | null, address?: { personId: string, email: string } | null }} [about] what the tap is opening, for stashDraft
    */
   async function challengeThen(intent, openField, report = (message) => (localCard.problem = message), about = {}) {
     localCard.problem = null;
@@ -437,6 +464,14 @@
       if (!delivery.sendError) localDraft = freshInvite();
     },
   });
+
+  /** Opens the address form for one person, behind its own challenge (#1869). @param {{ id: string }} person */
+  const openAddress = (person) => { addressCard.problem = null; return challengeThen("email_address_set", () => {
+    addressFor = addressFor === person.id ? null : person.id;
+    addressDraft = "";
+    addressPassword = "";
+    addressSaid = null;
+  }, (message) => (addressCard.problem = message), { address: { personId: person.id, email: "" } }); };
 
   /**
    * Sends a fresh link — the Retry under a failed send, and the per-row
@@ -785,12 +820,12 @@
 <div class="station-backdrop" bind:this={backdropRoot} aria-hidden="true"></div>
 <PageSky stars={false} />
 
-<Chrome user={view?.user ?? confirmedUser} current="administration" household={view?.household} />
+<Chrome user={view?.user ?? confirmedUser ?? data.user} current="administration" household={view?.household} />
 
 <!-- #1123, proposal §2.12: administration on a phone, chosen by CSS. It
      shares this page's state and acts (the step-up challenge, the re-read),
      so both dialects answer the server the same way. -->
-<Pocket {view} fixtures={Boolean(data?.fixtures)} {actorHasPassword} {provenIntent} {resumedResendPersonId} bind:draft={localDraft}
+<Pocket {view} fixtures={Boolean(data?.fixtures)} {actorHasPassword} {provenIntent} {resumedResendPersonId} {resumedAddress} bind:draft={localDraft}
         challenge={challengeThen} {reread}
         spent={() => (provenIntent = "")} {screenProblem} {screenRefused} onretry={loadScreen} />
 
@@ -1002,9 +1037,16 @@
             <span class="avatar">{initials(person.displayName)}</span>
             <div class="who">
               <b>{person.displayName}{person.id === view.user?.id ? " · you" : ""}</b>
-              <span>{[person.email, view.peopleMeta[person.id]].filter(Boolean).join(" · ")}</span>
+              <span>{[person.email ?? (person.metadataStatus?.email === "metadata_integrity_failed" ? "address can't be read" : null), view.peopleMeta[person.id]].filter(Boolean).join(" · ")}</span>
             </div>
             <span class="role" class:admin={person.isInstanceAdmin}>{person.isInstanceAdmin ? "admin" : "user"}</span>
+            {#if !view.failed.session && !view.metadata?.locked
+                 && person.metadataStatus?.email === "metadata_integrity_failed"}
+              <!-- #1869: a stored address that cannot be read has no other way
+                   back, so the way to set it is the row's first action. -->
+              <button class="place" onclick={() => openAddress(person)} aria-expanded={addressFor === person.id}
+                      aria-label={`set the address of ${person.displayName}`}>set their address…</button>
+            {/if}
             {#if !view.failed.session && person.id !== view.user?.id}
               <button class="place" title="Admins can add any user to any system"
                       onclick={() => (placing = placing === person.id ? null : person.id)}>place in a system…</button>
@@ -1030,6 +1072,11 @@
                       }, undefined, { resend: { personId: person.id, days: SETUP_LINK_DAYS.fallback } })}
                       aria-expanded={resendFor === person.id}
                       aria-label={`send a new setup link to ${person.displayName}`}>send a new setup link…</button>
+            {/if}
+            {#if !view.failed.session && !view.metadata?.locked
+                 && person.metadataStatus?.email !== "metadata_integrity_failed"}
+              <button class="place" onclick={() => openAddress(person)} aria-expanded={addressFor === person.id}
+                      aria-label={`change the address of ${person.displayName}`}>change address…</button>
             {/if}
           </div>
           {#if placing === person.id}
@@ -1058,7 +1105,27 @@
               </div>
             </form>
           {/if}
+          {#if addressFor === person.id}
+            <form class="localuser resend" onsubmit={(event) => { event.preventDefault(); setAddressNow(person); }}>
+              <label for="address-email">address</label>
+              <input id="address-email" type="email" autocomplete="off" placeholder="their@example.com"
+                     bind:value={addressDraft} required />
+              {#if actorHasPassword}
+                <label for="address-current">your current password</label>
+                <input id="address-current" type="password" autocomplete="current-password"
+                       bind:value={addressPassword} required />
+              {/if}
+              <div class="placerow localuserrow">
+                <button type="submit" disabled={addressCard.busy}>set it</button>
+                <button type="button" onclick={() => (addressFor = null)}>cancel</button>
+              </div>
+            </form>
+          {/if}
         {/each}
+        {#if addressSaid}
+          <div class="adminproblem" class:ok={!addressSaid.failure}>{addressSaid.text}</div>
+        {/if}
+        {#if addressCard.problem}<div class="adminproblem">{addressCard.problem}</div>{/if}
         {#if resendDelivery}
           {#if resendDelivery.sendError}
             <div class="adminproblem">{sendWords(resendDelivery.sendError)}</div>

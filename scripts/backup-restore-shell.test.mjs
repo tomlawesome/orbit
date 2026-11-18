@@ -546,7 +546,7 @@ describe("refusals that never reach docker", () => {
     const before = secretsSnapshot(deployment);
     const result = run(deployment, script, args.map((arg) => (arg === "BUNDLE" ? bundle : arg)));
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("preflight/key failed; .orbit-secrets/document-kek is a link to a file that does not exist. Remove the link and run again.");
+    expect(result.stderr).toContain("preflight/key failed; .orbit-secrets/document-kek is a link to a file that does not exist, so the key file is missing.");
     // A plain restore must name the link, not send the person looking for a key file (#1584 O-F1).
     expect(result.stderr).not.toContain("document key is missing");
     expect(verbs(result.calls)).toEqual([]);
@@ -835,6 +835,90 @@ describe("the stop / engine / start rule (E3)", () => {
     expect(result.probes).toEqual([]);
     expect(result.stderr).toContain("document-kek.import-rollback");
     expect(result.stderr).toMatch(/keep Orbit stopped/i);
+  });
+
+  // #1603 b1 L-F3: the key-less import (#1420) leaves <secrets dir>/document-kek.import-no-key
+  // when it is killed after writing the recovered key and before the journal records "no
+  // previous key". The live key is then not the deployment's, so Orbit must stay stopped.
+  it("import-recovery-bundle.sh: a run that exits 130 leaving document-kek.import-no-key and no journal keeps Orbit stopped and names the file (#1603 L-F3)", () => {
+    const deployment = makeDeployment();
+    const bundle = join(deployment.deployDir, "b.tar");
+    writeFileSync(bundle, "bundle");
+    const markerFile = join(deployment.deployDir, ".orbit-secrets", "document-kek.import-no-key");
+    const result = run(deployment, "import-recovery-bundle.sh", [bundle], {
+      env: { FAKE_ENGINE_STATUS: "130", FAKE_ENGINE_IMPORT_ROLLBACK: markerFile },
+    });
+    expect(existsSync(markerFile)).toBe(true);
+    expect(existsSync(deployment.journal)).toBe(false);
+    expect(result.status).not.toBe(0);
+    expect(verbs(result.calls)).toEqual(["run", "stop", "run"]);
+    expect(result.probes).toEqual([]);
+    expect(result.stderr).toContain("document-kek.import-no-key");
+    expect(result.stderr).toMatch(/keep Orbit stopped/i);
+  });
+
+  const danglingKeyDeployment = () => {
+    const deployment = makeDeployment({ key: false });
+    symlinkSync(join(deployment.deployDir, "no-such-key-target"), join(deployment.deployDir, ".orbit-secrets", "document-kek"));
+    return { deployment };
+  };
+
+  // #1603 O-S1 / ops-2: a dangling document-kek link means the key file is gone. The refusal
+  // says the key is missing and how to get it back (restore it from the backup or the
+  // recovery bundle), not only "remove the link"; --finish names the link first, not the
+  // generic "document key is missing".
+  it.each([
+    ["restore.sh", ["BUNDLE"]],
+    ["import-recovery-bundle.sh", ["BUNDLE"]],
+  ])("%s %j: a dangling document-key link says the key is missing and how to restore it (#1603 O-S1)", (script, args) => {
+    const { deployment } = danglingKeyDeployment();
+    const bundle = join(deployment.deployDir, "b.tar");
+    writeFileSync(bundle, "bundle");
+    const result = run(deployment, script, args.map((arg) => (arg === "BUNDLE" ? bundle : arg)));
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(/key (file )?(is|was) (missing|gone)|(missing|lost) (document )?key|key file (is )?missing|does not exist/i);
+    expect(result.stderr).toMatch(/restore (it|the (document )?key)|put the (document )?key back|copy the (document )?key back/i);
+  });
+
+  it("restore.sh --finish with a dangling document-key link names the link, not a generic missing key (#1603 ops-2)", () => {
+    const { deployment } = danglingKeyDeployment();
+    const result = run(deployment, "restore.sh", ["--finish"]);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(/document-kek is a link to a file that does not exist/);
+    expect(result.stderr).not.toContain("the configured document key is missing");
+    expect(verbs(result.calls)).toEqual([]);
+  });
+
+  // #1603 review: the dangling-link advice must be a key-only step. The recovery import also
+  // restores the bundle's backup over the live database, so sending the operator there for a
+  // lost key would lose every change since that backup. The step is the kept key file put back
+  // (docs/administrator-operations.md, "To restore it"), with the exact command.
+  it.each([
+    ["backup.sh", []],
+    ["restore.sh", ["BUNDLE"]],
+    ["restore.sh", ["--finish"]],
+    ["export-recovery-bundle.sh", ["BUNDLE"]],
+    ["import-recovery-bundle.sh", ["BUNDLE"]],
+  ])("%s %j: the dangling document-key advice puts back the kept key file, never the recovery import", (script, args) => {
+    const { deployment } = danglingKeyDeployment();
+    const bundle = join(deployment.deployDir, "b.tar");
+    writeFileSync(bundle, "bundle");
+    const result = run(deployment, script, args.map((arg) => (arg === "BUNDLE" ? bundle : arg)));
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("document-kek is a link to a file that does not exist");
+    expect(result.stderr).toContain("install -m 0400 /path/to/your/copy/document-kek .orbit-secrets/document-kek");
+    expect(result.stderr).not.toContain("import-recovery-bundle.sh");
+    expect(verbs(result.calls)).toEqual([]);
+  });
+
+  it("refuse_dangling_key() is the same text in all four operator scripts", () => {
+    const bodies = SCRIPTS.map((script) => {
+      const source = readFileSync(join(scriptsDir, script), "utf8");
+      const start = source.indexOf("refuse_dangling_key() {");
+      expect(start, script).toBeGreaterThanOrEqual(0);
+      return source.slice(start, source.indexOf("\n}\n", start) + 2);
+    });
+    for (const body of bodies) expect(body).toBe(bodies[0]);
   });
 
   it("restore.sh: a hard-killed engine (exit 137) that left its journal keeps Orbit stopped", () => {

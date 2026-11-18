@@ -210,8 +210,9 @@ set -Eeuo pipefail
 #                                   is disabled and the overlay is missing
 #                                   (an idle scanner still runs). Scanner off
 #                                   with both in step is healthy, not a
-#                                   finding. Plans as manual: configure.sh
-#                                   --set-scanner writes both.
+#                                   finding. The fail case plans as manual
+#                                   (configure.sh --set-scanner writes both);
+#                                   the info case is reported, never planned.
 #   managed-file-permissions     — .env-orbit exists but is not mode 600.
 #   secrets-directory-invalid    — .orbit-secrets missing, symlinked, the
 #                                   wrong type, or not mode 700 (any one
@@ -997,7 +998,7 @@ set -Eeuo pipefail
 #   execute action=<action-class> resolves=<reason-class> result=<done|failed|skipped>
 # one line per planned finding (in the same fixed `class_order` the plan
 # uses), followed by a terminal line:
-#   execution result=<empty|complete|unactionable|declined|failed> done=<n> failed=<n>
+#   execution result=<empty|complete|unactionable|declined|failed|refused> done=<n> failed=<n> [reason=<deployment-version-unsupported|repair-running>]
 # and then the full post-execution re-diagnosis, in exactly `--check`'s own
 # format (`finding class=... target=... severity=...` lines followed by
 # `diagnosis result=... checked=... skipped=...`). `done`/`failed` count
@@ -1393,7 +1394,7 @@ set -Eeuo pipefail
 # after the safe batch's own `execution result=...` line when both batches
 # ran:
 #
-#   dangerous result=<empty|complete|refused|failed> done=<n> failed=<n> reason=<none|non-interactive|refused-by-operator|checkpoint-failed|step-failed>
+#   dangerous result=<empty|complete|refused|failed> done=<n> failed=<n> reason=<none|non-interactive|refused-by-operator|checkpoint-failed|step-failed|repair-running>
 #
 # `result=empty` (reason=none) — `--dangerous` was given but the plan
 # contained no dangerous-class entry of either kind; no prompt is shown.
@@ -2260,6 +2261,14 @@ fetch_image_compose() {
 discard_image_compose() {
   [[ -z "$compose_image_tmp" ]] || rm -f -- "$compose_image_tmp"
   compose_image_tmp=""
+  release_compose_image_tmp_lock
+}
+
+# The fd of the flock this run holds on compose_image_tmp (b1 O-S2), if any.
+compose_image_tmp_lock_fd=""
+release_compose_image_tmp_lock() {
+  [[ -z "$compose_image_tmp_lock_fd" ]] || exec {compose_image_tmp_lock_fd}<&-
+  compose_image_tmp_lock_fd=""
 }
 
 # Removes the managed-file-missing finding for the Compose file; the caller
@@ -4244,13 +4253,52 @@ do_restore_compose_file() {
   local image
   [[ ! -e "$compose_file" && ! -L "$compose_file" ]] || return 1
   image="$(pinned_orbit_image)" || return 1
-  compose_image_tmp="$(mktemp "./.${compose_file}.repair.XXXXXX")" || { compose_image_tmp=""; return 1; }
-  if ! read_image_deployment_asset "$image" "$compose_file" "$compose_image_tmp" ||
+  # b1 O-S2: a run killed hard (no EXIT trap) leaves its scratch file. No lock
+  # covers this action, so each run holds a flock on its own scratch file
+  # while it exists, and the next restore sweeps only names of exactly
+  # mktemp's shape that it can lock: the kernel drops a dead run's lock, even
+  # after kill -9, while a running repair's scratch file stays locked. The
+  # owner's own files, such as .docker-compose.yml.repair.bak, never match.
+  # Without flock there is no sweep: a live run's file can't be told apart.
+  local leftover sweep_fd
+  local scratch_prefix="./.${compose_file}.repair."
+  if command -v flock >/dev/null 2>&1; then
+    for leftover in "$scratch_prefix"*; do
+      [[ "${leftover#"$scratch_prefix"}" =~ ^[A-Za-z0-9]{6}$ ]] || continue
+      [[ -f "$leftover" && ! -L "$leftover" ]] || continue
+      { exec {sweep_fd}<"$leftover"; } 2>/dev/null || continue
+      if flock -n "$sweep_fd" 2>/dev/null; then rm -f -- "$leftover" || true; fi
+      exec {sweep_fd}<&-
+    done
+  fi
+  compose_image_tmp="$(mktemp "${scratch_prefix}XXXXXX")" || { compose_image_tmp=""; return 1; }
+  if ! { exec {compose_image_tmp_lock_fd}<"$compose_image_tmp"; } 2>/dev/null; then
+    compose_image_tmp_lock_fd=""
+    discard_image_compose
+    return 1
+  fi
+  # Exit 75 only when another run holds the lock (a sweep that won the race
+  # and is removing the file): give up. Any other flock failure, such as a
+  # filesystem without locks (ENOLCK), means no lock: the restore goes ahead
+  # unlocked, and every sweep there keeps the file because it can't lock it.
+  local lock_status=0
+  if command -v flock >/dev/null 2>&1; then
+    flock -n -E 75 "$compose_image_tmp_lock_fd" 2>/dev/null || lock_status=$?
+  fi
+  if [[ "$lock_status" == 75 || ! -f "$compose_image_tmp" ]]; then
+    discard_image_compose
+    return 1
+  fi
+  if ! read_image_deployment_asset "$image" "$compose_file" "$compose_image_tmp" {compose_image_tmp_lock_fd}<&- ||
     ! chmod 0644 -- "$compose_image_tmp" ||
     ! own_as_folder "$compose_image_tmp"; then
     discard_image_compose
     return 1
   fi
+  # b1 O-R4: the bytes reach the disk before the rename can make them the live
+  # file. Best effort, like the folder's sync below: a sync that fails must not
+  # throw away a restore that is otherwise complete.
+  sync -- "$compose_image_tmp" 2>/dev/null || true
   mv -n -- "$compose_image_tmp" "$compose_file" || { discard_image_compose; return 1; }
   # mv -n leaves the source in place when the target appeared in the meantime.
   if [[ -e "$compose_image_tmp" ]]; then
@@ -4258,6 +4306,9 @@ do_restore_compose_file() {
     return 1
   fi
   compose_image_tmp=""
+  release_compose_image_tmp_lock
+  # And the rename survives a power cut. Best effort: the file is already in place.
+  sync -- . 2>/dev/null || true
 }
 
 # --- restore-transaction ----------------------------------------------------
@@ -4555,10 +4606,14 @@ do_restore_configuration_rollback() {
     rm -f -- "$staged"
     return 1
   fi
+  # b1 O-R4: flushed before the rename, and the folder after it. Both best
+  # effort: a failing sync must not stop the rollback.
+  sync -- "$staged" 2>/dev/null || true
   if ! mv -f -- "$staged" "$environment_file" 2>/dev/null; then
     rm -f -- "$staged"
     return 1
   fi
+  sync -- . 2>/dev/null || true
 
   rm -f -- "$rollback_path" || return 1
   return 0

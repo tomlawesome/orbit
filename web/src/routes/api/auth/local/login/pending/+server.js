@@ -6,6 +6,7 @@ import {
 } from "orbit/lib/auth/cookies";
 import { AuthError } from "orbit/lib/auth/errors";
 import { authErrorResponse } from "orbit/lib/auth/http";
+import { issuePasswordChangeHold } from "orbit/lib/auth/password-change-hold";
 import { assertSameOrigin, createSession, deleteSessionToken } from "orbit/lib/auth/session";
 import { getAuthConfig } from "orbit/lib/env";
 import { collectSignInApproval } from "orbit/server/sign-in-approvals";
@@ -32,6 +33,10 @@ import { api } from "$lib/server/api.js";
  *
  *   `approved` — somebody pressed Approve; the session is created here and
  *     the cookie set, exactly as the password route used to do it.
+ *   `password_change_required` — approved, but a refused sign-in has marked
+ *     this password (#1881). No session: the tab gets the change-password
+ *     hold, which lapses with this approval, and the moment of the newest
+ *     refusal for the card's one sentence.
  *   `waiting`  — nobody has pressed anything. The tab asks again.
  *   `denied`   — somebody pressed "This wasn't me". The tab says so and stops.
  *   `unknown`  — no pending sign-in, or it has lapsed or been spent. One word
@@ -69,6 +74,12 @@ export const POST = api(
       await deleteSessionToken(event.cookies.get(sessionCookieName(config)));
       setSessionCookie(event.cookies, /** @type {{token: string}} */ (pending.session).token, config);
       return answer({ state: "approved", authenticated: true });
+    }
+
+    if (pending.state === "password_change_required") {
+      clearPendingSignInCookie(event.cookies, config);
+      const hold = await issuePasswordChangeHold(event.cookies, pending.refusal, config);
+      return answer({ state: "password_change_required", refusedAt: hold.refusedAt });
     }
 
     if (pending.state === "denied" || pending.state === "unknown") {
