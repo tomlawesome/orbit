@@ -1522,9 +1522,11 @@ usage() {
   printf 'Orbit repair: writing the exact --check/--plan stream plus one identity line to a file.\n' >&2
 }
 
-# #1893: set only by the lock holder (hold_lock_and_run_worker) on the
-# --execute worker it starts, which already runs under the holder's folder
-# lock; unset at once, so nothing the worker starts sees it.
+# #1893: set only by the lock holder (hold_lock_and_run_worker), to its own
+# pid, on the --execute worker it starts, which already runs under the
+# holder's folder lock. The worker honours it only when it names its parent
+# (execute_repair); any other value is ignored and the lock taken as usual.
+# Unset at once, so nothing the worker starts sees it.
 repair_run_lock_held="${ORBIT_REPAIR_RUN_LOCK_HELD:-}"
 unset ORBIT_REPAIR_RUN_LOCK_HELD
 
@@ -7120,44 +7122,56 @@ acquire_repair_run_lock() {
 # holder dies, the folder is free at once. The worker (stdin kept, marked by
 # ORBIT_REPAIR_RUN_LOCK_HELD) dies with the holder: setpriv --pdeathsig
 # (util-linux 2.33+) sends it TERM when the holder dies, even of KILL; without
-# it only INT, TERM and HUP are forwarded. The holder exits with the worker's
-# status, or dies of the signal the worker died of, so the exit code and
-# stdout are the worker's. Never returns.
+# it only INT, TERM and HUP are passed on, and a KILLed holder's worker runs
+# all its remaining steps with the lock free. The holder exits with the
+# worker's status, or dies of the signal the worker died of (of INT, when INT
+# ended the run), so the exit code and stdout are the worker's. Never returns.
+#
+# INT reaches the worker as TERM: a bash that receives INT while it waits for
+# a foreground child (the compose $(...) subshells ignore INT) acts on it only
+# once that child ends, so an INT would leave the run going for as long as the
+# docker call takes. TERM ends it at once, as it did before the holder.
 hold_lock_and_run_worker() {
-  local worker_pid status
-  # The subshell only resets INT, which bash ignores in a background job, and
-  # execs the worker; it never holds the lock.
+  local worker_pid status rewait holder_signal=""
+  # The subshell resets INT, which bash ignores in a background job (so a
+  # Ctrl-C to the whole process group still reaches the worker), and execs
+  # the worker; it never holds the lock.
   if command -v setpriv >/dev/null 2>&1 &&
     setpriv --pdeathsig=TERM -- true {repair_run_lock_fd}<&- </dev/null >/dev/null 2>&1; then
     (
       trap - INT
-      ORBIT_REPAIR_RUN_LOCK_HELD=1 exec setpriv --pdeathsig=TERM -- bash "$repair_script_path" "$@"
+      ORBIT_REPAIR_RUN_LOCK_HELD="$$" exec setpriv --pdeathsig=TERM -- "$BASH" "$repair_script_path" "$@"
     ) {repair_run_lock_fd}<&- <&0 &
   else
     (
       trap - INT
-      ORBIT_REPAIR_RUN_LOCK_HELD=1 exec bash "$repair_script_path" "$@"
+      ORBIT_REPAIR_RUN_LOCK_HELD="$$" exec "$BASH" "$repair_script_path" "$@"
     ) {repair_run_lock_fd}<&- <&0 &
   fi
   worker_pid=$!
-  trap 'kill -INT "$worker_pid" 2>/dev/null || true' INT
+  trap 'holder_signal=INT; kill -TERM "$worker_pid" 2>/dev/null || true' INT
   trap 'kill -TERM "$worker_pid" 2>/dev/null || true' TERM
   trap 'kill -HUP "$worker_pid" 2>/dev/null || true' HUP
   for (( ; ; )); do
     status=0
     wait "$worker_pid" || status=$?
-    # A forwarded signal ends the wait early while the worker lives on: wait again.
-    if ((status > 128)) && kill -0 "$worker_pid" 2>/dev/null; then
-      continue
+    if ((status > 128)); then
+      # A trapped signal ends the wait early while the worker lives on: wait again.
+      kill -0 "$worker_pid" 2>/dev/null && continue
+      # The worker ended meanwhile: its saved status, not the signal's.
+      rewait=0
+      wait "$worker_pid" || rewait=$?
+      ((rewait == 127)) || status="$rewait"
     fi
     break
   done
-  # A worker that died of a signal: the holder dies of the same one, so the
-  # caller sees what it saw before (#1893 note 63872). The holder has nothing
-  # of its own to clean up.
-  if ((status > 128)); then
-    trap - EXIT "$((status - 128))" 2>/dev/null || true
-    kill -s "$((status - 128))" "$$" 2>/dev/null || true
+  # A worker that died of a signal: the holder dies of the same one (of INT,
+  # when INT ended the run), so the caller sees what it saw before (#1893
+  # note 63872). The holder has nothing of its own to clean up.
+  if [[ -n "$holder_signal" ]] || ((status > 128)); then
+    [[ -n "$holder_signal" ]] || holder_signal="$((status - 128))"
+    trap - EXIT "$holder_signal" 2>/dev/null || true
+    kill -s "$holder_signal" "$$" 2>/dev/null || true
   fi
   exit "$status"
 }
@@ -7173,7 +7187,7 @@ execute_repair() {
   dangerous_exit_code=0
   # #1893: the worker runs under its holder's lock; a run that took the lock
   # becomes its holder. With no lock taken, the run carries on as itself.
-  if [[ "$repair_run_lock_held" != 1 ]]; then
+  if [[ -z "$repair_run_lock_held" || "$repair_run_lock_held" != "$PPID" ]]; then
     acquire_repair_run_lock
     [[ -z "$repair_run_lock_fd" ]] || hold_lock_and_run_worker "$@"
   fi
