@@ -172,12 +172,17 @@ describe.skipIf(isRoot)("#1890 L1/L2: a lock the user can read but not write is 
 describe("#1890 L1: no open of the lock waits, read-only lock or not", () => {
   const start = ACTIONS["start-services"];
 
-  /** A start-services folder whose lock exists as a regular file of `mode`; a BASH_ENV hook swaps it for `kind` just before repair's open (after its lstat). */
+  /**
+   * A start-services folder whose lock exists as a regular file of `mode`; a BASH_ENV hook swaps it for `kind` just
+   * before repair's open (after its lstat). The hook writes the time of the swap to `flag` and, at the next command
+   * in probe_backup_restore_lock (so once the open has returned), the time to `opened`: their gap is the open alone.
+   */
   function swapped(kind, mode) {
     const { targetDir, state } = start.make();
     const path = plantLock(targetDir, { mode });
     const hook = scratchDir("orbit-lockrw-hook-");
     const flag = join(hook, "swapped");
+  const opened = join(hook, "opened");
     const outside = scratchDir("orbit-lockrw-dest-");
     const dest = join(outside, "lock-elsewhere");
     writeFileSync(dest, "");
@@ -186,18 +191,22 @@ describe("#1890 L1: no open of the lock waits, read-only lock or not", () => {
       join(hook, "env.sh"),
       `set -T
 __orbit_lock_swap() {
+  if [[ -e '${flag}' && ! -e '${opened}' && " \${FUNCNAME[*]-} " == *" probe_backup_restore_lock "* ]]; then
+    printf '%s' "\$EPOCHREALTIME" > '${opened}'
+    return 0
+  fi
   case "\${BASH_COMMAND-}" in *'exec {fd}<'*) ;; *) return 0;; esac
   [[ " \${FUNCNAME[*]-} " == *" probe_backup_restore_lock "* ]] || return 0
   [[ -e '${flag}' ]] && return 0
   local L='${path}'
-  : > '${flag}'
+  printf '%s' "\$EPOCHREALTIME" > '${flag}'
   ${swap}
   return 0
 }
 trap __orbit_lock_swap DEBUG
 `,
     );
-    return { targetDir, state, env: { BASH_ENV: join(hook, "env.sh") }, flag, path };
+    return { targetDir, state, env: { BASH_ENV: join(hook, "env.sh") }, flag, opened, path };
   }
 
   const release = (path) => {
@@ -208,6 +217,8 @@ trap __orbit_lock_swap DEBUG
       // already gone
     }
   };
+  /** Milliseconds from the swap to the open's return, as the hook recorded them; Infinity if the open never returned. */
+  const openMs = (flag, opened) => (existsSync(opened) ? (Number(readFileSync(opened, "utf8")) - Number(readFileSync(flag, "utf8"))) * 1000 : Infinity);
   const lockLine = (result) => orbitLines(result).some((line) => /the lock at .*(can't be read|could not be opened for writing)/u.test(line));
 
   for (const [who, shimOptions, mode] of [
@@ -215,14 +226,15 @@ trap __orbit_lock_swap DEBUG
     ["a writable lock (0600)", NOT_ROOT, 0o600],
   ]) {
     it.skipIf(isRoot)(`${who}: swapped for a FIFO between the lstat and the open, repair refuses within 5 s and never hangs`, () => {
-      const { targetDir, state, env, flag, path } = swapped("fifo", mode);
+      const { targetDir, state, env, flag, opened, path } = swapped("fifo", mode);
       const shims = privShims(targetDir, shimOptions);
       try {
         const result = runOwner(targetDir, { shims, state, env, capSeconds: 12 });
         expect(existsSync(flag), "the swap did not happen, so the test proves nothing").toBe(true);
         expect(result.hung, "repair blocked opening the FIFO").toBe(false);
-        // The spec's 5 s for the read-only lock; a writable lock gets the host's start-up slack, `hung` being the real check.
-        expect(result.ms, "repair waited on the lock").toBeLessThan(mode === 0o444 ? 5_000 : 10_000);
+        // The spec's 5 s, timed on the open alone (swap to return, from the hook), so host load on repair's start-up
+        // and its other checks cannot fail it; `hung` (the 12 s cap on the whole run) stays the backstop.
+        expect(openMs(flag, opened), "repair waited on the lock").toBeLessThan(5_000);
         expect(result.stdout).not.toContain(start.done);
         expect(result.status).not.toBe(0);
         expect(lockLine(result), `no lock refusal line:\n${result.stderr.slice(0, 1500)}`).toBe(true);

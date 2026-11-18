@@ -208,7 +208,11 @@ describe("#1887 R2: smtp_env_sum reads .env-orbit through the bounded read and d
 
   it("a .env-orbit over 1 MiB is refused as too large to read: no cksum, not retired", () => {
     const targetDir = mailFolder();
-    writeFileSync(envPath(targetDir), `${readFileSync(envPath(targetDir), "utf8")}# ${"padding ".repeat(140_000)}\n`, { mode: 0o600 });
+    // Over 1 MiB as 1,100 comment lines of about 1 KiB, not one 1.1 MB line: repair's per-line checks of .env-orbit
+    // before the sum (environment_file_ok_now's regex) took 12 s or more on one such line, so the run's 25 s cap
+    // timed those checks rather than the bounded read under test. The read still sees a file over 1 MiB.
+    writeFileSync(envPath(targetDir), `${readFileSync(envPath(targetDir), "utf8")}${`# ${"padding ".repeat(125)}\n`.repeat(1_100)}`, { mode: 0o600 });
+    expect(readFileSync(envPath(targetDir)).length).toBeGreaterThan(1024 * 1024);
     chmodSync(envPath(targetDir), 0o600);
     const shims = shimsFor(targetDir);
     const result = run(shims, targetDir);
