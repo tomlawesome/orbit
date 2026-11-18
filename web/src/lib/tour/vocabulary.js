@@ -1545,12 +1545,22 @@ export function createFilmContext({
        gap). `left`/`right` are resolved to `top`/`bottom` by the caller
        (callout(), below) before this ever runs. */
     let finalSide = side;
-    if (pocket && !o.pin && pocketFit.box && (side === "top" || side === "bottom")) {
+    /* #1895: a pocket anchor that is a surface (taller than half the band),
+       not a control, takes its line inside: hung from its top edge. */
+    let surface = false;
+    if (pocket && !o.pin && pocketFit.box) {
+      const sb = pocketBand();
+      surface = pocketFit.box.h > (sb.bottom - sb.top) / 2;
+    }
+    if (surface) {
+      finalSide = "bottom";
+      pt = edgeOf(pocketFit.box, "top");
+    } else if (pocket && !o.pin && pocketFit.box && (side === "top" || side === "bottom")) {
       const band = pocketBand();
       const room = side === "top" ? pt[1] - band.top : band.bottom - pt[1];
       if (room < ht + CALLOUT_GAP) finalSide = side === "top" ? "bottom" : "top";
     }
-    if (finalSide !== side && pocketFit.box) {
+    if (!surface && finalSide !== side && pocketFit.box) {
       pt = edgeOf(pocketFit.box, finalSide);
     }
 
@@ -1560,7 +1570,7 @@ export function createFilmContext({
        keeps that point. */
     const control = pocketFit.control ?? null;
     const pointNow = () => (control && control.els.length > 0)
-      ? edgeOf(boxOf(control.ringEls, control.pad), finalSide)
+      ? edgeOf(boxOf(control.ringEls, control.pad), surface ? "top" : finalSide)
       : pt;
 
     function place() {
