@@ -1797,7 +1797,9 @@ test.describe("every phone callout but the two sheet lines stays outside its anc
             /* ruling 1895c: chapter 6's phone line points at the address row, not the card */
             if (!later.addr) wrong.push(`${w} ${mark}: no relay address row on the screen`);
             else {
-              if (!sameBox(a, later.addr)) wrong.push(`${w} ${mark}: anchored on ${later.anchor}, not the address row's box (${Math.round(later.addr.x)},${Math.round(later.addr.y)},${Math.round(later.addr.w)},${Math.round(later.addr.h)})`);
+              /* the ruling's `pad: 2`: the anchor is the row's box grown 2px on each side */
+              const grown = { x: later.addr.x - 2, y: later.addr.y - 2, w: later.addr.w + 4, h: later.addr.h + 4 };
+              if (!sameBox(a, grown)) wrong.push(`${w} ${mark}: anchored on ${later.anchor}, not the address row's box grown by 2px (${Math.round(grown.x)},${Math.round(grown.y)},${Math.round(grown.w)},${Math.round(grown.h)})`);
               if (!(b.bottom <= later.addr.y + 0.5 || b.y >= later.addr.bottom - 0.5)) wrong.push(`${w} ${mark}: the callout (${Math.round(b.y)}-${Math.round(b.bottom)}) is not wholly above or below the address row (${Math.round(later.addr.y)}-${Math.round(later.addr.bottom)})`);
               const edge = later.side === "top" ? later.addr.y : later.addr.bottom;
               const tip = later.side === "top" ? later.tipBottom : later.tipY;
