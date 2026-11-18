@@ -1319,7 +1319,7 @@
     {#snippet foot()}
       {#if addressFor}
         <button class="p-pill filled" type="submit" form="ad-address-form" disabled={addressCard.busy}>{addressCard.busy ? "setting…" : ownAddress && ownAddressArmed ? `set my address to ${addressArmed}` : "set it"}</button>
-        {#if ownAddressArmed}<button class="p-pill" type="button" onclick={() => (addressArmed = "")}>cancel</button>{/if}
+        {#if ownAddressArmed}<button class="p-pill" type="button" onclick={() => { addressArmed = ""; addressDraft = ""; }}>cancel</button>{/if}
       {/if}
     {/snippet}
   </Sheet>

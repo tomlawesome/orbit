@@ -75,6 +75,10 @@ describe("the phone sheet's sentences (#1869 point 2)", () => {
     expect(pocket).toContain(OTHERS_AFTER);
   });
 
+  it("clears the typed address as well as disarming on cancel, as the desk does", () => {
+    expect(pocket).toMatch(/onclick=\{\(\) => \{[^}]*addressArmed = ""[^}]*addressDraft = ""[^}]*\}\}>cancel<\/button>/u);
+  });
+
   it("arms the own row's 'set it' on the phone too, sending confirmEmail", () => {
     expect(pocket).toMatch(/set my address to/u);
   });
