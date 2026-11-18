@@ -506,7 +506,8 @@ export const signInApprovals = pgTable("sign_in_approvals", {
  * One row per approval mail sent or about to be sent, so "five per account
  * per hour" counts the sends inside the hour and nothing older (#1604 P-20).
  * A row is written under the per-user lock as a reservation before its mail
- * goes, and deleted again if the mail does not go (#1882). The
+ * goes (#1882), and kept whether or not the mail goes: the limit counts
+ * attempts, not successes (#1879 ruling, note 64435). The
  * approval's own send_count and last_sent_at stay what they were; this table
  * is only the hour's tally, swept with the approvals it belongs to.
  */

@@ -128,9 +128,13 @@
     if (src.startsWith("blob:")) URL.revokeObjectURL(src);
   }
 
+  /** #1446: the quiet retry of a busy page, waiting out Retry-After. @type {ReturnType<typeof setTimeout> | undefined} */
+  let busyTimer;
+
   function stopLoading() {
     clearTimeout(beatTimer);
     clearTimeout(loadTimer);
+    clearTimeout(busyTimer);
     abort?.abort();
     abort = null;
   }
@@ -178,14 +182,21 @@
       A failure of a page turned to is that turn's own (missed), never the
       whole paper's, even before page one has arrived (#1803); only the
       first page's own load can fail the paper.
-      @param {PreviewDoc} paper @param {number} n @param {number} mine @param {boolean} [turned] */
-  function loadPage(paper, n, mine, turned = false) {
+      A busy answer (#1446 decision 3) is asked for once more after its
+      Retry-After, as the Reader does; it alone never reads as could-not-draw.
+      @param {PreviewDoc} paper @param {number} n @param {number} mine @param {boolean} [turned] @param {boolean} [again] */
+  function loadPage(paper, n, mine, turned = false, again = false) {
     abort?.abort();
+    clearTimeout(busyTimer);
     const controller = new AbortController();
     abort = controller;
     loadStagedPage(previewPageHref(paper.previewHref, n), controller.signal).then((result) => {
       if (mine !== token || controller.signal.aborted) {
         if (result.kind === "page") URL.revokeObjectURL(result.url);
+        return;
+      }
+      if (result.kind === "busy" && !again) {
+        busyTimer = setTimeout(() => { if (mine === token) loadPage(paper, n, mine, turned, true); }, result.retryAfterSeconds * 1000);
         return;
       }
       if (result.kind === "page") {

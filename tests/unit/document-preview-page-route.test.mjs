@@ -131,6 +131,22 @@ describe("preview routes: ?page=N and X-Orbit-Page-Count (#1300)", () => {
     });
   });
 
+  it("#1446: a full view queue answers 503 document_preview_busy with Retry-After 5 and no-store, on both routes", async () => {
+    const { stored, staged, AppError } = await routes();
+    const { RetryLaterError } = await import("orbit/lib/errors");
+    expect(RetryLaterError.prototype).toBeInstanceOf(AppError);
+    const busy = () => new RetryLaterError("document_preview_busy", "Orbit is busy; try again shortly", 5);
+    mocks.readDocumentPagePreview.mockRejectedValue(busy());
+    mocks.readHeldImapAttachmentPreview.mockRejectedValue(busy());
+
+    for (const response of [await stored(storedEvent("?page=2")), await staged(stagedEvent("?page=2"))]) {
+      expect(response.status).toBe(503);
+      expect(response.headers.get("retry-after")).toBe("5");
+      expect(response.headers.get("cache-control")).toContain("no-store");
+      expect((await response.json()).error.code).toBe("document_preview_busy");
+    }
+  });
+
   it("answers the fixture harness's placeholder as one page, and refuses a second", async () => {
     vi.stubEnv("ORBIT_FIXTURES", "1");
     const { stored } = await routes();

@@ -303,53 +303,40 @@ async function sendsInWindow(
  * per-user advisory lock, which the caller's `transaction` must already hold
  * (#1882). Requests arriving together queue on the lock, so each one counts
  * the reservations committed before it and no sixth mail is ever reserved.
- * Null when the hour's allowance is spent; otherwise the reservation, which
- * the caller commits before the mail goes and releases if it does not go.
+ * False when the hour's allowance is spent; true once the reservation is
+ * written, which the caller commits before the mail goes. It is kept whether or not the mail
+ * goes: the limit counts attempts, not successes (#1879 ruling, note 64435),
+ * because a "failed" send can still have reached the provider and the inbox.
  */
 async function reserveSend(
   transaction: Transaction,
   approvalId: string,
   userId: string,
   now: Date,
-): Promise<string | null> {
-  if (await sendsInWindow(userId, now, transaction) >= APPROVAL_SENDS_PER_HOUR) return null;
-  const [reserved] = await transaction.insert(signInApprovalSends)
-    .values({ approvalId, userId, sentAt: now })
-    .returning({ id: signInApprovalSends.id });
-  return reserved.id;
+): Promise<boolean> {
+  if (await sendsInWindow(userId, now, transaction) >= APPROVAL_SENDS_PER_HOUR) return false;
+  await transaction.insert(signInApprovalSends).values({ approvalId, userId, sentAt: now });
+  return true;
 }
 
 /**
- * Gives back a reservation whose mail did not go: only a mail that went out
- * spends the hour's allowance, as before #1882. Under the same lock, so the
- * count another request reads never sees a reservation half undone.
+ * Puts a failed resend's send time back, so the minute runs from the last
+ * mail that actually went (#1891). The hour's count row stays (#1879). Only
+ * while the row still carries this resend's own time, so a later resend that
+ * committed meanwhile is never undone. Under the same lock as the stamp.
  */
-async function releaseSend(
-  reservationId: string,
+async function restoreSendTime(
   userId: string,
-  restore?: ResendRestore,
+  approvalId: string,
+  stampedAt: Date,
+  previousLastSentAt: Date | null,
 ): Promise<void> {
   await getDb().transaction(async (transaction) => {
     await lockUser(transaction, userId);
-    await transaction.delete(signInApprovalSends).where(eq(signInApprovalSends.id, reservationId));
-    if (restore) {
-      /* A resend that did not go puts the approval back as it was: the
-         reader's previous link works again and the minute runs from the
-         last mail that actually went (#1891). Only while the row still
-         carries this resend's digest, so nothing written since is undone. */
-      await transaction.update(signInApprovals)
-        .set({ tokenHash: restore.previousTokenHash, lastSentAt: restore.previousLastSentAt })
-        .where(and(eq(signInApprovals.id, restore.approvalId), eq(signInApprovals.tokenHash, restore.tokenHash)));
-    }
+    await transaction.update(signInApprovals)
+      .set({ lastSentAt: previousLastSentAt })
+      .where(and(eq(signInApprovals.id, approvalId), eq(signInApprovals.lastSentAt, stampedAt)));
   });
-}
-
-/** What a resend wrote under the lock, so a send that fails can be undone (#1891). */
-interface ResendRestore {
-  approvalId: string;
-  tokenHash: string;
-  previousTokenHash: string;
-  previousLastSentAt: Date | null;
 }
 
 /** How long a finished or lapsed approval is kept before it is swept. */
@@ -449,9 +436,11 @@ async function mailApproval(
  * by looking up an existing row. Writing the row first means that same
  * crash instead leaves an unsent, harmless row that simply expires -- the
  * waiting tab never got a response either, so it retries and gets a new one.
- * A pending sign-in that could not be posted is still written and still
- * counts toward the hourly limit once it does send, exactly as before; only
- * the order changed.
+ * A pending sign-in that could not be posted is still written. Every
+ * attempted mail counts toward the hourly limit: its count row is reserved
+ * before the send (#1879 A-R2) and kept when the send fails (#1879 ruling,
+ * note 64435), so five failed sends in an hour answer `limited`. Only a mail
+ * that went sets the approval's own count and send time.
  */
 export async function startSignInApproval(
   userId: string,
@@ -473,7 +462,7 @@ export async function startSignInApproval(
      goes to the address the account still has. The hour's mail is reserved
      under the same lock (#1882) and the transaction commits before the mail
      goes: nothing is held open across the network send. */
-  const { recipient, row, limited, reservation } = await db.transaction(async (transaction) => {
+  const { recipient, row, limited } = await db.transaction(async (transaction) => {
     await lockUser(transaction, userId);
     const recipient = await readRecipient(userId, transaction);
     const [row] = await transaction.insert(signInApprovals).values({
@@ -486,30 +475,22 @@ export async function startSignInApproval(
       sendCount: 0,
       lastSentAt: null,
     }).returning({ id: signInApprovals.id });
-    const reservation = recipient ? await reserveSend(transaction, row.id, userId, now) : null;
     const limited = recipient
-      ? reservation === null
+      ? !(await reserveSend(transaction, row.id, userId, now))
       : await sendsInWindow(userId, now, transaction) >= APPROVAL_SENDS_PER_HOUR;
-    return { recipient, row, limited, reservation };
+    return { recipient, row, limited };
   });
 
-  /* An account that vanished between the password check and this read is a
-     send that did not happen, never a send that silently counted: `sent`
-     decides whether the hour's allowance is spent, so it has to mean "a mail
-     went out". */
-  const sendError = limited
+  const sendError: ApprovalSendError | null = limited
     ? null
     : recipient
       ? await mailApproval(recipient, token, facts, now, expiresAt, options)
       : "unknown";
-  const sent = !limited && sendError === null;
 
-  if (sent) {
+  if (!limited && sendError === null) {
     await db.update(signInApprovals)
       .set({ sendCount: 1, lastSentAt: now })
       .where(eq(signInApprovals.id, row.id));
-  } else if (reservation) {
-    await releaseSend(reservation, userId);
   }
 
   return {
@@ -846,11 +827,14 @@ export async function resendSignInApproval(
 
   /* Check-then-act as one locked step (#1891): the row is read again under
      the per-user lock (#1869, #1882), and the minute check, the hourly
-     reservation and the record of this send -- its time and the digest of
-     the link about to be mailed -- commit together before the mail goes.
+     reservation and this send's time commit together before the mail goes.
      A resend queued behind this one reads the send time written here and
-     answers too_soon, so one mail goes and its link is the live one. The
-     lock is not held across the network send. */
+     answers too_soon, so one mail goes. The lock is not held across the
+     network send.
+     The new link is staged, not switched (#1879 ruling, note 64435): the row
+     keeps the old digest while the mail is in flight, so the old link still
+     reads open and approves, and a process that stops before the send leaves
+     a working link rather than a dead one. */
   const reserved = await db.transaction(async (transaction) => {
     await lockUser(transaction, found.userId);
     const [row] = await transaction
@@ -865,41 +849,37 @@ export async function resendSignInApproval(
     if (await sendsInWindow(row.userId, now, transaction) >= APPROVAL_SENDS_PER_HOUR) return "limited" as const;
     const recipient = await readRecipient(row.userId, transaction);
     if (!recipient) return "unknown" as const;
-    const reservation = await reserveSend(transaction, row.id, row.userId, now);
-    if (!reservation) return "limited" as const;
+    if (!(await reserveSend(transaction, row.id, row.userId, now))) return "limited" as const;
     await transaction
       .update(signInApprovals)
-      .set({ tokenHash, lastSentAt: now })
+      .set({ lastSentAt: now })
       .where(eq(signInApprovals.id, row.id));
-    const restore: ResendRestore = {
-      approvalId: row.id,
-      tokenHash,
-      previousTokenHash: row.tokenHash,
-      previousLastSentAt: row.lastSentAt,
-    };
-    return { state: "reserved", row, recipient, reservation, restore } as const;
+    return { state: "reserved", row, recipient } as const;
   });
   if (reserved === "limited") return { state: "limited" };
   if (reserved === "unknown") return { state: "unknown" };
   if (reserved.state === "too_soon") return reserved;
-  const { row, recipient, reservation, restore } = reserved;
+  const { row, recipient } = reserved;
 
   let sendError: ApprovalSendError | null;
   try {
     sendError = await mailApproval(recipient, token, row, row.createdAt, row.expiresAt, options);
   } catch (error) {
-    await releaseSend(reservation, row.userId, restore);
+    await restoreSendTime(row.userId, row.id, now, row.lastSentAt);
     throw error;
   }
   if (sendError === null) {
+    /* The mail is in the post: switch the row to its link. Only while the row
+       still carries the digest read under the lock, so a row cancelled or
+       rewritten meanwhile (#1898) is left as it is. */
     await db
       .update(signInApprovals)
-      .set({ sendCount: sql`${signInApprovals.sendCount} + 1` })
-      .where(eq(signInApprovals.id, row.id));
+      .set({ tokenHash, sendCount: sql`${signInApprovals.sendCount} + 1` })
+      .where(and(eq(signInApprovals.id, row.id), eq(signInApprovals.tokenHash, row.tokenHash)));
   } else {
-    /* The new link never arrived, so the old one is put back: a failed
-       resend never leaves the reader with no working link. */
-    await releaseSend(reservation, row.userId, restore);
+    /* The new link never arrived and the old one was never replaced: only
+       the send time goes back. The count row stays (#1879). */
+    await restoreSendTime(row.userId, row.id, now, row.lastSentAt);
   }
 
   return {

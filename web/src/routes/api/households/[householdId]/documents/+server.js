@@ -46,6 +46,7 @@ export const POST = write(async (event, session) => {
     householdId,
     itemId: itemIdResult.data.toLowerCase(),
     staged: true,
+    enforceStagedLimit: true,
     filename,
     body: event.request.body,
     declaredBytes,
