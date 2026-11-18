@@ -38,7 +38,7 @@ import { visibleText } from "../support/mail-card";
 import { sealedHash } from "./support/imap-attachment-seed";
 
 /** Faults the review-findings tests switch on; off unless a test sets them. */
-const faults = vi.hoisted(() => ({ throwAfterBind: false, throwBeforeBind: false, readsBroken: false, documentReadsBroken: false, failBindLock: false, reads: [] as string[], flaggedCleanupReadFails: false,
+const faults = vi.hoisted(() => ({ refuseUploadBeforeReading: false, openedStreams: [] as Array<{ destroyed: boolean }>, throwAfterBind: false, throwBeforeBind: false, readsBroken: false, documentReadsBroken: false, failBindLock: false, reads: [] as string[], flaggedCleanupReadFails: false,
   /* #1832: holds the first matching call so a test can reclaim the claim while that attempt is still running. */
   holdUpsert: null as null | { reached: () => void; release: Promise<void> },
   holdAfterUpload: null as null | { documentId: string; reached: () => void; release: Promise<void> } }));
@@ -155,6 +155,8 @@ vi.mock("@/server/document-repository", async (importOriginal) => {
   return {
     ...actual,
     uploadItemDocument: async (...args: Parameters<typeof actual.uploadItemDocument>) => {
+      /* X-F1: refused (the approver lost access) before a byte of the body is read. */
+      if (faults.refuseUploadBeforeReading) throw new Error("synthetic refusal before the body is read");
       const result = await actual.uploadItemDocument(...args);
       const hold = faults.holdAfterUpload;
       if (hold && args[0].documentId === hold.documentId) {
@@ -163,6 +165,19 @@ vi.mock("@/server/document-repository", async (importOriginal) => {
         await hold.release;
       }
       return result;
+    },
+  };
+});
+
+/* X-F1: every read stream the approval opens, so a test can see which were closed. */
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return {
+    ...actual,
+    createReadStream: (...args: Parameters<typeof actual.createReadStream>) => {
+      const stream = actual.createReadStream(...args);
+      faults.openedStreams.push(stream);
+      return stream;
     },
   };
 });
@@ -183,7 +198,7 @@ beforeEach(() => { scan.mockReset(); scan.mockResolvedValue({ status: "clean" })
 afterEach(() => { vi.restoreAllMocks(); });
 afterAll(async () => { await cleanupIntegrationEnvironment(); });
 
-async function seedMail(fixture: IntegrationFixture, labels: string[]) {
+async function seedMail(fixture: IntegrationFixture, labels: string[], padBytes = 0) {
   const receiptId = randomUUID();
   await getDb().insert(imapIngestionMessages).values({
     id: receiptId, mailbox: "private", mailboxUidValidity: `aon-${receiptId.slice(0, 8)}`, mailboxUid: 1,
@@ -193,7 +208,9 @@ async function seedMail(fixture: IntegrationFixture, labels: string[]) {
   });
   const attachments: Array<{ id: string; storageKey: string; bytes: Uint8Array }> = [];
   for (const label of labels) {
-    const bytes = syntheticPdf(label);
+    const base = syntheticPdf(label);
+    /* A trailing PDF comment: a larger file, so a stream over it is not read to its end by the first pull. */
+    const bytes = padBytes > 0 ? Buffer.concat([base, Buffer.from(`\n%${"x".repeat(padBytes)}\n`)]) : base;
     const held = await scanAndHoldImapAttachment({
       bytes, filename: `${label}.pdf`, declaredMediaType: "application/pdf",
       recipientUserId: fixture.users.member.id, receiptId,
@@ -275,6 +292,24 @@ describe("mail approval is all or nothing (#1398)", () => {
 
       expect(outcome.error ?? outcome.result, "the approval did not report success").not.toMatchObject({ outcome: expect.stringMatching(/^(approved|partial_success)$/u) });
       await expectNothingChanged(fixture, receiptId, attachments, before);
+    });
+  }, 60_000);
+
+  it("X-F1: an upload refused before its body is read closes the held attachment's file stream", async () => {
+    const fixture = await createIntegrationFixture("aon-stream-closed");
+    await withRequiredScanMode(async () => {
+      const { receiptId, attachments } = await seedMail(fixture, ["aon-stream"], 2 * 1024 * 1024);
+      faults.openedStreams.length = 0;
+      faults.refuseUploadBeforeReading = true;
+      try {
+        await attempt(fixture.users.member.id, requestFor(fixture, receiptId, attachments.map(({ id }) => id)));
+      } finally {
+        faults.refuseUploadBeforeReading = false;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
+      expect(faults.openedStreams.length, "the approval opened the held file").toBeGreaterThan(0);
+      expect(faults.openedStreams.filter((stream) => !stream.destroyed), "streams left open").toHaveLength(0);
     });
   }, 60_000);
 

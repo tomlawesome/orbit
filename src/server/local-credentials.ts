@@ -125,6 +125,24 @@ export interface CreateLocalUserOptions {
   createdByUserId?: string;
 }
 
+/** The refusal for an address another account already holds (ADR-0023 §3). */
+function linkRequiredRefusal(): AuthError {
+  return new AuthError(
+    "link_required",
+    "An Orbit account already uses this email address. Sign in to it and link this provider from settings.",
+    403,
+  );
+}
+
+/** True for a Postgres unique-constraint violation (SQLSTATE 23505), bare or wrapped by the driver layer. */
+function isUniqueViolation(error: unknown): boolean {
+  for (let current: unknown = error, depth = 0; current && depth < 3; depth += 1) {
+    if ((current as { code?: unknown }).code === "23505") return true;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
 const emailSchema = z.email().max(MAX_EMAIL_LENGTH);
 
 /**
@@ -179,31 +197,34 @@ export async function createLocalUser(
         .from(users)
         .where(eq(users.emailIndex, emailIndex))
         .limit(1);
-    if (taken) {
-      throw new AuthError(
-        "link_required",
-        "An Orbit account already uses this email address. Sign in to it and link this provider from settings.",
-        403,
-      );
-    }
+    if (taken) throw linkRequiredRefusal();
 
     /* Minted here rather than by the database, because the envelope binds the
        address to its own row id: the ciphertext cannot be written before the
        id it belongs to is known. */
     const userId = randomUUID();
-    const [created] = await transaction
-      .insert(users)
-      .values({
-        id: userId,
-        emailEnc: cipher.encryptText("users.email", userId, email),
-        emailIndex,
-        /* Nothing has verified this address: no provider asserted it and Orbit
-           sends no confirmation mail (ADR-0023 rejects email-based flows). */
-        emailVerified: false,
-        displayName,
-        isInstanceAdmin: options.bootstrap === true,
-      })
-      .returning({ id: users.id, displayName: users.displayName });
+    let created: { id: string; displayName: string };
+    try {
+      [created] = await transaction
+        .insert(users)
+        .values({
+          id: userId,
+          emailEnc: cipher.encryptText("users.email", userId, email),
+          emailIndex,
+          /* Nothing has verified this address: no provider asserted it and Orbit
+             sends no confirmation mail (ADR-0023 rejects email-based flows). */
+          emailVerified: false,
+          displayName,
+          isInstanceAdmin: options.bootstrap === true,
+        })
+        .returning({ id: users.id, displayName: users.displayName });
+    } catch (error) {
+      /* Two creations racing for one address both pass the check above; the
+         unique blind index lets one through and refuses the other, which gets
+         the same answer as the check (#1604 ST-16). */
+      if (isUniqueViolation(error)) throw linkRequiredRefusal();
+      throw error;
+    }
 
     await transaction.insert(userPreferences).values({ userId: created.id }).onConflictDoNothing();
     await recordNewAccountSeenVersion(created.id, process.env.ORBIT_VERSION, transaction);
@@ -262,6 +283,10 @@ export type CredentialVerdict =
  * sign in, with no migration.
  */
 export async function verifyCredential(email: string, password: string): Promise<CredentialVerdict> {
+  /* No stored address is this long (emailSchema), so there is nothing to look
+     up: skip the blind-index hash and the query, and take the same no-account
+     path as an unknown address (#1604 PR-6/P-26). */
+  if (email.trim().length > MAX_EMAIL_LENGTH) return verifyWithLookup(async () => undefined, password);
   return verifyWithLookup(() => findAccountByEmail(email), password);
 }
 
@@ -1423,9 +1448,15 @@ export async function removeProviderLinks(
        APP_URL, cannot be unusable here: Orbit does not start without an
        https one, src/lib/env.ts.) */
     if (!(await outgoingMailReady(options.mailer))) {
+      /* Sending can be set up while its password cannot be read (key missing
+         or wrong): that is not "not set up", and the fix is different. */
+      const { sendingConfigured } = await import("@/server/mail-in/sending-settings");
+      const locked = await sendingConfigured().catch(() => false);
       throw new AppError(
         "mail_not_ready",
-        "Not removed: outgoing mail is not set up, so members left without a password could not be sent a setup link",
+        locked
+          ? "Not removed: outgoing mail is set up but its password cannot be read right now, so members left without a password could not be sent a setup link"
+          : "Not removed: outgoing mail is not set up, so members left without a password could not be sent a setup link",
         409,
       );
     }

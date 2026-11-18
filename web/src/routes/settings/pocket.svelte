@@ -13,12 +13,12 @@
   import { watchTour } from "$lib/tour/watch.js";
   import { alertsSupported, syncAlerts } from "$lib/push/alerts.js";
   import {
-    ROTATE_UNCHANGED, ROTATE_UNKNOWN, addSender, dismissReceipt, readRelay, readSentLately, removeSender, rotateRelay, rotateRelayReconciled,
+    ROTATE_LIMITED, ROTATE_NOT_CONFIRMED, ROTATE_UNCHANGED, ROTATE_UNKNOWN, WorkspaceError, addSender, dismissReceipt, readRelay, readSentLately, removeSender, rotateRelay, rotateRelayReconciled,
     sendSenderCheck, wordsOf,
   } from "$lib/data/workspace.js";
   import { ADMIN_PAUSED_WORDS, copyRelayAddress, relayAddressLabel } from "$lib/relay-address.js";
   import {
-    alreadyCheckedWords, checkRow, LINK_CHECKED, LINK_FAILED, refusalWords, SENDING, SENT_WAKE, sentWords, withLearnt,
+    alreadyCheckedWords, checkRow, linkCheckedWords, LINK_FAILED, refusalWords, SENDING, SENT_WAKE, sentWords, withLearnt,
     ADD, ADD_PLACEHOLDER, AT_LIMIT, atLimit, extraRow, extrasOf, NOT_ADDED, NOT_REMOVED, REMOVE, SEND_CHECK, removeArmedWords, withCheckSent,
   } from "./mail/sender.js";
   import {
@@ -66,6 +66,7 @@
    *   view: SettingsView | null,
    *   methods: Methods | null,
    *   sessions: Sessions,
+   *   sessionsLoaded?: boolean,
    *   active: string,
    *   textSize: string,
    *   labelDays: number,
@@ -97,6 +98,7 @@
     view = $bindable(),
     methods = $bindable(),
     sessions = $bindable(),
+    sessionsLoaded = true,
     /* The pack and the text size are the desk page's, picked through it (#1353). */
     active,
     textSize,
@@ -129,7 +131,7 @@
   } = $props();
 
   /** #1444: this session came through the provider, so signing out reaches it; a password session has nothing there to end. */
-  const providerSession = $derived(providerOffered && sessions.some((row) => row.current && row.viaProvider));
+  const providerSession = $derived(providerOffered && (!sessionsLoaded || sessions.some((row) => row.current && row.viaProvider)));
 
   /* ── reminders ────────────────────────────────────────────────────────── */
   /* #1509: the Mail card, `your relay` first, chosen when the reader came
@@ -368,14 +370,15 @@
         const outcome = await rotateRelayReconciled(relay?.address ?? "");
         if (outcome.relay) relayShared.rotated = outcome.relay;
         if (outcome.rotated) wake("new address · the old one collects for 14 more days");
-        else await refuse(outcome.rotated === null ? ROTATE_UNKNOWN : ROTATE_UNCHANGED);
+        else await refuse(outcome.rotated === null ? ROTATE_UNKNOWN : ROTATE_NOT_CONFIRMED);
       } else {
         relayShared.rotated = await rotateRelay(action);
         wake(action === "pause" ? "ingest paused · mail is held until you resume" : "ingest resumed");
       }
-    } catch {
+    } catch (error) {
+      /* #1848 W-R1: over the limits says so; any other refusal is the plain one. */
       await refuse(action === "rotate"
-        ? ROTATE_UNCHANGED
+        ? error instanceof WorkspaceError && error.code === "relay_rotation_limited" ? ROTATE_LIMITED : ROTATE_UNCHANGED
         : `not ${action === "pause" ? "paused" : "resumed"} — Orbit could not reach your relay`);
     } finally {
       working = null;
@@ -400,14 +403,14 @@
   $effect(() => {
     if (landed || !relay) return;
     landed = true;
-    if (live && landing === "verified") { wake(LINK_CHECKED); relaySaid = LINK_CHECKED; }
+    if (live && landing === "verified") { const words = linkCheckedWords(relay); wake(words); relaySaid = words; }
     if (live && landing === "unverified") refuse(LINK_FAILED);
   });
   /* #1810 W-F7: the landing's words belong to the arrival. Leaving the tab
      spends them, so coming back does not say them again. */
   $effect(() => {
     if (tab === "relay") return;
-    if (relaySaid === LINK_CHECKED) relaySaid = "";
+    if (relaySaid.startsWith("address checked")) relaySaid = "";
     if (relayProblem === LINK_FAILED) relayProblem = null;
   });
   onMount(() => {

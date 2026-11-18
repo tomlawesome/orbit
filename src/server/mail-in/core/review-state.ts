@@ -39,7 +39,7 @@ const attachmentTransferFailureCodes = new Set([
 ]);
 
 /**
- * The nine reasons a member can be given for a failed mail-in receipt,
+ * The ten reasons a member can be given for a failed mail-in receipt,
  * folded from the ~25 stored `failure_code` values (#1143). The member
  * needs "what kind of thing went wrong", not the worker's step; the raw
  * `failure_code` stays on the row for support.
@@ -51,6 +51,7 @@ export type FailureReason =
   | "scanner_off"
   | "not_kept"
   | "interrupted"
+  | "check_unavailable"
   | "wrong_recipient"
   | "account_disabled"
   | "unknown";
@@ -93,8 +94,8 @@ const failureReasonByCode: Record<string, FailureReason> = {
   sender_too_large: "too_large",
   // The item exists; only finishing it was cut short (#1568).
   approval_interrupted: "interrupted",
-  // The scanner answered clean; the step that did not finish is the open check.
-  structure_check_unavailable: "interrupted",
+  // The scanner answered clean; the document check never completed, which is not an approval cut short.
+  structure_check_unavailable: "check_unavailable",
   recipient_mismatch: "wrong_recipient",
   account_disabled: "account_disabled",
 };

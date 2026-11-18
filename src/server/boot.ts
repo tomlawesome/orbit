@@ -9,10 +9,10 @@
 const SCANNER_STARTUP_WINDOW_MS = 180_000;
 const SCANNER_READINESS_RETRY_INTERVAL_MS = 5_000;
 /** How long the claim notice waits for the start-up reports: well past a healthy answer, and a third of the scanner ping's 30 s limit, so a hung report delays the link, never withholds it (#1450). */
-const STARTUP_REPORTS_WAIT_MS = 10_000;
+export const STARTUP_REPORTS_WAIT_MS = 10_000;
 
 /** Resolves when every report has settled or `waitMs` has passed, whichever is first; never rejects. */
-async function settleWithin(reports: Promise<unknown>[], waitMs: number): Promise<void> {
+export async function settleWithin(reports: Promise<unknown>[], waitMs: number): Promise<void> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const bound = new Promise<void>((resolve) => {
     timer = setTimeout(resolve, waitMs);

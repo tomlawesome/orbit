@@ -407,12 +407,24 @@
   /**
    * A search result closes the search and opens its row (§2.1), drawn for
    * it if the manifest does not list it (openRow).
+   *
+   * #1604 W-R9: a row for an item deleted elsewhere (an orphan listed from a
+   * cached paper, or stale household data) has nothing to open. The sheet
+   * stays closed, one polite wake says so, and home and the papers are read
+   * again: the row drops out because its data was re-read, not by a special
+   * removal. A failed re-read adds nothing here.
    * @param {string} id
+   * @param {string} [title] the title the row showed
    */
-  async function openResult(id) {
+  async function openResult(id, title = "") {
     sheetOpen = false;
     await tick();
-    await openRow(id, { focus: true });
+    if (await openRow(id, { focus: true })) return;
+    wake(title ? `“${title}” is no longer in your orbit` : "that item is no longer in your orbit");
+    // Home first, so the papers are read against the household it returns.
+    // Neither failure adds a word here (the re-read says its own).
+    await Promise.resolve(onchanged?.()).catch(() => {});
+    await rereadPapers().catch(() => {});
   }
 
   /* Arriving on an item's address, `/home?item=<id>` (`copy link`, the
@@ -1060,7 +1072,7 @@
       {#each results.items as one (one.id)}
         <Row title={one.title} meta={[one.section, cost(one)].filter(Boolean).join(" · ")}
              trail={tlabel(one)} trailSub={one.dueDate ? dayMonth(one.dueDate) : ""} trailTone="var({BAND_VAR[one.band]})"
-             onactivate={() => openResult(one.id)}>
+             onactivate={() => openResult(one.id, one.title)}>
           {#snippet mark()}<span class="pk-dot" style:background="var({BAND_VAR[one.band]})"></span>{/snippet}
         </Row>
       {/each}
@@ -1074,7 +1086,7 @@
       </Row>
     {:else}
       {#each foundItems as one (one.id)}
-        <Row title={one.title} meta={costLabel(one)} onactivate={() => openResult(one.id)}>
+        <Row title={one.title} meta={costLabel(one)} onactivate={() => openResult(one.id, one.title)}>
           {#snippet mark()}<span class="pk-dot" style:background="var({BAND_VAR[one.band] ?? "--ink-faint"})"></span>{/snippet}
         </Row>
       {/each}

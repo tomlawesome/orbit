@@ -403,7 +403,7 @@ variables:
   # 34555 (cosign v3.1.3, docker 29.9.0 CLI), 2026-10-10.
   # Current: pipeline 2867, job publish_signing 38298 (cosign v3.1.4,
   # docker 29.9.2 CLI), 2026-10-22.
-  ORBIT_SIGNING_IMAGE: registry.tomlawson.io/ai/orbit-base-image/signing@sha256:21dad4f1976d1118e1a142b82bebc7b7eaf76f242f39edb14790543c3c2661f3
+  ORBIT_SIGNING_IMAGE: registry.tomlawson.io/ai/orbit-base-image/signing@sha256:53e95636ca3d43654b432bbc962198f4bfe61d005a8c42d8e890db15835941ec
   # Where `build_image` pulls Orbit's base image from (#1101): this GitLab's own
   # registry, ai/orbit-base-image, instead of GHCR, so a GHCR outage cannot fail
   # the build. Passed as the Dockerfile's BASE_IMAGE_REGISTRY build arg, whose
@@ -1156,6 +1156,63 @@ variables:
     su node -s /bin/bash -c "cd '$CI_PROJECT_DIR' && $1"
   }
 
+# --- release readiness ---------------------------------------------------------
+
+# A promotion merge request: `dev` into `preview`, or `preview` into `main`
+# (#1860). The same shape as the back-merge template's test, the other way
+# round; a hotfix into `main` and the back-merges are not promotions.
+.promotion_mr: &promotion_mr
+  if: $CI_PIPELINE_SOURCE == "merge_request_event" && (($CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == "dev" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "preview") || ($CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == "preview" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"))
+
+# Release readiness (#1860, owner 2026-11-16): first on every promotion merge
+# request, and everything else waits for it: `classify`, which has no `needs:`,
+# waits for it by stage, every job rooted at `classify` waits through it, and
+# the other jobs with no `needs:` wait by stage too. The three cheap static
+# checks (gitleaks, private-details, flake_check) keep `needs: []` and start
+# beside it (decided on #1860: under a minute each). Anything else that would
+# start beside it fails scripts/ci/release-readiness-ci.test.mjs. It runs every check scripts/release-readiness.mjs knows in one go and
+# ends with the list of every failure, so nothing long runs on a promotion that
+# was never ready (v0.3.9 lost two days to checks that only ran at the end).
+# The same script runs locally before the promotion is opened
+# (docs/releasing.md). On no other pipeline: its rule list ends in `never`,
+# and the `needs:` on it are optional, so those pipelines are unchanged.
+#
+# It reads earlier pipelines for the slow-gates check with the read-only
+# ORBIT_REUSE_TOKEN alone, as the reuse lookup does (#898), so it declares the
+# `ci-read-tokens` environment (owner 50a on #1860). It reads GHCR and the
+# handoff repository anonymously: both are public, and the handoff
+# repository's name comes from .github/workflows/publish-from-gitlab.yml.
+release_readiness:
+  stage: test
+  extends: .dind_service
+  image:
+    name: $NODE_IMAGE
+    pull_policy: if-not-present
+  timeout: 20m
+  # ORBIT_REUSE_TOKEN is scoped to this environment (owner, 2026-10-28; 50a on
+  # #1860). `prepare` records no deployment.
+  environment:
+    name: ci-read-tokens
+    action: prepare
+  rules:
+    - !reference [.dev-landing, job_rule]
+    - !reference [.backmerge-skip, job_rule]
+    - *batch_intake_skip
+    - *promotion_mr
+    - when: never
+  needs: []
+  variables:
+    # Full history: the record's signature is read from the last commit that
+    # touched it, and the containment check walks the target branch.
+    GIT_DEPTH: 0
+  script:
+    - *docker_cli
+    - |
+      set -eu
+      git fetch --quiet --tags origin \
+        "+refs/heads/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}:refs/remotes/origin/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}"
+      node scripts/release-readiness.mjs --target "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" --remote origin
+
 # --- classify ----------------------------------------------------------------
 
 # Selects the cheapest lane that still exercises every changed boundary, using
@@ -1196,6 +1253,9 @@ classify:
     - *nightly_browsers
     - *not_scheduled
     - when: on_success
+  # No `needs:`, on purpose: by stage order this waits for `release_readiness`
+  # (stage `test`) on a promotion merge request (#1860), and everything rooted
+  # here waits through it.
   variables:
     # Full history: the comparison below needs the base commit, and the
     # classifier reads two lockfile snapshots out of Git.
@@ -1345,12 +1405,12 @@ classify:
     # the file above so they reach the pipeline in the same dotenv report. The
     # tags are fetched because the checkout carries none. With no tags every
     # slot is empty and every cell would SKIP, so on the pipelines that run the
-    # cells (the merge request into preview, owner 59a, and a push to
-    # hotfix/*) a failed fetch fails this job rather than letting the gate pass
-    # untested; elsewhere it is best effort.
+    # cells (the merge requests into preview, owner 59a, and into dev, #1752,
+    # and a push to hotfix/*) a failed fetch fails this job rather than letting
+    # the gate pass untested; elsewhere it is best effort.
     - |
       set -eu
-      if { [ "${CI_PIPELINE_SOURCE:-}" = "merge_request_event" ] && [ "${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-}" = "preview" ]; } \
+      if { [ "${CI_PIPELINE_SOURCE:-}" = "merge_request_event" ] && case "${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-}" in preview | dev) true ;; *) false ;; esac; } \
         || { [ "${CI_PIPELINE_SOURCE:-}" = "push" ] && case "${CI_COMMIT_BRANCH:-}" in hotfix/*) true ;; *) false ;; esac; }; then
         git fetch --quiet --tags origin || git fetch --quiet --tags origin
       else
@@ -1464,12 +1524,12 @@ classify:
 fast:
   stage: fast
   extends: .node
-  # A hang detector, not a speed budget (#880, #1620). Set at 1.5x the 13m05s
-  # slowest green run of 2026-11-01, when this job also ran typecheck, lint and
-  # the web build (~4m); those moved to `fast_checks` (#1831), so 20m is now
-  # about 2x its Vitest share (~9m) and is kept until its runs are measured.
-  # This job runs test-backend.sh's `tests` phase.
-  timeout: 20m
+  # Still a hang detector, not a speed budget (#880, #1620). Measured: pipeline
+  # 4308 (2026-11-16) ran about 20m of wall time across 160 files on a
+  # changed-files run that touched repair.sh and install.sh, and hit the old
+  # 20m; 30m is about 1.5x that. Speeding up the slow repair and install tests
+  # is #1861. This job runs test-backend.sh's `tests` phase.
+  timeout: 30m
   rules:
     - !reference [.dev-landing, job_rule]
     - !reference [.backmerge-skip, job_rule]
@@ -1610,8 +1670,9 @@ fast_checks:
       # The built web application, so the rig jobs serve these bytes instead of
       # building their own copy (#1061, ADR-0028 slice 1). About 7 MB. A
       # `fast_checks` that stood on an earlier run leaves no web/build behind;
-      # that is safe rather than stale, because the rig's webServer checks the
-      # stamp and builds when there is nothing to serve.
+      # that is safe rather than stale, because the rig's webServer and
+      # `integration` (#1853) check the stamp and build when there is nothing
+      # to serve.
       - web/build/
       - ci-evidence/
     expire_in: 7 days
@@ -2777,6 +2838,10 @@ integration:
       # The document tests check and draw PDFs with the real poppler tools (#1436).
       command -v pdftoppm > /dev/null 2>&1 || { export DEBIAN_FRONTEND=noninteractive; apt-get update -qq && apt-get install -y -qq --no-install-recommends poppler-utils fonts-liberation; }
       pnpm install --frozen-lockfile
+      # Some tests serve web/build. fast_checks hands it over, but a reused
+      # fast_checks leaves none behind (#1853): build it when it is missing or
+      # not this checkout's, as the rig jobs do.
+      node scripts/web-build-stamp.mjs check || pnpm --filter orbit-web build
       export DATABASE_URL="postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}"
       # A per-run 256-bit hexadecimal secret, the rule the runtime applies
       # (#578). Test-only and thrown away with the job.
@@ -3847,15 +3912,47 @@ acceptance:
     expire_in: 7 days
     when: on_success
 
+# What an update depends on (#1752): the paths whose change starts the upgrade
+# cells on a merge request into `dev`. The union of the gate's updateRelevant
+# (scripts/ci/upgrade-cells-gate.mjs), UPGRADE_MATRIX_PATTERNS and LAUNCHER_PIN
+# (scripts/ci/upgrade-versions.mjs) and the cell's own files; a test fails when
+# they drift apart.
+.upgrade_cell_paths: &upgrade_cell_paths
+  - scripts/install.sh
+  - scripts/configure.sh
+  - scripts/installer-ui.sh
+  - scripts/configuration*.sh
+  - scripts/repair.sh
+  - scripts/get-orbit.sh
+  - scripts/update-and-start.sh
+  - scripts/container-entrypoint.sh
+  - .env-orbit.example
+  - docker-compose*.yml
+  - compose/**/*
+  - drizzle/**/*
+  - config/**/*
+  - src/db/migrations/**/*
+  - src/lib/install-orchestrator.ts
+  - src/lib/install-orchestrator/**/*
+  - launcher/pin.json
+  - scripts/ci/upgrade-*
+  - scripts/ci/upgrade-shapes/**/*
+  - scripts/ci/start-installer-registry.sh
+  - scripts/ci/write-test-manifest.sh
+  - scripts/ci/checkout-launcher-source.sh
+  - tests/oidc/**/*
+
 # The upgrade matrix (#1647, wired by #1665; ADR-0040): can an existing install
 # be updated to the candidate? One cell per old release x configuration shape,
 # each a fresh install of the old release, a seed, the candidate's own
 # `install.sh --update`, and the assertions (scripts/ci/upgrade-cell.sh).
 # It runs on any merge request into `preview` (in practice the `dev` ->
 # `preview` promotion; owner 59a, which overrides #1546's quick-checks-only rule
-# for these two jobs) and on a push to `hotfix/*`; never on the `preview` push,
-# a schedule, `main` or a merge request into any other branch. On a merge
-# request into `preview` a new commit re-runs the
+# for these two jobs), on a push to `hotfix/*`, and on a merge request into
+# `dev` that changes a path in `.upgrade_cell_paths` (#1752, owner 126a), where
+# GitLab's `changes:` decides at pipeline creation and the gate answers `run`.
+# Never on the `preview` push, a schedule, `main` or a merge request into any
+# other branch. On a merge request into `preview` a new commit re-runs the
 # cells only when it touches what updates depend on (owner 60a): `classify`
 # writes UPGRADE_CELLS=run|skip, and each job's first step honours a skip.
 #
@@ -3896,6 +3993,10 @@ upgrade_cell:
     - !reference [.dev-landing, job_rule]
     - !reference [.backmerge-skip, job_rule]
     - *batch_intake_skip
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "dev"
+      changes:
+        paths: *upgrade_cell_paths
+        compare_to: refs/heads/dev
     - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "preview"
     - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH =~ /^hotfix\//
     - when: never
@@ -3928,6 +4029,7 @@ upgrade_cell:
 # TestLive_UpdateExistingDeployment (ai/orbit-launcher#331, pinned in
 # launcher/pin.json since v0.4.5). The launcher refuses root, so the whole cell
 # runs as orbit-ci, set up the way launcher_install_compat does it (#1560).
+# Promotion-only, not on dev merge requests (#1752): build_launcher_branch's changes: list is narrower, so the cell could start with no launcher.
 upgrade_cell_launcher:
   stage: acceptance
   extends: .privileged_runner
@@ -4814,10 +4916,10 @@ sign_evidence:
     # this job's own checkout rather than read from the artifact.
     - job: record_image
       artifacts: true
-    # The SBOM, whose sha256 the attestation signs as sbomSha256 (#1824): the
-    # SBOM itself is not signed, so this is what makes a swapped one on the
-    # way to GitHub fail verification. handoff_to_github hands over the same
-    # artifact.
+    # The SBOM, attested itself as a second, spdxjson attestation over the
+    # same digest with the same key (D-S6 43a, #1848). It then travels inside
+    # the saved image layout, so a swapped one on the way to GitHub fails
+    # verification; nothing hands the file over separately.
     - job: supply_chain_image
       artifacts: true
   script:
@@ -4965,9 +5067,8 @@ handoff_to_github:
     # .sig is this job's artifact.
     - job: sign_evidence
       artifacts: true
-    # The SBOM.
-    - job: supply_chain_image
-      artifacts: true
+    # No supply_chain_image: the SBOM is an attestation sign_evidence made,
+    # carried in the saved layout (D-S6 43a).
     # The two launcher archives.
     - job: build_launcher
       artifacts: true
@@ -5008,10 +5109,13 @@ handoff_to_github:
       "$cosign" verify-attestation --local-image --key cosign.pub --type "$predicate_type" \
         --insecure-ignore-tlog=true "$ORBIT_HANDOFF_IMAGE_DIR" > /dev/null ||
         { echo "handoff_to_github: the saved image carries no attestation under cosign.pub; GitHub would refuse it" >&2; exit 1; }
+      # The SBOM travels the same way, as sign_evidence's spdxjson attestation.
+      "$cosign" verify-attestation --local-image --key cosign.pub --type spdxjson \
+        --insecure-ignore-tlog=true "$ORBIT_HANDOFF_IMAGE_DIR" > /dev/null ||
+        { echo "handoff_to_github: the saved image carries no SBOM (spdxjson) attestation under cosign.pub; GitHub would refuse it" >&2; exit 1; }
       tar -C "$ORBIT_HANDOFF_IMAGE_DIR" -cf "$ORBIT_HANDOFF_DIR/orbit-image.oci.tar" .
       for file in \
         .orbit-supply-chain/gitlab-tested-image.json \
-        .orbit-supply-chain/image.spdx.json \
         .orbit-supply-chain/orbit-release-manifest.json \
         .orbit-supply-chain/orbit-release-manifest.json.sig \
         .orbit-launcher-artifacts/orbit-launcher_linux_amd64.tar.gz \
@@ -5504,7 +5608,8 @@ install_bootstrap_latest:
 #                       evidence. Environment scope `ci-read-tokens` (owner,
 #                       2026-10-28), as are ORBIT_BASE_IMAGE_PULL_USER/_TOKEN:
 #                       only the jobs declaring that environment -- classify,
-#                       build_image, launch_timing -- receive them; scripts/gitlab-ci-lanes.test.mjs keeps that list
+#                       build_image, launch_timing, release_readiness (owner
+#                       50a, #1860) -- receive them; scripts/gitlab-ci-lanes.test.mjs keeps that list
 #                       and the readers equal.
 #                       Unset, every reuse verdict on a merge request
 #                       is "runs", the safe direction. The unset paths are covered by

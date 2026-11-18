@@ -21,7 +21,7 @@ import { createPageLoader } from "../support/svelte-page.mjs";
 
 const FALLBACK_NOTE = "your browser didn't say a currency we know — change it in settings";
 const READ_OFF = "Read off your browser. It moves to settings afterwards, and costs read by it.";
-const ZONE_OFF_LIST_NOTE = "your browser's zone isn't on this short list — change it in settings";
+const ZONE_OFF_LIST_NOTE = "your browser's zone isn't one of these — pick yours here";
 
 const loader = createPageLoader("create-currency-helper");
 beforeAll(() => loader.setup("lib/arrival/CreateSystem.svelte"));

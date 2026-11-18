@@ -97,6 +97,10 @@ if [[ "$run_tests" == true ]]; then
   # scripts that carry a copy and runs each.
   node --test scripts/read-environment-value.test.mjs
 
+  # Same reason (A-F4, #1789): blanks between "=" and the value, in repair.sh
+  # and end-maintenance.sh, read as Compose and the TypeScript reader do.
+  node --test scripts/read-environment-value-blanks.test.mjs
+
   # Same reason (#1099): uses node:test -- the per-directory coverage gate's own
   # tests. The gate itself runs after each coverage run below.
   node --test scripts/ci/coverage-floor-check.test.mjs

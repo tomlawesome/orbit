@@ -153,6 +153,7 @@ export const SENDER_CHECK_WORDS = {
   mailerRefused: "not sent — the mail server refused the message. try again later",
   unreadable: "not sent — Orbit cannot read the address it holds for you. ask your administrator",
   noAppUrl: "not sent — Orbit does not know its own web address. ask your administrator",
+  badAppUrl: "not sent — Orbit's web address is not a web (http or https) address. ask your administrator",
   lapsed: "not sent — that address was not checked within 14 days and is being removed. add it again",
 } as const;
 
@@ -683,7 +684,7 @@ function verificationUrl(appUrl: string, token: string): string {
     throw new AppError("app_url_not_configured", SENDER_CHECK_WORDS.noAppUrl, 503);
   }
   if (!url.hostname || !["http:", "https:"].includes(url.protocol)) {
-    throw new AppError("unsafe_input", "The application address is unavailable", 503);
+    throw new AppError("unsafe_input", SENDER_CHECK_WORDS.badAppUrl, 503);
   }
   const link = new URL("/api/settings/mail-relay/verify", url.origin);
   link.searchParams.set("token", token);
