@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AuthError } from "@/lib/auth/errors";
+import { AuthError, PasswordChangeRequiredError } from "@/lib/auth/errors";
 import { MetadataCipher } from "@/server/metadata/fields";
 
 /**
@@ -542,6 +542,15 @@ describe("a pending sign-in, from the password to the session (ADR-0027 §4-§6)
     expect(store.approvals[0].lastSentAt).not.toBeNull();
   });
 
+  it("reports a mail that cannot go as one bounded word, never the provider's message, and still opens the approval", async () => {
+    const failing = { async sendEmail() { throw new Error("relay mail.invalid said: bad password for ada"); } };
+    const pending = await startSignInApproval(USER, { userAgent: CHROME, clientAddress: "203.0.113.9" }, { mailer: failing });
+    expect(["smtp_unconfigured", "smtp_unavailable", "smtp_rejected", "unknown"]).toContain(pending.sendError);
+    expect(JSON.stringify(pending)).not.toContain("mail.invalid");
+    // The row exists, so the waiting tab can still be answered and a resend can follow.
+    expect(await collectSignInApproval(pending.claim)).toEqual({ state: "waiting" });
+  });
+
   it("holds the tab until somebody presses Approve, then hands it one session", async () => {
     const pending = await startSignInApproval(USER, { userAgent: CHROME, clientAddress: "203.0.113.9" }, { mailer });
     const token = tokenFromLatestMail();
@@ -574,6 +583,27 @@ describe("a pending sign-in, from the password to the session (ADR-0027 §4-§6)
       .resolves.toEqual({ state: "approved", userId: USER, session: minted });
     // Spent for good this time: a third attempt gets nothing.
     expect(await collectSignInApproval(pending.claim)).toEqual({ state: "unknown" });
+  });
+
+  it("hands the tab the change-password refusal for a marked password, leaving the approval spent (#1881)", async () => {
+    const pending = await startSignInApproval(USER, { userAgent: CHROME, clientAddress: "203.0.113.9" }, { mailer });
+    await decideSignInApproval(tokenFromLatestMail(), "approved");
+
+    const marked = new PasswordChangeRequiredError(USER, new Date(NINE.getTime() - 60_000));
+    const answer = await collectSignInApproval(pending.claim, async () => { throw marked; });
+    expect(answer).toEqual({ state: "password_change_required", refusal: marked });
+    /* Spent, not un-spent: the email factor is passed, so a second poll gets
+       nothing and the change-password hold is the only thing issued. */
+    expect(store.approvals[0].consumedAt).not.toBeNull();
+    expect(await collectSignInApproval(pending.claim)).toEqual({ state: "unknown" });
+  });
+
+  it("names the instance's host on the approval card, and none when APP_URL is missing or unreadable", async () => {
+    await startSignInApproval(USER, { userAgent: CHROME, clientAddress: "203.0.113.9" }, { mailer });
+    const token = tokenFromLatestMail();
+    expect((await readSignInApproval(token, { APP_URL: "https://orbit.example/path" }))?.instance).toBe("orbit.example");
+    expect((await readSignInApproval(token, { APP_URL: "not a url" }))?.instance).toBe("");
+    expect((await readSignInApproval(token, {}))?.instance).toBe("");
   });
 
   it("answers an account disabled mid-collection as unknown, not as a human denial, and leaves the same trail a refusal does (#1151 F12, S2)", async () => {

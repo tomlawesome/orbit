@@ -68,7 +68,10 @@ describe("install.sh: a folder on a dead mount cannot hang the host check (audit
       const label = "/orbit-dead-mount-label/orbit";
       update(label, { FAKE_TIMEOUT_LOG: join(logDir, "timeout.log") });
       const logged = readFileSync(join(logDir, "timeout.log"), "utf8");
-      expect(logged).toContain(label);
+      const lines = logged.split("\n");
+      // Both probes of the label run under timeout: the existence test and the entry (cd) probe.
+      expect(lines.some((line) => /\btest -e /u.test(line) && line.endsWith(label))).toBe(true);
+      expect(lines.some((line) => /\bsh -c .*\bcd\b/u.test(line) && line.endsWith(label))).toBe(true);
     } finally {
       rmSync(logDir, { recursive: true, force: true });
     }

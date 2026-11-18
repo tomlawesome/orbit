@@ -134,9 +134,9 @@ export async function issueSetupLink(userId, days, password, { card, lock, actor
  * setup link; the notice goes to the OLD address when it was readable, and
  * only a notice that failed to go is said, as its one bounded word.
  * @param {{ id: string, displayName: string }} person @param {string} email @param {string} password
- * @param {{ card: Card, actorHasPassword: boolean, landed: (answer: Awaited<ReturnType<typeof setUserAddress>>) => void, reread?: Reread, wake?: Wake }} on
+ * @param {{ card: Card, actorHasPassword: boolean, own?: boolean, landed: (answer: Awaited<ReturnType<typeof setUserAddress>>) => void, reread?: Reread, wake?: Wake }} on
  */
-export async function setAddress(person, email, password, { card, actorHasPassword, landed, reread, wake = quiet }) {
+export async function setAddress(person, email, password, { card, actorHasPassword, own = false, landed, reread, wake = quiet }) {
   if (card.busy) return;
   card.busy = true;
   card.problem = null;
@@ -144,6 +144,7 @@ export async function setAddress(person, email, password, { card, actorHasPasswo
   try {
     answer = await setUserAddress(person.id, {
       email: email.trim(),
+      ...(own ? { confirmEmail: email.trim() } : {}),
       ...(actorHasPassword ? { currentPassword: password } : {}),
     });
   } catch (error) {
@@ -153,8 +154,11 @@ export async function setAddress(person, email, password, { card, actorHasPasswo
   }
   try {
     landed(answer);
-    const now = `${person.displayName}'s address is now ${answer.user.email ?? email.trim()}`;
-    if (answer.noticeError) wake(`${now}, but the notice to the old address did not go: ${sendWords(answer.noticeError)}`, { failure: true });
+    const shown = answer.user.email ?? email.trim();
+    const now = own
+      ? `Your address is now ${shown}. Sign-in approvals now go there.`
+      : `${person.displayName}'s address is now ${shown}. Their pending setup links and sign-in approvals have stopped working; no link was sent.`;
+    if (answer.noticeError) wake(`${now.slice(0, -1)}, but the notice to the old address did not go: ${sendWords(answer.noticeError)}`, { failure: true });
     else wake(now);
     if (reread) await rereadAfterLanded(reread, unreadOn(card, wake));
   } finally {
