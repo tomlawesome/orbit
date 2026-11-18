@@ -67,6 +67,7 @@ export function setupWords(error) {
 export function addressWords(error) {
   const code = /** @type {{ code?: string }} */ (error)?.code;
   if (code === "recent_authentication_required") return "that isn't your current password — the address was not changed";
+  if (code === "address_confirmation_required") return "press set again to confirm your own address — the address was not changed";
   return setupWords(error);
 }
 

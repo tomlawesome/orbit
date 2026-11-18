@@ -3599,7 +3599,7 @@ export async function sendSetupLink(userId, options = {}) {
  * bounded word for why.
  *
  * @param {string} userId
- * @param {{ email: string, currentPassword?: string }} body
+ * @param {{ email: string, currentPassword?: string, confirmEmail?: string }} body
  * @returns {Promise<{ user: { id: string, displayName: string, email: ?string, metadataStatus?: { email?: string }, isInstanceAdmin: boolean, isPrimaryAdministrator: boolean, disabledAt: ?string }, noticeError: ?string }>}
  */
 export async function setUserAddress(userId, body) {
