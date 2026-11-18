@@ -68,8 +68,14 @@ export const SELECTORS = Object.freeze({
      *  address, status, ingest and the two acts — what "your relay address"
      *  points at. */
     card: "#p-mail",
+    /** The relay address row inside that card: the line's subject, #1895. */
+    address: "#p-mail .st-address",
   }),
 });
+
+/** The first control that found something, else the last (chapter 8's idiom).
+ *  @param {...import("../vocabulary.js").Control} controls */
+const at = (...controls) => controls.find((c) => c.els.length > 0) ?? controls[controls.length - 1];
 
 /** @type {import("./index.js").Chapter} */
 export default {
@@ -78,7 +84,7 @@ export default {
 
   /** @param {import("../vocabulary.js").FilmContext} ctx */
   async play(ctx) {
-    const { pocket, setScreen, veil, ctl, goto, unlight, callout, dropCallout } = ctx;
+    const { pocket, setScreen, veil, ctl, goto, unlight, callout, dropCallout, waitForReal } = ctx;
     const S = pocket ? SELECTORS.POCKET : SELECTORS.DESK;
 
     await setScreen("/home");
@@ -89,18 +95,32 @@ export default {
     veil(true);
     await setScreen("/settings");
 
+    /* The desk's Mail card sits inside the settings page's `{#if view}`, which
+       has not rendered when setScreen returns (#1895): wait for the real
+       element, as chapter 8 does, before ctl points at it. */
+    await waitForReal(S.card);
+    /* The pocket's card draws its address only once the relay read lands
+       (or its read-failed line, which has no address and falls back to the
+       card): wait for either, so ctl does not measure an empty card. */
+    if (pocket && "address" in S) await waitForReal(`${S.address}, ${S.card} .st-problem`);
+
     /* "Forward a bill to your relay address and Orbit reads a copy to import
        it." — the whole card, named once. Its second line, "Your mail is never
        redirected...", was the owner's cut (2026-10-01, #1174). */
     const card = ctl({ sel: S.card, radius: 16 });
-    await goto(card, { willPress: false });
+    /* On a phone the card fills the screen, so no line can sit beside it: the
+       line points at the address row it names (#1895), the card as fallback. */
+    const anchor = pocket
+      ? at(ctl({ sel: SELECTORS.POCKET.address, radius: 10, pad: 2, optional: true }), card)
+      : card;
+    await goto(anchor, { willPress: false });
     await callout(
       "Forward a bill to your relay address and Orbit reads a copy to import it.",
-      card,
+      anchor,
       "top",
       { mark: "relay-addr" },
     );
-    unlight(card);
+    unlight(anchor);
     dropCallout();
   },
 };
