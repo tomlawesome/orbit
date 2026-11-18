@@ -4509,18 +4509,32 @@ restore_transaction_fail() {
 # engine takes that lock with an exclusive create (O_EXCL) and reclaims it by
 # age; it never uses flock, so the age rule is the real protection and the
 # flock probe below adds none: it only notices some other process that
-# happens to hold flock on the file. The lock file is opened read-only, so it
-# is never created.
+# happens to hold flock on the file. #1897: the lock is opened read-write
+# only, never read-only, whoever runs repair, as the backup/restore lock is
+# (#1890): a FIFO swapped in after the checks opens at once instead of
+# waiting for a writer, and the descriptor must be the regular file stat saw.
+# A lock that will not open read-write, or that is not that file, leaves
+# $engine_lock_problem `unwritable`, and the caller refuses the action.
 readonly engine_lock_path=".orbit-engine.lock"
 readonly engine_lock_stale_seconds=600
+engine_lock_problem=""
 engine_lock_idle() {
-  local fd mtime now status=0
+  local fd="" mtime now status=0 before opened
+  engine_lock_problem=""
   [[ -e "$engine_lock_path" || -L "$engine_lock_path" ]] || return 0
   [[ ! -L "$engine_lock_path" && -f "$engine_lock_path" && -r "$engine_lock_path" ]] || return 1
   mtime="$(stat -c %Y -- "$engine_lock_path" 2>/dev/null)" && now="$(date +%s)" || return 1
   ((now - mtime > engine_lock_stale_seconds)) || return 1
   if command -v flock >/dev/null 2>&1; then
-    { exec {fd}<"$engine_lock_path"; } 2>/dev/null || return 1
+    before="$(stat -c '%d:%i %F' -- "$engine_lock_path" 2>/dev/null)" || before=""
+    { exec {fd}<>"$engine_lock_path"; } 2>/dev/null || fd=""
+    opened=""
+    [[ -z "$fd" ]] || opened="$(stat -L -c '%d:%i %F' -- "/dev/fd/$fd" 2>/dev/null)" || opened=""
+    if [[ -z "$fd" || -z "$before" || "$opened" != "$before" ]]; then
+      [[ -z "$fd" ]] || exec {fd}<&-
+      engine_lock_problem=unwritable
+      return 1
+    fi
     flock -n "$fd" >/dev/null 2>&1 || status=$?
     exec {fd}<&-
     [[ "$status" == 0 ]] || return 1
@@ -4529,9 +4543,27 @@ engine_lock_idle() {
 }
 
 # #1834 slice 4: the modes and types of a tree's entries, one line each,
-# sorted, for comparing a saved folder with its live one.
+# sorted, for comparing a saved folder with its live one. The pipeline fails
+# when any part of it does (pipefail, #1897). With `live`, as root, the
+# listing runs as the folder's owner (as_folder_owner: the owner-step
+# timeout), and root reads at most $owner_read_cap bytes of it under the
+# same limit plus the grace; more is refused (#1897 T1).
+# shellcheck disable=SC2016 # expanded by the child bash
+readonly tree_modes_script='set -o pipefail; cd -- "$1" && find . -mindepth 1 -printf "%P %y %m\n" | LC_ALL=C sort'
 restore_transaction_tree_modes() {
-  (cd -- "$1" && find . -mindepth 1 -printf '%P %y %m\n' | LC_ALL=C sort)
+  local out
+  if [[ "${2:-}" != live || "$(id -u)" != 0 ]]; then
+    (set -o pipefail && cd -- "$1" && find . -mindepth 1 -printf '%P %y %m\n' | LC_ALL=C sort)
+    return
+  fi
+  out="$(set -o pipefail
+    as_folder_owner --pipe bash -c "$tree_modes_script" tree-modes "$1" </dev/null |
+      LC_ALL=C timeout -k 1 "$((owner_step_timeout + owner_step_grace))" head -c "$((owner_read_cap + 1))")" || return 1
+  if (("$(LC_ALL=C; printf '%s' "${#out}")" > owner_read_cap)); then
+    printf "Orbit repair: %s: what the step tree-modes printed as the deployment folder's owner is too large (over 1 MiB), so it was not used.\n" "$owner_action" >&2 || true
+    return 1
+  fi
+  printf '%s\n' "$out"
 }
 
 # #1834 slice 4: true only when a restore would change nothing: the staging
@@ -4541,7 +4573,7 @@ restore_transaction_tree_modes() {
 # was created by the transaction, so it is not a match. Symlinks on either
 # side, or a symlinked parent, never match.
 restore_transaction_originals_match_live() {
-  local staging_root="$1" path backup_path saved=0 had_backup have_live backup_sum live_sum
+  local staging_root="$1" path backup_path saved=0 had_backup have_live backup_sum live_sum backup_modes live_modes
   for path in "${restore_transaction_paths[@]}"; do
     backup_path="$staging_root/rollback/original/$path"
     had_backup=0
@@ -4577,7 +4609,10 @@ restore_transaction_originals_match_live() {
       else
         diff -r --no-dereference -q -- "$backup_path" "$path" >/dev/null 2>&1 || return 1
       fi
-      [[ "$(restore_transaction_tree_modes "$backup_path")" == "$(restore_transaction_tree_modes "$path")" ]] || return 1
+      # #1897 T1: a listing that fails is "cannot check", never "same".
+      backup_modes="$(restore_transaction_tree_modes "$backup_path")" || return 1
+      live_modes="$(restore_transaction_tree_modes "$path" live)" || return 1
+      [[ "$backup_modes" == "$live_modes" ]] || return 1
     else
       return 1
     fi
@@ -4616,6 +4651,11 @@ do_restore_transaction() {
     as_folder_owner rm -rf -- "$staging_root" || return 1
     printf 'Orbit repair: removed %s; no install is running and restoring from it would change nothing (every saved file matches the live one).\n' "$staging_root" >&2
     return 0
+  fi
+  if [[ "$engine_lock_problem" == unwritable ]]; then
+    printf "Orbit repair: refusing restore-transaction; repair can't check whether an install is running: the engine lock at %s could not be opened for writing by the user running repair (repair opens it read-write so that the open can never wait, and only as the regular file it checked); make sure no install or update is running, then run repair as root or as the deployment folder's owner, or make the lock file writable for the user running repair.\n" \
+      "$engine_lock_path" >&2
+    return 1
   fi
 
   # install.sh writes $staging_root/committed the moment its own transaction

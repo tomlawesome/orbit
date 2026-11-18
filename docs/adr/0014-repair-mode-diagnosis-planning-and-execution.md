@@ -512,7 +512,7 @@ material keeps decision 6's rule, with one more exception (issue #1834, slice
 4): an `.orbit-install-staging.*` folder from a killed run is removed, even
 when marked committed, when no engine transaction is active (no
 `.orbit-engine.lock`, or a regular file older than the engine's ten-minute
-reclaim age) the lock file is readable and no other process holds it, at least one original was saved, and every saved file matches the live one exactly (no managed
+reclaim age) the lock file opens read-write and no other process holds it, at least one original was saved, and every saved file matches the live one exactly (no managed
 path live without a saved original, no differing mode). Otherwise the
 restore-transaction rules above apply unchanged.
 
@@ -528,3 +528,8 @@ repair (`umask 077`) never make; root already opened it read-write. Rejected:
 (b) a timeout-bounded read-only open, which races the swap; (c) a helper
 that opens with `O_NONBLOCK` (python3, perl or node), which repair.sh does
 not depend on today.
+The same holds for the engine's `.orbit-engine.lock` (#1897): repair opens
+it read-write only before it removes a staging folder, and a lock that
+will not open that way, or opens as anything but the regular file checked,
+is never taken as idle; restore-transaction refuses, saying the lock "could
+not be opened for writing".
