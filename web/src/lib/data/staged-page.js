@@ -47,10 +47,71 @@ function pageCountOf(response) {
   return Number.isSafeInteger(count) && count > 0 ? count : null;
 }
 
+/** How long a busy answer asks to wait when it names no whole number of seconds (#1446). */
+const BUSY_DEFAULT_SECONDS = 5;
+
+/**
+ * A 503 `document_preview_busy`'s Retry-After in whole seconds, clamped to
+ * 1-10; anything else the header says is the default (#1446).
+ * @param {Response} response
+ */
+function busySecondsOf(response) {
+  const raw = response.headers?.get("retry-after") ?? "";
+  if (!/^[0-9]+$/u.test(raw)) return BUSY_DEFAULT_SECONDS;
+  return Math.min(10, Math.max(1, Number(raw)));
+}
+
+/** The most of a 503's body that is read to find its code; a longer body is not the server's busy answer (#1446). */
+export const STAGED_PAGE_ERROR_BODY_MAX_BYTES = 16 * 1024;
+
+/**
+ * The 503's body as text, read through the stream up to the limit and then
+ * cancelled; null when the body is longer than the limit.
+ * @param {Response} response
+ * @returns {Promise<string | null>}
+ */
+async function boundedBodyText(response) {
+  const reader = response.body?.getReader();
+  if (!reader) return null;
+  const chunks = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > STAGED_PAGE_ERROR_BODY_MAX_BYTES) return null;
+      chunks.push(value);
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+  const bytes = new Uint8Array(total);
+  let at = 0;
+  for (const chunk of chunks) { bytes.set(chunk, at); at += chunk.byteLength; }
+  return new TextDecoder().decode(bytes);
+}
+
+/**
+ * Whether a 503 is the server's "busy, ask again shortly" (#1446): only its
+ * own code says so, in a body within the limit; any other 503 is a page that
+ * could not be drawn.
+ * @param {Response} response
+ */
+async function isBusyAnswer(response) {
+  try {
+    const text = response.body ? await boundedBodyText(response) : JSON.stringify(await response.json());
+    if (text === null) return false;
+    return JSON.parse(text)?.error?.code === "document_preview_busy";
+  } catch {
+    return false;
+  }
+}
+
 /**
  * @param {string} href
  * @param {AbortSignal} [signal]
- * @returns {Promise<{ kind: "page", url: string, pageCount: number | null } | { kind: "gone" } | { kind: "undrawable" }>}
+ * @returns {Promise<{ kind: "page", url: string, pageCount: number | null } | { kind: "gone" } | { kind: "undrawable" } | { kind: "busy", retryAfterSeconds: number }>}
  */
 export async function loadStagedPage(href, signal) {
   const deadline = AbortSignal.timeout(STAGED_PAGE_TIMEOUT_MS);
@@ -58,6 +119,7 @@ export async function loadStagedPage(href, signal) {
   try {
     const response = await fetch(href, { credentials: "same-origin", signal: combined });
     if (response.status === 404 || response.status === 410) return { kind: "gone" };
+    if (response.status === 503 && await isBusyAnswer(response)) return { kind: "busy", retryAfterSeconds: busySecondsOf(response) };
     if (!response.ok) return { kind: "undrawable" };
     const blob = await response.blob();
     return { kind: "page", url: URL.createObjectURL(blob), pageCount: pageCountOf(response) };

@@ -1,7 +1,8 @@
 <script>
   import { onMount } from "svelte";
-  import { beforeNavigate, goto } from "$app/navigation";
+  import { goto } from "$app/navigation";
   import { resolve } from "$app/paths";
+  import { anyUnsaved, holdUnsaved } from "$lib/unsaved.js";
   import "./create.css";
   import { mountCreate } from "./create.behaviour.js";
   import { mountConstellations } from "$lib/backdrops/constellations.js";
@@ -130,25 +131,21 @@
   /** @type {ReturnType<typeof mountCreate> | null} */
   let form = null;
 
-  /* A misclick on the light-dismiss stage below, a chrome link away, or any
-     other in-app navigation while the form holds something typed (#1151
-     W1-S1): no confirm sheet exists on the desk the way the pocket's own
-     form has one, so this is the browser's own confirm() — no new layout,
-     same "discard changes" question the pocket's sheet asks. */
-  beforeNavigate(({ cancel }) => {
-    if (form?.isDirty() && !confirm("Discard this entry? What you've typed will be lost.")) cancel();
-  });
+  /* In-app navigation while the form holds something typed (#1151 W1-S1) is
+     guarded once, by the root layout, through the unsaved registry (#1879
+     W-S1); the form registers itself on mount below. */
 
   /** Closing the tab or reloading: beforeNavigate never sees this, so the
       browser's own beforeunload prompt is the only honest warning left.
       @param {BeforeUnloadEvent} event */
   function onBeforeUnload(event) {
-    if (!form?.isDirty()) return;
+    if (!anyUnsaved()) return;
     event.preventDefault();
     event.returnValue = "";
   }
 
   onMount(() => {
+    const releaseUnsaved = holdUnsaved(() => form?.isDirty() ?? false, { visible: () => !isPocket() });
     form = mountCreate({
       documentReading,
       importance: { get: () => importance, setColour: (colour) => { importanceColour = colour; } },
@@ -178,6 +175,7 @@
     });
     return () => {
       disposed = true;
+      releaseUnsaved();
       form?.teardown();
       form = null;
       backdropTeardown();

@@ -3,6 +3,7 @@ import { getAuthConfig } from "@/lib/env";
 import { databaseConnectionString } from "@/db";
 import { readRuntimeSecret } from "@/lib/runtime-secret";
 import { documentKeyProblem, getDocumentConfig } from "@/server/documents/config";
+import { getNotificationWorkerSettings } from "@/server/notification-worker";
 import { setConfigurationProblems } from "@/lib/configuration-problems";
 import {
   logFormats,
@@ -168,7 +169,21 @@ export function validateStartupConfiguration(environment: NodeJS.ProcessEnv = pr
     issues.push({ field: "alerts", code: "configuration_optional" });
   }
   /* Outgoing mail is the Mail card's sending row (#1629); a leftover SMTP_*
-     line is only read once, by the import, so it is not checked here. */
+     line is only read once, by the import, so it is not checked here. The
+     worker's own settings (WORKER_POLL_SECONDS, NOTIFICATION_MAX_ATTEMPTS)
+     still are (#1879 A-D1): getNotificationWorkerSettings blanks the SMTP_*
+     lines, and VAPID is blanked because it has its own check below. */
+  try {
+    getNotificationWorkerSettings({
+      ...environment,
+      VAPID_SUBJECT: undefined,
+      VAPID_PUBLIC_KEY: undefined,
+      VAPID_PRIVATE_KEY: undefined,
+      VAPID_PRIVATE_KEY_FILE: undefined,
+    });
+  } catch (error) {
+    issues.push({ field: "mail", code: "configuration_optional", detail: detailFromCaughtError(error) });
+  }
   if (environment.ORBIT_LOG_LEVEL !== undefined && !(logLevels as readonly string[]).includes(environment.ORBIT_LOG_LEVEL)) {
     issues.push({ field: "logging", code: "configuration_optional" });
   }

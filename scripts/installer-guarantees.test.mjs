@@ -3,8 +3,11 @@ import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
+  aboutCitationProblems,
   citationContentProblems,
   citedFileLines,
+  fileCitationContentProblems,
+  fileNamedFunctionProblems,
   mainScriptCitationProblems,
   staleInstallShCitations,
 } from "./installer-guarantee-citations.mjs";
@@ -570,5 +573,92 @@ describe("repair.sh function and step citations (#1859)", () => {
       }
     }
     expect(problems).toEqual([]);
+  });
+});
+
+/*
+ * #1880: "about N-M" citations and citations into installer-ui.sh. An "about"
+ * citation names a function that must start inside the range. installer-ui.sh
+ * citations name no function in their parentheses, so each cited range must
+ * hold the code its guarantee describes, and each function a guarantee names
+ * in backticks must overlap one of its citations.
+ */
+describe("'about' and installer-ui.sh citations in the guarantee catalogue (#1880)", () => {
+  const read = (name) => readFileSync(new URL(`./${name}`, import.meta.url), "utf8").replaceAll("\r\n", "\n");
+  const entry = (text) => `## fake.sh\n\n1. ${text}\n`;
+  const fake = "a() {\n  :\n}\n\nb() {\n  :\n}\n";
+
+  it("accepts an 'about' range that holds the function's first line", () => {
+    expect(aboutCitationProblems(entry("fake.sh `b` (about 4-7)"), { "fake.sh": fake })).toEqual([]);
+  });
+
+  it("reports an 'about' range that misses the function's first line, or an undefined function", () => {
+    const stale = aboutCitationProblems(entry("fake.sh `b` (about 1-3), `c` (about 5-7)"), { "fake.sh": fake });
+    expect(stale.map((p) => p.problem)).toEqual([
+      "function starts at line 5, outside the range",
+      "function not defined",
+    ]);
+  });
+
+  it("reports an 'about' range that ends well before the function does", () => {
+    const long = `f() {\n${"  :\n".repeat(10)}}\n`;
+    const problems = aboutCitationProblems(entry("fake.sh `f` (about 1-3)"), { "fake.sh": long });
+    expect(problems.map((p) => p.problem)).toEqual(["function ends at line 12, outside the range"]);
+  });
+
+  it("reports a named function whose first line no citation holds, even if a range overlaps its body", () => {
+    const problems = fileNamedFunctionProblems(entry("`b`. fake.sh:6-9"), fake, "fake.sh");
+    expect(problems.map((p) => p.citation)).toEqual(["fake.sh:6-9 [b]"]);
+  });
+
+  it("reports a content citation whose lines lack the code", () => {
+    const problems = fileCitationContentProblems(entry("x. fake.sh:1-3, 5-6"), fake, "fake.sh", [
+      { guarantee: "fake.sh #1", index: 0, contains: ["a() {"] },
+      { guarantee: "fake.sh #1", index: 1, contains: ["a() {"] },
+      { guarantee: "fake.sh #1", index: 2, contains: ["a() {"] },
+    ]);
+    expect(problems.map((p) => p.problem)).toEqual(["lines lack a() {", "citation not found"]);
+  });
+
+  it("reports a named function that no citation of its guarantee overlaps", () => {
+    const problems = fileNamedFunctionProblems(entry("`a` and `b`. fake.sh:1-3"), fake, "fake.sh");
+    expect(problems.map((p) => p.citation)).toEqual(["fake.sh:1-3 [b]"]);
+  });
+
+  it("every 'about' citation in the real catalogue starts its function inside the range", () => {
+    expect(aboutCitationProblems(catalogue, { "repair.sh": read("repair.sh"), "install.sh": read("install.sh") })).toEqual([]);
+  });
+
+  it("every function an installer-ui.sh guarantee names lies inside its citations", () => {
+    expect(fileNamedFunctionProblems(catalogue, read("installer-ui.sh"), "installer-ui.sh")).toEqual([]);
+  });
+
+  // `index` is the segment's position among the guarantee's installer-ui.sh citations.
+  const uiExpectations = [
+    { guarantee: "installer-ui.sh #1", index: 0, contains: ["installer_ui_safe_field() {", "printf 'unknown'"] },
+    { guarantee: "installer-ui.sh #2", index: 0, contains: ["installer_ui_elapsed() {", "printf '0s'"] },
+    { guarantee: "installer-ui.sh #3", index: 0, contains: ["installer_ui_emit() {", "$# -eq 5 || $# -eq 6"] },
+    { guarantee: "installer-ui.sh #4", index: 0, contains: ["[SIMULATION] "] },
+    { guarantee: "installer-ui.sh #4", index: 1, contains: ["simulation=true"] },
+    { guarantee: "installer-ui.sh #5", index: 0, contains: ["installer_ui_read_key() {", '-u "$terminal_fd" raw_key'] },
+    { guarantee: "installer-ui.sh #6", index: 0, contains: ["osc_index < 256", "sequence_index < 32"] },
+    { guarantee: "installer-ui.sh #7", index: 0, contains: ["installer_ui_read_paste() {", "[[:cntrl:]]", "return 2"] },
+    { guarantee: "installer-ui.sh #8", index: 0, contains: ["installer_ui_read_value() {"] },
+    { guarantee: "installer-ui.sh #8", index: 1, contains: ["${#value} -le maximum", "[[:cntrl:]]", "return 2"] },
+    { guarantee: "installer-ui.sh #8", index: 2, contains: ["installer_ui_read_text() {", "installer_ui_read_secret() {"] },
+    { guarantee: "installer-ui.sh #9", index: 0, contains: ["installer_ui_menu_render() {"] },
+    { guarantee: "installer-ui.sh #9", index: 1, contains: ["installer_ui_select() {"] },
+    { guarantee: "installer-ui.sh #9", index: 2, contains: ['printf \'%s\\n\\n\' "$prompt" >&"$terminal_fd"'] },
+    { guarantee: "installer-ui.sh #10", index: 0, contains: ["saved_state=", "installer_ui_save_traps", "trap 'interrupted=1' INT TERM HUP"] },
+    { guarantee: "installer-ui.sh #10", index: 1, contains: ['stty "$saved_state"', "installer_ui_restore_traps"] },
+    { guarantee: "installer-ui.sh #10", index: 2, contains: ["installer_ui_save_traps", "trap 'interrupted=1' INT TERM HUP"] },
+    { guarantee: "installer-ui.sh #10", index: 3, contains: ['stty "$saved_state"', "installer_ui_restore_traps"] },
+    { guarantee: "installer-ui.sh #11", index: 0, contains: ["ORBIT_INSTALLER_PLAIN", "NO_COLOR", "dumb"] },
+    { guarantee: "installer-ui.sh #12", index: 0, contains: ["installer_ui_terminal_width() {", "stty size"] },
+    { guarantee: "installer-ui.sh #13", index: 0, contains: ["installer_ui_safe_field() {"] },
+  ];
+
+  it("each installer-ui.sh citation holds the code its guarantee describes", () => {
+    expect(fileCitationContentProblems(catalogue, read("installer-ui.sh"), "installer-ui.sh", uiExpectations)).toEqual([]);
   });
 });
