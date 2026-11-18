@@ -1544,24 +1544,29 @@ export function createFilmContext({
        does not fit in the band it was asked to sit in (< box height + the
        gap). `left`/`right` are resolved to `top`/`bottom` by the caller
        (callout(), below) before this ever runs. */
-    let finalSide = side;
     /* #1895: a pocket anchor that is a surface (taller than half the band),
-       not a control, takes its line inside: hung from its top edge. */
-    let surface = false;
-    if (pocket && !o.pin && pocketFit.box) {
+       not a control, takes its line inside: hung from its top edge. Judged
+       again each time the box is placed (place(), below): a sheet can grow
+       into a surface after the line is up — the preview card's page lands
+       a beat after the sheet rises (PreviewCard.svelte, 900ms). */
+    /** @param {{h:number} | null | undefined} b */
+    const isSurface = (b) => {
+      if (!pocket || o.pin || !b) return false;
       const sb = pocketBand();
-      surface = pocketFit.box.h > (sb.bottom - sb.top) / 2;
-    }
-    if (surface) {
-      finalSide = "bottom";
-      pt = edgeOf(pocketFit.box, "top");
-    } else if (pocket && !o.pin && pocketFit.box && (side === "top" || side === "bottom")) {
+      return b.h > (sb.bottom - sb.top) / 2;
+    };
+    let flipSide = side;
+    if (pocket && !o.pin && pocketFit.box && (side === "top" || side === "bottom")) {
       const band = pocketBand();
       const room = side === "top" ? pt[1] - band.top : band.bottom - pt[1];
-      if (room < ht + CALLOUT_GAP) finalSide = side === "top" ? "bottom" : "top";
+      if (room < ht + CALLOUT_GAP) flipSide = side === "top" ? "bottom" : "top";
     }
-    if (!surface && finalSide !== side && pocketFit.box) {
-      pt = edgeOf(pocketFit.box, finalSide);
+    let surface = isSurface(pocketFit.box);
+    let finalSide = surface ? "bottom" : flipSide;
+    if (surface) {
+      pt = edgeOf(/** @type {any} */ (pocketFit.box), "top");
+    } else if (flipSide !== side && pocketFit.box) {
+      pt = edgeOf(pocketFit.box, flipSide);
     }
 
     /* #1174: the anchor point is read fresh each time the box is placed, so
@@ -1574,6 +1579,13 @@ export function createFilmContext({
       : pt;
 
     function place() {
+      if (control && control.els.length > 0) {
+        const now = isSurface(boxOf(control.ringEls, control.pad));
+        if (now !== surface) {
+          surface = now;
+          finalSide = surface ? "bottom" : flipSide;
+        }
+      }
       const p = pointNow();
       /* What this line points at, for the phone check (tour-pocket-webkit
          .spec.js): the anchor's current box, or "none" when the control it
@@ -1603,6 +1615,7 @@ export function createFilmContext({
       }
       box.style.left = `${x}px`;
       box.style.top = `${y}px`;
+      stem.style.top = stem.style.bottom = stem.style.left = stem.style.right = "";
       if (finalSide === "left" || finalSide === "right") {
         stem.style.top = `${Math.max(12, Math.min(p[1] - y, ht - 12)) - 7}px`;
         stem.style[finalSide === "left" ? "right" : "left"] = "-8px";
