@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
-import { documentJobs, documents, items } from "@/db/schema";
+import { documentJobs, items } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
 import { requestDocumentDeletion } from "@/server/document-repository";
 import { reconcileDocumentStorage } from "@/server/document-worker";
