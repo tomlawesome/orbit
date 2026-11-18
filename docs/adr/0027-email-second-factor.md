@@ -120,7 +120,9 @@ change of memorized secret on evidence of compromise.
   password would be the whole of the way to a new one: the person who knew it
   could take the account. A correct but marked password is refused there
   (`password_recovery_required`, 403) with no hold and no session; the way
-  back is a new setup link from an administrator (#1881 review; OWASP/NIST: a
+  back is a provider sign-in (which reaches the hold), the command-line
+  recovery link for the primary administrator, or a new setup link from an
+  administrator once a relay is back (#1881 review; OWASP/NIST: a
   known-compromised password is reset only through a verified channel). A
   wrong password still answers `credentials_invalid`, so the mark cannot be
   probed.
@@ -129,10 +131,13 @@ change of memorized secret on evidence of compromise.
   statement that writes the hash, revokes every session the account held
   (ADR-0023 §7) and records `password_changed`; only then is a session minted.
   A setup or recovery link, or a signed-in change, clears it the same way and
-  is held to the same "not the refused one" rule. A link holder has not proved
-  the old password, so each `password_unchanged` answer to a link counts
-  against the credential's sign-in backoff (ADR-0023 §4), and while that
-  backoff holds the link is refused with `too_many_attempts`.
+  is held to the same "not the refused one" rule. A link is not throttled by
+  the sign-in backoff: it works once and is spent by any accepted password, so
+  repeating the refused one learns nothing, and a credential locked by sign-in
+  failures can still be renewed through a link (#1881 fix review).
+- "This wasn't me" marks only the password the approval was for: pressed on an
+  approval made before the account's last password change, it is recorded but
+  marks nothing, since the new password was never typed there.
 - The mark has no time limit: it is security state, not a notice, and is not
   spent by being shown. The one-time notice on the sky goes; the moment of the
   refusal is said on the new-password step instead (design round

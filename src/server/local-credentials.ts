@@ -824,32 +824,20 @@ export async function passwordChangeRequiredAt(userId: string): Promise<Date | n
  * costs is spent only on the few accounts that carry the mark. Run before any
  * transaction is opened, so a 64 MiB derivation never holds a row lock.
  *
- * `throttle` is for a caller whose holder has not proved the old password (a
- * setup or recovery link, #1881 review): a `password_unchanged` answer tells
- * them the guess WAS the old password, so each one counts against the
- * credential's own sign-in backoff (`recordLocalCredentialFailure`, the login
- * route's limiter), and while that backoff holds the comparison is not made
- * at all. One live link per account (issuing one kills the last), so the
- * credential's count is the link's count.
+ * No backoff applies, and none is needed (#1881 fix review): through a setup
+ * or recovery link, any guess that is NOT the refused password is saved as
+ * the new one and spends the link, so the link answers one question at most.
+ * And the sign-in backoff must not apply either, or anybody who knows the
+ * address could lock the owner out of their recovery link with wrong
+ * passwords at the door.
  */
-export async function assertNotRefusedPassword(
-  userId: string,
-  password: string,
-  options: { throttle?: boolean } = {},
-): Promise<void> {
+export async function assertNotRefusedPassword(userId: string, password: string): Promise<void> {
   const [row] = await getDb()
-    .select({
-      passwordHash: localCredentials.passwordHash,
-      requiredAt: localCredentials.passwordChangeRequiredAt,
-      lockedUntil: localCredentials.lockedUntil,
-    })
+    .select({ passwordHash: localCredentials.passwordHash, requiredAt: localCredentials.passwordChangeRequiredAt })
     .from(localCredentials)
     .where(eq(localCredentials.userId, userId))
     .limit(1);
   if (!row?.requiredAt) return;
-  if (options.throttle && row.lockedUntil && row.lockedUntil > new Date()) {
-    throw new AuthError("too_many_attempts", "Too many attempts; try again shortly", 429);
-  }
   let verified: boolean;
   try {
     ({ verified } = await verifyPassword(row.passwordHash, password));
@@ -860,7 +848,6 @@ export async function assertNotRefusedPassword(
     throw error;
   }
   if (verified) {
-    if (options.throttle) await recordFailure(userId);
     throw new AuthError("password_unchanged", "Choose a password different from the one that was refused", 400);
   }
 }

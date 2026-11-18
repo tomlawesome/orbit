@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { APP, door, onPhone } from "./a11y-support.js";
+import { APP, door, onPhone, signedIn } from "./a11y-support.js";
 
 /** @typedef {import("@playwright/test").Page} Page */
 /** @typedef {import("@playwright/test").Locator} Locator */
@@ -161,4 +161,57 @@ test("a lapsed hold turns the card into its lapsed state, with the way back to s
   const back = card.locator(".note.after").getByRole("button", { name: "sign in" });
   await expect(back).toBeVisible();
   await expectWithinWidth(page, back, "the sign-in line");
+});
+
+/**
+ * The door as a signed-out reader meets it once their session has been
+ * revoked: healthy, a local-only instance, no session.
+ * @param {Page} page
+ */
+async function signedOutDoor(page) {
+  await page.route("**/api/health", (route) => route.fulfill({ json: { status: "ready" } }));
+  await page.route("**/api/auth/availability", (route) => route.fulfill({
+    json: { configured: true, phase: "running", contactAddress: null, claimed: true, methods: { local: true, oidc: false, localAccounts: true } },
+  }));
+  await page.route("**/api/auth/session", (route) => route.fulfill({ status: 401, json: { error: "unauthenticated" } }));
+}
+
+/* THE RACE ANSWERS (#1881 fix review). A password saved through a setup link,
+   or from Settings, just as a refusal marks the account again: the route
+   answers 200 with the hold and no session. Neither screen may carry on as
+   if signed in; both go to the renew step, which the hold can save. */
+const RACE = { state: "password_change_required", refusedAt: REFUSED_AT };
+
+test("a setup link whose save is answered with the hold goes to the renew step, not the front door", async ({ page }) => {
+  test.setTimeout(90_000);
+  await signedOutDoor(page);
+  await page.route("**/api/auth/local/setup", (route) => route.fulfill({ json: RACE }));
+  await page.goto("/setup/a-setup-token-for-the-rig-1881");
+  await page.fill("#idpassword", NEW_PASSWORD);
+  await page.fill("#idagain", NEW_PASSWORD);
+  await page.locator("#idbtn").click();
+
+  await expect(page.locator(".card.renew")).toBeVisible({ timeout: 30_000 });
+  await expect(page).toHaveURL(/\/login(\?|$)/);
+  await expect(page.locator(".card.renew .note.why")).toContainText("11 November 2026 at 21:14 UTC");
+});
+
+test("a Settings change answered with the hold goes to the renew step, and does not stay signed in", async ({ page }, testInfo) => {
+  test.skip(onPhone(testInfo), "the helm's inline change is the desk's; the pocket's sheet calls the same changeMethod");
+  test.setTimeout(90_000);
+  await signedIn("/settings", "any-dialect")(page);
+  await page.route("**/api/auth/local/password", (route) => route.fulfill({ json: { changed: true, sessionsRevoked: 1, ...RACE } }));
+
+  await page.locator(".kv", { hasText: "password" }).first().getByRole("button", { name: "change" }).click();
+  const challenge = page.locator(".challenge");
+  await challenge.getByLabel("current password").fill("the-right-one");
+  await challenge.getByLabel("new password").fill(NEW_PASSWORD);
+  /* The session this screen held was revoked with the change: from here the
+     engine answers as it would, signed out. */
+  await signedOutDoor(page);
+  await challenge.getByRole("button", { name: "save it" }).click();
+
+  await expect(page.locator(".card.renew")).toBeVisible({ timeout: 30_000 });
+  await expect(page).toHaveURL(/\/login(\?|$)/);
+  await expect(page.locator(".note.ok")).toHaveCount(0);
 });

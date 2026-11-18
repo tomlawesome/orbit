@@ -210,8 +210,8 @@ async function signInByPassword(email: string, password = OLD_PASSWORD): Promise
 }
 
 /** "This wasn't me", pressed on a password sign-in. */
-async function refuseASignIn(email: string): Promise<void> {
-  const typed = await typePassword(email);
+async function refuseASignIn(email: string, password = OLD_PASSWORD): Promise<void> {
+  const typed = await typePassword(email, password);
   expect(await (await press(mailedToken(), "denied")).json()).toEqual({ recorded: true, decision: "denied" });
   expect(await (await collectWith(claimOf(typed))).json()).toEqual({ state: "denied" });
 }
@@ -868,18 +868,49 @@ describe("the other ways to a new password refuse the refused one (#1881 review)
     );
   });
 
-  it("a recovery link cannot be used to test the refused password without limit", async () => {
-    const account = await seedAccount("setup-guessing");
+  it("a recovery link is spent by the first guess that is not the refused password, so it tests nothing", async () => {
+    // Why the link needs no backoff of its own (#1881 fix review): a wrong guess IS a new password.
+    const account = await seedAccount("setup-one-guess");
+    await refuseASignIn(account.email);
+    const { token } = await issueSetupToken(account.id, "recovery");
+
+    await expectSavedAndSignedIn(
+      await post(consumeSetup, "/api/auth/local/setup", { token, password: NEW_PASSWORD }),
+      account.id,
+    );
+    const again = await post(consumeSetup, "/api/auth/local/setup", { token, password: "yet-another-password-1881" });
+    expect(await errorCode(again)).toBe("setup_token_invalid");
+  });
+
+  it("a credential locked by sign-in failures can still finish a recovery link", async () => {
+    // Anybody who knows the address can lock the password sign-in; that must not lock the owner's link.
+    const account = await seedAccount("setup-locked");
+    await refuseASignIn(account.email);
+    await getDb().update(localCredentials)
+      .set({ failedAttemptCount: 20, lockedUntil: new Date(Date.now() + 15 * 60 * SECOND) })
+      .where(eq(localCredentials.userId, account.id));
+    const { token } = await issueSetupToken(account.id, "recovery");
+
+    await expectSavedAndSignedIn(
+      await post(consumeSetup, "/api/auth/local/setup", { token, password: NEW_PASSWORD }),
+      account.id,
+    );
+  });
+
+  it("repeating the refused password through a link never locks the link out", async () => {
+    const account = await seedAccount("setup-repeats");
     await refuseASignIn(account.email);
     const { token } = await issueSetupToken(account.id, "recovery");
     vi.useFakeTimers({ toFake: ["Date"] });
 
-    const codes: string[] = [];
     for (let attempt = 0; attempt < 8; attempt += 1) {
-      codes.push(await errorCode(await post(consumeSetup, "/api/auth/local/setup", { token, password: OLD_PASSWORD })));
+      expect(await errorCode(await post(consumeSetup, "/api/auth/local/setup", { token, password: OLD_PASSWORD })))
+        .toBe("password_unchanged");
     }
-    expect(codes.slice(0, 5)).toEqual(Array(5).fill("password_unchanged"));
-    expect(codes.at(-1)).toBe("too_many_attempts");
+    await expectSavedAndSignedIn(
+      await post(consumeSetup, "/api/auth/local/setup", { token, password: NEW_PASSWORD }),
+      account.id,
+    );
   });
 
   it("the signed-in change answers the refused password with password_unchanged and changes nothing", async () => {
@@ -907,12 +938,32 @@ describe("the other ways to a new password refuse the refused one (#1881 review)
   });
 });
 
+/**
+ * A refusal landing between the save and the session: the first session mint
+ * finds the account marked again, for real, at a moment this returns.
+ */
+function remarkWhileSaving(userId: string): Date {
+  const remarked = new Date(Date.now() + SECOND);
+  vi.spyOn(sessionModule, "createSession").mockImplementationOnce(async () => {
+    await getDb().update(localCredentials).set({ passwordChangeRequiredAt: remarked })
+      .where(eq(localCredentials.userId, userId));
+    throw new PasswordChangeRequiredError(userId, remarked);
+  });
+  return remarked;
+}
+
+/** The hold a race answer carried takes a new password and signs the person in. */
+async function expectTheHoldSaves(answered: Response, userId: string): Promise<void> {
+  const third = "a-third-password-after-the-race";
+  await expectSavedAndSignedIn(await save({ password: third, passwordAgain: third }, replayCookies(answered)), userId);
+  expect(await markOf(userId)).toBeNull();
+}
+
 describe("a password saved as the account is marked again answers with the hold, never a raw 403 (#1881 review)", () => {
   it("the recovery link: saved, no session, the hold to the change step", async () => {
     const account = await seedAccount("setup-race");
     const { token } = await issueSetupToken(account.id, "recovery");
-    const remarked = new Date();
-    vi.spyOn(sessionModule, "createSession").mockRejectedValueOnce(new PasswordChangeRequiredError(account.id, remarked));
+    const remarked = remarkWhileSaving(account.id);
 
     const answered = await post(consumeSetup, "/api/auth/local/setup", { token, password: NEW_PASSWORD });
     expect(answered.status).toBe(200);
@@ -920,13 +971,13 @@ describe("a password saved as the account is marked again answers with the hold,
     expect(sessionCookieOf(answered)).toBeUndefined();
     expect(readSetCookie(answered, passwordChangeCookieName(getAuthConfig()))?.value ?? "").not.toBe("");
     expect((await verifyPassword(await passwordHashOf(account.id), NEW_PASSWORD)).verified).toBe(true);
+    await expectTheHoldSaves(answered, account.id);
   });
 
   it("the signed-in change: saved, no session, the hold to the change step", async () => {
     const account = await seedAccount("signed-in-race");
     const actor = await actorFor(account.id);
-    const remarked = new Date();
-    vi.spyOn(sessionModule, "createSession").mockRejectedValueOnce(new PasswordChangeRequiredError(account.id, remarked));
+    const remarked = remarkWhileSaving(account.id);
 
     const answered = await callRoute(changePassword, {
       url: `${ORIGIN}/api/auth/local/password`,
@@ -945,5 +996,39 @@ describe("a password saved as the account is marked again answers with the hold,
     expect(sessionCookieOf(answered)).toBeUndefined();
     expect(readSetCookie(answered, passwordChangeCookieName(getAuthConfig()))?.value ?? "").not.toBe("");
     expect((await verifyPassword(await passwordHashOf(account.id), NEW_PASSWORD)).verified).toBe(true);
+    await expectTheHoldSaves(answered, account.id);
+  });
+});
+
+describe("a stale approval cannot mark a password it was never for (#1881 fix review)", () => {
+  it("refusing an approval made before the last password change leaves the new password unmarked", async () => {
+    const account = await seedAccount("stale-approval");
+    // An approval asked for with the old password, still waiting in the mailbox.
+    await typePassword(account.email);
+    const staleToken = mailedToken();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    // The password changes (a recovery link) before anybody answers that mail.
+    const { token } = await issueSetupToken(account.id, "recovery");
+    await expectSavedAndSignedIn(await post(consumeSetup, "/api/auth/local/setup", { token, password: NEW_PASSWORD }), account.id);
+
+    expect(await (await press(staleToken, "denied")).json()).toEqual({ recorded: true, decision: "denied" });
+    expect(await markOf(account.id), "a refusal of the old password's approval marked the new password").toBeNull();
+
+    // The new password signs in as ever: approved, and a session.
+    mail.sent.length = 0;
+    const next = await signInByPassword(account.email, NEW_PASSWORD);
+    expect(await next.json()).toEqual({ state: "approved", authenticated: true });
+  });
+
+  it("still marks for an approval made after the last change (the guard for the case above)", async () => {
+    const account = await seedAccount("fresh-approval");
+    const { token } = await issueSetupToken(account.id, "recovery");
+    await expectSavedAndSignedIn(await post(consumeSetup, "/api/auth/local/setup", { token, password: NEW_PASSWORD }), account.id);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    mail.sent.length = 0;
+
+    await refuseASignIn(account.email, NEW_PASSWORD);
+    expect(await markOf(account.id)).not.toBeNull();
   });
 });

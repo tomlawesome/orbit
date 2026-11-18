@@ -122,9 +122,17 @@ is saved, there or through a setup or recovery link; it does not wear off.
 
 If the mail relay has since been turned off, the marked password no longer
 signs in at all, because there is no approval mail left to prove it is you.
-The door says so: ask an administrator for a new setup link. (While there is
-no relay that link cannot be mailed either, so the relay has to be set up
-again first.)
+The door says so: ask an administrator for a new setup link. While there is
+no relay that link cannot be mailed, so there are two ways back without one:
+
+- Sign in through your identity provider, if the account has one linked. That
+  reaches the new-password step as above, since it needs no mail.
+- For the primary administrator, the recovery link printed by the command
+  line on the deployment host (see
+  [Recovering the primary administrator](administrator-operations.md#recovering-the-primary-administrator)).
+
+Anyone else needs the relay set up again, so the administrator can send them
+a new setup link.
 
 ## Adding OIDC later
 
@@ -344,6 +352,16 @@ for readers who want to check it, is in
   Orbit does not say which, on purpose.
 - `too_many_attempts`: the credential is temporarily locked from repeated
   failures; wait for the backoff to clear.
+- `password_unchanged`: the new password is the one a refused sign-in marked;
+  choose a different one (see "Approving each password sign-in by email").
+- `password_mismatch`: the two new-password entries do not match, or the
+  second is missing.
+- `password_change_lapsed`: the ten minutes on the new-password step ran out,
+  the step was already used, or a later refused sign-in replaced it — sign in
+  again.
+- `password_recovery_required`: a marked password was typed on an instance
+  with no mail relay, so it signs nobody in; see the two ways back under
+  "Approving each password sign-in by email".
 - `recent_authentication_required` / `step_up_failed`: the action needs a
   fresh password or provider challenge (see "Recent authentication" above).
 - `link_required`: an OIDC sign-in matched an existing account's email; sign in

@@ -336,6 +336,24 @@ export const APPROVAL_BACKSTOP_MS = 10 * 60_000;
 export const RENEW_HOLD_MS = 10 * 60_000;
 
 /**
+ * The door's renew step, for a screen that is not the door (#1881): the
+ * setup link and Settings, when their save is answered with the hold rather
+ * than a session because a refusal marked the account again. The same two
+ * parameters the provider callback uses; the door takes them out of the
+ * address bar before it draws anything.
+ *
+ * @param {unknown} refusedAt the refusal's moment, ISO 8601, as the route sent it
+ * @param {string} returnTo where to go once the new password is saved
+ * @returns {string}
+ */
+export function renewStepAddress(refusedAt, returnTo) {
+  const query = new URLSearchParams({ password: "new" });
+  if (typeof refusedAt === "string" && refusedAt.length > 0) query.set("refusedAt", refusedAt);
+  query.set("returnTo", returnTo);
+  return `/login?${query.toString()}`;
+}
+
+/**
  * The other pure decision in this module (#869): given the state
  * {@link nextDoorState} already decided for this round, a deadline and the
  * caller's own clock read, whether the door keeps polling or gives up.

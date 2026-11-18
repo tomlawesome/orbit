@@ -245,7 +245,7 @@ are for people working on Orbit, not for running it.
 | `GET` | `/api/auth/availability` | Signed-out: whether the instance is claimed, which sign-in methods are offered, and whether password sign-ins are approved by email. Reveals nothing about accounts. |
 | `POST` | `/api/auth/bootstrap/claim` | Verifies the claim code and sets a short-lived claim cookie. |
 | `POST` | `/api/auth/bootstrap/local` | Creates the first administrator with a password, under the claim cookie. |
-| `POST` | `/api/auth/local/login` | Checks email and password. Answers with a pending sign-in (and mails its approval link) unless the instance has no mail relay, in which case it signs the user in directly. |
+| `POST` | `/api/auth/local/login` | Checks email and password. Answers with a pending sign-in (and mails its approval link) unless the instance has no mail relay, in which case it signs the user in directly — except for an account a refused sign-in marked, which is refused with `password_recovery_required` and no session (#1881). |
 | `POST` | `/api/auth/local/login/pending` | The waiting tab asks whether its sign-in has been approved; mints the session for that browser when it has. Authorised by the pending-sign-in cookie alone. |
 | `POST` | `/api/auth/local/login/resend` | Sends the approval link again, inside the send limits. Same cookie, same rule. |
 | `POST` | `/api/auth/local/login/new-password` | Saves a new password for an account a refused sign-in marked, then signs the browser in. Authorised by the change-password hold cookie alone (#1881). |

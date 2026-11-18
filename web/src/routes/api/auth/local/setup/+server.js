@@ -63,7 +63,7 @@ export const POST = api(
        unknown or spent token has no owner here and is refused below by
        `consumeSetupToken`, exactly as before. */
     const owner = await setupTokenOwner(token);
-    if (owner) await assertNotRefusedPassword(owner, password, { throttle: true });
+    if (owner) await assertNotRefusedPassword(owner, password);
 
     let passwordHash;
     try {

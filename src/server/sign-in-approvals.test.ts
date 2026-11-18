@@ -129,6 +129,8 @@ vi.mock("@/db", async () => {
         && held.getTime() > new Date(stream[at + 2]?.value as string).getTime();
       else if (operator === "<") verdict &&= held instanceof Date
         && held.getTime() < new Date(stream[at + 2]?.value as string).getTime();
+      else if (operator === "<=") verdict &&= held instanceof Date
+        && held.getTime() <= new Date(stream[at + 2]?.value as string).getTime();
       else throw new Error(`the fake database does not implement "${operator}"`);
     }
     return verdict;
@@ -342,7 +344,9 @@ beforeEach(() => {
     emailEnc: new MetadataCipher(testKey).encryptText("users.email", USER, "priya@example.invalid"),
     displayName: "Priya Shah",
   });
-  store.credentials.push({ userId: USER, failedAttemptCount: 0, lockedUntil: null });
+  /* password_changed_at is NOT NULL in the schema: a password set long before
+     any approval here, so a refusal marks it (#1881). */
+  store.credentials.push({ userId: USER, failedAttemptCount: 0, lockedUntil: null, passwordChangedAt: new Date(0) });
 });
 
 afterEach(() => {

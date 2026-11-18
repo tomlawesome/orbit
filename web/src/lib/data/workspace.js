@@ -3418,18 +3418,30 @@ export async function readAuthMethodsOffered() {
  * is derived from the session token, and the one held here belongs to the
  * session that just died.
  *
+ * ONE EXCEPTION (#1881): a refusal that marks the account again between the
+ * save and the re-issue leaves this browser with NO session, only the
+ * change-password hold. Then `renew` carries the refusal's moment, and the
+ * caller must take the reader to the door's renew step: the screen it is on
+ * has nothing left to stand on.
+ *
  * @param {{ password: string, currentPassword?: string }} change
- * @returns {Promise<{ changed: boolean, sessionsRevoked: number }>}
+ * @returns {Promise<{ changed: boolean, sessionsRevoked: number, renew: { refusedAt: string | null } | null }>}
  */
 export async function writeLocalPassword({ password, currentPassword }) {
-  /** @type {{ changed?: boolean, sessionsRevoked?: number }} */
+  /** @type {{ changed?: boolean, sessionsRevoked?: number, state?: string, refusedAt?: string }} */
   const body = await json(
     await csrfFetch("/api/auth/local/password", {
       body: currentPassword ? { password, currentPassword } : { password },
     }),
   );
   sessionPromise = null;
-  return { changed: body.changed ?? false, sessionsRevoked: body.sessionsRevoked ?? 0 };
+  return {
+    changed: body.changed ?? false,
+    sessionsRevoked: body.sessionsRevoked ?? 0,
+    renew: body.state === "password_change_required"
+      ? { refusedAt: typeof body.refusedAt === "string" ? body.refusedAt : null }
+      : null,
+  };
 }
 
 /**

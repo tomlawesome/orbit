@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { cardMessageFor, refusalMoment } from "$lib/flight/door-state.js";
+import { cardMessageFor, refusalMoment, renewStepAddress } from "$lib/flight/door-state.js";
 
 /*
  * #1881, review round 1. The ratified wording table names the refusal's
@@ -35,5 +35,21 @@ describe("a marked password with no relay (password_recovery_required)", () => {
     expect(words).toBe("Somebody else knew this password, so it no longer signs in. Ask an administrator for a new setup link.");
     expect(words).not.toBe(cardMessageFor("some_unknown_code"));
     expect(words).not.toContain("_");
+  });
+});
+
+describe("the way to the renew step from outside the door (#1881 fix review)", () => {
+  it("is the door with the hold's two parameters and where to go after", () => {
+    const address = new URL(renewStepAddress("2026-11-11T21:14:00.000Z", "/settings"), "http://orbit.invalid");
+    expect(address.pathname).toBe("/login");
+    expect(address.searchParams.get("password")).toBe("new");
+    expect(address.searchParams.get("refusedAt")).toBe("2026-11-11T21:14:00.000Z");
+    expect(address.searchParams.get("returnTo")).toBe("/settings");
+  });
+
+  it("carries no refusedAt it was not given a moment for", () => {
+    const address = new URL(renewStepAddress(undefined, "/"), "http://orbit.invalid");
+    expect(address.searchParams.get("password")).toBe("new");
+    expect(address.searchParams.has("refusedAt")).toBe(false);
   });
 });

@@ -37,7 +37,7 @@
  */
 
 import { createHash, randomBytes } from "node:crypto";
-import { and, eq, gt, isNull, lt, sql } from "drizzle-orm";
+import { and, eq, gt, isNull, lt, lte, sql } from "drizzle-orm";
 import { base64url } from "jose";
 import { getDb } from "@/db";
 import { auditLog, localCredentials, signInApprovalSends, signInApprovals, users } from "@/db/schema";
@@ -533,6 +533,7 @@ export async function decideSignInApproval(
         expiresAt: signInApprovals.expiresAt,
         outcome: signInApprovals.outcome,
         consumedAt: signInApprovals.consumedAt,
+        createdAt: signInApprovals.createdAt,
       })
       .from(signInApprovals)
       .where(eq(signInApprovals.tokenHash, tokenHash))
@@ -574,10 +575,18 @@ export async function decideSignInApproval(
       /* The mark (#1881), in the same transaction as the refusal it records.
          The newest refusal's moment, so several in a row read as the one
          story the card tells, and any hold issued before this one is void. */
+      /* Only the password this approval was asked for (#1881 fix review): an
+         approval made before the credential's last change was for the OLD
+         password, and refusing it says nothing about the new one, so it
+         marks nothing. `password_changed_at` is the credential's own clock
+         for exactly this (a rehash on sign-in does not move it). */
       await transaction
         .update(localCredentials)
         .set({ passwordChangeRequiredAt: decidedAt, updatedAt: decidedAt })
-        .where(eq(localCredentials.userId, row.userId));
+        .where(and(
+          eq(localCredentials.userId, row.userId),
+          lte(localCredentials.passwordChangedAt, row.createdAt),
+        ));
     }
 
     return { recorded: true };
