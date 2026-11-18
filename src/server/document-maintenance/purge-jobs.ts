@@ -32,7 +32,17 @@ interface OwnedPurgeRecord {
   storageKey: string | null;
 }
 
-export async function claimExpiredPurgeJobs(limit = 25): Promise<ClaimedDocumentJob[]> {
+/** One claim's batch: a cycle claims batches of this size until none is left (#1605 P-1). */
+export const PURGE_BATCH_SIZE = 25;
+
+/**
+ * Claims up to `limit` expired purge jobs in job-id order, after `afterJobId`
+ * when given: a keyset cursor, so a cycle pages through its backlog once and
+ * never meets a job it already tried (a failed purge is back to `retry` and
+ * claimable at once).
+ */
+export async function claimExpiredPurgeJobs(limit = PURGE_BATCH_SIZE, afterJobId?: string): Promise<ClaimedDocumentJob[]> {
+  const excluded = afterJobId ? sql`and job.id > ${afterJobId}::uuid` : sql``;
   const rows = await getDb().execute(sql<ClaimedDocumentJob>`
     with claimable as materialized (
       select job.id, job.status as previous_status
@@ -46,7 +56,8 @@ export async function claimExpiredPurgeJobs(limit = 25): Promise<ClaimedDocument
         and document.lifecycle = 'pending_deletion'
         and document.delete_after <= now()
         and (job.lease_expires_at is null or job.lease_expires_at < now())
-      order by document.delete_after
+        ${excluded}
+      order by job.id
       for update of job skip locked
       limit ${limit}
     ), claimed as (
@@ -56,6 +67,7 @@ export async function claimExpiredPurgeJobs(limit = 25): Promise<ClaimedDocument
       claimed.lease_token as "leaseToken", claimable.previous_status as "previousStatus"
     from claimed
     inner join claimable on claimable.id = claimed.id
+    order by claimed.id
   `);
   return rows as unknown as ClaimedDocumentJob[];
 }
@@ -221,6 +233,22 @@ async function completeStalePurgeClaim(job: ClaimedDocumentJob): Promise<void> {
     if (document?.lifecycle === "pending_deletion" && document.generation === job.generation) return;
     await completeJob(transaction, and(holdsJobLease(job), eq(documentJobs.generation, job.generation)));
   });
+}
+
+/**
+ * Gives a claim back untouched (#1605 P-1): the job returns to the status it
+ * was claimed from (an expired lease's reclaim to `retry`), with the attempt
+ * the claim took and no lease, as if this cycle never reached it.
+ */
+export async function releasePurgeClaim(job: ClaimedDocumentJob): Promise<void> {
+  await getDb().update(documentJobs).set({
+    status: job.previousStatus === "processing" ? "retry" : job.previousStatus,
+    attempts: sql`greatest(${documentJobs.attempts} - 1, 0)`,
+    lockedAt: null,
+    leaseExpiresAt: null,
+    leaseToken: null,
+    updatedAt: new Date(),
+  }).where(holdsJobLease(job));
 }
 
 export async function failPurgeJob(job: ClaimedDocumentJob, error: unknown): Promise<void> {

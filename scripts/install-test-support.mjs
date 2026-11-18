@@ -12,10 +12,11 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
-  mkdtempSync,
+  mkdtempSync as makeTempDir,
   readFileSync,
   readdirSync,
   readlinkSync,
+  rmSync,
   statSync,
   watch,
   writeFileSync,
@@ -58,6 +59,18 @@ export const repository = "example/orbit-fixture";
 export const registry = "fake-registry.example";
 export const imageRepository = `${registry}/${repository}`;
 export const digest = "a".repeat(64);
+// Every folder this module makes is removed when the process exits (group 6
+// L-S1); before, each run left more orbit-install-* folders behind.
+const madeFolders = [];
+process.on("exit", () => {
+  for (const folder of madeFolders) rmSync(folder, { recursive: true, force: true });
+});
+function mkdtempSync(prefix) {
+  const folder = makeTempDir(prefix);
+  madeFolders.push(folder);
+  return folder;
+}
+
 export const revision = "b".repeat(40);
 export const resolvedReference = `${imageRepository}@sha256:${digest}`;
 export const preflightSuccessLine =
@@ -212,6 +225,13 @@ function runEngine() {
     const outcomeIndex = rest.indexOf("--outcome");
     if (env.FAKE_ENGINE_OUTCOME !== undefined && outcomeIndex >= 0) {
       fs.writeFileSync(translate(rest[outcomeIndex + 1]), env.FAKE_ENGINE_OUTCOME, { mode: 0o600 });
+      // A work directory whose model-pull.out cannot be written (stands in for a full disk).
+      if (env.FAKE_LOCK_ORIGINALS === "1") {
+        // The copy of the originals cannot be removed afterwards (a read-only folder inside the install folder's backups).
+        const root = process.cwd() + "/orbit-install-backups";
+        if (fs.existsSync(root)) for (const stamp of fs.readdirSync(root)) if (fs.existsSync(root + "/" + stamp + "/originals")) fs.chmodSync(root + "/" + stamp + "/originals", 0o500);
+      }
+      if (env.FAKE_PLANT_PULL_OUT_DIR === "1") fs.mkdirSync(translate(rest[outcomeIndex + 1]).replace(/[^/]*$/, "") + "model-pull.out");
     }
     personWrites();
     // The canned engine committed (files and outcome written) and is still running (redesign r1).
@@ -337,6 +357,14 @@ function compose() {
         secretPresent: fs.existsSync(".orbit-secrets/smtp-password"),
       };
       if (env.FAKE_STATE_DIR) fs.appendFileSync(env.FAKE_STATE_DIR + "/up-trace.jsonl", JSON.stringify(state) + "\\n");
+      // Compose refuses to start when the mail overlay is listed in COMPOSE_FILE and the secret file it declares is missing (#1789 D-S3).
+      {
+        const listed = /^COMPOSE_FILE=(.*)$/m.exec(environment)?.[1] ?? env.COMPOSE_FILE ?? "";
+        if (/docker-compose\\.mail\\.yml/.test(listed) && !state.secretPresent) {
+          process.stderr.write("secret file ./.orbit-secrets/smtp-password not found: no such file or directory\\n");
+          exit(1);
+        }
+      }
       // A crash after the SMTP lines left .env-orbit: every start from then on fails.
       if (env.FAKE_UP_FAIL_AFTER_SMTP_RETIRED === "1" && !state.smtpLines && !state.overlayListed) exit(1);
     }
@@ -625,6 +653,29 @@ export function makeFakeBin() {
     writeFileSync(join(binDir, name), source);
     chmodSync(join(binDir, name), 0o755);
   }
+  // Pass-through shims so a test can fail a restore copy or watch which probes are bounded (audit Lows O-R4, b2 O-R2).
+  const shims = {
+    cp: `#!/bin/sh
+# FAKE_CP_FAIL_RESTORE=1: a copy whose source is inside an originals copy (the rollback's restore) fails.
+if [ "\${FAKE_CP_FAIL_RESTORE:-}" = 1 ]; then
+  after=0
+  for a in "$@"; do
+    if [ "$after" = 1 ]; then case "$a" in */originals/*) exit 1 ;; esac; break; fi
+    [ "$a" = "--" ] && after=1
+  done
+fi
+exec /usr/bin/cp "$@"
+`,
+    timeout: `#!/bin/sh
+# FAKE_TIMEOUT_LOG: one line per bounded command.
+if [ -n "\${FAKE_TIMEOUT_LOG:-}" ]; then printf '%s\\n' "$*" >> "$FAKE_TIMEOUT_LOG"; fi
+exec /usr/bin/timeout "$@"
+`,
+  };
+  for (const [name, source] of Object.entries(shims)) {
+    writeFileSync(join(binDir, name), source);
+    chmodSync(join(binDir, name), 0o755);
+  }
   return binDir;
 }
 
@@ -902,7 +953,7 @@ export function pidAlive(pid) {
   }
 }
 
-export function runInstallSignalled(targetDir, envOverrides, { signal, marker }) {
+export function runInstallSignalled(targetDir, envOverrides, { signal, marker, settleMs = 0 }) {
   const binDir = makeFakeBin();
   const logDir = scratchDir("log");
   const stateDir = envOverrides.FAKE_STATE_DIR;
@@ -923,10 +974,15 @@ export function runInstallSignalled(targetDir, envOverrides, { signal, marker })
     let stdout = "";
     let stderr = "";
     let sent = false;
+    let stdoutAtSignal = "";
     const send = () => {
       if (sent || !existsSync(join(stateDir, marker))) return;
       sent = true;
-      killGroup(signal);
+      // settleMs: let output written before the marker reach us, then record what had been printed when the signal went out.
+      setTimeout(() => {
+        stdoutAtSignal = stdout;
+        killGroup(signal);
+      }, settleMs);
     };
     const watcher = watch(stateDir, send);
     const watchdog = processWatchdog({ label: "runInstallSignalled", kill: () => killGroup("SIGKILL") });
@@ -962,6 +1018,7 @@ export function runInstallSignalled(targetDir, envOverrides, { signal, marker })
         signal: closedBy,
         signalSent: sent,
         hungAlive,
+        stdoutAtSignal,
         stdout,
         stderr,
         calls: readOptional(join(logDir, "calls.log")),

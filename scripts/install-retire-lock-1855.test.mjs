@@ -215,7 +215,7 @@ function lockProbes(lockPath) {
   writeFileSync(
     join(dir, "mv"),
     `#!/bin/bash
-case "\${*}" in *.retire-smtp.tmp*) ${probe("rewrite")} ;; esac
+case "\${*}" in *.env-orbit.retire-smtp.*) ${probe("rewrite")} ;; esac
 exec ${realMv} "$@"
 `,
   );

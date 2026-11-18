@@ -1922,7 +1922,7 @@ export async function readAdminScreen() {
     }, () => null),
     adminRead("/api/admin/users", tally).then((response) => json(response))
       .then(
-        (/** @type {{ users?: { id: string, displayName: string, email?: string, isInstanceAdmin?: boolean, disabledAt?: ?string }[] }} */ body) =>
+        (/** @type {{ users?: { id: string, displayName: string, email?: string, isInstanceAdmin?: boolean, disabledAt?: ?string, metadataStatus?: { email?: string } }[] }} */ body) =>
           body.users ?? [],
       )
       /* null, not []: a failed read is not an instance of nobody (#1442). */
@@ -3577,6 +3577,22 @@ export async function createLocalUser(draft) {
 export async function sendSetupLink(userId, options = {}) {
   return json(
     await csrfFetch(`/api/admin/users/${encodeURIComponent(userId)}/setup-link`, { body: options }),
+  );
+}
+
+/**
+ * Sets one member's registered address — PUT /api/admin/users/{id}/email
+ * (#1869). Answers the refreshed user row, as the list shapes it, and, when
+ * the old address was readable and the notice to it did not go, the one
+ * bounded word for why.
+ *
+ * @param {string} userId
+ * @param {{ email: string, currentPassword?: string }} body
+ * @returns {Promise<{ user: { id: string, displayName: string, email: ?string, metadataStatus?: { email?: string }, isInstanceAdmin: boolean, isPrimaryAdministrator: boolean, disabledAt: ?string }, noticeError: ?string }>}
+ */
+export async function setUserAddress(userId, body) {
+  return json(
+    await csrfFetch(`/api/admin/users/${encodeURIComponent(userId)}/email`, { method: "PUT", body }),
   );
 }
 

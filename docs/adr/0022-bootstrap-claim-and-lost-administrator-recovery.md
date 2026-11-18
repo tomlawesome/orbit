@@ -246,3 +246,10 @@ readers could have claimed first.
   column.
 - The plan's `GET /api/auth/bootstrap` route is folded into the existing
   signed-out `GET /api/auth/availability` (`claimed` and `methods` fields).
+
+## Amendment (2026-11-17, #1604)
+
+"The last line" of the start-up log, above, is where the claim link is first
+printed, not where it stays: later lines (a scanner retry, for example) can
+follow it. Operators look for the claim link in the log, and the installer's
+completion screen should say so.

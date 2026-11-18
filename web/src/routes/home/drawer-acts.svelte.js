@@ -58,7 +58,7 @@
  * the drawer opens any item, and offers what fits its state).
  *
  * `onamend` and `onaccept` are a suggestion's (SuggestionView.svelte, #1319):
- * `review & amend →` puts its rows into editing, and `add to orbit` approves
+ * `review & amend →` puts its rows into editing, and the amend button (`add to orbit`, or `add without it` when a file is flagged) approves
  * what they hold.
  *
  * @typedef {"snooze" | "complete" | "attach" | "retire" | "restore"} FootKind
@@ -163,7 +163,7 @@ export function createDrawerActs({
      owner-decisions §34; on the phone too (owner, 2026-10-08). `review &
      amend →` puts the suggestion's rows into editing (EditRows), the relay's
      proposal standing in for the item it would become (proposedItemOf); the
-     choosers are a filed item's. `add to orbit` sends the rows as the
+     choosers are a filed item's. The amend button (`add to orbit`, or `add without it` when a file is flagged) sends the rows as the
      amended item on the two-tap decision's own operation id (`amend`), into
      the section the rows chose; `cancel` puts the readings back. */
   /* #1316: the latest review & amend press still waiting on the reminder
@@ -310,6 +310,10 @@ export function createDrawerActs({
   let papersReady = $state(false);
   /** @type {object | null} */
   let searchDocumentsFor = null;
+  /* #1605 W-R7: each read takes a token and only the newest one lands, so a
+     read a re-read overtook never writes its older papers over the newer
+     (the same household object no longer tells the two reads apart). */
+  let searchReads = 0;
 
   /** #1151 W1-Q8: pocket-search.js's readSearchDocuments carries the
    *  concurrency cap (#1151 W1-R9). Answers the items whose papers could
@@ -323,6 +327,7 @@ export function createDrawerActs({
     const householdId = current?.primary;
     if (!household || !householdId || searchDocumentsFor === household) return failed;
     searchDocumentsFor = household;
+    const read = ++searchReads;
     const carrying = (household.items ?? []).filter((item) => (item.status === "active" || item.id === also) && (item.documentCount ?? 0) > 0);
     // Additive: an item whose papers cannot be read loses its papers from the
     // results, not the search. Which items those were is answered, for the
@@ -330,7 +335,7 @@ export function createDrawerActs({
     const found = await readSearchDocuments(
       carrying, readItemDocuments, householdId, () => searchDocumentsFor !== household, (id) => failed.add(id),
     );
-    if (searchDocumentsFor === household) {
+    if (searchDocumentsFor === household && searchReads === read) {
       searchDocuments = found;
       papersReady = true;
     }

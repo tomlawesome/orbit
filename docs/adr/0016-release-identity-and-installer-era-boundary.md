@@ -116,3 +116,11 @@ now numbered 0.x and a major-0 version is no longer a sign of a
 development build. The retracted list lives in one place,
 `scripts/retracted-tags.json`; this follows the standard "retract a
 published version" pattern, as Go modules do it.
+
+## Amendment (2026-11-17, #1603)
+
+`install.sh` and `repair.sh` carry no floor check, no retracted-tag refusal and
+no major-0 exemption (the exemption was withdrawn with the 2026-10-04
+amendment). The retracted list in `scripts/retracted-tags.json` is read by the
+version calculation and the release-readiness check; the supported-install
+floor is a support commitment, not a refusal in the operator tooling.

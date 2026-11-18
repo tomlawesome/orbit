@@ -115,7 +115,7 @@ function classifyExecute(text: string): string {
   if (/crypto\.storage_key as "storageKey"/u.test(text)) return "readOwnedPurgeRecord";
   if (/select lifecycle, version as generation/u.test(text)) return "readPurgeDocumentState";
   if (/select lifecycle\s+from documents/u.test(text)) return "readCurrentLifecycle";
-  if (/item_id is null and delete_after <= now\(\)/u.test(text)) return "retireUnboundUploads";
+  if (/item_id is null and bound_at is null and delete_after <= now\(\)/u.test(text)) return "retireUnboundUploads";
   if (/'preview', coalesce\(max\(generation\), 0\) \+ 1/u.test(text)) return "enqueuePreviewJob";
   if (/select id\s+from document_jobs/u.test(text)) {
     if (/kind = 'scan'/u.test(text)) return "fenceScanJob";
@@ -657,7 +657,10 @@ describe("claim statements — lease, fencing and eligibility", () => {
     const { purge } = await claimStatements();
     expect(purge).toContain("document.lifecycle = 'pending_deletion'");
     expect(purge).toContain("document.delete_after <= now()");
-    expect(purge).toContain("order by document.delete_after");
+    // #1605 P-1: the drain pages by a keyset cursor on the job id, so the
+    // claim is ordered by it rather than by the retention deadline.
+    expect(purge).toContain("order by job.id");
+    expect(purge).toContain("order by claimed.id");
   });
 
   it("re-reads the claimed scan record under the same generation and lease token", async () => {
