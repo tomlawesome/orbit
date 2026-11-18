@@ -134,6 +134,11 @@ no relay that link cannot be mailed, so there are two ways back without one:
 Anyone else needs the relay set up again, so the administrator can send them
 a new setup link.
 
+An administrator who changes their own address to one they cannot read is locked
+out once the session ends, because the next sign-in waits on an approval mailed
+to it; the change is armed and must be confirmed for that reason. The way back
+is the recovery link above, or another administrator setting the address.
+
 ## Adding OIDC later
 
 Local-only and OIDC are not a one-time choice. To turn OIDC on for an existing

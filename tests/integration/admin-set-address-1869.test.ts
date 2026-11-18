@@ -341,7 +341,7 @@ describe("PUT /api/admin/users/{userId}/email: the success path", () => {
     const audit = await auditFor(target.id);
     expect(audit).toHaveLength(1);
     expect(audit[0].actorUserId).toBe(admin.userId);
-    expect(audit[0].changes).toEqual({ userId: target.id, previous: "unreadable" });
+    expect(audit[0].changes).toEqual({ userId: target.id, previous: "unreadable", self: false });
     const everything = JSON.stringify(await getDb().select().from(auditLog));
     expect(everything.toLowerCase()).not.toContain("fresh@example.invalid");
     expect(everything.toLowerCase()).not.toContain("was-unreadable@example.invalid");
@@ -465,7 +465,7 @@ describe("PUT /api/admin/users/{userId}/email: the success path", () => {
     expect(mailText).not.toContain("brand-new@example.invalid");
     expect(mailText).not.toContain("/setup/");
     expect(await auditFor(target.id)).toEqual([
-      expect.objectContaining({ changes: { userId: target.id, previous: "readable" } }),
+      expect.objectContaining({ changes: { userId: target.id, previous: "readable", self: false } }),
     ]);
   }, 30_000);
 
