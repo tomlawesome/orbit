@@ -37,17 +37,19 @@
  */
 
 import { createHash, randomBytes } from "node:crypto";
-import { and, eq, gt, isNull, lt, sql } from "drizzle-orm";
+import { and, eq, gt, isNull, lt, lte, sql } from "drizzle-orm";
 import { base64url } from "jose";
 import { getDb } from "@/db";
-import { auditLog, signInApprovalSends, signInApprovals, users } from "@/db/schema";
+import { auditLog, localCredentials, signInApprovalSends, signInApprovals, users } from "@/db/schema";
+import { userAddressLockKey } from "@/lib/auth/authority-locks";
 import { describeDevice } from "@/lib/auth/device";
-import { AuthError } from "@/lib/auth/errors";
+import { AuthError, PasswordChangeRequiredError } from "@/lib/auth/errors";
 import { log } from "@/lib/logger";
 import { recordLocalCredentialFailure } from "@/server/local-credentials";
 import { absoluteAppLink, sendBoundedMail, type InvitationMailer, type InvitationSendError } from "@/server/invitations/send";
 import { sendingConfigured } from "@/server/mail-in/sending-settings";
 import { openInstanceMetadataReader } from "@/server/metadata/fields";
+import type { MetadataExecutor } from "@/server/metadata/keys";
 import { renderApprovalMail } from "@/server/sign-in-approvals/mail";
 
 /** Ten minutes (ADR-0027 §6): long enough to reach a phone, short enough that
@@ -246,8 +248,10 @@ interface Recipient {
   displayName: string;
 }
 
-async function readRecipient(userId: string): Promise<Recipient | null> {
-  const db = getDb();
+async function readRecipient(
+  userId: string,
+  db: MetadataExecutor = getDb(),
+): Promise<Recipient | null> {
   const [row] = await db
     .select({
       id: users.id,
@@ -395,20 +399,29 @@ export async function startSignInApproval(
   const claim = createSecret();
 
   await sweepExpiredApprovals(now);
-  const recipient = await readRecipient(userId);
   const limited = await sendsInWindow(userId, now) >= APPROVAL_SENDS_PER_HOUR;
 
   const db = getDb();
-  const [row] = await db.insert(signInApprovals).values({
-    userId,
-    tokenHash: secretDigest(token),
-    claimHash: secretDigest(claim),
-    userAgent: facts.userAgent ? facts.userAgent.slice(0, 256) : null,
-    clientAddress: facts.clientAddress,
-    expiresAt,
-    sendCount: 0,
-    lastSentAt: null,
-  }).returning({ id: signInApprovals.id });
+  /* The address is read and the row written under the per-user address lock
+     an administrator's address change takes (#1869). A change that commits
+     before this reads the new address; one that commits after it finds this
+     row and expires it, so the link mailed below can only work while it
+     goes to the address the account still has. */
+  const { recipient, row } = await db.transaction(async (transaction) => {
+    await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${userAddressLockKey(userId)}, 0))`);
+    const recipient = await readRecipient(userId, transaction);
+    const [row] = await transaction.insert(signInApprovals).values({
+      userId,
+      tokenHash: secretDigest(token),
+      claimHash: secretDigest(claim),
+      userAgent: facts.userAgent ? facts.userAgent.slice(0, 256) : null,
+      clientAddress: facts.clientAddress,
+      expiresAt,
+      sendCount: 0,
+      lastSentAt: null,
+    }).returning({ id: signInApprovals.id });
+    return { recipient, row };
+  });
 
   /* An account that vanished between the password check and this read is a
      send that did not happen, never a send that silently counted: `sent`
@@ -514,8 +527,9 @@ export type ApprovalDecision = "approved" | "denied";
  * A refusal is worth more than a closed door: it revokes the pending sign-in,
  * counts as a failed attempt in the per-credential backoff (ADR-0027 §8, so a
  * guessing run that reaches somebody's mailbox still costs what a wrong
- * password costs), and leaves the account holder a notice for their next
- * successful sign-in.
+ * password costs), and marks the password as needing a change (#1881): a
+ * refusal means somebody else knew it, so the next sign-in with it lands on
+ * the set-new-password step rather than in Orbit (NIST SP 800-63B section 5.1.1 (memorized secret verifiers)).
  */
 export async function decideSignInApproval(
   token: string,
@@ -532,6 +546,7 @@ export async function decideSignInApproval(
         expiresAt: signInApprovals.expiresAt,
         outcome: signInApprovals.outcome,
         consumedAt: signInApprovals.consumedAt,
+        createdAt: signInApprovals.createdAt,
       })
       .from(signInApprovals)
       .where(eq(signInApprovals.tokenHash, tokenHash))
@@ -570,6 +585,21 @@ export async function decideSignInApproval(
          password that is then denied locks the credential the same way a
          wrong one does, rather than only incrementing a count nothing reads. */
       await recordLocalCredentialFailure(transaction, row.userId);
+      /* The mark (#1881), in the same transaction as the refusal it records.
+         The newest refusal's moment, so several in a row read as the one
+         story the card tells, and any hold issued before this one is void. */
+      /* Only the password this approval was asked for (#1881 fix review): an
+         approval made before the credential's last change was for the OLD
+         password, and refusing it says nothing about the new one, so it
+         marks nothing. `password_changed_at` is the credential's own clock
+         for exactly this (a rehash on sign-in does not move it). */
+      await transaction
+        .update(localCredentials)
+        .set({ passwordChangeRequiredAt: decidedAt, updatedAt: decidedAt })
+        .where(and(
+          eq(localCredentials.userId, row.userId),
+          lte(localCredentials.passwordChangedAt, row.createdAt),
+        ));
     }
 
     return { recorded: true };
@@ -586,6 +616,9 @@ export interface MintedApprovalSession {
 export type PendingSignInState =
   | { state: "waiting" }
   | { state: "approved"; userId: string; session?: MintedApprovalSession }
+  /* Approved, but the account's password is marked (#1881): the approval is
+     spent and the caller issues the change-password hold, never a session. */
+  | { state: "password_change_required"; refusal: PasswordChangeRequiredError }
   | { state: "denied" }
   | { state: "unknown" };
 
@@ -645,6 +678,13 @@ export async function collectSignInApproval(
     const session = await mintSession(row.userId);
     return { state: "approved", userId: row.userId, session };
   } catch (error) {
+    // A marked password (#1881) is an answer too: the approval stays spent --
+    // it has done its job, the email factor is passed -- and what the tab
+    // collects is the change-password hold, which runs its own ten minutes
+    // from being issued, so a late press still leaves time to type.
+    if (error instanceof PasswordChangeRequiredError) {
+      return { state: "password_change_required", refusal: error };
+    }
     // A disabled account is an answer, not a hiccup: the approval stays
     // spent, or re-enabling the account within the TTL would let the old
     // emailed link sign in with no new approval asked for.
@@ -754,29 +794,18 @@ export async function resendSignInApproval(
 }
 
 /**
- * The other half of a refusal (ADR-0027, consequences): somebody said "this
- * wasn't me", and the account holder is owed one line about it the next time
- * they get in.
+ * The other half of a refusal (#1881, ADR-0027 amendment of 2026-11-17):
+ * when a refused sign-in marked this account's password, or null.
  *
- * Taken rather than read -- every unshown refusal is stamped in the same
- * statement that answers -- so the notice appears once and does not follow
- * the reader around. The newest refusal is the one reported: several in a row
- * are one story, and the most recent is the one that tells it.
+ * A pure read since #1881. The mark is security state, not a notice: it is
+ * not spent by being shown and has no time limit, and only a saved password
+ * clears it (`writePasswordHash`). The moment is the newest refusal's.
  */
-export async function takeDeniedSignInNotice(userId: string): Promise<{ deniedAt: Date } | null> {
-  const db = getDb();
-  const shown = await db
-    .update(signInApprovals)
-    .set({ noticeShownAt: new Date() })
-    .where(and(
-      eq(signInApprovals.userId, userId),
-      eq(signInApprovals.outcome, "denied"),
-      isNull(signInApprovals.noticeShownAt),
-    ))
-    .returning({ decidedAt: signInApprovals.decidedAt, createdAt: signInApprovals.createdAt });
-  if (shown.length === 0) return null;
-  const newest = shown
-    .map((row) => row.decidedAt ?? row.createdAt)
-    .sort((left, right) => right.getTime() - left.getTime())[0];
-  return { deniedAt: newest };
+export async function readDeniedSignInNotice(userId: string): Promise<{ deniedAt: Date } | null> {
+  const [row] = await getDb()
+    .select({ requiredAt: localCredentials.passwordChangeRequiredAt })
+    .from(localCredentials)
+    .where(eq(localCredentials.userId, userId))
+    .limit(1);
+  return row?.requiredAt ? { deniedAt: row.requiredAt } : null;
 }

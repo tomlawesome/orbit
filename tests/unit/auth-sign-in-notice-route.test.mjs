@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /*
- * `GET /api/auth/sign-in-notice` (#1033, ADR-0027): a signed-in reader is told,
- * once, that a sign-in to their account was refused. A read that writes (the
- * notice is taken). Scoped to the caller's own id, takes nothing from the
+ * `GET /api/auth/sign-in-notice` (#1033, ADR-0027, #1881): a signed-in reader is
+ * told that a refused sign-in marked their password. A pure read since #1881
+ * (the mark is cleared only by a saved password). Scoped to the caller's own id, takes nothing from the
  * request, `null` is the ordinary answer, no-store, and fixtures never show a
  * refusal.
  */
@@ -11,14 +11,14 @@ const mocks = vi.hoisted(() => ({
   getAuthConfig: vi.fn(),
   requireSession: vi.fn(),
   assertOutsideMaintenance: vi.fn(),
-  takeDeniedSignInNotice: vi.fn(),
+  readDeniedSignInNotice: vi.fn(),
   assertKeyUsable: vi.fn(),
 }));
 
 vi.mock("orbit/lib/env", () => ({ getAuthConfig: mocks.getAuthConfig }));
 vi.mock("orbit/lib/auth/session", async (importOriginal) => ({ ...(await importOriginal()), requireSession: mocks.requireSession }));
 vi.mock("orbit/server/maintenance", () => ({ assertOutsideMaintenance: mocks.assertOutsideMaintenance }));
-vi.mock("orbit/server/sign-in-approvals", () => ({ takeDeniedSignInNotice: mocks.takeDeniedSignInNotice }));
+vi.mock("orbit/server/sign-in-approvals", () => ({ readDeniedSignInNotice: mocks.readDeniedSignInNotice }));
 vi.mock("orbit/server/key-state", () => ({ assertKeyUsable: mocks.assertKeyUsable, noteRefusedSignIn: vi.fn() }));
 
 const { GET } = await import("../../web/src/routes/api/auth/sign-in-notice/+server.js");
@@ -36,7 +36,7 @@ beforeEach(() => {
   for (const m of Object.values(mocks)) m.mockReset();
   mocks.getAuthConfig.mockReturnValue({});
   mocks.requireSession.mockResolvedValue({ user: { id: "u-1" } });
-  mocks.takeDeniedSignInNotice.mockResolvedValue(null);
+  mocks.readDeniedSignInNotice.mockResolvedValue(null);
 });
 
 describe("GET /api/auth/sign-in-notice", () => {
@@ -47,26 +47,26 @@ describe("GET /api/auth/sign-in-notice", () => {
     expect(response.headers.get("cache-control")).toBe("no-store");
   });
 
-  it("answers the refusal's time as ISO 8601 and takes it for the caller's own id only", async () => {
-    mocks.takeDeniedSignInNotice.mockResolvedValue({ deniedAt: new Date("2026-10-01T10:20:30.000Z") });
+  it("answers the refusal's time as ISO 8601 for the caller's own id only", async () => {
+    mocks.readDeniedSignInNotice.mockResolvedValue({ deniedAt: new Date("2026-10-01T10:20:30.000Z") });
     const response = await GET(event("?userId=someone-else"));
     expect(await response.json()).toEqual({ notice: { deniedAt: "2026-10-01T10:20:30.000Z" } });
-    expect(mocks.takeDeniedSignInNotice).toHaveBeenCalledTimes(1);
-    expect(mocks.takeDeniedSignInNotice).toHaveBeenCalledWith("u-1");
+    expect(mocks.readDeniedSignInNotice).toHaveBeenCalledTimes(1);
+    expect(mocks.readDeniedSignInNotice).toHaveBeenCalledWith("u-1");
   });
 
-  it("refuses a signed-out reader with 401 and takes nothing", async () => {
+  it("refuses a signed-out reader with 401 and reads nothing", async () => {
     mocks.requireSession.mockRejectedValue(new AuthError("session_required", "A valid session is required", 401));
     const response = await GET(event());
     expect(response.status).toBe(401);
-    expect(mocks.takeDeniedSignInNotice).not.toHaveBeenCalled();
+    expect(mocks.readDeniedSignInNotice).not.toHaveBeenCalled();
   });
 
-  it("answers 503 during maintenance without taking the notice", async () => {
+  it("answers 503 during maintenance without reading the mark", async () => {
     mocks.assertOutsideMaintenance.mockRejectedValue(new MaintenanceActiveError(null));
     const response = await GET(event());
     expect(response.status).toBe(503);
-    expect(mocks.takeDeniedSignInNotice).not.toHaveBeenCalled();
+    expect(mocks.readDeniedSignInNotice).not.toHaveBeenCalled();
   });
 
   it("answers null under fixtures without reaching the engine", async () => {
@@ -74,6 +74,6 @@ describe("GET /api/auth/sign-in-notice", () => {
     const response = await GET(event());
     expect(await response.json()).toEqual({ notice: null });
     expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(mocks.takeDeniedSignInNotice).not.toHaveBeenCalled();
+    expect(mocks.readDeniedSignInNotice).not.toHaveBeenCalled();
   });
 });

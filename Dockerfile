@@ -229,7 +229,7 @@ RUN ORBIT_WEB_RUNTIME_ROOT=/opt/orbit/web node scripts/pdf-renderer-runtime-chec
   && rm -f /opt/orbit/scripts/pdf-renderer-runtime-check.mjs
 COPY --chown=orbit:orbit scripts/recovery-crypto.mjs ./scripts/recovery-crypto.mjs
 COPY --chown=root:root scripts/container-entrypoint.sh ./scripts/container-entrypoint.sh
-# The fifteen deployment assets, at the same relative paths an install uses
+# The sixteen deployment assets, at the same relative paths an install uses
 # them at (ADR-0019); scripts/update.sh goes to the top, where `./update.sh`
 # runs it (#1770). They travel with the digest, so the compose file an
 # operator runs and the image it configures are the same artifact, and an

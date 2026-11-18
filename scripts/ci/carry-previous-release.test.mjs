@@ -3134,3 +3134,19 @@ afterAll(() => {
 afterAll(() => {
   rmSync(keyDir, { recursive: true, force: true });
 });
+
+describe("scripts/ci/carry-previous-release.sh names the cause when its set-up fails (group 6 D-F1-2)", () => {
+  const realTool = (name) => spawnSync("bash", ["-c", `command -v ${name}`], { encoding: "utf8", ...processGuard() }).stdout.trim();
+  const failing = (name, match) => ({
+    [name]: `#!/usr/bin/env bash\ncase "$*" in *${match}*) echo "${name}: simulated failure" >&2; exit 1 ;; esac\nexec "${realTool(name)}" "$@"\n`,
+  });
+
+  it.each([
+    ["the token header file cannot be made", failing("mktemp", "carry-previous-header")],
+    ["the supply-chain folder cannot be made", failing("mkdir", ".orbit-supply-chain")],
+  ])("%s: the script's own FAILED line names it", (_label, shims) => {
+    const r = carry({ routes: world(pair(OLDER)), shims });
+    expect(r.prepare.status).not.toBe(0);
+    expect(output(r.prepare)).toMatch(/carry-previous-release: FAILED: /u);
+  });
+});

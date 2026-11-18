@@ -303,3 +303,16 @@ describe("docs name ./update.sh as the way to update (#1770)", () => {
     expect(guarantees).toContain(FIXED_UPDATE_URL);
   });
 });
+
+describe("update.sh downloads are bounded (audit Low O-R1)", () => {
+  it("every curl it runs has a connect timeout and a total time limit", () => {
+    const ctx = setup();
+    const r = run(ctx);
+    const lines = r.curlLog.split("\n").filter(Boolean);
+    expect(lines.length).toBeGreaterThan(0);
+    for (const line of lines) {
+      expect(line).toContain("--connect-timeout");
+      expect(line).toContain("--max-time");
+    }
+  });
+});

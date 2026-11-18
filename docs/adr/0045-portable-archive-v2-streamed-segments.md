@@ -140,8 +140,13 @@ RANGE-R2/2 and the three AR2-1 lines) are about the cracks in that undo.
 
 8. **v1 archives import unchanged**, through the scratch tmpfs, with their
    own named limits (a file of about 341 MiB, 357979480 bytes; 256 MiB of
-   plaintext). Orbit no longer writes v1. The v1 reader's two low-grade
-   findings about field order (#1605 W-F1, W-Q1) stay open; v2 has no field order and names its version in byte 8.
+   plaintext). Orbit no longer writes v1. Of the v1 reader's two low-grade
+   findings about field order, W-F1 (#1605) is closed by decision
+   (2026-11-17): a v1 file whose ciphertext comes before its salt and iv is
+   refused as not an archive, not read by parking the ciphertext until they
+   arrive. Orbit only ever wrote salt and iv first, so only a file reordered
+   by hand is refused. W-Q1 (#1605, the version checked after decryption)
+   stays open as a note. v2 has no field order and names its version in byte 8.
 
 ## Consequences
 

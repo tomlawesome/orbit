@@ -48,10 +48,23 @@ fail() {
   exit 1
 }
 
+# O-R1: a stalled server must not hang the update; same bounds as get-orbit.sh.
+# Curl's exit status 28 is its own time limit.
+download() {
+  local status=0
+  curl -fsSL --connect-timeout 5 --max-time 120 -o "$1" "$2" || status=$?
+  if (( status == 28 )); then
+    download_reason=" (no answer within the time limit)"
+  else
+    download_reason=""
+  fi
+  return "$status"
+}
+
 if [[ "${ORBIT_UPDATE_SELF_REPLACED:-}" != 1 ]]; then
   downloaded="$work_dir/update.sh"
-  if ! curl -fsSL -o "$downloaded" "$self_update_url"; then
-    fail "could not download the newest update.sh from $self_update_url; nothing was run. Check the network and try again."
+  if ! download "$downloaded" "$self_update_url"; then
+    fail "could not download the newest update.sh from $self_update_url${download_reason}; nothing was run. Check the network and try again."
   fi
   if ! cmp -s -- "$downloaded" "$self"; then
     first_line=""
@@ -76,8 +89,8 @@ fi
 
 # Fetched whole to a file and only run once curl reports success, so a
 # partial download is never run.
-if ! curl -fsSL -o "$work_dir/get-orbit.sh" "$get_orbit_url"; then
-  fail "could not download get-orbit.sh from $get_orbit_url."
+if ! download "$work_dir/get-orbit.sh" "$get_orbit_url"; then
+  fail "could not download get-orbit.sh from $get_orbit_url${download_reason}."
 fi
 
 cd -- "$orbit_dir"

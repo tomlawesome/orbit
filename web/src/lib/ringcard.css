@@ -370,3 +370,18 @@ body.showform:not(.reclaimed):not(.shownew):not(.counting):not(.instrument)
 /* The countdown reads as the line the button will become, not as a disabled
    button: a greyed-out control invites the press it is refusing. */
 :where(.ringcard) .card.waiting .waiting-wait{color:#6f7b93}
+
+/* ── THE NEW-PASSWORD CARD (#1881) ───────────────────────────────────────
+   design/v19/password-after-refusal/round-1/r-the-card-again.html, owner
+   verdict 2026-11-17. The setup card's two fields with one note above them in
+   the note's own voice -- when, and why; not a banner and not a warm line,
+   because nothing here refuses what the reader is doing now -- and the two
+   rules under the first field in the same voice. Lapsed, it is the one state
+   with no fields: the note says so, and the quiet "sign in" is the way on. */
+:where(.ringcard) .card.renew .note.why{margin:0 0 18px;line-height:1.9}
+:where(.ringcard) .card.renew .hint{font:0.65625rem var(--mono);color:#8f9bb5;letter-spacing:.05em;
+      margin-top:7px;text-align:center}
+:where(.ringcard) .card.renew .note.after{margin:6px 0 0}
+:where(.ringcard) .card.renew.lapsed .field,
+:where(.ringcard) .card.renew.lapsed .act{display:none}
+:where(.ringcard) .card.renew.lapsed .note.why{margin-bottom:6px}

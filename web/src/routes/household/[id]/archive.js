@@ -48,21 +48,48 @@ export function passphraseProblem(passphrase, again, limits) {
 
 /**
  * Why a chosen file cannot be an archive, judged before it is read. The size
- * check is the engine's ceiling when the session gave one; the server still
- * refuses an oversized body whatever this says.
+ * check is the engine's ceiling; until the session has given it the file is
+ * refused, as passphraseProblem refuses (#1605 O-R9: one fail-closed rule on
+ * both gates). The server still refuses an oversized body whatever this says.
  * @param {{ size: number }} file
  * @param {EngineLimits | null | undefined} limits
  * @returns {string | null}
  */
 export function archiveFileProblem(file, limits) {
   if (file.size === 0) return "this file is empty";
+  if (!limits) return "orbit has not said how large an archive may be yet — reload the page";
   /* archiveFileBytes follows the current storage limit (maxArchiveFileBytes),
      so an archive over it is over that limit, which can be raised (#1823
      A-F11, owner answer 46a on #1799). */
-  if (limits && file.size > limits.archiveFileBytes) {
+  if (file.size > limits.archiveFileBytes) {
     return `this file is larger than ${sizeLabel(limits.archiveFileBytes)}, the most the storage limit allows; ask your administrator to raise the storage limit`;
   }
   return null;
+}
+
+/**
+ * Whether a refusal is the browser's for a file that changed on disk after it
+ * was picked (#1605 W-R12): a picked File is a snapshot, and once its disk
+ * copy changes the browser will not read it (NotReadableError). Only choosing
+ * the file again reads the new copy.
+ * @param {unknown} error
+ */
+export function fileChangedSincePicked(error) {
+  return /** @type {{ name?: unknown } | null | undefined} */ (error)?.name === "NotReadableError";
+}
+
+/** The card's words for that refusal. */
+export const FILE_CHANGED_WORDS = "the file changed after it was chosen — choose it again";
+
+/**
+ * Reads one byte of the picked file before it is sent (#1605 W-R12 review).
+ * A file whose disk copy changed throws NotReadableError here; inside the
+ * upload's FormData the same change only makes fetch reject with a bare
+ * TypeError, which cannot be told from a lost connection.
+ * @param {Blob} file
+ */
+export async function checkFileReadable(file) {
+  await file.slice(0, 1).arrayBuffer();
 }
 
 /** The v2 archive header (#1390, ADR-0045): "ORBITARC", then format version 2. */

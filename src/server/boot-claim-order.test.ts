@@ -2,8 +2,8 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 
 /*
  * #1450: the claim link is printed after the normal start-up lines, so it is
- * the log's last line on a real install and the operator can find it by
- * reading the logs (owner, answer 11a).
+ * the last line at start-up, and later lines (a scanner retry) can follow it, so
+ * the operator finds it by looking for the claim link in the logs (owner, answer 11a).
  *
  * The seam is `registerNode()` in ./boot, the whole start-up sequence, driven
  * the way boot.test.ts drives it: the collaborators are stand-ins and every
