@@ -192,6 +192,7 @@
     const input = /** @type {HTMLInputElement} */ (event.currentTarget);
     const next = input.files?.[0] ?? null;
     input.value = "";
+    if (inPhase === "bringing") return;
     if (!next) return;
     inProblem = archiveFileProblem(next, limits);
     preview = null;
@@ -346,7 +347,7 @@
           <button class="p-pill filled" disabled={passphraseLength(passIn) < passphraseMin || inPhase === "looking"} onclick={lookInside}>
             {inPhase === "looking" ? "looking…" : "look inside"}</button>
         </div>
-      {:else if preview}
+      {:else if preview && inPhase !== "bringing"}
         <div class="p-card proposed hh-preview">
           <p class="p-caps">inside · {preview.householdName}</p>
           <div class="p-kv"><span>entries</span><b>{preview.items}</b></div>
