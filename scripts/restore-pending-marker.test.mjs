@@ -600,3 +600,13 @@ describe("#1848 O-S1 a full restore that finishes asks; kept-stopped and --recov
     expect(mailLines(result.stderr)).toEqual([]);
   });
 });
+
+describe("#1874 O-S3 the unfinished-restore refusal hint", () => {
+  it("ends the line carrying the copy-paste command with the command, not a full stop", () => {
+    const script = readFileSync(join(scriptsDir, "restore.sh"), "utf8");
+    const refusal = script.split("\n").find((line) => line.includes("an earlier restore is unfinished"));
+    expect(refusal).toBeDefined();
+    expect(refusal).toMatch(/\$marked_hint(?!\.)/u);
+    expect(refusal).not.toMatch(/\$\{?marked_hint\}?\./u);
+  });
+});

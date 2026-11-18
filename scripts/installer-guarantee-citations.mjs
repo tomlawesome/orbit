@@ -15,7 +15,8 @@
  * A function's span runs from its `name() {` line at column 0 to the next `}`
  * at column 0. A citation is stale when the function is not defined, or when
  * none of the cited lines fall inside the span. A range with no function name
- * in its parentheses is not checked.
+ * in its parentheses is not checked here; main-script ranges and cited
+ * content (both #1846) have their own checks below.
  */
 
 const FUNCTION_START = /^([A-Za-z_][A-Za-z0-9_]*)\(\) *\{/u;
