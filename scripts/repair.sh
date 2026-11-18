@@ -7378,11 +7378,11 @@ is_removable_checkpoint_dir() {
 
 # #1876: removes each `.orbit-repair-discard.*` an earlier run left when it
 # was stopped between discard_staging_root's rename and the end of its
-# removal. Runs at most once per --execute, under the run lock, and only once
-# a batch is approved: after the version gate and the confirmation, before
-# any action (run_safe_batch, execute_dangerous_batch). A declined or refused
-# run, and --check and --plan, never call it (guarantees 33 and 56). It never
-# reads what is inside. Only a real folder is removed, as
+# removal. Runs at most once per --execute, under the run lock, after the
+# version gate: once a batch is confirmed, before any action, or at once on
+# an empty or manual-only plan, which has nothing to confirm. A declined or
+# refused run, and --check and --plan, never call it (guarantees 33 and 56).
+# It never reads what is inside. Only a real folder is removed, as
 # the folder owner (#1872), and rm -rf does not follow a symlink inside it;
 # anything else under that name is named and left for the operator.
 discards_cleared=0

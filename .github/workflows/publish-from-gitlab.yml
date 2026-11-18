@@ -27,7 +27,9 @@ name: Publish the GitLab-tested image to GHCR
 #      the shared verifier (verify-validation-evidence.sh), which also writes
 #      out the newest verified SBOM for the SBOM attestation below;
 #   3. only then are the image and that attestation copied to GHCR, tagged and
-#      attested. Nothing unverified is written to GHCR.
+#      attested. Nothing unverified is written to GHCR but a referrer's
+#      config blob and annotations, copied as they are; its layer, the
+#      attestation bundle, is what is verified.
 #
 # The mirror push lands within minutes of the merge while the GitLab pipeline
 # takes the best part of an hour, so the first step waits for the handoff. If
@@ -211,7 +213,34 @@ jobs:
             exit 1
           }
           predicate_type="$(sed -n 's/^readonly PREDICATE_TYPE="\(.*\)"$/\1/p' scripts/ci/verify-validation-evidence.sh)"
-          index="$(crane manifest "${THROWAWAY_IMAGE}:sha256-${DIGEST#sha256:}")"
+          bundles="$(mktemp -d)"
+          trap 'rm -rf "${bundles}"' EXIT
+          subject="The handoff index"
+          label=""
+          readonly MAX_BUNDLE_BYTES=$((16 * 1024 * 1024))
+          # 4 MiB: the OCI distribution spec's ceiling for manifests a registry must accept.
+          readonly MAX_MANIFEST_BYTES=$((4 * 1024 * 1024))
+          refuse() {
+            printf '%s did not verify under cosign.pub%s for %s (%s); copying nothing.\n' \
+              "${subject}" "${label:+ as ${label}}" "${DIGEST}" "$1" >&2
+            exit 1
+          }
+          # fetch LIMIT FILE ARGS: crane ARGS into FILE, reading at most LIMIT+1
+          # bytes. Returns 2 if more than LIMIT arrived (crane may then die of
+          # SIGPIPE), else 1 if crane or head failed, else 0.
+          fetch() {
+            local limit="$1" out="$2"
+            local -a rc
+            shift 2
+            crane "$@" < /dev/null | head -c "$((limit + 1))" > "${out}" && rc=(0 0) || rc=("${PIPESTATUS[@]}")
+            (( $(wc -c < "${out}") <= limit )) || return 2
+            (( rc[0] == 0 && rc[1] == 0 )) || return 1
+          }
+          status=0
+          fetch "${MAX_MANIFEST_BYTES}" "${bundles}/index.json" manifest "${THROWAWAY_IMAGE}:sha256-${DIGEST#sha256:}" || status=$?
+          (( status != 2 )) || refuse "it is larger than the 4 MiB manifest limit"
+          (( status == 0 )) || refuse "it is unreadable"
+          index="$(< "${bundles}/index.json")"
           referrers="$(printf '%s' "${index}" | node -e '
             let raw = "";
             process.stdin.on("data", (c) => { raw += c; }).on("end", () => {
@@ -249,16 +278,8 @@ jobs:
             exit 1
           }
           cosign_cmd="$(bash scripts/ci/ensure-cosign.sh)"
-          bundles="$(mktemp -d)"
-          trap 'rm -rf "${bundles}"' EXIT
-          label=""
-          readonly MAX_BUNDLE_BYTES=$((16 * 1024 * 1024))
-          refuse() {
-            printf 'Attestation %s did not verify under cosign.pub as %s for %s (%s); copying nothing.\n' \
-              "${referrer}" "${label:-<unlabelled>}" "${DIGEST}" "$1" >&2
-            exit 1
-          }
           for referrer in "${referrers[@]}"; do
+            subject="Attestation ${referrer}"
             label="$(printf '%s' "${index}" | node -e '
               let raw = "";
               process.stdin.on("data", (c) => { raw += c; }).on("end", () => {
@@ -268,7 +289,12 @@ jobs:
               });
             ' -- "${referrer}")"
             [[ -n "${label}" ]] || refuse "it has no single predicate type label"
-            layer="$(crane manifest "${THROWAWAY_IMAGE}@${referrer}" < /dev/null | node -e '
+            manifest="${bundles}/${referrer#sha256:}.manifest.json"
+            status=0
+            fetch "${MAX_MANIFEST_BYTES}" "${manifest}" manifest "${THROWAWAY_IMAGE}@${referrer}" || status=$?
+            (( status != 2 )) || refuse "its manifest is larger than the 4 MiB manifest limit"
+            (( status == 0 )) || refuse "its manifest is unreadable"
+            layer="$(node -e '
               let raw = "";
               process.stdin.on("data", (c) => { raw += c; }).on("end", () => {
                 const m = JSON.parse(raw);
@@ -277,7 +303,7 @@ jobs:
                     layers[0].mediaType !== "application/vnd.dev.sigstore.bundle.v0.3+json") return;
                 process.stdout.write(String(layers[0].digest) + " " + String(layers[0].size));
               });
-            ' -- "${DIGEST}")" || refuse "its manifest is unreadable"
+            ' -- "${DIGEST}" < "${manifest}")" || refuse "its manifest is unreadable"
             read -r layer layer_size <<< "${layer}"
             [[ "${layer}" =~ ${ORBIT_DIGEST_PATTERN} ]] ||
               refuse "it is not one sigstore bundle attached to this digest"
@@ -286,8 +312,11 @@ jobs:
               refuse "its bundle is declared as ${layer_size:-no} bytes, not a size within the 16 MiB limit"
             fi
             bundle="${bundles}/${referrer#sha256:}.json"
-            crane blob "${THROWAWAY_IMAGE}@${layer}" > "${bundle}" < /dev/null ||
-              refuse "its bundle is unreadable"
+            # And the bytes read: a registry can stream past what it declared.
+            status=0
+            fetch "${MAX_BUNDLE_BYTES}" "${bundle}" blob "${THROWAWAY_IMAGE}@${layer}" || status=$?
+            (( status != 2 )) || refuse "its bundle is larger than the 16 MiB limit"
+            (( status == 0 )) || refuse "its bundle is unreadable"
             "${cosign_cmd}" verify-blob-attestation \
               --bundle "${bundle}" \
               --key cosign.pub \
