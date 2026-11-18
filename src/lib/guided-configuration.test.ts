@@ -119,7 +119,7 @@ describe("noninteractiveConfigurationGuidance (install.sh:879-885, guarantee #24
   it("matches install.sh's exact remediation lines, space-joining missing fields", () => {
     expect(noninteractiveConfigurationGuidance(["APP_URL", "OIDC_CLIENT_SECRET"])).toEqual([
       "Orbit installer: configuration fields requiring attention: APP_URL OIDC_CLIENT_SECRET.",
-      "Orbit installer: non-interactive use requires a complete .env-orbit and, when ORBIT_AUTH_OIDC=true, an existing owner-only .orbit-secrets/oidc-client-secret file.",
+      "Orbit installer: non-interactive use requires a complete .env-orbit and, when ORBIT_AUTH_OIDC=true, an existing owner-only .orbit-secrets/oidc-client-secret file; set ORBIT_AUTH_OIDC=false to use local accounts with no OIDC secret.",
       "Orbit installer: safe next command in a controlling terminal: curl -fsSL https://raw.githubusercontent.com/tomlawesome/orbit/main/scripts/get-orbit.sh | bash",
       "Orbit installer: configure with --init, provide the secret with --set-oidc-secret if OIDC is on, then verify with --check before rerunning automation.",
     ]);
@@ -620,5 +620,12 @@ describe("prepareConfiguration (install.sh:947-1008)", () => {
       message:
         "Configuration fields require attention (APP_URL ORBIT_IMAGE OIDC_ISSUER OIDC_CLIENT_ID OIDC_CLIENT_SECRET OIDC_CALLBACK_URL); refusing to start Compose.",
     });
+  });
+});
+
+describe("noninteractive guidance (audit Low: local-accounts refusal naming)", () => {
+  it("names ORBIT_AUTH_OIDC=false as the way out of the OIDC secret requirement", () => {
+    const text = noninteractiveConfigurationGuidance(["oidc-client-secret"]).join("\n");
+    expect(text).toContain("ORBIT_AUTH_OIDC=false");
   });
 });

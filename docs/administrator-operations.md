@@ -377,7 +377,8 @@ given both directly and as a file, and optional groups that are only partly
 configured. Its output has only field names and readiness categories, never
 values. A failed check is yours to resolve before deploying. Keep the
 persistent `.env-orbit` file at mode `0600`. A secret is given either
-directly or as a file, never both. Ordinary configuration runs and recognised
+directly or as a file, never both; prefer the file form, which keeps the
+value out of the environment and process listings. Ordinary configuration runs and recognised
 upgrades keep the OIDC secret file. Never put credentials in command
 arguments, terminal history, issue text, chat or logs.
 
@@ -386,7 +387,8 @@ arguments, terminal history, issue text, chat or logs.
 Every supported setting is listed, with comments, in
 [`.env-orbit.example`](../.env-orbit.example). A sensitive setting can be given
 either directly (for example `SESSION_SECRET`) or as the path to a file
-holding it (`SESSION_SECRET_FILE`). Set one form or the other, never both.
+holding it (`SESSION_SECRET_FILE`). Set one form or the other, never both;
+the file form is the recommended one.
 
 The generated `.env-orbit` is short and grouped into Core, Authentication,
 Generated secrets and keys, Deployment, Optional services and Observability.

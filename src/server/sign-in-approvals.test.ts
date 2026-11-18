@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AuthError } from "@/lib/auth/errors";
+import { AuthError, PasswordChangeRequiredError } from "@/lib/auth/errors";
 import { MetadataCipher } from "@/server/metadata/fields";
 
 /**
@@ -129,6 +129,8 @@ vi.mock("@/db", async () => {
         && held.getTime() > new Date(stream[at + 2]?.value as string).getTime();
       else if (operator === "<") verdict &&= held instanceof Date
         && held.getTime() < new Date(stream[at + 2]?.value as string).getTime();
+      else if (operator === "<=") verdict &&= held instanceof Date
+        && held.getTime() <= new Date(stream[at + 2]?.value as string).getTime();
       else throw new Error(`the fake database does not implement "${operator}"`);
     }
     return verdict;
@@ -186,7 +188,6 @@ vi.mock("@/db", async () => {
           consumedAt: null,
           outcome: null,
           decidedAt: null,
-          noticeShownAt: null,
           sendCount: 0,
           lastSentAt: null,
           ...value,
@@ -276,6 +277,9 @@ vi.mock("@/db", async () => {
        order, which is what these tests are about. Rollback is PostgreSQL's
        to prove, and the integration suite's to check. */
     transaction: (body: (executor: unknown) => unknown) => Promise.resolve(body(db)),
+    /* The only raw statement the module runs is the per-user address lock
+       (#1869); one process has nobody to wait for. */
+    execute: () => Promise.resolve([]),
   };
   return { getDb: () => db };
 });
@@ -294,7 +298,7 @@ const {
   resendSignInApproval,
   secondFactorConfigured,
   startSignInApproval,
-  takeDeniedSignInNotice,
+  readDeniedSignInNotice,
 } = await import("@/server/sign-in-approvals");
 
 const USER = "22222222-2222-4222-8222-222222222222";
@@ -343,7 +347,9 @@ beforeEach(() => {
     emailEnc: new MetadataCipher(testKey).encryptText("users.email", USER, "priya@example.invalid"),
     displayName: "Priya Shah",
   });
-  store.credentials.push({ userId: USER, failedAttemptCount: 0, lockedUntil: null });
+  /* password_changed_at is NOT NULL in the schema: a password set long before
+     any approval here, so a refusal marks it (#1881). */
+  store.credentials.push({ userId: USER, failedAttemptCount: 0, lockedUntil: null, passwordChangedAt: new Date(0) });
 });
 
 afterEach(() => {
@@ -485,6 +491,15 @@ describe("a pending sign-in, from the password to the session (ADR-0027 §4-§6)
     expect(store.approvals[0].lastSentAt).not.toBeNull();
   });
 
+  it("reports a mail that cannot go as one bounded word, never the provider's message, and still opens the approval", async () => {
+    const failing = { async sendEmail() { throw new Error("relay mail.invalid said: bad password for ada"); } };
+    const pending = await startSignInApproval(USER, { userAgent: CHROME, clientAddress: "203.0.113.9" }, { mailer: failing });
+    expect(["smtp_unconfigured", "smtp_unavailable", "smtp_rejected", "unknown"]).toContain(pending.sendError);
+    expect(JSON.stringify(pending)).not.toContain("mail.invalid");
+    // The row exists, so the waiting tab can still be answered and a resend can follow.
+    expect(await collectSignInApproval(pending.claim)).toEqual({ state: "waiting" });
+  });
+
   it("holds the tab until somebody presses Approve, then hands it one session", async () => {
     const pending = await startSignInApproval(USER, { userAgent: CHROME, clientAddress: "203.0.113.9" }, { mailer });
     const token = tokenFromLatestMail();
@@ -517,6 +532,27 @@ describe("a pending sign-in, from the password to the session (ADR-0027 §4-§6)
       .resolves.toEqual({ state: "approved", userId: USER, session: minted });
     // Spent for good this time: a third attempt gets nothing.
     expect(await collectSignInApproval(pending.claim)).toEqual({ state: "unknown" });
+  });
+
+  it("hands the tab the change-password refusal for a marked password, leaving the approval spent (#1881)", async () => {
+    const pending = await startSignInApproval(USER, { userAgent: CHROME, clientAddress: "203.0.113.9" }, { mailer });
+    await decideSignInApproval(tokenFromLatestMail(), "approved");
+
+    const marked = new PasswordChangeRequiredError(USER, new Date(NINE.getTime() - 60_000));
+    const answer = await collectSignInApproval(pending.claim, async () => { throw marked; });
+    expect(answer).toEqual({ state: "password_change_required", refusal: marked });
+    /* Spent, not un-spent: the email factor is passed, so a second poll gets
+       nothing and the change-password hold is the only thing issued. */
+    expect(store.approvals[0].consumedAt).not.toBeNull();
+    expect(await collectSignInApproval(pending.claim)).toEqual({ state: "unknown" });
+  });
+
+  it("names the instance's host on the approval card, and none when APP_URL is missing or unreadable", async () => {
+    await startSignInApproval(USER, { userAgent: CHROME, clientAddress: "203.0.113.9" }, { mailer });
+    const token = tokenFromLatestMail();
+    expect((await readSignInApproval(token, { APP_URL: "https://orbit.example/path" }))?.instance).toBe("orbit.example");
+    expect((await readSignInApproval(token, { APP_URL: "not a url" }))?.instance).toBe("");
+    expect((await readSignInApproval(token, {}))?.instance).toBe("");
   });
 
   it("answers an account disabled mid-collection as unknown, not as a human denial, and leaves the same trail a refusal does (#1151 F12, S2)", async () => {
@@ -632,20 +668,21 @@ describe("a refusal (ADR-0027 §8 and consequences)", () => {
     expect((lockedUntil as Date).getTime()).toBeGreaterThan(now.getTime());
   });
 
-  it("tells the account holder once, on their next successful sign-in", async () => {
+  it("marks the password, and showing the mark does not spend it (#1881)", async () => {
     await startSignInApproval(USER, { userAgent: CHROME, clientAddress: null }, { mailer });
     await decideSignInApproval(tokenFromLatestMail(), "denied");
 
-    const notice = await takeDeniedSignInNotice(USER);
+    const notice = await readDeniedSignInNotice(USER);
     expect(notice).not.toBeNull();
-    /* Taken, not read: the second sign-in is not told again. */
-    expect(await takeDeniedSignInNotice(USER)).toBeNull();
+    expect(store.credentials[0].passwordChangeRequiredAt).toEqual(notice?.deniedAt);
+    /* Security state, not a notice: only a saved password clears it. */
+    expect(await readDeniedSignInNotice(USER)).toEqual(notice);
   });
 
   it("says nothing when nobody has refused anything", async () => {
     await startSignInApproval(USER, { userAgent: CHROME, clientAddress: null }, { mailer });
     await decideSignInApproval(tokenFromLatestMail(), "approved");
-    expect(await takeDeniedSignInNotice(USER)).toBeNull();
+    expect(await readDeniedSignInNotice(USER)).toBeNull();
   });
 });
 

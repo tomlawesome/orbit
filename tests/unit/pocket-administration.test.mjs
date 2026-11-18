@@ -112,7 +112,7 @@ describe("administration on a phone, mounted", () => {
     document.getElementById($$("label", scope).find((el) => text.test(el.textContent ?? ""))?.getAttribute("for") ?? ""));
   const text = (/** @type {Element} */ el) => (el.textContent ?? "").replace(/\s+/gu, " ").trim();
 
-  it("a tap opens a person's row, naming its acts; your own row has none", async () => {
+  it("a tap opens a person's row, naming its acts; your own row offers only its address", async () => {
     const { settle } = await mountAdmin();
     /* At rest every row is shut: its acts are hidden, out of the page. */
     expect($$(".ad-pocket [data-row-panel]").filter((el) => !el.hidden)).toHaveLength(0);
@@ -122,8 +122,17 @@ describe("administration on a phone, mounted", () => {
     for (const name of ["Place Emma Harlow in a system", "Send Emma Harlow a new setup link", "Disable Emma Harlow"]) {
       expect(reachable(control(name, emma)), name).toBe(true);
     }
-    /* Your own row has none. */
-    expect(row("[data-ad=people]", "· you").querySelector("[data-row-acts]")).toBeNull();
+    /* Others' rows keep the old address act name. */
+    expect(reachable(control("Change the address of Emma Harlow", emma))).toBe(true);
+    /* Your own row offers only "change address…" (#1869 allows the actor's
+       own row): no place, no setup link, no disable. */
+    const mine = row("[data-ad=people]", "· you");
+    const myName = /** @type {RegExpExecArray} */ (/([^·]+?)\s*·\s*you/u.exec(text($(".title", mine))))[1].trim();
+    await open(mine, settle);
+    const acts = $$("[data-row-acts] button, [data-row-acts] a", mine)
+      .map((el) => (el.getAttribute("aria-label") ?? el.textContent ?? "").trim());
+    expect(acts).toEqual(["change your address"]);
+    expect(acts).not.toContain(`Change the address of ${myName}`);
   });
 
   it("disable arms before it fires", async () => {

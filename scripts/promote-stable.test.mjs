@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -88,6 +88,11 @@ const DOCKER_STUB = [
   "            exit 0",
   "            ;;",
   "        esac",
+  // #1604 D-S1: a registry that cannot be reached at all, as opposed to a tag that is not there.
+  '        if [ -n "${STUB_INSPECT_UNREACHABLE:-}" ]; then',
+  "          echo 'ERROR: failed to do request: dial tcp: lookup ghcr.io: no such host' >&2",
+  "          exit 1",
+  "        fi",
   '        file="$digests_dir/$(sanitize "$ref")"',
   '        if [ -f "$file" ]; then',
   "          printf 'Digest: %s\\n' \"$(cat \"$file\")\"",
@@ -1119,6 +1124,22 @@ describe(".gitlab-ci.yml promote_stable job", () => {
   });
 });
 
+describe("scripts/ci/promote-stable.sh with GHCR unreachable (#1604 D-S1)", () => {
+  it("says the registry could not be reached, not that main's commit has no published image, and promotes nothing", () => {
+    const { result, calls } = run({ previewDigestInput: null, env: { STUB_INSPECT_UNREACHABLE: "1" } });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(/unreachable|could not (?:be )?reach|cannot reach|could not contact|no such host/iu);
+    expect(result.stderr).not.toMatch(/resolves to nothing|has no published image/iu);
+    expect(calls().some((call) => call[0] === "docker" && call[1].startsWith("buildx imagetools create"))).toBe(false);
+  });
+
+  it("still says a tag that is simply missing resolves to nothing, when the registry answers", () => {
+    const { result } = run({ previewDigestInput: null, shaTagDigest: null });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(/resolves to nothing/u);
+  });
+});
+
 describe("scripts/ci/promote-stable.sh update-path cross-check (#1667)", () => {
   function manifestWith(updateFrom, omitField = false) {
     const path = join(mkdtempSync(join(tmpdir(), "promote-stable-manifest-")), "orbit-release-manifest.json");
@@ -1213,3 +1234,30 @@ describe("scripts/ci/promote-stable.sh update-path cross-check (#1667)", () => {
   });
 });
 
+
+describe("scripts/ci/promote-stable.sh tells an unreachable registry from a missing tag (group 6 D-S1)", () => {
+  it("says GHCR is unreachable when inspect fails for a network reason", () => {
+    const dir = mkdtempSync(join(tmpdir(), "promote-stable-unreachable-"));
+    const bashEnv = join(dir, "bash-env.sh");
+    writeFileSync(
+      bashEnv,
+      [
+        "docker() {",
+        '  if [ "$1" = buildx ] && [ "$2" = imagetools ] && [ "$3" = inspect ]; then',
+        '    echo "ERROR: failed to do request: Head \"https://ghcr.io/v2/x/manifests/y\": dial tcp: lookup ghcr.io: no such host" >&2',
+        "    return 1",
+        "  fi",
+        '  command docker "$@"',
+        "}",
+        "",
+      ].join("\n"),
+    );
+    try {
+      const { result } = run({ env: { BASH_ENV: bashEnv } });
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toMatch(/unreachable/iu);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

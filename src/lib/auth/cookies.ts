@@ -86,3 +86,33 @@ export function clearPendingSignInCookie(cookies: CookieSink, config: AuthConfig
     maxAge: 0,
   });
 }
+
+/**
+ * The change-password hold (#1881): what a marked account's sign-in gets
+ * instead of a session. `__Host-` for the pending cookie's reason, and
+ * HTTP-only like it: the sealed value inside is the whole authorisation of
+ * `POST /api/auth/local/login/new-password` and of nothing else.
+ */
+export function passwordChangeCookieName(config: AuthConfig): string {
+  return config.secureCookies ? "__Host-orbit-password-change" : "orbit-password-change";
+}
+
+export function setPasswordChangeCookie(cookies: CookieSink, value: string, config: AuthConfig, maxAgeSeconds: number): void {
+  cookies.set(passwordChangeCookieName(config), value, {
+    httpOnly: true,
+    secure: config.secureCookies,
+    sameSite: "lax",
+    path: "/",
+    maxAge: maxAgeSeconds,
+  });
+}
+
+export function clearPasswordChangeCookie(cookies: CookieSink, config: AuthConfig): void {
+  cookies.set(passwordChangeCookieName(config), "", {
+    httpOnly: true,
+    secure: config.secureCookies,
+    sameSite: "lax",
+    path: "/",
+    maxAge: 0,
+  });
+}

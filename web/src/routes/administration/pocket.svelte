@@ -23,7 +23,7 @@
     canRemove, closeConfirm, loadProviders, openConfirm, providerRows, providerState, removeNow, signedOutToo,
   } from "./providers.js";
   import {
-    card, commandMail, deleteSystemNow, inviteLocalUser, issueSetupLink, makeSystem, placePerson, restoreSystem,
+    card, commandMail, deleteSystemNow, inviteLocalUser, issueSetupLink, makeSystem, placePerson, restoreSystem, setAddress,
     runMailTest, retryJob, saveSending, setArchiveStorage, setContact, setDisabled, setMailLimit, setUploadLimit,
   } from "./acts.svelte.js";
 
@@ -54,12 +54,12 @@
 
   /** @typedef {NonNullable<Awaited<ReturnType<typeof import('$lib/data/workspace.js').readAdminScreen>>>} AdminView */
   /** @typedef {{ email: string, displayName: string, expiresInDays: number }} Draft */
-  /** @typedef {(intent: string, open: () => void, report?: (message: string) => void, about?: { resend?: { personId: string, days: number } }) => Promise<void>} Challenge */
+  /** @typedef {(intent: string, open: () => void, report?: (message: string) => void, about?: { resend?: { personId: string, days: number }, address?: { personId: string, email: string } }) => Promise<void>} Challenge */
   /** @typedef {NonNullable<AdminView["users"]>[number]} Person */
   /** @typedef {AdminView["households"][number]} System */
 
-  /** @type {{ view: AdminView | null, fixtures: boolean, actorHasPassword: boolean, provenIntent: string, resumedResendPersonId: string | null, draft: Draft, challenge: Challenge, reread: () => Promise<void>, spent: () => void, screenProblem: string | null, screenRefused: boolean, onretry: () => void }} */
-  let { view, fixtures, actorHasPassword, provenIntent, resumedResendPersonId, draft = $bindable(), challenge, reread, spent, screenProblem, screenRefused, onretry } = $props();
+  /** @type {{ view: AdminView | null, fixtures: boolean, actorHasPassword: boolean, provenIntent: string, resumedResendPersonId: string | null, resumedAddress?: { personId: string, email: string } | null, draft: Draft, challenge: Challenge, reread: () => Promise<void>, spent: () => void, screenProblem: string | null, screenRefused: boolean, onretry: () => void }} */
+  let { view, fixtures, actorHasPassword, provenIntent, resumedResendPersonId, resumedAddress = null, draft = $bindable(), challenge, reread, spent, screenProblem, screenRefused, onretry } = $props();
 
   /* A panel whose read failed says so with a "try again" (#1442), as
      settings does on the phone (#1195): the whole screen is re-read, and a
@@ -222,6 +222,41 @@
     });
   }
 
+  /* Setting a person's address (#1869): its own sheet and its own intent. */
+  /** @type {Person | null} */
+  let addressFor = $state(null);
+  let addressOpen = $state(false);
+  let addressDraft = $state("");
+  let addressPassword = $state("");
+  const addressCard = $state(card());
+  /** The address the own row's first "set it" armed, "" when disarmed (as on the desk). */
+  let addressArmed = $state("");
+  const ownAddress = $derived(/** @type {Person | null} */ (addressFor)?.id === meId);
+  const ownAddressArmed = $derived(addressArmed !== "" && addressArmed === addressDraft.trim());
+
+  /** @param {Person} person */
+  function openAddress(person) {
+    peopleCard.problem = null;
+    challenge("email_address_set", () => {
+      addressFor = person;
+      addressDraft = "";
+      addressPassword = "";
+      addressArmed = "";
+      addressCard.problem = null;
+      addressOpen = true;
+    }, (message) => (peopleCard.problem = message), { address: { personId: person.id, email: "" } });
+  }
+
+  async function saveAddress() {
+    const person = addressFor;
+    if (!person) return;
+    if (ownAddress && !ownAddressArmed) { addressArmed = addressDraft.trim(); return; }
+    await setAddress(person, addressDraft, addressPassword, {
+      card: addressCard, actorHasPassword, own: ownAddress, reread, wake,
+      landed: () => { addressOpen = false; addressPassword = ""; addressArmed = ""; spent(); },
+    });
+  }
+
   /* Placing a person in a system (§11, #453): the systems are the rows. */
   /** @type {Person | null} */
   let placing = $state(null);
@@ -234,6 +269,14 @@
     await placePerson(person, system, { card: peopleCard, reread, wake });
   }
 
+  /** @param {Person} person @returns {import('$lib/pocket/row.js').RowAct[]} */
+  const addressAct = (person) => view?.failed.session || view?.metadata?.locked ? [] : [
+    person.metadataStatus?.email === "metadata_integrity_failed"
+      ? { label: "set address", name: `Set the address of ${person.displayName}`, tone: "accent", onact: () => openAddress(person) }
+      : person.id === meId
+        ? { label: "change my address…", name: "change your address", tone: "accent", onact: () => openAddress(person) }
+        : { label: "address", name: `Change the address of ${person.displayName}`, tone: "accent", onact: () => openAddress(person) },
+  ];
   /**
    * The acts behind a person's row (§2.12, review round §2.6): a tap opens
    * it. None on your own row, and none on any row while the session read
@@ -242,11 +285,13 @@
    * @param {Person} person
    * @returns {import('$lib/pocket/row.js').RowAct[]}
    */
-  const personActs = (person) => person.id === meId || view?.failed.session ? [] : [
+  const personActs = (person) => person.id === meId || view?.failed.session ? addressAct(person) : [
+    ...(person.metadataStatus?.email === "metadata_integrity_failed" ? addressAct(person) : []),
     { label: "place", name: `Place ${person.displayName} in a system`, tone: "accent",
       onact: () => { placing = person; placeOpen = true; } },
     { label: "link", name: `Send ${person.displayName} a new setup link`, tone: "accent",
       onact: () => openResend(person) },
+    ...(person.metadataStatus?.email === "metadata_integrity_failed" ? [] : addressAct(person)),
     person.disabledAt
       ? { label: "enable", name: `Enable ${person.displayName}`, tone: "ok", onact: () => disable(person, false) }
       /* §2.6: disable arms. The wake still offers undo (§1.13) once it has
@@ -578,8 +623,10 @@
      typed to restore yet (the challenge fires before the name field is
      ever shown), so reopening empty is already the fix; `setup_link_issue`
      needs the person back, carried from the desk's sessionStorage draft
-     since this layout's own `resendFor` is a whole Person, not an id. */
-  $effect(() => {
+     since this layout's own `resendFor` is a whole Person, not an id.
+     `email_address_set` (#1869) is the same: the person and what was typed
+     come back from the desk's draft, and the address sheet reopens. */
+  function resumeProvenErrand() {
     if (!view) return;
     if (provenIntent === "local_user_create") inviteOpen = true;
     if (provenIntent === "system_create") { systemName = ""; systemOpen = true; }
@@ -592,7 +639,18 @@
         resendOpen = true;
       }
     }
-  });
+    if (provenIntent === "email_address_set" && resumedAddress) {
+      const person = view.users?.find((one) => one.id === resumedAddress.personId);
+      if (person) {
+        addressFor = person;
+        addressDraft = resumedAddress.email;
+        addressPassword = "";
+        addressCard.problem = null;
+        addressOpen = true;
+      }
+    }
+  }
+  $effect(() => resumeProvenErrand());
 </script>
 
 <div class="ad-pocket">
@@ -695,7 +753,7 @@
                the systems they are in are the panel's first line. -->
           {#snippet personDetail()}<div class="p-kv"><span>{standing}</span></div>{/snippet}
           <Row title="{person.displayName}{person.id === meId ? ' · you' : ''}"
-               meta={person.email}
+               meta={person.email ?? (person.metadataStatus?.email === "metadata_integrity_failed" ? "address can’t be read" : undefined)}
                trail={person.isInstanceAdmin ? "admin" : "user"}
                trailTone={person.isInstanceAdmin ? "var(--accent-text)" : ""} acts={personActs(person)}
                detail={standing ? personDetail : undefined}>
@@ -1237,6 +1295,31 @@
     {#snippet foot()}
       {#if resendFor}
         <button class="p-pill filled" type="submit" form="ad-resend-form" disabled={resendCard.busy}>{resendCard.busy ? "sending…" : "send it"}</button>
+      {/if}
+    {/snippet}
+  </Sheet>
+
+  <Sheet bind:open={addressOpen} size="callout" title={ownAddress ? "Your address" : "Their address"}>
+    {#if addressFor}
+      <form id="ad-address-form" onsubmit={(event) => { event.preventDefault(); saveAddress(); }}>
+        <p class="p-prose ad-sheet-say">{ownAddress
+          ? "Sets the address you sign in with. Your next sign-in waits on an approval mailed to it, so a mistyped address locks you out once this session ends. Check it, then press again."
+          : `Sets the address ${addressFor.displayName} is registered with. Their pending setup links and sign-in approvals stop working. No link is sent; send a new one afterwards.`}</p>
+        <label class="ad-label" for="ad-addr-email">address</label>
+        <input id="ad-addr-email" class="p-input" type="email" autocomplete="off" enterkeyhint="send"
+               bind:value={addressDraft} required>
+        {#if actorHasPassword}
+          <label class="ad-label" for="ad-addr-current">your current password</label>
+          <input id="ad-addr-current" class="p-input" type="password" autocomplete="current-password" enterkeyhint="send"
+                 bind:value={addressPassword} required>
+        {/if}
+        {#if addressCard.problem}<p class="p-error" role="alert">{addressCard.problem}</p>{/if}
+      </form>
+    {/if}
+    {#snippet foot()}
+      {#if addressFor}
+        <button class="p-pill filled" type="submit" form="ad-address-form" disabled={addressCard.busy}>{addressCard.busy ? "setting…" : ownAddress && ownAddressArmed ? `set my address to ${addressArmed}` : "set it"}</button>
+        {#if ownAddressArmed}<button class="p-pill" type="button" onclick={() => { addressArmed = ""; addressDraft = ""; }}>cancel</button>{/if}
       {/if}
     {/snippet}
   </Sheet>

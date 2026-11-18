@@ -6,7 +6,7 @@
   import Identity from "$lib/flight/Identity.svelte";
   import { markLaunch } from "$lib/flight/arrival.js";
   import RingCard from "$lib/flight/RingCard.svelte";
-  import { cardMessageFor } from "$lib/flight/door-state.js";
+  import { cardMessageFor, renewStepAddress } from "$lib/flight/door-state.js";
   import "$lib/ringcard.css";
   import "$lib/flight/flight.css";
   import "$lib/flight/door-phone.css";
@@ -68,6 +68,21 @@
       if (response.ok) {
         password = "";
         again = "";
+        /* Saved, but a refusal marked the account again in between (#1881):
+           no session came with it, only the hold, so the way on is the
+           door's renew step rather than a front door that would turn this
+           reader away. */
+        /** @type {{ state?: string, refusedAt?: string } | null} */
+        let saved = null;
+        try {
+          saved = await response.json();
+        } catch {
+          saved = null;
+        }
+        if (saved?.state === "password_change_required") {
+          location.assign(renewStepAddress(saved.refusedAt, "/"));
+          return;
+        }
         markLaunch();
         location.href = "/";
         return;

@@ -865,7 +865,7 @@ local_only_scenario() {
   # section 1) -- only a pointer to where the operator reads it.
   grep -qi 'bootstrap.claim' "$workdir/install.log" &&
     fail "the installer's own output named the claim event; it must only point at the container log"
-  grep -Fq 'Claim this instance: run "docker compose --env-file .env-orbit logs orbit-app"' "$workdir/install.log" ||
+  grep -Fq 'Claim this instance: run "docker compose --env-file .env-orbit logs orbit-app | grep -i claim"' "$workdir/install.log" ||
     fail "completion screen did not name the claim-notice pointer"
 
   local health_body

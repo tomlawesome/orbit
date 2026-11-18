@@ -61,6 +61,23 @@ function updateWithOutcome(outcome, env = {}) {
 const okUpdate = (extra) => `status=ok\nfresh=0\nprofile=standard\nscanner=on\nmodel-pull=0\ndatabase-volume=\n${extra}`;
 const lastEngineEnv = (result) => result.engineRuns[result.engineRuns.length - 1].env;
 
+describe("install.sh: a folder on a dead mount cannot hang the host check (audit Low b2 O-R2)", () => {
+  it("probes a working-folder label for existence and entry under timeout", () => {
+    const logDir = mkdtempSync(join(tmpdir(), "orbit-timeout-log-"));
+    try {
+      const label = "/orbit-dead-mount-label/orbit";
+      update(label, { FAKE_TIMEOUT_LOG: join(logDir, "timeout.log") });
+      const logged = readFileSync(join(logDir, "timeout.log"), "utf8");
+      const lines = logged.split("\n");
+      // Both probes of the label run under timeout: the existence test and the entry (cd) probe.
+      expect(lines.some((line) => /\btest -e /u.test(line) && line.endsWith(label))).toBe(true);
+      expect(lines.some((line) => /\bsh -c .*\bcd\b/u.test(line) && line.endsWith(label))).toBe(true);
+    } finally {
+      rmSync(logDir, { recursive: true, force: true });
+    }
+  }, PROCESS_TEST_TIMEOUT_MS);
+});
+
 describe("install.sh and the engine's recreate outcome (#1576)", () => {
   it("forwards ORBIT_INSTALL_FOLDER_MOVED to the engine, beside the profile and scanner requests", () => {
     const { result } = updateWithOutcome(okUpdate("recreate=0\n"), { ORBIT_INSTALL_FOLDER_MOVED: "recreate", ORBIT_INSTALL_SCANNER: "on" });
