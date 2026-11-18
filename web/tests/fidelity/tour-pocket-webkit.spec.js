@@ -1545,3 +1545,135 @@ test.describe("chapters 8 and 9 stay on the sky when the household has nothing i
     expect.soft(faults, "every line points at something on the screen").toEqual({});
   });
 });
+
+
+/* ---- #1895: the phone's callouts on a sky line and on a sheet ------------
+   Two callouts sat on top of things on the phone: chapter 3's "Bodies orbit
+   by when they're due." landed on the dial's own planet names, and chapter
+   8's "item-read" line straddled the item drawer's head above the sheet.
+   The design ruling (issue note 63824): a sky line anchors the sun, side
+   `bottom`, dy 30, as chapters 1 and 5 do (#1083 §3.3); a pocket anchor that
+   is a surface (a sheet) takes its line inside, hung from its top edge. */
+const CALLOUT_GAP = 18; /* vocabulary.js's CALLOUT_GAP */
+
+/**
+ * Holds the film at one mark (jumping to its chapter first when it is the
+ * chapter's first mark) and reads the callout standing there: the film's
+ * own stamp on it, its box, its stem's tip, the sampler's faults, and the
+ * boxes the test asks for.
+ * @param {import("@playwright/test").Page} page
+ * @param {string} mark
+ * @param {number | null} jumpTo  chapter index to jump to, or null to play on
+ * @param {string[]} selectors  elements whose boxes are wanted
+ */
+async function holdAndRead(page, mark, jumpTo, selectors) {
+  await page.evaluate((m) => {
+    const hooks = /** @type {any} */ (window);
+    hooks.__held = null;
+    hooks.__hold = m;
+  }, mark);
+  if (jumpTo !== null) await page.evaluate((k) => /** @type {any} */ (window).__jump(k), jumpTo);
+  else await page.evaluate(() => /** @type {any} */ (window).__play());
+  await page.waitForFunction((m) => /** @type {any} */ (window).__held === m, mark, { timeout: 45_000 });
+  await settled(page);
+  return page.evaluate((sels) => {
+    const el = [...document.querySelectorAll(".tourfilm-callout")]
+      .find((c) => /** @type {HTMLElement} */ (c).style.opacity !== "0");
+    if (!el) return null;
+    const rect = (/** @type {DOMRect} */ r) => ({ x: r.left, y: r.top, w: r.width, h: r.height, right: r.right, bottom: r.bottom });
+    const stem = el.querySelector("i");
+    const sb = (stem ?? el).getBoundingClientRect();
+    const d = /** @type {HTMLElement} */ (el).dataset;
+    const lit = /** @type {any} */ (window).__lit?.() ?? [];
+    return {
+      anchor: d.tourfilmAnchor ?? "",
+      side: d.tourfilmSide ?? "",
+      dy: Number(d.tourfilmDy ?? 0),
+      box: rect(el.getBoundingClientRect()),
+      tipX: (sb.left + sb.right) / 2,
+      tipY: sb.top, /* the stem's point on a `bottom` callout */
+      boxes: Object.fromEntries(sels.map((s) => {
+        const found = document.querySelector(s);
+        return [s, found ? rect(found.getBoundingClientRect()) : null];
+      })),
+      litSels: lit.map((/** @type {any} */ l) => l.sel),
+    };
+  }, selectors);
+}
+
+/** @param {string} anchor "x,y,w,h" */
+const anchorBox = (anchor) => {
+  const [x, y, w, h] = anchor.split(",").map(Number);
+  return { x, y, w, h, right: x + w, bottom: y + h };
+};
+/** @param {{ x: number, y: number, w: number, h: number }} a @param {{ x: number, y: number, w: number, h: number }} b */
+const sameBox = (a, b) => [a.x - b.x, a.y - b.y, a.w - b.w, a.h - b.h].every((d) => Math.abs(d) <= 2);
+
+test.describe("the phone's callouts sit on the sky line and on the sheet (#1895)", () => {
+  test.use({ reducedMotion: "reduce" });
+
+  for (const phone of PHONES) {
+    test(`at ${phone.width}x${phone.height}, chapter 3's line sits under the sun and chapter 8's lines sit on their sheets`, async ({ browser }) => {
+      test.setTimeout(240_000);
+      const context = await browser.newContext({
+        viewport: { width: phone.width, height: phone.height }, isMobile: true, hasTouch: true, deviceScaleFactor: 2,
+        reducedMotion: "reduce",
+      });
+      const page = await context.newPage();
+      await openFilm(page);
+      /** @type {string[]} */
+      const wrong = [];
+      const coverFaults = (/** @type {string[]} */ fs) => fs.filter((f) => /covers the text|misses its anchor|past the screen|under the top chrome|pointing at nothing/u.test(f));
+
+      /* Chapter 3, lands-body: the sun's line. */
+      const SUN = ".pocket .mdial .pk-sun";
+      const DIAL = ".pocket .mdial";
+      const lands = await holdAndRead(page, "lands-body", MARKS.findIndex(([id]) => id === "lands"), [SUN, DIAL]);
+      if (!lands) wrong.push("lands-body: no callout up");
+      else {
+        const sun = lands.boxes[SUN], dial = lands.boxes[DIAL];
+        if (!sun || !dial) wrong.push("lands-body: no sun or dial on the screen");
+        else {
+          if (!sameBox(anchorBox(lands.anchor), sun)) wrong.push(`lands-body: anchored on ${lands.anchor}, not the sun's box`);
+          if (lands.side !== "bottom") wrong.push(`lands-body: side ${lands.side}, not bottom`);
+          if (Math.abs(lands.dy) !== 30) wrong.push(`lands-body: dy ${lands.dy}, not 30`);
+          if (!lands.litSels.some((s) => String(s).includes("tourfilm-lands-body"))) wrong.push("lands-body: the demo body is not ringed");
+          const b = lands.box;
+          if (b.x < dial.x - 0.5 || b.right > dial.right + 0.5 || b.y < dial.y - 0.5 || b.bottom > dial.bottom + 0.5) wrong.push("lands-body: the callout is not wholly inside the dial");
+          if (b.y < sun.bottom - 0.5) wrong.push(`lands-body: the callout (top ${Math.round(b.y)}) is not below the sun (bottom ${Math.round(sun.bottom)})`);
+        }
+        const s = await page.evaluate(sample);
+        wrong.push(...coverFaults(s?.faults ?? []).map((f) => `lands-body: ${f}`));
+      }
+
+      /* Chapter 8: the item's marks in order, up to item-read and the calendar. */
+      const itemIndex = MARKS.findIndex(([id]) => id === "item");
+      const itemMarks = /** @type {string[]} */ (MARKS[itemIndex][1]);
+      const PREVIEW = "[data-preview-card]";
+      for (const [k, mark] of itemMarks.entries()) {
+        const read = await holdAndRead(page, mark, k === 0 ? itemIndex : null, [PREVIEW]);
+        if (mark !== "item-read" && mark !== "item-calendar") continue;
+        if (!read) { wrong.push(`${mark}: no callout up`); continue; }
+        if (mark === "item-calendar") {
+          /* also a bottom sheet: it keeps holding the sampler's rules */
+          const cs = await page.evaluate(sample);
+          wrong.push(...coverFaults(cs?.faults ?? []).map((f) => `${mark}: ${f}`));
+          continue;
+        }
+        const sheet = read.boxes[PREVIEW];
+        if (!sheet) { wrong.push(`${mark}: no preview sheet on the screen`); continue; }
+        if (!sameBox(anchorBox(read.anchor), sheet)) wrong.push(`${mark}: anchored on ${read.anchor}, not the sheet's box`);
+        if (read.side !== "bottom") wrong.push(`${mark}: side ${read.side}, not bottom`);
+        const b = read.box;
+        if (b.x < sheet.x - 0.5 || b.right > sheet.right + 0.5 || b.bottom > sheet.bottom + 0.5) wrong.push(`${mark}: the callout is not wholly inside the sheet`);
+        if (b.y < sheet.y + CALLOUT_GAP - 0.5) wrong.push(`${mark}: the callout (top ${Math.round(b.y)}) is not ${CALLOUT_GAP}px inside the sheet's top (${Math.round(sheet.y)})`);
+        if (Math.abs(read.tipY - sheet.y) > 12) wrong.push(`${mark}: the stem's tip (${Math.round(read.tipY)}) is not on the sheet's top edge (${Math.round(sheet.y)})`);
+        if (b.y < sheet.y) wrong.push(`${mark}: part of the callout is above the sheet's top edge`);
+        const s = await page.evaluate(sample);
+        wrong.push(...coverFaults(s?.faults ?? []).map((f) => `${mark}: ${f}`));
+      }
+      await context.close();
+      expect(wrong, "the callouts sit where the ruling puts them").toEqual([]);
+    });
+  }
+});
