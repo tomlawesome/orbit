@@ -40,15 +40,31 @@
     phase = "loading";
     let current = "";
     const controller = new AbortController();
-    loadStagedPage(target, controller.signal).then((result) => {
-      if (result.kind === "page") { current = result.url; pageUrl = result.url; phase = "page"; }
-      else phase = result.kind;
-    }).catch((error) => {
-      if (error instanceof DOMException && error.name === "AbortError") return;
-      phase = "undrawable";
-    });
+    /** @type {ReturnType<typeof setTimeout> | undefined} */
+    let timer;
+    /* #1446 decision 3: a busy answer is asked for once more after its Retry-After, quietly. */
+    /** @param {boolean} again */
+    function ask(again) {
+      loadStagedPage(target, controller.signal).then((result) => {
+        if (controller.signal.aborted) {
+          if (result.kind === "page") URL.revokeObjectURL(result.url);
+          return;
+        }
+        if (result.kind === "busy" && !again) {
+          timer = setTimeout(() => ask(true), result.retryAfterSeconds * 1000);
+          return;
+        }
+        if (result.kind === "page") { current = result.url; pageUrl = result.url; phase = "page"; }
+        else phase = result.kind === "busy" ? "undrawable" : result.kind;
+      }).catch((error) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        phase = "undrawable";
+      });
+    }
+    ask(false);
     return () => {
       controller.abort();
+      clearTimeout(timer);
       if (current) URL.revokeObjectURL(current);
     };
   });

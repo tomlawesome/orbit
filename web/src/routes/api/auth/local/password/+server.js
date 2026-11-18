@@ -2,14 +2,15 @@ import { json } from "@sveltejs/kit";
 import { z } from "zod";
 
 import { setSessionCookie } from "orbit/lib/auth/cookies";
-import { AuthError } from "orbit/lib/auth/errors";
+import { AuthError, PasswordChangeRequiredError } from "orbit/lib/auth/errors";
 import { authErrorResponse } from "orbit/lib/auth/http";
+import { issuePasswordChangeHold } from "orbit/lib/auth/password-change-hold";
 import { checkPasswordBounds, hashPassword, MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from "orbit/lib/auth/password";
 import { requireRecentAuthentication } from "orbit/lib/auth/recent-auth";
 import { createSession } from "orbit/lib/auth/session";
 import { VerificationGateRefusedError } from "orbit/lib/auth/verification-gate";
 import { getAuthConfig } from "orbit/lib/env";
-import { hasLocalCredential, setPassword } from "orbit/server/local-credentials";
+import { assertNotRefusedPassword, hasLocalCredential, setPassword } from "orbit/server/local-credentials";
 
 import { write } from "$lib/server/api.js";
 
@@ -51,6 +52,10 @@ export const POST = write(async (event, session) => {
     );
   }
 
+  /* A signed-in change clears a refused sign-in's mark too (#1881), so it is
+     held to the same rule: not the refused password. */
+  await assertNotRefusedPassword(session.user.id, submitted.password);
+
   let passwordHash;
   try {
     passwordHash = await hashPassword(submitted.password);
@@ -69,7 +74,27 @@ export const POST = write(async (event, session) => {
        caller's own" half of ADR-0023 §7 — not a sign-in, so no CSRF or
        origin check beyond the one `write()` already made for this request. */
     const config = getAuthConfig();
-    const reissued = await createSession(session.user.id, config, event.request.headers.get("user-agent"));
+    let reissued;
+    try {
+      reissued = await createSession(session.user.id, config, event.request.headers.get("user-agent"));
+    } catch (error) {
+      /* Saved, but a refusal re-marked the account in between (#1881): no
+         session, and the change-password hold instead of a raw 403
+         (errors.ts). The change itself stands and is reported. */
+      if (error instanceof PasswordChangeRequiredError) {
+        const hold = await issuePasswordChangeHold(event.cookies, error, config);
+        return json(
+          {
+            changed: outcome.replaced,
+            sessionsRevoked: outcome.sessionsRevoked,
+            state: "password_change_required",
+            refusedAt: hold.refusedAt,
+          },
+          { headers: { "cache-control": "no-store" } },
+        );
+      }
+      throw error;
+    }
     setSessionCookie(event.cookies, reissued.token, config);
   }
 

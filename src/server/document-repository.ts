@@ -211,6 +211,7 @@ async function requireDocumentAccess(userId: string, documentId: string) {
       lifecycle: documents.lifecycle,
       scanStatus: documents.scanStatus,
       deleteAfter: documents.deleteAfter,
+      boundAt: documents.boundAt,
       availableAt: documents.availableAt,
       uploadedByUserId: documents.uploadedByUserId,
       pageCount: documents.pageCount,
@@ -507,6 +508,9 @@ export async function readDocumentTransferState(documentId: string): Promise<{ s
   return { state: "pending" };
 }
 
+/** #1605 P-1: staged uploads one member may hold waiting to be attached to an item. */
+export const STAGED_UPLOADS_PER_MEMBER_LIMIT = 100;
+
 async function reserveDocumentMetadata(input: {
   documentId: string;
   userId: string;
@@ -515,6 +519,8 @@ async function reserveDocumentMetadata(input: {
   itemId: string;
   /** A staged upload: stored with no item, due to be retired unless bound in time. */
   staged: boolean;
+  /** Whether the #1605 per-member cap judges this staging (the member's own direct upload only). */
+  enforceStagedLimit: boolean;
   displayName: string;
   mediaType: string;
   sizeBytes: number;
@@ -547,12 +553,26 @@ async function reserveDocumentMetadata(input: {
     if (Number(householdUsage.total) + input.sizeBytes > config.householdQuotaBytes) {
       throw new AppError("document_household_quota", "This household has reached its document storage limit", 413);
     }
+    if (input.staged && input.enforceStagedLimit) {
+      const [{ total: staged }] = await transaction
+        .select({ total: sql<number>`count(*)` })
+        .from(documents)
+        .where(and(eq(documents.uploadedByUserId, input.userId), isNull(documents.itemId), isNull(documents.boundAt), inArray(documents.lifecycle, ["quarantined", "scanning", "available"])));
+      if (Number(staged) >= STAGED_UPLOADS_PER_MEMBER_LIMIT) {
+        throw new AppError(
+          "document_staged_limit",
+          "You already have 100 uploads waiting to be attached to an item. Attach or delete some first",
+          429,
+        );
+      }
+    }
     await transaction.insert(documents).values({
       id: input.documentId,
       householdId: input.householdId,
       itemId: input.staged ? null : input.itemId,
       sealedItemId: input.itemId,
       deleteAfter: input.staged ? new Date(Date.now() + stagedUploadHoldMs(config)) : null,
+      boundAt: input.staged ? null : new Date(),
       uploadedByUserId: input.userId,
       displayName: input.displayName,
       mediaType: input.mediaType,
@@ -601,6 +621,12 @@ export async function uploadItemDocument(input: {
    * the item. The item need not exist yet.
    */
   staged?: boolean;
+  /**
+   * #1605 P-1 / #1904: set only by the member's own direct staged upload, the one
+   * path the per-member staged cap limits. System staging (archive import, mail
+   * approval) leaves it unset: never refused by the cap.
+   */
+  enforceStagedLimit?: boolean;
   filename: string;
   body: ReadableStream<Uint8Array> | null;
   declaredBytes?: number;
@@ -784,6 +810,7 @@ export async function uploadItemDocument(input: {
       householdId: input.householdId,
       itemId: input.itemId,
       staged,
+      enforceStagedLimit: input.enforceStagedLimit === true,
       displayName,
       mediaType,
       sizeBytes: received.sizeBytes,
@@ -1206,10 +1233,10 @@ export async function requestDocumentDeletion(
      goes at the next purge, not after the retention window. Every other
      delete -- an unbound document included, such as one whose item was
      deleted -- keeps the window and its restore. A staged copy is one no item
-     binds that still carries its hold; the update takes it only while it
+     has ever bound (bound_at null) that still carries its hold; the update takes it only while it
      still is one, so a bind that wins the race keeps the file. */
   const staged = options.stagedDiscard === true;
-  if (staged && (record.itemId !== null || record.deleteAfter === null)) {
+  if (staged && (record.itemId !== null || record.boundAt !== null || record.deleteAfter === null)) {
     throw new AppError("document_conflict", "That document is no longer a staged upload", 409);
   }
   const deleteAfter = staged ? new Date() : new Date(Date.now() + config.retentionDays * 86_400_000);
@@ -1226,6 +1253,7 @@ export async function requestDocumentDeletion(
       eq(documents.id, documentId),
       eq(documents.lifecycle, "available"),
       staged ? isNull(documents.itemId) : undefined,
+      staged ? isNull(documents.boundAt) : undefined,
       staged ? isNotNull(documents.deleteAfter) : undefined,
     )).returning();
     if (!changed) return undefined;
@@ -1279,9 +1307,41 @@ export async function restoreDocument(userId: string, documentId: string): Promi
       // pending purge and its metadata so a valid retry can finalize it.
       throw new AppError("document_unavailable", "That document cannot currently be restored", 503);
     }
+    // #1605 P-1: a never-bound staged upload counts against its member's cap
+    // again once restored; checked under the same locks as the reserve.
+    const [row] = await transaction.select({
+      itemId: documents.itemId,
+      sealedItemId: documents.sealedItemId,
+      uploadedByUserId: documents.uploadedByUserId,
+      boundAt: documents.boundAt,
+    }).from(documents).where(eq(documents.id, documentId)).limit(1);
+    if (row && row.itemId === null && row.boundAt === null && row.sealedItemId !== null && row.uploadedByUserId !== null) {
+      await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended('orbit:document-instance-quota', 0))`);
+      await transaction.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${`orbit:document-household-quota:${record.householdId}`}, 0))`,
+      );
+      const [{ total: staged }] = await transaction
+        .select({ total: sql<number>`count(*)` })
+        .from(documents)
+        .where(and(
+          eq(documents.uploadedByUserId, row.uploadedByUserId),
+          isNull(documents.itemId),
+          isNull(documents.boundAt),
+          inArray(documents.lifecycle, ["quarantined", "scanning", "available"]),
+        ));
+      if (Number(staged) >= STAGED_UPLOADS_PER_MEMBER_LIMIT) {
+        throw new AppError(
+          "document_staged_limit",
+          "You already have 100 uploads waiting to be attached to an item. Attach or delete some first",
+          429,
+        );
+      }
+    }
     const [changed] = await transaction.update(documents).set({
       lifecycle: "available",
-      deleteAfter: null,
+      // An upload no item ever claimed gets a fresh staged hold, so the sweep
+      // can still retire it; a document an item once held keeps none (#1871).
+      deleteAfter: record.boundAt === null ? new Date(Date.now() + stagedUploadHoldMs(config)) : null,
       version: sql`${documents.version} + 1`,
       updatedAt: new Date(),
     }).where(and(eq(documents.id, documentId), eq(documents.lifecycle, "pending_deletion"))).returning();

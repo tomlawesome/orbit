@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, readdir, rm, stat } from "node:fs/promises";
+import { mkdtemp, open, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -170,16 +170,41 @@ describe("private IMAP attachment holding", () => {
       expect(vi.mocked(scanFileWithClamAv).mock.calls[0]![0]).toBe(seals.mock.calls[0]![0]);
     });
 
-    it("reads the quarantine file once for the check, and zeroes that copy by the time the hold returns", async () => {
+    /* #1605 A-Q2: the caller already holds the bytes (and zeroes them itself),
+       so the check uses them: no second copy is read back from quarantine. */
+    it("checks the bytes the caller already holds, without reading the quarantine file back (A-Q2)", async () => {
       root = await mkdtemp(join(tmpdir(), "orbit-imap-sealed-"));
       configure();
       const reads = vi.spyOn(LocalDocumentStorage.prototype, "readQuarantine");
+      const bytes = syntheticPdf("checked in place");
+      const before = Buffer.from(bytes);
 
-      await scanAndHoldImapAttachment({ bytes: syntheticPdf("wiped after the hold"), filename: "wiped.pdf", declaredMediaType: "application/pdf", recipientUserId, receiptId });
+      await scanAndHoldImapAttachment({ bytes, filename: "checked.pdf", declaredMediaType: "application/pdf", recipientUserId, receiptId });
 
-      expect(reads).toHaveBeenCalledTimes(1);
-      const copy = await reads.mock.results[0]!.value as Buffer;
-      expect(copy.byteLength === 0 || copy.every((byte) => byte === 0)).toBe(true);
+      expect(reads).not.toHaveBeenCalled();
+      expect(vi.mocked(classifyDocumentStructure).mock.calls[0]![0]).toBe(bytes);
+      // The caller owns its buffer: the hold leaves it intact.
+      expect(bytes.equals(before)).toBe(true);
+    });
+
+    /* #1605 A-Q2: the check now runs on the caller's bytes while the seal reads
+       the quarantine file, so the seal's own digest check is what stops a file
+       swapped between the two from being sealed. */
+    it("refuses to seal a quarantine file that changed after it was received, and leaves nothing behind", async () => {
+      root = await mkdtemp(join(tmpdir(), "orbit-imap-sealed-"));
+      configure();
+      const original = LocalDocumentStorage.prototype.sealQuarantine;
+      vi.spyOn(LocalDocumentStorage.prototype, "sealQuarantine").mockImplementationOnce(async function (this: LocalDocumentStorage, path, ...rest) {
+        const handle = await open(path, "r+");
+        try { await handle.write(Buffer.from([0x58]), 0, 1, 20); } finally { await handle.close(); }
+        return original.call(this, path, ...rest);
+      });
+
+      await expect(scanAndHoldImapAttachment({ bytes: syntheticPdf("swapped after the check"), filename: "swap.pdf", declaredMediaType: "application/pdf", recipientUserId, receiptId }))
+        .rejects.toMatchObject({ code: "document_quarantine_invalid" });
+
+      const files = (await readdir(root, { recursive: true, withFileTypes: true })).filter((entry) => entry.isFile());
+      expect(files).toEqual([]);
     });
 
     it("leaves no object, no temporary file and no quarantine file when the seal fails", async () => {

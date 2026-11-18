@@ -62,7 +62,7 @@ const run = (targetDir, shims, { env: envExtra = {}, ...extra } = {}) =>
 function expectAllUnderSetpriv(shims) {
   // FIX-S1 addendum: the restore lock's folder and file under backups/ are made as the owner too, so nothing is excluded.
   const under = shims.toolCalls().filter((line) => / under=1 /u.test(line));
-  expect(under.length, `no mktemp/chmod/mv/rm/rmdir/mkdir call named a path under the folder:\n${shims.toolCalls().join("\n")}`).toBeGreaterThan(0);
+  expect(under.length, `no dd/chmod/mv/rm/rmdir/mkdir call named a path under the folder:\n${shims.toolCalls().join("\n")}`).toBeGreaterThan(0);
   const bare = under.filter((line) => !/ marker=1 /u.test(line));
   expect(bare, "calls under the deployment folder made by root, outside setpriv").toEqual([]);
   expect(shims.setprivCalls().filter((line) => line.startsWith("BAD ")), "setpriv called without the required options").toEqual([]);
@@ -77,7 +77,7 @@ function expectAllUnderSetpriv(shims) {
 const notOwnedByTestUser = (targetDir) => findIn(targetDir, ["(", "-not", "-uid", String(UID), "-o", "-not", "-gid", String(GID), ")"]);
 
 describe("#1848 FIX-S1 acceptance 1: every mutation under the folder runs under setpriv; no chown", () => {
-  it("each mktemp, chmod, mv, rm, rmdir and mkdir that names a path under the folder runs under the setpriv shim; chown never runs", () => {
+  it("each dd, chmod, mv, rm, rmdir and mkdir that names a path under the folder runs under the setpriv shim; chown never runs", () => {
     const targetDir = withMail();
     const shims = privShims(targetDir);
     const result = run(targetDir, shims);
@@ -85,7 +85,7 @@ describe("#1848 FIX-S1 acceptance 1: every mutation under the folder runs under 
     const under = expectAllUnderSetpriv(shims);
     expect(shims.setprivCalls().length).toBeGreaterThan(0);
     // The kinds of mutation the action makes: each is among the calls checked.
-    for (const tool of ["mktemp", "chmod", "mv", "rm", "mkdir"]) {
+    for (const tool of ["dd", "chmod", "mv", "rm", "mkdir"]) {
       expect(under.some((line) => line.startsWith(`${tool} `)), `no ${tool} call under the folder was seen:\n${shims.toolCalls().join("\n")}`).toBe(true);
     }
     expect(shims.chownCalls(), "chown was run by retire-smtp-lines under simulated root").toEqual([]);
@@ -646,11 +646,11 @@ describe("#1848 FIX-S1 addendum 2, item 1 (opt-in, needs root and a second user)
 // the folder), plus this opt-in test, for the owner to run as root: it needs root, a second user
 // (ORBIT_TEST_OTHER_USER, default "nobody") and sudo-style privilege, e.g.
 //   sudo ORBIT_TEST_OTHER_USER=<user> npx vitest run scripts/repair-retire-privdrop-1848.test.mjs
-// Real root, a folder owned by the other user. The temporary names are random (mktemp), so a link cannot be
-// planted at one ahead of time; instead a mktemp shim does what the folder's owner would do in the race: right
-// after mktemp made its file it swaps the file for a link to a root-only file. Whoever then writes to that name
-// (root, before the fix; the owner, after it) is tested: the root-only file must be unchanged. The shim records
-// each swap, so the test cannot pass without one having happened.
+// Real root, a folder owned by the other user. Root picks each temporary name (#1873 X1) and the owner creates
+// exactly that name with `dd of=<name> conv=excl`; instead of an owner planting a link ahead of time, a dd shim does
+// what the folder's owner would do in the race: right before dd runs it plants a link at the name, to a root-only
+// file. Whoever then writes to that name is tested: create-exclusive must refuse the link, so the root-only file must
+// be unchanged. The shim records each plant, so the test cannot pass without one having happened.
 describe("#1848 FIX-S1 acceptance 6 (opt-in, needs root and a second user)", () => {
   it.skipIf(process.getuid?.() !== 0)("a link swapped in at the temporary names the code really uses is not followed by a real root run", () => {
     const other = process.env.ORBIT_TEST_OTHER_USER ?? "nobody";
@@ -666,10 +666,10 @@ describe("#1848 FIX-S1 acceptance 6 (opt-in, needs root and a second user)", () 
     const shimDir = scratchDir("orbit-repair-privdrop-swap-");
     const plantLog = join(shimDir, "planted.log");
     writeFileSync(
-      join(shimDir, "mktemp"),
-      `#!/usr/bin/env bash\nout="$('${realTool("mktemp")}' "$@")" || exit $?\ncase "$out" in '${targetDir}'/*) rm -f -- "$out"; ln -s -- '${victim}' "$out"; printf '%s\\n' "$out" >> '${plantLog}';; esac\nprintf '%s\\n' "$out"\n`,
+      join(shimDir, "dd"),
+      `#!/usr/bin/env bash\nfor a in "$@"; do case "$a" in of=*/dev/null) ;; of=*) out="\${a#of=}"; rm -f -- "$out"; ln -s -- '${victim}' "$out"; printf '%s\\n' "$out" >> '${plantLog}';; esac; done\nexec '${realTool("dd")}' "$@"\n`,
     );
-    chmodSync(join(shimDir, "mktemp"), 0o755);
+    chmodSync(join(shimDir, "dd"), 0o755);
     spawnSync("chmod", ["755", shimDir]);
     const result = runRepair(targetDir, ["--execute", "--safe-only"], {
       ...IMPORTED,
@@ -718,9 +718,9 @@ describe("#1848 FIX-S1 addendum 3, item 1: a failure as the owner says why", () 
     expect(seen * BIG_UNIT.length, "more than 4 KiB of the child's stderr was printed").toBeLessThanOrEqual(4096);
   });
 
-  it("the record write fails as the owner (mktemp): the error text and a repair line naming the record or step reach the output", () => {
+  it("the record write fails as the owner (create step): the error text and a repair line naming the record or step reach the output", () => {
     const targetDir = withMail();
-    const shims = privShims(targetDir, { toolFail: { tool: "mktemp", match: "*orbit-smtp-retirement.XXXXXX*", emit: `echo '${ERR_TEXT}' >&2` } });
+    const shims = privShims(targetDir, { toolFail: { tool: "dd", match: "*of=*orbit-smtp-retirement.*", emit: `echo '${ERR_TEXT}' >&2` } });
     const result = run(targetDir, shims);
     expect(result.stdout).not.toContain(DONE);
     expect(everything(result), "the child's error text was swallowed").toContain(ERR_TEXT);

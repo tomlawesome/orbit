@@ -30,8 +30,7 @@ import { FAILED_MESSAGE, INTERNAL_ERROR, SUGGESTION, rememberMailDecisions } fro
  * the reload every one of these ends with: the entry is gone after it.
  *
  * Each test starts from the fixture inbox (the approvable "Home insurance
- * renewal" receipt; the failed message "It carried no document Orbit can
- * read"). The decision is answered, and remembered for the reload that follows
+ * renewal" receipt; the failed message "no PDF attached"). The decision is answered, and remembered for the reload that follows
  * it, by `rememberMailDecisions` (mail-support.js); the one failed re-read is
  * the test's own fault, injected on `/api/workspace`.
  *

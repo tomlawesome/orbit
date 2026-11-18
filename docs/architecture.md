@@ -245,11 +245,12 @@ are for people working on Orbit, not for running it.
 | `GET` | `/api/auth/availability` | Signed-out: whether the instance is claimed, which sign-in methods are offered, and whether password sign-ins are approved by email. Reveals nothing about accounts. |
 | `POST` | `/api/auth/bootstrap/claim` | Verifies the claim code and sets a short-lived claim cookie. |
 | `POST` | `/api/auth/bootstrap/local` | Creates the first administrator with a password, under the claim cookie. |
-| `POST` | `/api/auth/local/login` | Checks email and password. Answers with a pending sign-in (and mails its approval link) unless the instance has no mail relay, in which case it signs the user in directly. |
+| `POST` | `/api/auth/local/login` | Checks email and password. Answers with a pending sign-in (and mails its approval link) unless the instance has no mail relay, in which case it signs the user in directly — except for an account a refused sign-in marked, which is refused with `password_recovery_required` and no session (#1881). |
 | `POST` | `/api/auth/local/login/pending` | The waiting tab asks whether its sign-in has been approved; mints the session for that browser when it has. Authorised by the pending-sign-in cookie alone. |
 | `POST` | `/api/auth/local/login/resend` | Sends the approval link again, inside the send limits. Same cookie, same rule. |
+| `POST` | `/api/auth/local/login/new-password` | Saves a new password for an account a refused sign-in marked, then signs the browser in. Authorised by the change-password hold cookie alone (#1881). |
 | `POST` | `/api/auth/approve` | Records **Approve** or **This wasn't me** for a pending sign-in. Signed out, and signs nobody in. |
-| `GET` | `/api/auth/sign-in-notice` | The one line a refused sign-in left for its owner. Asking for it spends it. |
+| `GET` | `/api/auth/sign-in-notice` | When a refused sign-in marked the caller's password, or null. A pure read; only a saved password clears the mark. |
 | `GET` | `/api/auth/login?returnTo=/path` | Starts OIDC sign-in and redirects to the provider (`auth_not_configured` when OIDC is off). |
 | `GET` | `/api/auth/callback` | Validates the provider response and completes sign-in, bootstrap, linking, or step-up, depending on what started the transaction. |
 | `GET` | `/api/auth/session` | Returns the current user, expiry, household context, and CSRF token. |
@@ -263,6 +264,7 @@ are for people working on Orbit, not for running it.
 | `DELETE` | `/api/auth/methods/local`, `/api/auth/methods/oidc/:identityId` | Removes a sign-in method, refused if it is the last one. |
 | `POST` | `/api/admin/users` | Administrator: creates a local user and emails the setup link. |
 | `POST` | `/api/admin/users/:userId/setup-link` | Administrator: re-issues and re-sends a setup or recovery link. |
+| `PUT` | `/api/admin/users/:userId/email` | Administrator: sets a member's registered address (step-up intent `email_address_set`), retires their pending links and approvals, and notifies the old address when it was readable (#1869). |
 | `GET` | `/api/workspace` | Returns the caller&apos;s authorized households and records. |
 | `POST` | `/api/workspace/commands` | Applies one validated, authorized workspace mutation. |
 | `PUT` | `/api/preferences` | Saves the caller&apos;s appearance preferences. |

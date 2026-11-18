@@ -129,6 +129,8 @@ vi.mock("@/db", async () => {
         && held.getTime() > new Date(stream[at + 2]?.value as string).getTime();
       else if (operator === "<") verdict &&= held instanceof Date
         && held.getTime() < new Date(stream[at + 2]?.value as string).getTime();
+      else if (operator === "<=") verdict &&= held instanceof Date
+        && held.getTime() <= new Date(stream[at + 2]?.value as string).getTime();
       else throw new Error(`the fake database does not implement "${operator}"`);
     }
     return verdict;
@@ -186,7 +188,6 @@ vi.mock("@/db", async () => {
           consumedAt: null,
           outcome: null,
           decidedAt: null,
-          noticeShownAt: null,
           sendCount: 0,
           lastSentAt: null,
           ...value,
@@ -273,9 +274,12 @@ vi.mock("@/db", async () => {
     update,
     delete: remove,
     /* One process, one store: a transaction here is the rules running in
-       order, which is what these tests are about. Rollback is PostgreSQL's
-       to prove, and the integration suite's to check. */
+       order. Rollback is PostgreSQL's to prove, and the integration suite's
+       to check. */
     transaction: (body: (executor: unknown) => unknown) => Promise.resolve(body(db)),
+    /* The only raw statement the module runs is the per-user address lock
+       (#1869); one process has nobody to wait for. */
+    execute: () => Promise.resolve([]),
   };
   return { getDb: () => db };
 });
@@ -294,7 +298,7 @@ const {
   resendSignInApproval,
   secondFactorConfigured,
   startSignInApproval,
-  takeDeniedSignInNotice,
+  readDeniedSignInNotice,
 } = await import("@/server/sign-in-approvals");
 
 const USER = "22222222-2222-4222-8222-222222222222";
@@ -343,7 +347,9 @@ beforeEach(() => {
     emailEnc: new MetadataCipher(testKey).encryptText("users.email", USER, "priya@example.invalid"),
     displayName: "Priya Shah",
   });
-  store.credentials.push({ userId: USER, failedAttemptCount: 0, lockedUntil: null });
+  /* password_changed_at is NOT NULL in the schema: a password set long before
+     any approval here, so a refusal marks it (#1881). */
+  store.credentials.push({ userId: USER, failedAttemptCount: 0, lockedUntil: null, passwordChangedAt: new Date(0) });
 });
 
 afterEach(() => {
@@ -632,20 +638,163 @@ describe("a refusal (ADR-0027 §8 and consequences)", () => {
     expect((lockedUntil as Date).getTime()).toBeGreaterThan(now.getTime());
   });
 
-  it("tells the account holder once, on their next successful sign-in", async () => {
+  it("marks the password, and showing the mark does not spend it (#1881)", async () => {
     await startSignInApproval(USER, { userAgent: CHROME, clientAddress: null }, { mailer });
     await decideSignInApproval(tokenFromLatestMail(), "denied");
 
-    const notice = await takeDeniedSignInNotice(USER);
+    const notice = await readDeniedSignInNotice(USER);
     expect(notice).not.toBeNull();
-    /* Taken, not read: the second sign-in is not told again. */
-    expect(await takeDeniedSignInNotice(USER)).toBeNull();
+    expect(store.credentials[0].passwordChangeRequiredAt).toEqual(notice?.deniedAt);
+    /* Security state, not a notice: only a saved password clears it. */
+    expect(await readDeniedSignInNotice(USER)).toEqual(notice);
   });
 
   it("says nothing when nobody has refused anything", async () => {
     await startSignInApproval(USER, { userAgent: CHROME, clientAddress: null }, { mailer });
     await decideSignInApproval(tokenFromLatestMail(), "approved");
-    expect(await takeDeniedSignInNotice(USER)).toBeNull();
+    expect(await readDeniedSignInNotice(USER)).toBeNull();
+  });
+});
+
+describe("a send is reserved before it is mailed (#1879 A-R2)", () => {
+  /** A mailer that notes how many send rows existed at the moment it was called. */
+  function watchingMailer(fail = false) {
+    const seen: number[] = [];
+    return {
+      seen,
+      async sendEmail(notification: { to: string; subject: string; text: string }) {
+        seen.push(store.sends.length);
+        if (fail) throw new Error("smtp down");
+        posted.push({ to: notification.to, subject: notification.subject, text: notification.text });
+      },
+    };
+  }
+
+  it("opening: the send row exists before the mailer is called", async () => {
+    const watcher = watchingMailer();
+    await startSignInApproval(USER, { userAgent: CHROME, clientAddress: null }, { mailer: watcher, now: NINE });
+    expect(watcher.seen).toEqual([1]);
+    expect(store.sends).toHaveLength(1);
+  });
+
+  it("resending: the new send row exists before the mailer is called", async () => {
+    const pending = await startSignInApproval(USER, { userAgent: CHROME, clientAddress: null }, { mailer, now: NINE });
+    const watcher = watchingMailer();
+    await resendSignInApproval(pending.claim, { mailer: watcher, now: at(NINE, APPROVAL_RESEND_INTERVAL_MS) });
+    expect(watcher.seen).toEqual([2]);
+    expect(store.sends).toHaveLength(2);
+  });
+
+  it("opening: a mail that fails still leaves its count row, and the approval's count, time and link stay unset", async () => {
+    const result = await startSignInApproval(USER, { userAgent: CHROME, clientAddress: null }, { mailer: watchingMailer(true), now: NINE });
+    expect(result.sendError).not.toBeNull();
+    expect(store.sends).toHaveLength(1);
+    expect(store.approvals[0].sendCount).toBe(0);
+    expect(store.approvals[0].lastSentAt).toBeNull();
+  });
+
+  it("resending: a mail that fails still leaves its count row; the count, time and old link stay as they were", async () => {
+    const pending = await startSignInApproval(USER, { userAgent: CHROME, clientAddress: null }, { mailer, now: NINE });
+    const oldToken = tokenFromLatestMail();
+    const before = { ...store.approvals[0] };
+
+    const outcome = await resendSignInApproval(pending.claim, {
+      mailer: watchingMailer(true),
+      now: at(NINE, APPROVAL_RESEND_INTERVAL_MS),
+    });
+    expect(outcome).toMatchObject({ state: "sent" });
+    expect((outcome as { sendError: unknown }).sendError).not.toBeNull();
+    expect(store.sends).toHaveLength(2);
+    expect(store.approvals[0].sendCount).toBe(before.sendCount);
+    expect(store.approvals[0].lastSentAt).toEqual(before.lastSentAt);
+    expect(store.approvals[0].tokenHash).toBe(before.tokenHash);
+    expect((await readSignInApproval(oldToken))?.state).toBe("open");
+  });
+
+  it("a retry adds one row per attempt", async () => {
+    const pending = await startSignInApproval(USER, { userAgent: CHROME, clientAddress: null }, { mailer: watchingMailer(true), now: NINE });
+    expect(store.sends).toHaveLength(1);
+    await resendSignInApproval(pending.claim, { mailer: watchingMailer(true), now: at(NINE, APPROVAL_RESEND_INTERVAL_MS) });
+    expect(store.sends).toHaveLength(2);
+    await resendSignInApproval(pending.claim, { mailer, now: at(NINE, 2 * APPROVAL_RESEND_INTERVAL_MS) });
+    expect(store.sends).toHaveLength(3);
+  });
+
+  /* Ruling on #1879 (note 64435), point 2: stage then switch. The send time
+     is written under the lock, the new link only once the mail is accepted. */
+  it("resending: the send time is stamped and the old link still reads open while the mailer runs", async () => {
+    const pending = await startSignInApproval(USER, { userAgent: CHROME, clientAddress: null }, { mailer, now: NINE });
+    const oldToken = tokenFromLatestMail();
+    const oldDigest = store.approvals[0].tokenHash;
+    const now = at(NINE, APPROVAL_RESEND_INTERVAL_MS);
+    /* Noted, not asserted, inside the mailer: a throw there would read as a
+       failed send rather than a failed test. */
+    const during: { lastSentAt?: unknown; tokenHash?: unknown; oldLink?: string | null } = {};
+    const watcher = {
+      async sendEmail(notification: { to: string; subject: string; text: string }) {
+        during.lastSentAt = store.approvals[0].lastSentAt;
+        during.tokenHash = store.approvals[0].tokenHash;
+        during.oldLink = (await readSignInApproval(oldToken))?.state ?? null;
+        posted.push({ to: notification.to, subject: notification.subject, text: notification.text });
+      },
+    };
+
+    const outcome = await resendSignInApproval(pending.claim, { mailer: watcher, now });
+
+    expect(outcome).toMatchObject({ state: "sent", sendError: null });
+    expect(during.lastSentAt).toEqual(now);
+    expect(during.tokenHash).toBe(oldDigest);
+    expect(during.oldLink).toBe("open");
+    /* Once the mail is in the post the link switches. */
+    expect(await readSignInApproval(oldToken)).toBeNull();
+    expect((await readSignInApproval(tokenFromLatestMail()))?.state).toBe("open");
+  });
+
+  it("a resend asked for while another is in the post answers too_soon", async () => {
+    const pending = await startSignInApproval(USER, { userAgent: CHROME, clientAddress: null }, { mailer, now: NINE });
+    const now = at(NINE, APPROVAL_RESEND_INTERVAL_MS);
+    let inner: unknown;
+    const watcher = {
+      async sendEmail(notification: { to: string; subject: string; text: string }) {
+        inner = await resendSignInApproval(pending.claim, { mailer, now });
+        posted.push({ to: notification.to, subject: notification.subject, text: notification.text });
+      },
+    };
+
+    const outcome = await resendSignInApproval(pending.claim, { mailer: watcher, now });
+
+    expect(outcome).toMatchObject({ state: "sent", sendError: null });
+    expect(inner).toMatchObject({ state: "too_soon" });
+    /* The opening mail and one resend: the inner request sent nothing. */
+    expect(posted).toHaveLength(2);
+  });
+
+  /* Ruling on #1879 (note 64435), point 1: the limit counts attempts. */
+  it("five failed sends in an hour answer limited", async () => {
+    const failing = watchingMailer(true);
+    const pending = await startSignInApproval(USER, { userAgent: CHROME, clientAddress: null }, { mailer: failing, now: NINE });
+    expect(pending.sendError).not.toBeNull();
+    for (let attempt = 1; attempt < APPROVAL_SENDS_PER_HOUR; attempt += 1) {
+      const outcome = await resendSignInApproval(pending.claim, {
+        mailer: failing,
+        now: at(NINE, attempt * APPROVAL_RESEND_INTERVAL_MS),
+      });
+      expect(outcome.state, `attempt ${attempt + 1}`).toBe("sent");
+    }
+    expect(failing.seen).toHaveLength(APPROVAL_SENDS_PER_HOUR);
+
+    const sixth = await resendSignInApproval(pending.claim, {
+      mailer,
+      now: at(NINE, APPROVAL_SENDS_PER_HOUR * APPROVAL_RESEND_INTERVAL_MS),
+    });
+    expect(sixth).toEqual({ state: "limited" });
+    const opened = await startSignInApproval(
+      USER,
+      { userAgent: CHROME, clientAddress: null },
+      { mailer, now: at(NINE, (APPROVAL_SENDS_PER_HOUR + 1) * APPROVAL_RESEND_INTERVAL_MS) },
+    );
+    expect(opened.limited).toBe(true);
+    expect(posted).toHaveLength(0);
   });
 });
 

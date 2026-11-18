@@ -13,7 +13,7 @@ export const GID = process.getgid();
 export const USER_NAME = spawnSync("id", ["-un"], { encoding: "utf8" }).stdout.trim();
 export const realTool = (name) => spawnSync("bash", ["-c", `command -v ${name}`], { encoding: "utf8" }).stdout.trim();
 
-const TOOLS = ["mktemp", "chmod", "mv", "rm", "rmdir", "mkdir"];
+const TOOLS = ["mktemp", "dd", "chmod", "mv", "rm", "rmdir", "mkdir"];
 
 // Bash source of each tool shim (String.raw, so bash's own ${...} is not JS interpolation; __TOKENS__ are filled in).
 // Besides the marker log, each call records what the process it runs in actually inherited, read from /proc at
@@ -23,6 +23,7 @@ const TOOLS = ["mktemp", "chmod", "mv", "rm", "rmdir", "mkdir"];
 const TOOL_SHIM = String.raw`under=0
 for a in "$@"; do
   [[ "$a" == -* ]] && continue
+  case "$a" in of=*|if=*) a="\${a#*=}";; esac
   case "$a" in /*) p="$a";; *) p="$PWD/$a";; esac
   case "$p" in '__TARGET__'|'__TARGET__'/*) under=1;; esac
 done
@@ -54,9 +55,9 @@ if [[ "$last" == . || "$last" == ./ ]] && [[ -n '__FAKEGID__' ]]; then
   done
 fi
 case "$last" in
-  *.env-orbit) lie=env;;
   *orbit-install-backups|*orbit-install-backups/) lie=backups;;
   *orbit-install-backups/[0-9]*) lie=undo;;
+  *.env-orbit) lie=env;;
   *.orbit-secrets/smtp-password) lie=file;;
   *.orbit-secrets|*.orbit-secrets/) lie=dir;;
   *) lie="";;
@@ -78,6 +79,8 @@ exec '__REAL__' "\${args[@]}"
 //   grandchild  leaves a background process (25 s) holding stdout and stderr, and exits 0
 //   run-then-stop  runs the command it was asked to (as the owner), then SIGSTOPs itself: the step made its
 //               change and then timed out (#1872 V10)
+//   run-then-ignore-term  runs the command it was asked to, then ignores TERM and waits (at most 40 s) (#1873)
+//   run-then-flood  runs the command it was asked to (its output discarded), then writes 8 MiB to stdout and exits 1 (#1873)
 //   flood       writes 8 MiB (no newline) to stdout and to stderr, and exits 1
 function variantSnippet(variant, pidLog) {
   if (!variant) return "";
@@ -86,6 +89,8 @@ function variantSnippet(variant, pidLog) {
     "ignore-term": `echo $$ >> '${pidLog}'; trap '' TERM; for _i in $(seq 1 40); do sleep 1; done; exit 1`,
     grandchild: `sleep 25 & echo $! >> '${pidLog}'; exit 0`,
     "run-then-stop": `args=("$@"); while [[ $# -gt 0 && "$1" != -- ]]; do shift; done; shift; ( export ORBIT_TEST_PRIVDROP=1; "$@" ) >/dev/null 2>&1; echo $$ >> '${pidLog}'; kill -STOP $$; exit 1`,
+    "run-then-ignore-term": `args=("$@"); while [[ $# -gt 0 && "$1" != -- ]]; do shift; done; shift; ( export ORBIT_TEST_PRIVDROP=1; "$@" ) >/dev/null 2>&1; echo $$ >> '${pidLog}'; trap '' TERM; for _i in $(seq 1 40); do sleep 1; done; exit 1`,
+    "run-then-flood": `while [[ $# -gt 0 && "$1" != -- ]]; do shift; done; shift; ( export ORBIT_TEST_PRIVDROP=1; "$@" ) >/dev/null 2>&1; head -c 8388608 /dev/zero | tr '\\0' a; exit 1`,
     flood: `head -c 8388608 /dev/zero | tr '\\0' a; head -c 8388608 /dev/zero | tr '\\0' a >&2; exit 1`,
   }[variant.kind];
   if (body === undefined) throw new Error(`unknown setpriv variant ${variant.kind}`);
@@ -96,8 +101,7 @@ function variantSnippet(variant, pidLog) {
  * Builds the shim directory. `setpriv: false` leaves setpriv off PATH altogether (every other executable of the
  * original PATH is linked into a private bin, setpriv excepted). `folderGid` makes `stat` report that gid for the
  * deployment folder; `rootOwned` ("dir", "file", "env", "backups" or "undo") makes it report root as the owner of
- * .orbit-secrets, its secret file, .env-orbit, orbit-install-backups or a dated (undo) folder under it. Logs, one
- * line each:
+ * .orbit-secrets, its secret file, .env-orbit, orbit-install-backups or a dated folder under it. Logs, one line each:
  *   tools.log:   "<tool> marker=<0|1> under=<0|1> cwd=<cwd> args=<args>"   (under: names a path under the folder)
  *   child.log:   "<tool>|<marker>|<session id>|<stdin target>|<extra fds>|<parent command line>"
  *   setpriv.log: "<argv of the setpriv call>"   (and "BAD <argv>" when it lacks the three required options; exit 99)
@@ -121,7 +125,9 @@ export function privShims(targetDir, { root = true, setpriv = true, setprivFail 
     // The group options are not checked here (acceptance 3 reads the log); the user and no-new-privs are.
     write(
       "setpriv",
-      `printf '%s\\n' "$*" >> '${privLog}'
+      `# A setpriv call with only --pdeathsig is not a privilege drop (#1893): pass it through, unlogged.
+case " $* " in *" --reuid"*|*" --regid"*|*" --init-groups "*|*" --clear-groups "*) ;; *" --pdeathsig"*) while [[ $# -gt 0 && "$1" != -- ]]; do shift; done; shift; exec "$@";; esac
+printf '%s\\n' "$*" >> '${privLog}'
 ok=0
 [[ " $* " == *" --reuid=${UID} "* && " $* " == *" --regid=${dbGid} "* && " $* " == *" --no-new-privs "* ]] && ok=1
 if [[ $ok -ne 1 ]]; then printf 'BAD %s\\n' "$*" >> '${privLog}'; exit 99; fi

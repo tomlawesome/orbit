@@ -563,3 +563,10 @@ describe("command line (#1510)", () => {
     expect(run(root).status).toBe(0);
   });
 });
+
+describe("the error for an unknown registry names the exceptions file (#1604 b1 L-S3)", () => {
+  it("points at .github/image-cache-exceptions.json when the registry has no cache prefix", () => {
+    const [finding] = scan("docker-compose.yml", "services:\n  a:\n    image: registry.example.com:5000/team/tool:2\n");
+    expect(finding.reason).toContain(".github/image-cache-exceptions.json");
+  });
+});

@@ -1,11 +1,12 @@
 import { sessionCookieName, setSessionCookie } from "orbit/lib/auth/cookies";
-import { AuthError } from "orbit/lib/auth/errors";
+import { AuthError, PasswordChangeRequiredError } from "orbit/lib/auth/errors";
 import { authErrorResponse } from "orbit/lib/auth/http";
+import { issuePasswordChangeHold } from "orbit/lib/auth/password-change-hold";
 import { checkPasswordBounds, hashPassword, MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from "orbit/lib/auth/password";
 import { assertSameOrigin, createSession, deleteSessionToken } from "orbit/lib/auth/session";
 import { VerificationGateRefusedError } from "orbit/lib/auth/verification-gate";
 import { getAuthConfig } from "orbit/lib/env";
-import { consumeSetupToken } from "orbit/server/local-credentials";
+import { assertNotRefusedPassword, consumeSetupToken, setupTokenOwner } from "orbit/server/local-credentials";
 
 import { api } from "$lib/server/api.js";
 
@@ -57,6 +58,13 @@ export const POST = api(
       );
     }
 
+    /* A recovery link is one of the ways out of a refused sign-in's mark
+       (#1881), and the new password it sets must not be the refused one. An
+       unknown or spent token has no owner here and is refused below by
+       `consumeSetupToken`, exactly as before. */
+    const owner = await setupTokenOwner(token);
+    if (owner) await assertNotRefusedPassword(owner, password);
+
     let passwordHash;
     try {
       passwordHash = await hashPassword(password);
@@ -73,7 +81,22 @@ export const POST = api(
        different account than the one the token names; `consumeSetupToken`
        already revoked every session the token's own owner held. */
     await deleteSessionToken(event.cookies.get(sessionCookieName(config)));
-    const session = await createSession(consumed.userId, config, event.request.headers.get("user-agent"));
+    let session;
+    try {
+      session = await createSession(consumed.userId, config, event.request.headers.get("user-agent"));
+    } catch (error) {
+      /* The password is saved, and the mark it cleared is already back: a
+         refusal landed in between (#1881). As every sign-in route does, the
+         answer is the change-password hold, never a raw 403 (errors.ts). */
+      if (error instanceof PasswordChangeRequiredError) {
+        const hold = await issuePasswordChangeHold(event.cookies, error, config);
+        return new Response(
+          JSON.stringify({ state: "password_change_required", refusedAt: hold.refusedAt }),
+          { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store" } },
+        );
+      }
+      throw error;
+    }
     setSessionCookie(event.cookies, session.token, config);
 
     return new Response(

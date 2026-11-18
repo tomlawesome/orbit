@@ -6,12 +6,13 @@ import {
 } from "orbit/lib/auth/cookies";
 import { clearClaimCookie } from "orbit/lib/auth/bootstrap";
 import { constantTimeEqual, openLoginTransaction, transactionKind } from "orbit/lib/auth/crypto";
-import { AuthError, asAuthError } from "orbit/lib/auth/errors";
+import { AuthError, PasswordChangeRequiredError, asAuthError } from "orbit/lib/auth/errors";
 import { authErrorResponse } from "orbit/lib/auth/http";
 import { reportAuthCallbackFailure } from "orbit/lib/auth/observability";
 import { completeAuthorization, discoverProvider } from "orbit/lib/auth/oidc";
 import { provisionIdentity } from "orbit/lib/auth/provision";
 import { completeStepUp, isStepUpIntent, setStepUpProofCookie } from "orbit/lib/auth/recent-auth";
+import { issuePasswordChangeHold } from "orbit/lib/auth/password-change-hold";
 import { createSession, deleteSessionToken } from "orbit/lib/auth/session";
 import { getAuthConfig } from "orbit/lib/env";
 import { readInvitationCookie } from "orbit/server/invitations/cookie";
@@ -184,7 +185,29 @@ export async function GET(event) {
        error, say -- the reader would be left with neither session, signed
        out by a blip that had nothing to do with their sign-in. */
     const previousSessionToken = event.cookies.get(sessionCookieName(config));
-    const session = await createSession(user.id, config, event.request.headers.get("user-agent"), { idToken });
+    let session;
+    try {
+      session = await createSession(user.id, config, event.request.headers.get("user-agent"), { idToken });
+    } catch (error) {
+      /* A refused sign-in marked this account's password (#1881): the mark
+         holds by every way in, the provider's included, so this sign-in gets
+         the change-password hold and the door's new-password card, never a
+         session. The ID token is not carried: a hold is not a session, and
+         the session the save mints signs out of Orbit only. */
+      if (!(error instanceof PasswordChangeRequiredError)) throw error;
+      const hold = await issuePasswordChangeHold(event.cookies, error, config);
+      clearTransactionCookie(event.cookies, config);
+      const door = new URL("/login", config.appUrl);
+      door.searchParams.set("password", "new");
+      /* The moment only, for the card's sentence; the door takes both out of
+         the address bar before it draws. */
+      door.searchParams.set("refusedAt", hold.refusedAt);
+      door.searchParams.set("returnTo", transaction.returnTo);
+      return new Response(null, {
+        status: 303,
+        headers: { location: door.href, "cache-control": "no-store" },
+      });
+    }
     await deleteSessionToken(previousSessionToken);
 
     clearTransactionCookie(event.cookies, config);

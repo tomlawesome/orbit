@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
@@ -310,6 +310,116 @@ function snapshot(path) {
 
 const MANUAL_STEP = /recreate the missing managed file from your install source/i;
 
+describe("repair.sh's compose restore is durable and leaves no scratch file (audit Lows b1 O-R4, b1 O-S2)", () => {
+  it("O-R4: flushes the restored file and its folder to disk before the restore counts as done", () => {
+    const targetDir = makeDeployment({});
+    const shimDir = scratchDir("orbit-repair-sync-shim-");
+    const syncLog = join(shimDir, "sync.log");
+    writeFileSync(join(shimDir, "sync"), `#!/bin/sh\nprintf '%s\\n' "$*" >> '${syncLog}'\nexec /usr/bin/sync "$@"\n`);
+    chmodSync(join(shimDir, "sync"), 0o755);
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], { pathPrefix: shimDir });
+    expect(existsSync(join(targetDir, "docker-compose.yml")), result.combined).toBe(true);
+    const calls = existsSync(syncLog) ? lines(readFileSync(syncLog, "utf8")) : [];
+    const wholeFilesystem = calls.some((line) => /(^|\s)(-f|--file-system)(\s|$)/u.test(line));
+    const file = calls.some((line) => line.includes("docker-compose.yml"));
+    const folder = calls.some((line) => /(^|\s)(\.|\.\/|'?\.'?)(\s|$)/u.test(line) || line.includes(targetDir));
+    expect(wholeFilesystem || (file && folder), `sync calls: ${JSON.stringify(calls)}`).toBe(true);
+  });
+
+  it("O-S2: a run killed mid-restore leaves no scratch file once a later run has finished", () => {
+    const targetDir = makeDeployment({});
+    runRepair(targetDir, ["--execute", "--safe-only"], {
+      raceHook: 'if compgen -G "$PWD/.docker-compose.yml.repair*" >/dev/null; then pkill -9 -f "$PWD/scripts/repair.sh"; sleep 2; fi',
+    });
+    // The killed run's `timeout docker run` child outlives repair.sh (it holds
+    // none of spawnSync's pipes) and inherits the #1849 folder lock until it
+    // exits; the later run starts once that run is wholly gone.
+    const deadline = Date.now() + 10_000;
+    while (spawnSync("flock", ["-n", targetDir, "true"]).status !== 0) {
+      if (Date.now() > deadline) throw new Error("the killed run never released the folder lock");
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+    }
+    const second = runRepair(targetDir, ["--execute", "--safe-only"]);
+    expect(existsSync(join(targetDir, "docker-compose.yml")), second.combined).toBe(true);
+    expect(readdirSync(targetDir).filter((name) => name.startsWith(".docker-compose.yml.repair"))).toEqual([]);
+  });
+
+  it("O-S2 review: the sweep leaves the owner's own .docker-compose.yml.repair.bak alone", () => {
+    const targetDir = makeDeployment({});
+    const ownerFile = join(targetDir, ".docker-compose.yml.repair.bak");
+    writeFileSync(ownerFile, "owner's notes\n");
+    const result = runRepair(targetDir, ["--execute", "--safe-only"]);
+    expect(existsSync(join(targetDir, "docker-compose.yml")), result.combined).toBe(true);
+    expect(existsSync(ownerFile), result.combined).toBe(true);
+    expect(readFileSync(ownerFile, "utf8")).toBe("owner's notes\n");
+  });
+
+  it("O-S2 review: the sweep leaves a scratch file of a repair that is still running", async () => {
+    const targetDir = makeDeployment({});
+    // A scratch file of exactly mktemp's shape, locked the way a running
+    // repair holds its own, by a process that outlives the repair under test.
+    const liveScratch = join(targetDir, ".docker-compose.yml.repair.AbC123");
+    writeFileSync(liveScratch, "half-written by another repair\n");
+    const holder = spawn("flock", [liveScratch, "-c", "echo locked; sleep 30"], { stdio: ["ignore", "pipe", "ignore"] });
+    try {
+      await new Promise((resolve, reject) => {
+        holder.stdout.once("data", resolve);
+        holder.once("error", reject);
+        holder.once("exit", () => reject(new Error("the lock holder exited early")));
+      });
+      const result = runRepair(targetDir, ["--execute", "--safe-only"]);
+      expect(existsSync(join(targetDir, "docker-compose.yml")), result.combined).toBe(true);
+      expect(existsSync(liveScratch), result.combined).toBe(true);
+    } finally {
+      holder.kill("SIGKILL");
+    }
+  });
+
+  it("O-S2 review: on a filesystem without locks, the restore still finishes and the sweep keeps the file", () => {
+    const targetDir = makeDeployment({});
+    const leftover = join(targetDir, ".docker-compose.yml.repair.Zz9Zz9");
+    writeFileSync(leftover, "maybe another repair's\n");
+    const shimDir = scratchDir("orbit-repair-flock-enolck-");
+    // ENOLCK: flock fails with an error that is not a conflict.
+    writeFileSync(join(shimDir, "flock"), "#!/bin/sh\necho 'flock: failed to get lock: No locks available' >&2\nexit 1\n");
+    chmodSync(join(shimDir, "flock"), 0o755);
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], { pathPrefix: shimDir });
+    expect(result.stdout, result.combined).toContain("execute action=restore-compose-file resolves=compose-file-restorable result=done");
+    expect(existsSync(join(targetDir, "docker-compose.yml")), result.combined).toBe(true);
+    expect(existsSync(leftover), result.combined).toBe(true);
+  });
+
+  it("O-S2 review: a fresh scratch file that cannot be opened is removed", () => {
+    const targetDir = makeDeployment({});
+    // Merge of #1603 into the owner-writes flow (#1857 S3): the owner makes the
+    // scratch file and sets its mode, so the shim leaves it write-only there,
+    // and the lock holder can't open it.
+    const shimDir = scratchDir("orbit-repair-scratch-unreadable-");
+    writeFileSync(join(shimDir, "chmod"), [
+      "#!/bin/sh",
+      'for last in "$@"; do :; done',
+      'case "$last" in *docker-compose.yml.repair.*) exec /usr/bin/chmod 200 "$last" ;; esac',
+      'exec /usr/bin/chmod "$@"',
+      "",
+    ].join("\n"));
+    chmodSync(join(shimDir, "chmod"), 0o755);
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], { pathPrefix: shimDir });
+    expect(result.stdout, result.combined).toContain("execute action=restore-compose-file resolves=compose-file-restorable result=failed");
+    expect(readdirSync(targetDir).filter((name) => name.startsWith(".docker-compose.yml.repair")), result.combined).toEqual([]);
+  });
+
+  it("O-R4 review: a failing sync does not stop the compose restore", () => {
+    const targetDir = makeDeployment({});
+    const shimDir = scratchDir("orbit-repair-sync-fails-");
+    writeFileSync(join(shimDir, "sync"), "#!/bin/sh\nexit 1\n");
+    chmodSync(join(shimDir, "sync"), 0o755);
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], { pathPrefix: shimDir });
+    expect(existsSync(join(targetDir, "docker-compose.yml")), result.combined).toBe(true);
+    expect(result.stdout).toContain("execute action=restore-compose-file resolves=compose-file-restorable result=done");
+    expect(readdirSync(targetDir).filter((name) => name.startsWith(".docker-compose.yml.repair"))).toEqual([]);
+  });
+});
+
 describe("repair.sh restores a missing docker-compose.yml from the image (#1484)", () => {
   it("writes the image's copy back byte for byte, with the installer's mode and the folder's owner", () => {
     const targetDir = makeDeployment({});
@@ -404,7 +514,6 @@ describe("repair.sh reports, but never replaces, a docker-compose.yml that diffe
     const result = runRepair(targetDir, ["--check"]);
 
     expect(result.stderr).toContain("restart: unless-stopped");
-    // eslint-disable-next-line no-control-regex
     expect(result.stderr).not.toMatch(/[\x00-\x08\x0b-\x1f\x7f]/);
   });
 

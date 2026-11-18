@@ -24,6 +24,7 @@ vi.mock("@/server/documents/pdf-structure-sandbox", async (importOriginal) => {
 const {
   DOCUMENT_PREVIEW_BUSY_RETRY_SECONDS,
   DOCUMENT_PREVIEW_MAX_EDGE,
+  DOCUMENT_PREVIEW_QUEUED_RETRY_SECONDS,
   drawDocumentPage,
   drawImagePage,
   drawPdfPage,
@@ -80,6 +81,25 @@ describe("drawPdfPage", () => {
   ])("maps a stopped child (%s) to what is remembered, never storing Orbit's own unavailability", async (stop, expected) => {
     sandbox.pdf.mockResolvedValueOnce({ outcome: "failed", stop });
     expect(await drawPdfPage({ bytes: pdf }, 1, "background")).toEqual(expected);
+  });
+});
+
+describe("a full view queue (#1446 decision 2)", () => {
+  it("names a 5 s retry, shorter than the unavailable renderer's", () => {
+    expect(DOCUMENT_PREVIEW_QUEUED_RETRY_SECONDS).toBe(5);
+    expect(DOCUMENT_PREVIEW_QUEUED_RETRY_SECONDS).toBeLessThan(DOCUMENT_PREVIEW_BUSY_RETRY_SECONDS);
+  });
+
+  it("maps the sandbox's queue_full stop to busy with the 5 s retry, for a PDF and for an image, never remembered", async () => {
+    sandbox.pdf.mockResolvedValueOnce({ outcome: "failed", stop: "queue_full" });
+    expect(await drawPdfPage({ bytes: pdf }, 1, "view")).toEqual({ outcome: "busy", retryAfterSeconds: DOCUMENT_PREVIEW_QUEUED_RETRY_SECONDS });
+    sandbox.image.mockResolvedValueOnce({ outcome: "failed", stop: "queue_full" });
+    expect(await drawImagePage(png, "image/png", "view")).toEqual({ outcome: "busy", retryAfterSeconds: DOCUMENT_PREVIEW_QUEUED_RETRY_SECONDS });
+  });
+
+  it("keeps the unavailable renderer's busy answer as it was, with no retry figure of its own", async () => {
+    sandbox.pdf.mockResolvedValueOnce({ outcome: "failed", stop: "unavailable" });
+    expect(await drawPdfPage({ bytes: pdf }, 1, "view")).toEqual({ outcome: "busy" });
   });
 });
 

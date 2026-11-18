@@ -16,7 +16,7 @@ the same commit and says why.
 | `configure-check-edge/` | `--check`/`--check-rollback` edge cases: no file, unknown key, loose mode, usage errors | `config-contract.parity.test.ts` |
 | `configure-write/` | `.env-orbit` and secret files (mode and content) written by the bare flow, `--init`, `--set-oidc-secret`, `--set-deployment-profile`, plus their stdout/stderr and refusals | `configure-engine.parity.test.ts` |
 | `configure-machine-prompts/` | `ORBIT_CONFIGURE_PROMPTS=machine` transcripts for `--init` and `--set-oidc-secret` | `guided-configuration.parity.test.ts` |
-| `configuration-migration/matrix.json` | `configuration.sh --check/--preflight/--migrate` over 94 inputs: exit status, stdout, stderr, the file, rollback copy and lock afterwards | `configuration-migration.parity.test.ts` |
+| `configuration-migration/matrix.json` | `configuration.sh --check/--preflight/--migrate` over 97 inputs: exit status, stdout, stderr, the file, rollback copy and lock afterwards | `configuration-migration.parity.test.ts` |
 | `configuration-migration-parity/` | install.sh's preflight/migrate hand-off (`runConfigurationMigration`) | `configuration-migration.parity.test.ts` |
 | `session-secret-configure/` | `configure.sh` accepting or refusing each session-secret candidate | `session-secret.contract.test.ts` |
 | `restore-sh/` | restore.sh's correspondence queries and scan-lease statement as passed to psql, `checkpoint_sha256` on a fixed file, `load_recovery_journal`'s format rules, `check_capacity` at each threshold (#1211) | `restore-engine.parity.test.ts` |
@@ -45,6 +45,11 @@ file is confirmed. Refusals, failures and transaction runs are unchanged.
 write the key twice) changed "migrate: duplicate managed keys" by hand: each
 managed key is now written once, at its first matching line, and later matching
 lines are dropped, so the case now exits 0 with the migrated file.
+
+#1603 (installer audit Low: the non-interactive guidance names the way out)
+changed `install-guided-configuration/noninteractive-configuration-guidance.json`
+by hand: its second line now ends "; set ORBIT_AUTH_OIDC=false to use local
+accounts with no OIDC secret." instead of a full stop.
 
 #1211 captured its three directories from `6448f07e` (the scripts unchanged since
 `d6a365a3`), before backup.sh, restore.sh and the recovery-bundle scripts
