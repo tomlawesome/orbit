@@ -7,7 +7,7 @@ import { answerPushWithoutAService } from "./webkit-push";
  *
  * The first sign-in no longer promotes anyone: an unclaimed instance refuses
  * to start a provider sign-in at all, and the only way in is the code the
- * container prints as the last line of its own start-up log. So the specs
+ * container prints in its own start-up log. So the specs
  * that used to race for the promotion with a bare `establishInstanceAdmin`
  * now read that notice, POST the code, and complete the claim as
  * "Orbit Administrator" — deterministically, once per stack, through exactly

@@ -95,8 +95,8 @@
       {/if}
     {:else if phase === "denied"}
       <!-- The refusal is the whole message: somebody with that password was
-           turned away, and the account holder is told the same thing again on
-           their next successful sign-in. -->
+           turned away, and the next sign-in with it asks for a new one
+           (#1881). -->
       <p class="note">Somebody said this wasn’t them, so nobody was let in.</p>
     {:else}
       <p class="note">Nobody answered in time. Sign in again for a new link.</p>

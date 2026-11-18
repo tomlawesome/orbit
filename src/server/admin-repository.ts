@@ -95,6 +95,15 @@ export async function listInstanceUsers(actorUserId: string): Promise<InstanceUs
   return instanceUserList();
 }
 
+/** One user as `listInstanceUsers` shapes it, or null when there is none (#1869). The caller has checked the administrator. */
+export async function readInstanceUser(userId: string): Promise<InstanceUser | null> {
+  const db = getDb();
+  const [row] = await db.select(instanceUserColumns).from(users).where(eq(users.id, userId)).limit(1);
+  if (!row) return null;
+  const primaryUserId = await db.transaction((transaction) => primaryAdministratorId(transaction));
+  return toInstanceUser(row, await openInstanceMetadataReader(db), primaryUserId);
+}
+
 /**
  * `listInstanceUsers`'s own body, without the admin check (#1151 A1-Q1): a
  * mutation elsewhere in this file already re-reads and verifies the actor

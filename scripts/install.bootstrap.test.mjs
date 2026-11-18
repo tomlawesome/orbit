@@ -269,7 +269,7 @@ describe("install.sh: the engine run", () => {
     expect(result.stdout).toContain("Channel: latest");
     expect(result.stdout).toContain("Status: docker compose --env-file .env-orbit ps");
     expect(result.stdout).toContain("Logs: docker compose --env-file .env-orbit logs --tail 200");
-    expect(result.stdout).toContain('Claim this instance: run "docker compose --env-file .env-orbit logs orbit-app"');
+    expect(result.stdout).toContain('Claim this instance: run "docker compose --env-file .env-orbit logs orbit-app | grep -i claim"');
     // The image's own banner, from the digest reference, before the engine.
     expect(result.stdout).toContain("ORBIT FAKE BANNER");
     expect(result.calls).toContain(`docker run --rm --entrypoint /opt/orbit/scripts/container-entrypoint.sh ${resolvedReference} --banner`);
@@ -546,6 +546,18 @@ describe("install.sh: the engine's outcome", () => {
     });
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("reported success but exited with status 1");
+  });
+});
+
+describe("install.sh: the completion screen's claim line (audit Low 10-22)", () => {
+  it("says how to pick the claim link out of the logs, not only which logs to read", () => {
+    const targetDir = makeTarget();
+    makePreprovisionedDeployment(targetDir);
+    const result = runInstall(targetDir, {}, ["--plain"]);
+    expect(result.status).toBe(0);
+    const line = result.stdout.split("\n").find((entry) => entry.startsWith("Claim this instance"));
+    expect(line).toBeDefined();
+    expect(line).toMatch(/grep/u);
   });
 });
 

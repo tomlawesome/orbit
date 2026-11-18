@@ -73,6 +73,10 @@ export const stepUpIntents = [
   /* Removing every member's link to a retired provider (#1676): it signs
      members out and can mail each of them a setup link. */
   "provider_links_remove",
+  /* An administrator replacing a member's registered address (#1869): it
+     retires their pending links and approvals, so a proof for the setup link
+     cannot pay for it. */
+  "email_address_set",
 ] as const;
 export type StepUpIntent = typeof stepUpIntents[number];
 

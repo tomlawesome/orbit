@@ -210,8 +210,9 @@ set -Eeuo pipefail
 #                                   is disabled and the overlay is missing
 #                                   (an idle scanner still runs). Scanner off
 #                                   with both in step is healthy, not a
-#                                   finding. Plans as manual: configure.sh
-#                                   --set-scanner writes both.
+#                                   finding. The fail case plans as manual
+#                                   (configure.sh --set-scanner writes both);
+#                                   the info case is reported, never planned.
 #   managed-file-permissions     — .env-orbit exists but is not mode 600.
 #   secrets-directory-invalid    — .orbit-secrets missing, symlinked, the
 #                                   wrong type, or not mode 700 (any one
@@ -997,7 +998,7 @@ set -Eeuo pipefail
 #   execute action=<action-class> resolves=<reason-class> result=<done|failed|skipped>
 # one line per planned finding (in the same fixed `class_order` the plan
 # uses), followed by a terminal line:
-#   execution result=<empty|complete|unactionable|declined|failed> done=<n> failed=<n>
+#   execution result=<empty|complete|unactionable|declined|failed|refused> done=<n> failed=<n> [reason=<deployment-version-unsupported|repair-running>]
 # and then the full post-execution re-diagnosis, in exactly `--check`'s own
 # format (`finding class=... target=... severity=...` lines followed by
 # `diagnosis result=... checked=... skipped=...`). `done`/`failed` count
@@ -1398,7 +1399,7 @@ set -Eeuo pipefail
 # after the safe batch's own `execution result=...` line when both batches
 # ran:
 #
-#   dangerous result=<empty|complete|refused|failed> done=<n> failed=<n> reason=<none|non-interactive|refused-by-operator|checkpoint-failed|step-failed>
+#   dangerous result=<empty|complete|refused|failed> done=<n> failed=<n> reason=<none|non-interactive|refused-by-operator|checkpoint-failed|step-failed|repair-running>
 #
 # `result=empty` (reason=none) — `--dangerous` was given but the plan
 # contained no dangerous-class entry of either kind; no prompt is shown.
@@ -4430,17 +4431,21 @@ do_fix_permissions() {
 #
 # Puts back a MISSING docker-compose.yml from the pinned image. A present
 # file (a file, a symlink, anything) is never replaced. In order (#1857 S3):
-# the deployment folder's owner makes a same-folder temporary file with the
-# installer's mode 0644 (smtp_owner_write); root re-checks that nothing
+# the owner sweeps a killed run's scratch file (b1 O-S2, #1603); the
+# deployment folder's owner makes a same-folder temporary file with the
+# installer's mode 0644 (smtp_owner_write) and an owner child holds a flock
+# on it while it exists (hold_compose_restore_lock); root re-checks that nothing
 # exists at the name, so a file that appeared since the diagnosis stops it
 # before the image is read again (#1558); root reads the image's bytes
 # (streamed, no shell text handling, so trailing blank lines, trailing
-# spaces and non-ASCII survive) and the owner writes them into that file;
+# spaces and non-ASCII survive) and the owner writes them into that file
+# and flushes it (sync, best effort, b1 O-R4);
 # the owner renames it onto the name with mv -nT, which refuses to overwrite
 # a file that appeared meanwhile and, with -T, never moves the file into a
 # folder that took the name (#1873 X2); the rename counts only when the
 # temporary file is gone and docker-compose.yml is a regular file, also
-# when the owner's mv step timed out after the rename landed. The
+# when the owner's mv step timed out after the rename landed, and the owner
+# then flushes the folder (best effort, b1 O-R4). The
 # image's bytes are capped at 1 MiB ($owner_read_cap) while they stream: the
 # owner keeps at most one byte more, and a file over the cap fails the
 # restore with a line saying it is too large (#1873 X4). Root writes,
@@ -4450,6 +4455,89 @@ do_fix_permissions() {
 # shellcheck disable=SC2016 # expanded by the child bash
 readonly owner_fill_script='head -c "$2" > "$1" || exit 1; size="$(wc -c < "$1")" || exit 1; '\
 '((size > 0)) || exit 1; ((size < $2)) || exit 4'
+# b1 O-S2 (#1603), in the owner-writes flow: a run killed hard (no EXIT
+# trap) leaves its scratch file. Each run holds a flock on its own scratch
+# file while it exists, and the next restore sweeps only names of exactly
+# the scratch shape (six characters of [A-Za-z0-9]) that it can lock: the
+# kernel drops a dead run's lock, even after kill -9, while a running
+# repair's scratch file stays locked. The owner's own files, such as
+# .docker-compose.yml.repair.bak, never match. Without flock there is no
+# sweep: a live run's file can't be told apart. Root only lists the folder;
+# the opens, the flocks and the removals are the owner's (as_folder_owner),
+# so root never deletes in a folder another user owns, and rm removes a link
+# itself, never what it points at (a link is skipped anyway). Best effort:
+# a sweep that fails or times out does not stop the restore.
+# shellcheck disable=SC2016 # expanded by the child bash
+readonly owner_sweep_script='for f in "$@"; do [[ -f "$f" && ! -L "$f" ]] || continue; '\
+'{ exec {fd}<"$f"; } 2>/dev/null || continue; '\
+'if flock -n "$fd" 2>/dev/null; then rm -f -- "$f" || true; fi; exec {fd}<&-; done'
+sweep_compose_restore_scratch() {
+  local leftover
+  local scratch_prefix="./.${compose_file}.repair."
+  local -a candidates=()
+  command -v flock >/dev/null 2>&1 || return 0
+  for leftover in "$scratch_prefix"*; do
+    [[ "${leftover#"$scratch_prefix"}" =~ ^[A-Za-z0-9]{6}$ ]] || continue
+    [[ -f "$leftover" && ! -L "$leftover" ]] || continue
+    candidates+=("$leftover")
+  done
+  ((${#candidates[@]} > 0)) || return 0
+  as_folder_owner bash -c "$owner_sweep_script" owner-sweep "${candidates[@]}" || true
+}
+
+# The lock holder of the restore's own scratch file (b1 O-S2): an owner
+# child (as_folder_owner) that opens the file without creating it, takes a
+# non-blocking flock and keeps it until root closes its stdin, or root dies
+# (the pipe's write end is root's alone: bash keeps coproc descriptors out of
+# the programs it runs). It is a step like any other, so it holds the lock
+# for at most $owner_step_timeout s. Exit 75 only when another run holds the
+# lock (a sweep that won the race and is removing the file): give up. Any
+# other flock failure, such as a filesystem without locks (ENOLCK), or no
+# flock at all, means no lock: the restore goes ahead unlocked, and every
+# sweep there keeps the file because it can't lock it.
+# shellcheck disable=SC2016 # expanded by the child bash
+readonly owner_lock_script='exec 3<"$1" || exit 1; s=0; '\
+'if command -v flock >/dev/null 2>&1; then flock -n -E 75 3 2>/dev/null || s=$?; fi; '\
+'((s != 75)) || exit 75; [[ -f "$1" && ! -L "$1" ]] || exit 1; printf "locked\n"; read -r _ || true'
+compose_restore_lock_pid=""
+# hold_compose_restore_lock <scratch-file>: 0 once the holder says it holds
+# the lock (or goes ahead without one), 1 otherwise (it is stopped first).
+# Root's wait for that word is bounded like any owner step.
+hold_compose_restore_lock() {
+  local line=""
+  # The holder's own shell closes every descriptor above 2 it inherited
+  # from root (the held locks' included) before the owner step starts.
+  coproc compose_restore_lock {
+    for fd in /proc/"$BASHPID"/fd/*; do
+      fd="${fd##*/}"
+      [[ "$fd" =~ ^[0-9]+$ ]] && ((fd > 2)) && [[ -e /proc/"$BASHPID"/fd/"$fd" ]] && eval "exec $fd>&-"
+    done
+    as_folder_owner --pipe bash -c "$owner_lock_script" owner-lock "$1" 2>/dev/null
+  }
+  # shellcheck disable=SC2154 # set by coproc
+  compose_restore_lock_pid="$compose_restore_lock_PID"
+  if [[ -n "${compose_restore_lock[0]:-}" ]]; then
+    read -r -t "$((owner_step_timeout + owner_step_grace + 1))" line <&"${compose_restore_lock[0]}" || true
+  fi
+  [[ "$line" == locked ]] && return 0
+  release_compose_restore_lock
+  return 1
+}
+
+# Ends the holder: closes its stdin and waits for it. Bash closes and unsets
+# a coproc's descriptors itself once it has ended, so only those still set
+# are closed here.
+release_compose_restore_lock() {
+  local fd
+  [[ -n "$compose_restore_lock_pid" ]] || return 0
+  fd="${compose_restore_lock[1]:-}"
+  [[ -z "$fd" ]] || exec {fd}>&-
+  fd="${compose_restore_lock[0]:-}"
+  [[ -z "$fd" ]] || exec {fd}<&-
+  wait "$compose_restore_lock_pid" 2>/dev/null || true
+  compose_restore_lock_pid=""
+}
+
 do_restore_compose_file() {
   local image tmp status=0
   if [[ "$(id -u)" == 0 ]] && ! check_folder_owner; then
@@ -4457,9 +4545,14 @@ do_restore_compose_file() {
     return 1
   fi
   image="$(pinned_orbit_image)" || return 1
+  # b1 O-S2 (#1603): a run killed hard (no EXIT trap) leaves its scratch
+  # file, and the next restore sweeps it (sweep_compose_restore_scratch).
+  sweep_compose_restore_scratch
   smtp_owner_write . ".${compose_file}.repair.XXXXXX" 644 "" true || return 1
   tmp="$smtp_step_tmp"
-  if [[ -e "$compose_file" || -L "$compose_file" ]]; then
+  if ! hold_compose_restore_lock "$tmp"; then
+    status=1
+  elif [[ -e "$compose_file" || -L "$compose_file" ]]; then
     status=1
   else
     image_deployment_asset_bytes "$image" "$compose_file" |
@@ -4467,6 +4560,10 @@ do_restore_compose_file() {
     if [[ "$status" == 4 ]]; then
       printf "Orbit repair: restore-compose-file: the pinned image's %s is too large (over 1 MiB), so it was not restored.\n" "$compose_file" >&2
     elif [[ "$status" == 0 ]]; then
+      # b1 O-R4 (#1603): the bytes reach the disk before the rename can make
+      # them the live file, flushed as the owner. Best effort: a sync that
+      # fails must not throw away a restore that is otherwise complete.
+      as_folder_owner sync -- "$tmp" 2>/dev/null || true
       # mv -nT leaves the source in place when the target appeared in the
       # meantime (and, in newer coreutils, says so with exit 1).
       as_folder_owner mv -nT -- "$tmp" "$compose_file" || true
@@ -4487,9 +4584,14 @@ do_restore_compose_file() {
   if [[ "$status" != 0 ]]; then
     as_folder_owner rm -f -- "$tmp" || true
     smtp_step_tmp=""
+    release_compose_restore_lock
     return 1
   fi
   smtp_step_tmp=""
+  release_compose_restore_lock
+  # b1 O-R4: and the rename survives a power cut. Best effort, as the owner:
+  # the file is already in place.
+  as_folder_owner sync -- . 2>/dev/null || true
 }
 
 # --- restore-transaction ----------------------------------------------------
@@ -4910,12 +5012,16 @@ do_restore_configuration_rollback() {
   # changed and the action reporting failed, the rollback-copy removal below.
   smtp_owner_write . "${environment_file}.repair-restore.XXXXXX" 600 "" smtp_read_file "$rollback_path" || return 1
   staged="$smtp_step_tmp"
+  # b1 O-R4 (#1603): flushed before the rename, and the folder after it, both
+  # as the owner. Both best effort: a failing sync must not stop the rollback.
+  as_folder_owner sync -- "$staged" 2>/dev/null || true
   if ! as_folder_owner mv -fT -- "$staged" "$environment_file"; then
     as_folder_owner rm -f -- "$staged" || true
     smtp_step_tmp=""
     return 1
   fi
   smtp_step_tmp=""
+  as_folder_owner sync -- . 2>/dev/null || true
 
   as_folder_owner rm -f -- "$rollback_path" || return 1
   return 0

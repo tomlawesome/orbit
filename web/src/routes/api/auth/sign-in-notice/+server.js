@@ -1,30 +1,27 @@
 import { json } from "@sveltejs/kit";
 
-import { takeDeniedSignInNotice } from "orbit/server/sign-in-approvals";
+import { readDeniedSignInNotice } from "orbit/server/sign-in-approvals";
 
 import { read } from "$lib/server/api.js";
 
 /**
- * The one line a refused sign-in leaves behind (#1033, ADR-0027 consequences).
+ * Whether a refused sign-in has marked the caller's password (#1033, #1881).
  *
- * Somebody pressed "This wasn't me" on an approval mail. Nobody got in, which
- * is the point — but somebody knew that password, and the account holder is
- * owed that fact the next time they are actually in. So the notice waits here
- * until a signed-in reader asks for it.
+ * Somebody pressed "This wasn't me" on an approval mail: nobody got in, but
+ * somebody knew the password. Since #1881 that is security state on the
+ * credential rather than a one-time notice: the next sign-in lands on the
+ * set-new-password step, and this route only reports the mark to a reader
+ * who still holds a session from before it. A PURE READ: asking does not
+ * spend it, and only a saved password clears it, after which this answers
+ * `null`. Scoped to the caller's own account; it takes no id from the
+ * request, so it can never report somebody else's refusal.
  *
- * A READ THAT WRITES, deliberately. Asking TAKES the notice: every unshown
- * refusal is stamped in the same statement that answers, so the line appears
- * once and does not follow the reader from screen to screen. It is scoped to
- * the caller's own rows and takes no id from the request, so it can never
- * report somebody else's refusal.
- *
- * `null` is the ordinary answer and the one this route gives almost every
- * time. The fixture answers it too: a refusal is a real event on a real
- * account, and the fidelity gate must never photograph one.
+ * The fixture answers `null`: a refusal is a real event on a real account,
+ * and the fidelity gate must never photograph one.
  */
 export const GET = read(
   async (_event, session) => {
-    const notice = await takeDeniedSignInNotice(session.user.id);
+    const notice = await readDeniedSignInNotice(session.user.id);
     return json(
       { notice: notice ? { deniedAt: notice.deniedAt.toISOString() } : null },
       { headers: { "cache-control": "no-store" } },

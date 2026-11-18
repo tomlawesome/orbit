@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
@@ -471,4 +471,33 @@ describe("#1873 X5: the #1858 stall test covers every owner action, not only ret
       });
     }
   }
+});
+
+describe("#1603 b1 O-S2 merged into the owner-writes flow: the scratch-file sweep is the owner's", () => {
+  const compose = ACTIONS["restore-compose-file"];
+
+  it("as root, a dead run's scratch file is removed as the owner, and a link of the scratch shape is left alone with its target untouched", () => {
+    const { targetDir, state, fakeBin } = compose.make();
+    const dead = join(targetDir, ".docker-compose.yml.repair.Dead01");
+    writeFileSync(dead, "a killed run's half-written copy\n");
+    const outside = scratchDir("orbit-lows-sweep-outside-");
+    const victim = join(outside, "victim");
+    writeFileSync(victim, "UNTOUCHED\n");
+    const link = join(targetDir, ".docker-compose.yml.repair.Link01");
+    symlinkSync(victim, link);
+    const shims = privShims(targetDir);
+    try {
+      const result = runOwner(targetDir, { shims, state, fakeBin });
+      expect(result.stdout, result.stderr).toContain(compose.done);
+      expect(existsSync(dead), "the dead run's scratch file was not swept").toBe(false);
+      expect(shims.setprivCalls().some((line) => line.includes("owner-sweep")), `the sweep did not run as the owner:\n${shims.setprivCalls().join("\n")}`).toBe(true);
+      const rms = shims.toolCalls().filter((line) => line.startsWith("rm ") && line.includes("Dead01"));
+      expect(rms.length, shims.toolCalls().join("\n")).toBeGreaterThan(0);
+      expect(rms.every((line) => / marker=1 /u.test(line)), `root removed the scratch file itself:\n${rms.join("\n")}`).toBe(true);
+      expect(lstatSync(link).isSymbolicLink(), "the link was removed or replaced").toBe(true);
+      expect(readFileSync(victim, "utf8")).toBe("UNTOUCHED\n");
+    } finally {
+      shims.cleanup();
+    }
+  });
 });

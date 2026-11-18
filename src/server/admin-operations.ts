@@ -98,6 +98,8 @@ const actionLabels: Record<string, string> = {
   // M7 slice 9 (#912, ADR-0022 §5): the primary-administrator recovery CLI's
   // own audit record, alongside `issueSetupToken`'s `setup_link_issued`.
   recovery_link_issued: "Recovery link issued",
+  // #1869: an administrator set a member's address; the payload never carries it.
+  email_address_set: "Email address set by an administrator",
 };
 
 /** Maps persisted actions to a bounded administrator-facing label. */
