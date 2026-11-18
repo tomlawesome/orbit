@@ -4,10 +4,12 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vites
 import { createPageLoader, settle } from "../support/svelte-page.mjs";
 
 /*
- * #1605 W-R12, round two: bring-in reads one byte of the chosen file before
- * the upload. While that read is in flight, "choose another file" or a new
- * pick makes its late result moot: it must neither upload the old file nor
- * clear the new pick (file, preview, phase, words). Desk and pocket cards.
+ * #1903 (after #1605 W-R12): bring-in reads one byte of the chosen file
+ * before the upload. While a file is being brought in, only the "bringing it
+ * in · N entries" status shows (and, on the desk, the step-up challenge):
+ * no "choose another file", no "bring in" button, and a stray change event
+ * on the file input is ignored. A failed bring returns to the preview with
+ * its buttons and the refusal. Desk and pocket cards.
  * Harness as archive-file-changed-1605.test.mjs.
  */
 const ws = vi.hoisted(() => ({
@@ -17,12 +19,12 @@ const ws = vi.hoisted(() => ({
 }));
 vi.mock("$lib/data/workspace.js", () => ws);
 
-const WORDS = "this file changed since you chose it";
+const WORDS = "the file changed after it was chosen — choose it again";
 const PASSPHRASE = "correct horse battery staple";
 const LIMITS = { archiveFileBytes: 1_000_000, passphraseMin: 12, passphraseMax: 200 };
 const PREVIEW = { householdName: "Home", items: 2, sections: 1, documents: 0, documentsExcluded: false, conflicts: [] };
 
-const loader = createPageLoader("archive-late-read-1605", { stub: (file) => /\/Sheet\.svelte$/.test(file) });
+const loader = createPageLoader("archive-late-read-1903", { stub: (file) => /\/Sheet\.svelte$/.test(file) });
 beforeEach(() => {
   for (const fn of [ws.importPortableArchive, ws.previewPortableArchive, ws.readSignInMethods, ws.startStepUp, ws.writePortableArchive]) fn.mockReset();
   ws.previewPortableArchive.mockResolvedValue(PREVIEW);
@@ -51,7 +53,7 @@ const CARDS = [
   { name: "PocketArchive", path: "routes/household/[id]/PocketArchive.svelte", pass: "#hh-pass-in" },
 ];
 
-describe.each(CARDS)("$name: a late one-byte read of a file no longer chosen", ({ path, pass }) => {
+describe.each(CARDS)("$name: while a file is brought in", ({ path, pass }) => {
   /** @type {{ target: HTMLElement, flushSync: () => void }} */
   let screen;
   const text = () => (screen.target.textContent ?? "").replace(/\s+/g, " ");
@@ -89,36 +91,82 @@ describe.each(CARDS)("$name: a late one-byte read of a file no longer chosen", (
   }
   const afterRead = async (/** @type {() => void} */ finish) => { finish(); await settle(); screen.flushSync(); };
 
-  it("choose another file, then pick a new one; the old read succeeds late: nothing is uploaded and the new pick stands", async () => {
+  it("while the read is held only the bringing status shows: no choose-another, no bring-in", async () => {
     const old = heldFile("old.orbit");
     await startHeldBringIn(old);
-    await press("choose another file");
-    await choose(plainFile("new.orbit"));
-    await afterRead(old.read.ok);
 
-    expect(ws.importPortableArchive, "the old file is not uploaded").not.toHaveBeenCalled();
-    expect(text()).toContain("new.orbit");
+    expect(text()).toContain("bringing it in");
+    expect(button("choose another file"), "no choose another file").toBeUndefined();
+    expect(button("bring in"), "no bring-in button").toBeUndefined();
+    expect(button("tap again"), "no armed bring-in button").toBeUndefined();
+    await afterRead(old.read.ok);
   });
 
-  it("choose another file, then pick a new one; the old read fails late: the new pick is not cleared and no words are said", async () => {
+  it("the read succeeds: the old file is uploaded once and the card reaches brought in", async () => {
     const old = heldFile("old.orbit");
     await startHeldBringIn(old);
-    await press("choose another file");
-    await choose(plainFile("new.orbit"));
+    await afterRead(old.read.ok);
+
+    expect(ws.importPortableArchive).toHaveBeenCalledTimes(1);
+    expect(ws.importPortableArchive.mock.calls[0][1].file).toBe(old.file);
+    expect(text()).toContain("brought in");
+  });
+
+  it("the read fails: back to the preview with both buttons and the file-changed words", async () => {
+    const old = heldFile("old.orbit");
+    await startHeldBringIn(old);
     await afterRead(old.read.fail);
 
-    expect(text()).toContain("new.orbit");
-    expect(text()).not.toContain(WORDS);
-    expect(button("look inside"), "still at the new pick's step").toBeTruthy();
+    expect(ws.importPortableArchive).not.toHaveBeenCalled();
+    expect(button("bring in 2 entries"), "bring-in is back").toBeTruthy();
+    expect(button("choose another file"), "choose another file is back").toBeTruthy();
+    expect(text()).toContain(WORDS);
   });
 
-  it("a new pick made straight over the held read: the old read's late success uploads nothing", async () => {
+  it("a change event on the file input while bringing is ignored; the old file is uploaded once", async () => {
     const old = heldFile("old.orbit");
     await startHeldBringIn(old);
     await choose(plainFile("new.orbit"));
-    await afterRead(old.read.ok);
 
-    expect(ws.importPortableArchive).not.toHaveBeenCalled();
-    expect(text()).toContain("new.orbit");
+    expect(text()).not.toContain("new.orbit");
+    expect(text()).toContain("bringing it in");
+    await afterRead(old.read.ok);
+    expect(ws.importPortableArchive).toHaveBeenCalledTimes(1);
+    expect(ws.importPortableArchive.mock.calls[0][1].file).toBe(old.file);
+    expect(text()).not.toContain("new.orbit");
+  });
+});
+
+describe("DeskArchive: the step-up challenge during an import", () => {
+  /** @type {{ target: HTMLElement, flushSync: () => void }} */
+  let screen;
+  const text = () => (screen.target.textContent ?? "").replace(/\s+/g, " ");
+  const click = async (/** @type {string} */ label) => {
+    const found = [...screen.target.querySelectorAll("button")].find((one) => (one.textContent ?? "").replace(/\s+/g, " ").includes(label));
+    expect(found, `a "${label}" button`).toBeTruthy();
+    /** @type {HTMLButtonElement} */ (found).click();
+    await settle();
+    screen.flushSync();
+  };
+
+  it("renders once, with its password field, when the import asks for proof", async () => {
+    ws.readSignInMethods.mockResolvedValue({ local: { set: true } });
+    ws.importPortableArchive.mockRejectedValueOnce(Object.assign(new Error("sign in again"), { code: "recent_authentication_required" }));
+    screen = await loader.mount(CARDS[0].path, { householdId: "h1", householdName: "Home", entries: 3, sections: 2, limits: LIMITS });
+    const input = /** @type {HTMLInputElement} */ (screen.target.querySelector('input[type="file"]'));
+    Object.defineProperty(input, "files", { value: [plainFile("old.orbit")], configurable: true });
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    await settle(); screen.flushSync();
+    const pp = /** @type {HTMLInputElement} */ (screen.target.querySelector("#arch-pp-in"));
+    pp.value = PASSPHRASE;
+    pp.dispatchEvent(new Event("input", { bubbles: true }));
+    await settle(); screen.flushSync();
+    await click("look inside");
+    await click("bring in 2 entries");
+    await click("bring in 2 entries");
+    await settle(); screen.flushSync();
+
+    expect(screen.target.querySelectorAll("#arch-proof")).toHaveLength(1);
+    expect(text()).toContain("sign in again");
   });
 });
