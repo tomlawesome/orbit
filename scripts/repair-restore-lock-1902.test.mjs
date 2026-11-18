@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
@@ -55,35 +55,32 @@ describe("#1902 L1: the compose-restore lock does not lapse silently", () => {
 });
 
 describe("#1902 L3: root's sweep listing", () => {
-  it("as root, never stats through a scratch-shape link (a link to a FIFO included): no hang, no following stat", () => {
-    const strace = realTool("strace");
-    if (!strace) throw new Error("strace is needed to see root's stats");
+  it("as root, never applies a link-following test to a scratch-shape name (a link to a FIFO included): no hang", () => {
     const { targetDir, state, fakeBin } = compose.make();
     const outside = scratchDir("orbit-1902-fifo-");
     const fifo = join(outside, "hung");
     expect(spawnSync("mkfifo", [fifo]).status).toBe(0);
     const link = ".docker-compose.yml.repair.Fifo01";
     symlinkSync(fifo, join(targetDir, link));
-    // `bash repair.sh` runs under strace (file calls only); other bash runs are plain.
-    const shimDir = scratchDir("orbit-1902-strace-");
-    const trace = join(shimDir, "trace.log");
-    writeFileSync(join(shimDir, "bash"), [
-      "#!/bin/sh",
-      `case "$1" in */scripts/repair.sh) exec '${strace}' -f -qq -s 4096 -e trace=%file,%stat,%lstat -o '${trace}' ${realTool("bash")} "$@";; esac`,
-      `exec '${realTool("bash")}' "$@"`,
+    // A DEBUG trap (BASH_ENV, set -T so functions and subshells inherit it) records every command root's bash runs
+    // while the sweep function is on the stack. Owner children (ORBIT_TEST_PRIVDROP=1) are not root's reads.
+    const hook = scratchDir("orbit-1902-hook-");
+    const trace = join(hook, "root-sweep.log");
+    writeFileSync(join(hook, "env.sh"), [
+      "set -T",
+      `trap '[[ "\${ORBIT_TEST_PRIVDROP:-0}" == 1 ]] || { [[ " \${FUNCNAME[*]} " == *" sweep_compose_restore_scratch "* ]] && printf "%s\\n" "$BASH_COMMAND" >> '${trace}'; }' DEBUG`,
       "",
     ].join("\n"));
-    chmodSync(join(shimDir, "bash"), 0o755);
     const shims = privShims(targetDir);
     try {
-      const result = runOwner(targetDir, { shims, state, fakeBin, env: { PATH: `${shimDir}:${shims.env.PATH}` }, capSeconds: 30 });
+      const result = runOwner(targetDir, { shims, state, fakeBin, env: { BASH_ENV: join(hook, "env.sh") }, capSeconds: 30 });
       expect(result.hung, `repair hung:\n${result.stderr.slice(0, 600)}`).toBe(false);
       expect(result.stdout, result.stderr).toContain(compose.done);
-      const lines = readFileSync(trace, "utf8").split("\n");
-      // Owner children (their execve names owner-sweep) may do what they like; root's own processes must not.
-      const owner = new Set(lines.filter((line) => /execve\(.*"owner-sweep"/u.test(line)).map((line) => line.split(" ")[0]));
-      const following = lines.filter((line) => line.includes("Fifo01") && /stat|access/u.test(line) && !/NOFOLLOW|lstat\(/u.test(line) && !owner.has(line.split(" ")[0]));
-      expect(following, `root stat'd through the link:\n${following.join("\n")}`).toEqual([]);
+      const commands = existsSync(trace) ? readFileSync(trace, "utf8").split("\n").filter(Boolean) : [];
+      expect(commands.length, "the hook saw no command of root's sweep").toBeGreaterThan(0);
+      // Follow-capable: [[ / [ / test with -f -e -d -s -r -w -x -p -S -b -c -a, stat -L, find -L/-H/-follow.
+      const following = commands.filter((command) => /(?:\[\[|\[|\btest)\s(?:[^\n]*\s)?-[fedsrwxpSbca]\s|\bstat\s+(?:\S+\s+)*-L\b|\bfind\s+(?:\S+\s+)*(?:-L|-H|-follow)\b/u.test(command));
+      expect(following, `root applied a link-following test:\n${following.join("\n")}`).toEqual([]);
       expect(existsSync(join(targetDir, link))).toBe(true);
     } finally {
       shims.cleanup();
