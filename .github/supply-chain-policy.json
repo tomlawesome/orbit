@@ -715,8 +715,8 @@
     {
       "name": "Orbit base image (Alpine plus Node from official signed source)",
       "tag": "ghcr.io/tomlawesome/orbit-base-image:latest",
-      "reference": "ghcr.io/tomlawesome/orbit-base-image:latest@sha256:acdeefd6b9b06c774524485ba1692a4dd4e01700e01aeda0250896c5d2606cb1",
-      "indexDigest": "sha256:acdeefd6b9b06c774524485ba1692a4dd4e01700e01aeda0250896c5d2606cb1",
+      "reference": "ghcr.io/tomlawesome/orbit-base-image:latest@sha256:ed90d17aaa54cc4fec123bc1270616bd4925b8598e7a7fb87b1e87e619253cda",
+      "indexDigest": "sha256:ed90d17aaa54cc4fec123bc1270616bd4925b8598e7a7fb87b1e87e619253cda",
       "platform": "linux/amd64",
       "locations": [
         "Dockerfile"
@@ -841,7 +841,7 @@
       "reason": "CI acceptance image built by the orbit-base-image pipeline; its digest comes from that pipeline, as the base image's does, not from a registry tag. Ships nothing to operators."
     },
     {
-      "reference": "registry.tomlawson.io/ai/orbit-base-image/signing@sha256:21dad4f1976d1118e1a142b82bebc7b7eaf76f242f39edb14790543c3c2661f3",
+      "reference": "registry.tomlawson.io/ai/orbit-base-image/signing@sha256:53e95636ca3d43654b432bbc962198f4bfe61d005a8c42d8e890db15835941ec",
       "locations": [
         ".gitlab-ci.yml"
       ],
