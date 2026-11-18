@@ -405,6 +405,14 @@ export const sessions = pgTable("sessions", {
  * successful verification; `passwordChangedAt` is distinct from the row's
  * own audit `updatedAt` because a rehash on login touches the hash without
  * the password changing.
+ *
+ * `passwordChangeRequiredAt` is the "must change password" mark (#1881,
+ * ADR-0027 amendment of 2026-11-17): set to the moment somebody pressed
+ * "This wasn't me" on an approval for this password, because a refused
+ * sign-in means somebody else knew it (NIST SP 800-63B section 5.1.1 (memorized secret verifiers)). While it is
+ * set, no sign-in path mints a session for this account, only the narrow
+ * change-password hold. Only a saved password clears it, in the same
+ * statement that writes the hash; it has no time limit.
  */
 export const localCredentials = pgTable("local_credentials", {
   userId: uuid("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
@@ -413,6 +421,7 @@ export const localCredentials = pgTable("local_credentials", {
   lockedUntil: timestamp("locked_until", { withTimezone: true }),
   lastVerifiedAt: timestamp("last_verified_at", { withTimezone: true }),
   passwordChangedAt: timestamp("password_changed_at", { withTimezone: true }).notNull().defaultNow(),
+  passwordChangeRequiredAt: timestamp("password_change_required_at", { withTimezone: true }),
   ...auditColumns,
 });
 
@@ -465,9 +474,9 @@ export const credentialSetupTokens = pgTable("credential_setup_tokens", {
  * read it; the wording a reader sees ("from your home network" for a private
  * address) is decided at render time, never here.
  *
- * `noticeShownAt` belongs to the other half of a refusal: a recorded "this
- * wasn't me" is worth telling the account holder about, once, on their next
- * successful sign-in. Stamping it is what keeps "once" true.
+ * The other half of a refusal is not kept here: a recorded "this wasn't me"
+ * marks the password itself (`local_credentials.password_change_required_at`,
+ * #1881).
  */
 export const signInApprovals = pgTable("sign_in_approvals", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -487,7 +496,6 @@ export const signInApprovals = pgTable("sign_in_approvals", {
      mail (#1604 P-20). */
   sendCount: integer("send_count").notNull().default(0),
   lastSentAt: timestamp("last_sent_at", { withTimezone: true }),
-  noticeShownAt: timestamp("notice_shown_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   index("sign_in_approvals_user_idx").on(table.userId),

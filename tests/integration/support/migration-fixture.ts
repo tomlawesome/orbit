@@ -109,10 +109,11 @@ export const EXPECTED_TABLE_COLUMNS: Record<string, string[]> = {
   // Check-mail send log, kept when a row is removed (#1650, 0016).
   mail_in_sender_check_sends: ["id", "user_id", "sent_at"],
   mail_in_unattributed_replies: ["address_sha256", "last_replied_at", "created_at", "updated_at"],
-  local_credentials: ["user_id", "password_hash", "failed_attempt_count", "locked_until", "last_verified_at", "password_changed_at", "created_at", "updated_at"],
+  // The "must change password" mark a refused sign-in leaves (#1881, 0021).
+  local_credentials: ["user_id", "password_hash", "failed_attempt_count", "locked_until", "last_verified_at", "password_changed_at", "password_change_required_at", "created_at", "updated_at"],
   credential_setup_tokens: ["id", "user_id", "token_hash", "purpose", "expires_at", "consumed_at", "created_by_user_id", "created_at"],
   step_up_proofs: ["id", "session_id", "intent", "expires_at", "consumed_at", "created_at"],
-  sign_in_approvals: ["id", "user_id", "token_hash", "claim_hash", "user_agent", "client_address", "expires_at", "consumed_at", "outcome", "decided_at", "send_count", "last_sent_at", "notice_shown_at", "created_at"],
+  sign_in_approvals: ["id", "user_id", "token_hash", "claim_hash", "user_agent", "client_address", "expires_at", "consumed_at", "outcome", "decided_at", "send_count", "last_sent_at", "created_at"],
   sign_in_approval_sends: ["id", "approval_id", "user_id", "sent_at"],
 };
 for (const columns of Object.values(EXPECTED_TABLE_COLUMNS)) columns.sort();

@@ -2,12 +2,12 @@ import { randomUUID } from "node:crypto";
 import { and, eq, gt, lt, sql } from "drizzle-orm";
 import type { CookieReader } from "@/lib/http";
 import { getDb } from "@/db";
-import { auditLog, sessions, userPreferences, users } from "@/db/schema";
+import { auditLog, localCredentials, sessions, userPreferences, users } from "@/db/schema";
 import type { AuthConfig } from "@/lib/env";
 import { ACCOUNT_LIFECYCLE_LOCK_KEY } from "@/lib/auth/authority-locks";
 import { sessionCookieName } from "@/lib/auth/cookies";
 import { constantTimeEqual, createCsrfToken, hashSessionToken, randomUrlSafe } from "@/lib/auth/crypto";
-import { AuthError } from "@/lib/auth/errors";
+import { AuthError, PasswordChangeRequiredError } from "@/lib/auth/errors";
 import type { PlanetSize, SkyDriver, TextSize } from "@/lib/preferences";
 import { log, operationalDetail } from "@/lib/logger";
 import { assertKeyUsable } from "@/server/key-state";
@@ -96,10 +96,21 @@ export async function createSession(
        created rarely enough that one statement here costs nothing; it is the
        shape `sealStepUpProof` already uses. */
     await transaction.delete(sessions).where(lt(sessions.expiresAt, new Date()));
-    const [user] = await transaction.select({ disabledAt: users.disabledAt }).from(users)
+    const [user] = await transaction
+      .select({ disabledAt: users.disabledAt, passwordChangeRequiredAt: localCredentials.passwordChangeRequiredAt })
+      .from(users)
+      .leftJoin(localCredentials, eq(localCredentials.userId, users.id))
       .where(eq(users.id, userId)).limit(1);
     if (!user || user.disabledAt) {
       throw new AuthError("account_disabled", "This Orbit account is disabled", 403);
+    }
+    /* A refused sign-in marked this password (#1881, NIST SP 800-63B
+       section 5.1.1 (memorized secret verifiers)): no session for this account, by any way in, until a new
+       one is saved. Checked here, the one place every sign-in path mints a
+       session, so a route that forgets the mark still cannot let anyone in;
+       the routes turn this into the narrow change-password hold. */
+    if (user.passwordChangeRequiredAt) {
+      throw new PasswordChangeRequiredError(userId, user.passwordChangeRequiredAt);
     }
     let idTokenEnc: string | null = null;
     if (idToken) {

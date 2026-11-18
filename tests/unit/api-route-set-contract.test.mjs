@@ -109,6 +109,9 @@ const EXPECTED_ROUTES = [
   // the send limits.
   "/api/auth/local/login/pending",
   "/api/auth/local/login/resend",
+  // Saves the new password a refused sign-in made necessary (#1881): signed
+  // out, authorised by the change-password hold cookie alone.
+  "/api/auth/local/login/new-password",
   // Sets or changes the signed-in caller's own password (M7 slice 8, #911,
   // ADR-0023 §6-§7): a session route, guarded by `write()`.
   "/api/auth/local/password",
@@ -120,8 +123,8 @@ const EXPECTED_ROUTES = [
   "/api/auth/methods",
   "/api/auth/methods/local",
   "/api/auth/methods/oidc/[identityId]",
-  // The one line a refused sign-in leaves for its owner (#1033): a session
-  // route, and a read that spends the notice as it answers.
+  // Whether a refused sign-in has marked the caller's password (#1033,
+  // #1881): a session route, and a pure read.
   "/api/auth/sign-in-notice",
   "/api/auth/logout",
   "/api/auth/session",

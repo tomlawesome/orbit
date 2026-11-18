@@ -184,6 +184,14 @@
         width:100%;min-height:var(--p-hit);margin:20px 0 0;padding:0 24px;
         font-size:var(--p-type-button)}
 
+  /* THE NEW-PASSWORD CARD (#1881): the note and the rule line at the
+     column's 13px, with the void's halo; lapsed keeps no field and no pill. */
+  .ringcard #formlayer .card.renew .note.why{margin:0 0 18px;line-height:1.75}
+  .ringcard #formlayer .card.renew .hint{font-size:var(--p-type-meta);letter-spacing:.03em;
+        text-shadow:0 1px 5px rgba(4,6,14,.9)}
+  .ringcard #formlayer .card.renew.lapsed .field,
+  .ringcard #formlayer .card.renew.lapsed .act{display:none}
+
   /* THE WAITING CARD: its heading is the ring's question like any other. */
   .ringcard #formlayer .card.waiting .note{line-height:1.8}
   .ringcard #formlayer .card.waiting .waiting-resend{margin-bottom:0}
