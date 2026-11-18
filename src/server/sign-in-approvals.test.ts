@@ -1175,6 +1175,52 @@ describe("a maybe-delivered resend keeps both links (#1896)", () => {
       expect(outcome).toMatchObject({ maybeDelivered: false });
     });
 
+    /* nodemailer 10 moves the system code to originalCode and sets code to ESOCKET or ECONNECTION (smtp-connection _formatError). */
+    const nodemailerFailure = (code: "ESOCKET" | "ECONNECTION", originalCode: string, command: string): Error =>
+      Object.assign(new Error(`connect ${originalCode}`), { code, originalCode, command });
+
+    it.each(
+      (["ECONNREFUSED", "ENOTFOUND", "ENETUNREACH", "EHOSTUNREACH"] as const).flatMap((original) =>
+        (["ECONNECTION", "ESOCKET"] as const).map((code) => [`${code} carrying ${original}`, code, original] as const),
+      ),
+    )("%s, as nodemailer shapes it: the connection never opened -- not delivered", async (_label, code, original) => {
+      const outcome = await sendBoundedMail("priya@example.invalid", mail, failingWith(nodemailerFailure(code, original, "CONN")), NINE);
+      expect(outcome.sendError).not.toBeNull();
+      expect(outcome).toMatchObject({ maybeDelivered: false });
+    });
+
+    it.each([
+      ["ESOCKET carrying ECONNRESET", nodemailerFailure("ESOCKET", "ECONNRESET", "CONN")],
+      ["ESOCKET carrying ETIMEDOUT", nodemailerFailure("ESOCKET", "ETIMEDOUT", "CONN")],
+      ["ETIMEDOUT during DATA", Object.assign(new Error("Socket timed out"), { code: "ETIMEDOUT", command: "DATA" })],
+      ["ESOCKET carrying ETIMEDOUT during DATA", nodemailerFailure("ESOCKET", "ETIMEDOUT", "DATA")],
+    ])("%s: the connection had opened -- maybe delivered", async (_label, error) => {
+      const outcome = await sendBoundedMail("priya@example.invalid", mail, failingWith(error), NINE);
+      expect(outcome.sendError).not.toBeNull();
+      expect(outcome).toMatchObject({ maybeDelivered: true });
+    });
+
+    it("nodemailer itself refused by a closed local port: not delivered", async () => {
+      vi.useRealTimers(); /* a real socket needs the real event loop; afterEach restores */
+      const { createServer } = await import("node:net");
+      const port = await new Promise<number>((resolve) => {
+        const probe = createServer().listen(0, "127.0.0.1", () => {
+          const { port: chosen } = probe.address() as { port: number };
+          probe.close(() => resolve(chosen));
+        });
+      });
+      const nodemailer = (await import("nodemailer")).default;
+      const transporter = nodemailer.createTransport({ host: "127.0.0.1", port, connectionTimeout: 5000 });
+      const refusing = {
+        async sendEmail(n: { to: string; subject: string; text: string }) {
+          try { await transporter.sendMail({ from: "orbit@example.invalid", ...n }); } finally { transporter.close(); }
+        },
+      };
+      const outcome = await sendBoundedMail("priya@example.invalid", mail, refusing, NINE);
+      expect(outcome.sendError).not.toBeNull();
+      expect(outcome).toMatchObject({ maybeDelivered: false });
+    });
+
     it.each([
       ["ETIMEDOUT", smtpFailure({ code: "ETIMEDOUT" })],
       ["ECONNRESET", smtpFailure({ code: "ECONNRESET" })],
