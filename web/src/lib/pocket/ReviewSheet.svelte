@@ -106,6 +106,12 @@
   $effect(() => {
     if (entry && start && JSON.stringify(entry.reminderDays) !== JSON.stringify(start.reminderDays)) reminderChosen = true;
   });
+  /* #1795: the flagged papers, as ReviewCard counts them: the add button says the file is left out. */
+  const flaggedIds = $derived(papers.flatMap((paper, i) => (paper.flagged ? [`${uid}-flag-${i}`] : [])));
+  /* The blocks are drawn only with the form (below: entry && checked && !pending), so the label and the tie follow that. */
+  const formDrawn = $derived(Boolean(entry && checked && !pending));
+  const shownFlags = $derived(formDrawn ? flaggedIds : []);
+  const without = $derived(shownFlags.length > 1 ? "add without them" : "add without it");
   const household = $derived(households.find((one) => one.id === entry?.householdId) ?? null);
   const dirty = () => Boolean(entry && start && entryChanged(entry, start));
 
@@ -149,7 +155,7 @@
   {:else if entry && checked}
     <form id="{uid}-form" aria-label="Review {title}" onsubmit={(event) => { event.preventDefault(); save(); }}>
       <EntryForm bind:entry households={household ? [household] : []} mode="review" nested
-                 disabled={busy} {readings} {papers} {receiptId} />
+                 disabled={busy} {readings} {papers} {receiptId} flagBase={uid} />
     </form>
     {#if problem}<p class="p-error" role="alert">{problem}</p>
     {:else if refusal}<p class="rv-refusal" id="{uid}-refusal">{refusal}</p>{/if}
@@ -164,10 +170,11 @@
     </form>
   {/if}
   {#snippet foot()}
+    {@const describers = [...shownFlags, ...(!pending && refusal ? [`${uid}-refusal`] : [])].join(" ") || undefined}
     {@const held = busy || !checked || (!pending && refusal !== null)}
     <button type="submit" form="{uid}-form" class="p-pill filled rv-go" aria-disabled={held ? "true" : undefined}
-            aria-describedby={!pending && refusal ? `${uid}-refusal` : undefined}>
-      {busy ? "adding…" : "add to orbit"}
+            aria-describedby={describers}>
+      {busy ? "adding…" : shownFlags.length ? without : "add to orbit"}
     </button>
   {/snippet}
 </Sheet>

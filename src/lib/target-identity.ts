@@ -232,19 +232,29 @@ export function validateTarget(targetDir: string): ValidateTargetResult {
   // The engine's deploy lock goes with it (#1212): a hard kill inside the
   // transaction leaves both, and the lock alone would otherwise turn a
   // pre-provisioned target into an unrecognisable one with no word why.
+  // A-R1: a lock reclaimed by a run that was then killed is left as
+  // `.orbit-engine.lock.stale-<pid>` (deploy-lock.ts), and is named too.
   const leftovers = readdirSync(targetDir)
-    .filter((entry) => entry.startsWith(".orbit-install-staging.") || entry === DEPLOY_LOCK_FILE_NAME)
+    .filter(
+      (entry) =>
+        entry.startsWith(".orbit-install-staging.") ||
+        entry === DEPLOY_LOCK_FILE_NAME ||
+        entry.startsWith(`${DEPLOY_LOCK_FILE_NAME}.stale-`),
+    )
     .sort();
+  const backupsPath = join(targetDir, INSTALL_BACKUPS_DIRECTORY);
+  const backupsNotFolder = existsAsAnyType(backupsPath) && !isRealNonSymlinkDirectory(backupsPath);
+  // A-S1: both problems are reported together, so fixing one does not reveal the other only on the next try.
+  const backupsProblem = `${INSTALL_BACKUPS_DIRECTORY} is not a folder, and the installer keeps its backups under that name. Rename it, then install again.`;
   if (leftovers.length > 0) {
     throw new TargetValidationRefusal(
-      `A previous install attempt was interrupted and left ${leftovers.join(" ")} behind in this directory. Review its contents, then remove ${leftovers.length === 1 ? "it" : "them"} (safe once you have confirmed no install is still in progress) and retry.`,
+      `A previous install attempt was interrupted and left ${leftovers.join(" ")} behind in this directory. Review its contents, then remove ${leftovers.length === 1 ? "it" : "them"} (safe once you have confirmed no install is still in progress) and retry.${backupsNotFolder ? ` Also, ${backupsProblem}` : ""}`,
     );
   }
 
-  const backupsPath = join(targetDir, INSTALL_BACKUPS_DIRECTORY);
-  if (existsAsAnyType(backupsPath) && !isRealNonSymlinkDirectory(backupsPath)) {
+  if (backupsNotFolder) {
     throw new TargetValidationRefusal(
-      `The installation directory is not empty and is not a recognizable Orbit deployment or safe pre-provisioned bootstrap: ${INSTALL_BACKUPS_DIRECTORY} is not a folder, and the installer keeps its backups under that name. Rename it, then install again.`,
+      `The installation directory is not empty and is not a recognizable Orbit deployment or safe pre-provisioned bootstrap: ${backupsProblem}`,
     );
   }
   throw new TargetValidationRefusal(

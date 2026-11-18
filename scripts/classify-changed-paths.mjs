@@ -200,6 +200,14 @@ function normalizePath(path) {
   return String(path ?? "").replaceAll("\\", "/").trim();
 }
 
+// The audit record (#1766): review files under `.agents/reviews/`, at any
+// depth. Fast on purpose -- they are prose. A `.` or `..` segment could climb
+// out of that directory, so such a path is never an audit record.
+function isAuditRecord(path) {
+  if (!/^\.agents\/reviews\/.+\.md$/u.test(path)) return false;
+  return !path.split("/").some((segment) => segment === "." || segment === "..");
+}
+
 function matchesAny(path, patterns) {
   return patterns.some((pattern) => pattern.test(path));
 }
@@ -217,7 +225,7 @@ export function pathRisk(path, { productionDependencyGraphChanged } = {}) {
   if (dependencySnapshotPaths.has(normalized)) {
     return productionDependencyGraphChanged === false ? CI_RISK.FAST : CI_RISK.SYSTEM;
   }
-  if (matchesAny(normalized, fastPatterns)) return CI_RISK.FAST;
+  if (matchesAny(normalized, fastPatterns) || isAuditRecord(normalized)) return CI_RISK.FAST;
   if (matchesAny(normalized, systemPatterns)) return CI_RISK.SYSTEM;
   if (matchesAny(normalized, integrationPatterns)) return CI_RISK.INTEGRATION;
   return CI_RISK.SYSTEM;

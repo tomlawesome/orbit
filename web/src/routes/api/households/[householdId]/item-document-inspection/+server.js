@@ -39,23 +39,28 @@ export const POST = write(
     /* No engine behind ORBIT_FIXTURES=1 (#1141's rule): the shape of the
        answer the engine gives when document reading is off (#1459: no
        message), so the create form's reading lane (#1245) settles in the
-       fixture harness rather than bouncing a 401 into the login flow. */
-    fixture: (event) => {
-      /* The engine's one suggestion with reading off: the title from the file name. */
-      let filename = "";
-      try {
-        filename = decodeURIComponent(event.request.headers.get("x-orbit-filename") ?? "");
-      } catch {
-        filename = "";
-      }
-      return json({
-        extracted: false,
-        suggestions: filename
-          ? [{ field: "title", value: safeDocumentFilenameTitle(filename), source: "filename", confidence: "high" }]
-          : [],
-        attachmentDisposition: "attachable",
-        reason: "supported_structure",
-      }, { headers: { "Cache-Control": "no-store" } });
-    },
+       fixture harness rather than bouncing a 401 into the login flow. With
+       reading off the engine still offers the file name's title (#1789
+       G8-FR1), so a dropped file named here gets it too. */
+    fixture: (event) => json({
+      extracted: false,
+      suggestions: fixtureFilenameSuggestions(event.request.headers.get("x-orbit-filename")),
+      attachmentDisposition: "attachable",
+      reason: "supported_structure",
+    }, { headers: { "Cache-Control": "no-store" } }),
   },
 );
+
+/**
+ * The engine's filename-only answer: the title read from the file's name
+ * (buildDocumentSuggestions' first line), none when no usable name was sent.
+ * @param {string | null} encodedFilename
+ */
+function fixtureFilenameSuggestions(encodedFilename) {
+  if (!encodedFilename) return [];
+  try {
+    return [{ field: "title", value: safeDocumentFilenameTitle(decodeURIComponent(encodedFilename)), source: "filename", confidence: "high" }];
+  } catch {
+    return [];
+  }
+}

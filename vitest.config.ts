@@ -1,4 +1,5 @@
 import { fileURLToPath } from "node:url";
+import { testWorkers } from "./scripts/test-workers.mjs";
 import { floors } from "./supply-chain/coverage-floors.mjs";
 import { configDefaults, defineConfig, type TestUserConfig } from "vitest/config";
 
@@ -60,6 +61,11 @@ const test: TestUserConfig = {
   // keep meaning what it meant before this fold -- no database required. A
   // --project on the command line overrides it.
   project: ["default"],
+  // The local worker cap (#1864). Root level on purpose: Vitest falls back to
+  // the root maxWorkers for every project that sets none, and an explicit
+  // `--maxWorkers` on the command line replaces the root value, which a cap
+  // written inside each project would shadow. CI sets no cap (see the helper).
+  ...testWorkers(),
   projects: [
     {
       resolve: {

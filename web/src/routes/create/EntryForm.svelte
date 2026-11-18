@@ -7,15 +7,16 @@
   import { IMPORTANCE_CHOICES } from "$lib/editing/importance.js";
   import { sectionColourOf } from "$lib/option-colour.js";
   import Reticle from "$lib/reading/Reticle.svelte";
-  import Sheet from "$lib/pocket/Sheet.svelte";
+  import DayChips from "$lib/editing/DayChips.svelte";
   import StagedPage from "$lib/pocket/StagedPage.svelte";
+  import FlaggedLine from "./FlaggedLine.svelte";
   import { stagedPreviewHref } from "$lib/pocket/review.js";
   import { DAMAGED, DAMAGED_PLACEHOLDER } from "$lib/data/metadata-status.js";
   import { DOCUMENT_ACCEPT, PAGE_HEAD, READING_HEAD, whyLines } from "$lib/data/document-read.js";
   import { ALREADY_HEAD, NOTHING_READ, RENEW_ADD, YOU_HOLD, addedDay, dueWords, keptWords } from "$lib/data/already-held.js";
   import AlreadyHeldRow from "$lib/pocket/AlreadyHeldRow.svelte";
   import {
-    RECURRENCE_MAX, REMINDER_CHOICES, recurrenceWords, stepRecurrence, toggleReminder,
+    RECURRENCE_MAX, recurrenceWords, stepRecurrence, toggleReminder,
   } from "./entry.js";
   const uid = $props.id();
 
@@ -68,6 +69,7 @@
    *   readings?: Reading[],
    *   papers?: { id?: string | null, name: string, meta: string, drawable?: boolean, flagged?: true }[],
    *   receiptId?: string | null,
+   *   flagBase?: string,
    * }} Props
    */
   /** @type {Props} */
@@ -89,7 +91,10 @@
     readings = [],
     papers = [],
     receiptId = null,
+    flagBase = undefined,
   } = $props();
+  /* #1795: how many papers the scanner flagged, for the block's plural. */
+  const flaggedCount = $derived(papers.filter((paper) => paper.flagged).length);
 
   /* #1155: the review row unfolds its page in place -- only one at a time,
      and `reader={false}` on purpose: a reader over a full sheet is a third
@@ -110,8 +115,24 @@
     entry.sectionId = null;
   }
 
-  /* ---- reminders: two chips, editable in a callout (§2.5) -------------- */
+  /* ---- reminders: tags, editable in the chooser card (§2.5, #1892) ------ */
   let remindOpen = $state(false);
+  /** @type {HTMLElement | undefined} */
+  let remindButton = $state();
+  /** @param {boolean} refocus */
+  function closeRemind(refocus) {
+    remindOpen = false;
+    if (refocus) tick().then(() => remindButton?.focus({ preventScroll: true }));
+  }
+  /** #1892: a press toggles a day; the card stays. @param {string} day */
+  function pickRemind(day) {
+    entry.reminderDays = toggleReminder(entry.reminderDays, Number(day));
+    entry = { ...entry }; // a fresh object, so a host that passes a plain entry repaints too
+  }
+  const remindAsk = $derived({
+    key: /** @type {const} */ ("reminders"), label: "reminders", heading: "reminders",
+    value: null, choices: [], days: entry.reminderDays, due: entry.dueDate || null, today: todayIso(),
+  });
   const remindWords = $derived(entry.reminderDays.length ? entry.reminderDays.map((d) => `${d}d`) : ["none"]);
 
   /* ---- the document picker (§2.5, item 3) ------------------------------ */
@@ -356,7 +377,7 @@
     <div class="pc-field" class:sugg={marked.includes("dueDate")}>
         <label for="{uid}-due">due date <span class="pc-from">◆ from document</span></label>
         <button type="button" id="{uid}-due" class="pc-val mono" bind:this={dueButton} {disabled} aria-haspopup="dialog"
-                aria-expanded={dueOpen} onclick={() => { dueOpen = !dueOpen; }}>{entry.dueDate ? dayMonthYear(entry.dueDate) : "choose a date"}<span class="pc-ch">change</span></button>
+                aria-expanded={dueOpen} onclick={() => { remindOpen = false; dueOpen = !dueOpen; }}>{entry.dueDate ? dayMonthYear(entry.dueDate) : "choose a date"}<span class="pc-ch">change</span></button>
       </div>
 
     <div class="pc-field" role="group" aria-labelledby="{uid}-recur">
@@ -390,16 +411,16 @@
 
     <div class="pc-field" role="group" aria-labelledby="{uid}-remind">
       <div class="pc-label" id="{uid}-remind">reminders</div>
-      <button type="button" class="pc-remind" aria-expanded={remindOpen} {disabled}
+      <button type="button" class="pc-remind" aria-haspopup="dialog" aria-expanded={remindOpen} {disabled} bind:this={remindButton}
               aria-label="Reminders: {entry.reminderDays.length ? entry.reminderDays.map((d) => `${d} days`).join(', ') + ' before' : 'none'}. Change"
-              onclick={() => { remindOpen = !remindOpen; }}>
+              onclick={() => { if (remindOpen) closeRemind(true); else { dueOpen = false; remindOpen = true; } }}>
         {#each remindWords as word (word)}<span class="pc-tag">{word}</span>{/each}
         <span class="pc-before">before</span>
         <span class="pc-change">change</span>
       </button>
       {#if nested && remindOpen}
         <div class="pc-remind-pick">
-          {@render remindChoices()}
+          <DayChips days={entry.reminderDays} due={entry.dueDate || null} onpick={pickRemind} />
         </div>
       {/if}
     </div>
@@ -415,14 +436,19 @@
     <!-- Review mode: what the relay read, below the fields (§2.5, §2.6). -->
     <section class="p-card proposed pc-card pc-reading" style:--i="2" aria-labelledby="{uid}-reading">
       <h2 class="p-caps" id="{uid}-reading">what the relay read</h2>
-      {#each papers as paper (paper.name)}
+      {#each papers as paper, i (paper.name)}
         <button type="button" class="pc-paper" disabled={!paper.id || paper.flagged}
+                aria-describedby={paper.flagged ? `${flagBase ?? uid}-flag-${i}` : undefined}
                 aria-expanded={openPaperName === paper.name}
                 onclick={() => { openPaperName = openPaperName === paper.name ? null : paper.name; }}>
           <span class="p-paper pc-doc-mark" aria-hidden="true">◆</span>
           <span class="pc-paper-words"><b>{paper.name}</b><span>{paper.meta}</span></span>
           {#if paper.id && !paper.flagged}<span class="pc-chev" aria-hidden="true">{openPaperName === paper.name ? "⌄" : "›"}</span>{/if}
         </button>
+        {#if paper.flagged}
+          <!-- #1795 (note 63499): the card's own block, under the paper it is about. -->
+          <FlaggedLine id="{flagBase ?? uid}-flag-{i}" name={paper.name} many={flaggedCount > 1} />
+        {/if}
         {#if openPaperName === paper.name && paper.id && !paper.flagged}
           <StagedPage href={receiptId ? stagedPreviewHref(receiptId, paper.id) : ""} name={paper.name}
                       drawable={Boolean(paper.drawable)} reader={false} />
@@ -445,15 +471,6 @@
       </div>
     {/each}
   {/snippet}
-  {#snippet remindChoices()}
-    <div class="pc-strip pc-remind-choices" role="group" aria-label="Remind me this many days before">
-      {#each REMINDER_CHOICES as day (day)}
-        <button type="button" class="pc-chip pc-mini" aria-pressed={entry.reminderDays.includes(day)}
-                onclick={() => { entry.reminderDays = toggleReminder(entry.reminderDays, day); }}>{day}d</button>
-      {/each}
-    </div>
-    <p class="pc-hint">days before it is due · as many as you like, or none</p>
-  {/snippet}
 
   {#if dueOpen}
     <div class="pc-chseat" data-chooser-card use:holdSeat>
@@ -462,13 +479,11 @@
     </div>
   {/if}
 
-  {#if !nested}
-    <Sheet bind:open={remindOpen} size="callout" title="Reminders">
-      {@render remindChoices()}
-      {#snippet foot()}
-        <button type="button" class="p-pill filled" onclick={() => { remindOpen = false; }}>done</button>
-      {/snippet}
-    </Sheet>
+  {#if !nested && remindOpen}
+    <div class="pc-chseat" data-chooser-card use:holdSeat>
+      <div class="pc-chscrim" aria-hidden="true" onclick={() => closeRemind(false)}></div>
+      <ChooserCard ask={remindAsk} layout="sheet" onpick={pickRemind} onclose={() => closeRemind(true)} />
+    </div>
   {/if}
 </div>
 
@@ -570,7 +585,6 @@
   .pc-before{font:var(--p-type-meta)/1 var(--mono);color:var(--ink-quiet)}
   .pc-change{margin-left:auto;font:var(--p-type-meta)/1 var(--mono);color:var(--accent-text)}
   .pc-remind-pick{margin-top:10px}
-  .pc-remind-choices{flex-wrap:wrap;overflow:visible;margin:0;padding:0}
 
   /* The reading card: something Orbit proposes, so the desk's dashed pen. In
      review mode each row is a button (#1155) that unfolds its page in place;
@@ -660,6 +674,14 @@
   .pc-alert{color:var(--warm-text)}
   .pc-bead{display:inline-block;width:10px;height:10px;border-radius:50%;flex:none;background:var(--warm);
     box-shadow:inset -2px 2px 0 rgba(255,255,255,.28)}
+  /* #1795: the card's .rv-dup.flag, in the form */
+  /* :global under .pc-form so the block keeps the bare class name `pc-flag` (the sheet and tests name it) */
+  .pc-form :global(.pc-flag){display:grid;grid-template-columns:10px 1fr;gap:4px 10px;align-items:start;margin:4px 0 8px;padding:12px;
+    border:1px solid var(--line-soft);border-radius:12px}
+  .pc-form :global(.pc-flag .pc-bead){display:inline-block;width:10px;height:10px;border-radius:50%;margin-top:6px;background:var(--overdue)}
+  .pc-form :global(.pc-flag p){margin:0;font:var(--p-type-meta)/1.5 var(--ui);color:var(--ink-mid)}
+  .pc-form :global(.pc-flag p + p){grid-column:2}
+  .pc-form :global(.pc-flag p b){color:var(--ink);font-weight:500}
   .pc-dup{display:flex;flex-direction:column;align-items:center;text-align:center;margin-top:16px}
   .pc-dup-line{display:flex;align-items:center;gap:9px;margin:0;font:600 var(--p-type-body)/1.35 var(--display);letter-spacing:.01em;color:var(--ink)}
   .pc-dup-why{margin:8px 0 0;font:var(--p-type-meta)/1.5 var(--ui);color:var(--ink-mid);text-wrap:pretty}

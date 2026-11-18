@@ -150,7 +150,9 @@ function hostFindings(lines) {
       if (ALLOWED_HOSTS.has(host)) continue;
       const known = Object.keys(CACHE_PREFIX).find((name) => host.endsWith(name));
       if (!CACHED_ELSEWHERE_HOST.test(host) && !TAG_OR_DIGEST_PATTERN.test(match[2])) continue;
-      const hint = known ? ` (use ${CACHE_PREFIX[known]})` : "";
+      const hint = known
+        ? ` (use ${CACHE_PREFIX[known]})`
+        : ` (no cache prefix for it; to allow it, add it to ${EXCEPTIONS_FILE})`;
       found.push({
         line: index + 1,
         reference: trimTrailingPunctuation(match[0]),

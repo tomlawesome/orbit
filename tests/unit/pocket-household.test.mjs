@@ -125,10 +125,9 @@ describe("the archive card", () => {
     expect(archiveFileProblem({ size: LIMITS.archiveFileBytes + 1 }, LIMITS)).toMatch(/larger than 170.7 MB/);
     expect(archiveFileProblem({ size: 130_000_000 }, LIMITS)).toBeNull();
     expect(archiveFileProblem({ size: 2048 }, LIMITS)).toBeNull();
-    // No ceiling from the engine (#1605 O-R9): the empty check still comes first, then the card refuses
-    // rather than judge a size it has no number for.
-    expect(archiveFileProblem({ size: 0 }, null)).toMatch(/empty/);
-    expect(archiveFileProblem({ size: 2048 }, null)).toBe("orbit has not said how large an archive may be yet — reload the page");
+    // No ceiling from the engine yet: refused until it loads (#1605 O-R9,
+    // archive-file-limits-unloaded.test.mjs).
+    expect(archiveFileProblem({ size: 2048 }, null)).toMatch(/reload/);
   });
 
   it("prints sizes the way a person reads them", () => {

@@ -58,7 +58,7 @@
  * the drawer opens any item, and offers what fits its state).
  *
  * `onamend` and `onaccept` are a suggestion's (SuggestionView.svelte, #1319):
- * `review & amend →` puts its rows into editing, and `add to orbit` approves
+ * `review & amend →` puts its rows into editing, and the amend button (`add to orbit`, or `add without it` when a file is flagged) approves
  * what they hold.
  *
  * @typedef {"snooze" | "complete" | "attach" | "retire" | "restore"} FootKind
@@ -163,7 +163,7 @@ export function createDrawerActs({
      owner-decisions §34; on the phone too (owner, 2026-10-08). `review &
      amend →` puts the suggestion's rows into editing (EditRows), the relay's
      proposal standing in for the item it would become (proposedItemOf); the
-     choosers are a filed item's. `add to orbit` sends the rows as the
+     choosers are a filed item's. The amend button (`add to orbit`, or `add without it` when a file is flagged) sends the rows as the
      amended item on the two-tap decision's own operation id (`amend`), into
      the section the rows chose; `cancel` puts the readings back. */
   /* #1316: the latest review & amend press still waiting on the reminder
@@ -310,15 +310,16 @@ export function createDrawerActs({
   let papersReady = $state(false);
   /** @type {object | null} */
   let searchDocumentsFor = null;
-  /** #1605 W-R7: bumped as each read starts or is superseded; a read whose
-   *  number is no longer current must not land. */
-  let searchReadGeneration = 0;
+  /* #1605 W-R7: each read takes a token and only the newest one lands, so a
+     read a re-read overtook never writes its older papers over the newer
+     (the same household object no longer tells the two reads apart). */
+  let searchReads = 0;
 
   /** #1151 W1-Q8: pocket-search.js's readSearchDocuments carries the
    *  concurrency cap (#1151 W1-R9). Answers the items whose papers could
    *  not be read (empty when nothing was read). @param {string | null} [also]
    *  @returns {Promise<Set<string>>} */
-  async function loadSearchDocuments(also = null, mustRead = null) {
+  async function loadSearchDocuments(also = null) {
     /** @type {Set<string>} */
     const failed = new Set();
     const current = view();
@@ -326,22 +327,17 @@ export function createDrawerActs({
     const householdId = current?.primary;
     if (!household || !householdId || searchDocumentsFor === household) return failed;
     searchDocumentsFor = household;
-    const generation = ++searchReadGeneration;
+    const read = ++searchReads;
     const carrying = (household.items ?? []).filter((item) => (item.status === "active" || item.id === also) && (item.documentCount ?? 0) > 0);
     // Additive: an item whose papers cannot be read loses its papers from the
     // results, not the search. Which items those were is answered, for the
     // one caller that must know (rereadSearchDocuments).
     const found = await readSearchDocuments(
-      carrying, readItemDocuments, householdId, () => searchDocumentsFor !== household || generation !== searchReadGeneration, (id) => failed.add(id),
+      carrying, readItemDocuments, householdId, () => searchDocumentsFor !== household, (id) => failed.add(id),
     );
-    if (searchDocumentsFor === household && generation === searchReadGeneration) {
+    if (searchDocumentsFor === household && searchReads === read) {
       searchDocuments = found;
       papersReady = true;
-    } else if (mustRead && !failed.has(mustRead)) {
-      /* #1605 W-R7: superseded, this read stopped writing results and may
-         have stopped before mustRead's item; that item is still checked, so
-         the act that asked hears of its failure whatever took over. */
-      await readItemDocuments(householdId, mustRead).catch(() => failed.add(mustRead));
     }
     return failed;
   }
@@ -352,9 +348,8 @@ export function createDrawerActs({
       Any other item's papers still drop out quietly: the search is additive. @param {string | null} [also] @param {string | null} [mustRead] */
   async function rereadSearchDocuments(also = null, mustRead = null) {
     searchDocumentsFor = null;
-    searchReadGeneration += 1;
     papersReady = false;
-    const failed = await loadSearchDocuments(also, mustRead);
+    const failed = await loadSearchDocuments(also);
     if (mustRead && failed.has(mustRead)) throw new Error(`the papers of ${mustRead} could not be read`);
   }
 

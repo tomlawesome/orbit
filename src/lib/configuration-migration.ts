@@ -567,7 +567,7 @@ export function isNotUtf8Failure(result: ConfigurationCommandResult): boolean {
 // Names the offending line where the parser knows it: without the key an
 // operator whose file carries an unknown setting is rolled back with
 // nothing to say which line to fix, and stays blocked.
-function preflightFailureMessage(result: ConfigurationCommandResult): string {
+export function preflightFailureMessage(result: ConfigurationCommandResult): string {
   if (isNotUtf8Failure(result)) return NOT_UTF8_FAILURE_MESSAGE;
   const { key } = result;
   if (key !== undefined) {

@@ -15,11 +15,11 @@
 
 import {
   addMember, commandArchiveStorage, commandContact, commandMailLimit, commandMailbox, commandSending, commandUploadLimit, createLocalUser, createSystem,
-  hardDeleteHousehold, postAdminJson, readAdminJson, restoreHousehold, retryDocumentJob, sendSetupLink, setUserDisabled,
+  hardDeleteHousehold, postAdminJson, readAdminJson, restoreHousehold, retryDocumentJob, sendSetupLink, setUserAddress, setUserDisabled,
   testMail, wordsOf,
 } from "$lib/data/workspace.js";
 import { DONE_UNREAD, rereadAfterLanded } from "$lib/data/landed.js";
-import { JOB_KINDS, lapsesShort, megabytes, removalWords, sendWords, setupWords } from "./words.js";
+import { JOB_KINDS, addressWords, lapsesShort, megabytes, removalWords, sendWords, setupWords } from "./words.js";
 
 /** @typedef {{ busy: boolean, problem: string | null }} Card */
 /** @typedef {(message: string, options?: { failure?: boolean, undo?: () => void }) => unknown} Wake */
@@ -125,6 +125,40 @@ export async function issueSetupLink(userId, days, password, { card, lock, actor
   } finally {
     card.busy = false;
     if (lock) lock.busy = false;
+  }
+}
+
+/**
+ * Sets a member's registered address (#1869): the way back for an address
+ * that cannot be read, and a correction for one typed wrongly. It sends no
+ * setup link; the notice goes to the OLD address when it was readable, and
+ * only a notice that failed to go is said, as its one bounded word.
+ * @param {{ id: string, displayName: string }} person @param {string} email @param {string} password
+ * @param {{ card: Card, actorHasPassword: boolean, landed: (answer: Awaited<ReturnType<typeof setUserAddress>>) => void, reread?: Reread, wake?: Wake }} on
+ */
+export async function setAddress(person, email, password, { card, actorHasPassword, landed, reread, wake = quiet }) {
+  if (card.busy) return;
+  card.busy = true;
+  card.problem = null;
+  let answer;
+  try {
+    answer = await setUserAddress(person.id, {
+      email: email.trim(),
+      ...(actorHasPassword ? { currentPassword: password } : {}),
+    });
+  } catch (error) {
+    card.problem = addressWords(error);
+    card.busy = false;
+    return;
+  }
+  try {
+    landed(answer);
+    const now = `${person.displayName}'s address is now ${answer.user.email ?? email.trim()}`;
+    if (answer.noticeError) wake(`${now}, but the notice to the old address did not go: ${sendWords(answer.noticeError)}`, { failure: true });
+    else wake(now);
+    if (reread) await rereadAfterLanded(reread, unreadOn(card, wake));
+  } finally {
+    card.busy = false;
   }
 }
 
@@ -463,8 +497,8 @@ export async function runMailTest(which, { card, reread }) {
   }
 }
 
-/** Jobs whose retry is out: a second press on one sends nothing (#1605 W-Q3). @type {Set<string>} */
-const retriesOut = new Set();
+/** Job ids whose retry request is in flight (#1605 W-Q3). */
+const retryingJobs = new Set();
 
 /**
  * Retries a failed document job. The row shows queued at once (`retried`,
@@ -473,8 +507,12 @@ const retriesOut = new Set();
  * @param {{ card: Card, retried: Record<string, { status: string, at: string, was: string }>, wake?: Wake }} on
  */
 export async function retryJob(job, { card, retried, wake = quiet }) {
-  if (retriesOut.has(job.id)) return;
-  retriesOut.add(job.id);
+  /* #1605 W-Q3: one press is one request. A press while this job's retry is
+     in flight (a double tap, or the other layout's button) sends nothing, and
+     a row already shown queued is not retried again with its stale status:
+     the next re-read (a newer updatedAt) settles it first. */
+  if (retryingJobs.has(job.id) || retried[job.id]?.was === job.updatedAt) return;
+  retryingJobs.add(job.id);
   card.problem = null;
   try {
     await retryDocumentJob(job.id, job.status);
@@ -483,6 +521,6 @@ export async function retryJob(job, { card, retried, wake = quiet }) {
   } catch (error) {
     card.problem = wordsOf(error);
   } finally {
-    retriesOut.delete(job.id);
+    retryingJobs.delete(job.id);
   }
 }

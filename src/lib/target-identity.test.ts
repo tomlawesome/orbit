@@ -384,6 +384,24 @@ describe("validateTarget (guarantee #7)", () => {
     expect(lstatSync(join(targetDir, ".orbit-engine.lock")).isFile()).toBe(true);
   });
 
+  it("A-R1: names a leftover .orbit-engine.lock.stale-<pid> instead of the generic refusal", () => {
+    writeFileSync(join(targetDir, ".orbit-engine.lock.stale-4242"), "1:owner\n", { mode: 0o600 });
+    expect(() => validateTarget(targetDir)).toThrow(/left \.orbit-engine\.lock\.stale-4242 behind/);
+  });
+
+  it("A-S1: reports both a staging leftover and a non-folder orbit-install-backups", () => {
+    mkdirSync(join(targetDir, ".orbit-install-staging.AbC123"), { mode: 0o700 });
+    writeFileSync(join(targetDir, "orbit-install-backups"), "");
+    let message = "";
+    try {
+      validateTarget(targetDir);
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message).toContain(".orbit-install-staging.AbC123");
+    expect(message).toContain("orbit-install-backups");
+  });
+
   function seedRecognisedDeployment(): void {
     writeFileSync(join(targetDir, ".env-orbit"), "APP_URL=https://example.invalid\n", { mode: 0o600 });
     writeFileSync(join(targetDir, "docker-compose.yml"), "services: {}\n");

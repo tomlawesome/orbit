@@ -60,6 +60,17 @@ export function setupWords(error) {
 }
 
 /**
+ * A refused address change (#1869) in its own words: nothing is created by
+ * one, so a wrong password says the address was not changed.
+ * @param {unknown} error
+ */
+export function addressWords(error) {
+  const code = /** @type {{ code?: string }} */ (error)?.code;
+  if (code === "recent_authentication_required") return "that isn't your current password — the address was not changed";
+  return setupWords(error);
+}
+
+/**
  * A document size limit as the upload limit card says it (#1285): whole MB
  * where it is whole, which every limit set here is. @param {number} bytes
  */

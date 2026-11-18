@@ -16,6 +16,7 @@ import {
   writeReminders,
 } from "$lib/data/workspace.js";
 import { rereadAfterLanded } from "$lib/data/landed.js";
+import { renewStepAddress } from "$lib/flight/door-state.js";
 import { disableAlerts, enableAlerts, syncAlerts } from "$lib/push/alerts.js";
 import { alertsOutcomeWords, intentOf, methodWords, stepUpReturnOf } from "./helm.js";
 import { signOutOfDevice, signOutOfEveryDevice } from "./sign-out.js";
@@ -64,6 +65,13 @@ export async function changeMethod(action, { hasPassword, currentPassword, newPa
     }
     if (action === "password_set" || action === "password_change") {
       const result = await writeLocalPassword({ password: newPassword, ...challenge });
+      /* Saved, but the account was marked again in between (#1881): this
+         browser's session is gone and only the hold is left, so the screen
+         does not carry on as if signed in; the door's renew step takes it. */
+      if (result.renew) {
+        location.assign(renewStepAddress(result.renew.refusedAt, "/settings"));
+        return;
+      }
       outcome = result.changed ? "password changed · every other device was signed out" : "password set";
     } else if (action === "password_remove") {
       await removeLocalPassword(challenge);

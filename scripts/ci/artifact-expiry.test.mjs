@@ -9,10 +9,10 @@ import { describe, expect, it } from "vitest";
  *   - `fast`, `fast_docker` and the smoke jobs keep their artifacts for exactly
  *     7 days (scripts/ci/reuse-lookup.mjs reuses evidence up to 7 days old, so
  *     not shorter).
- *   - `build_launcher`'s archives expire after 14 days, except on `main`,
+ *   - `build_launcher`'s archives expire after 3 days, except on `main`,
  *     `preview` and `hotfix/*`, which keep them 90 days. Hotfix was added at
  *     build time: a hotfix tag is released from its hotfix pipeline exactly as
- *     a preview tag is (.github/workflows/release-on-tag.yml), so 14 days there
+ *     a preview tag is (.github/workflows/release-on-tag.yml), so 3 days there
  *     could leave a late hotfix tag with nothing to publish.
  *
  * A job declares one `expire_in`, so the launcher change may be two variants of
@@ -406,7 +406,7 @@ describe("#1608 build_launcher artifacts", () => {
     },
   );
 
-  // Two publishers on one ref would hide a 14-day copy behind a 90-day one.
+  // Two publishers on one ref would hide a 3-day copy behind a 90-day one.
   it.each(Object.keys(contexts))("runs at most one job that publishes the archives on %s", (context) => {
     expect(effective(contexts[context]).running.length).toBeLessThanOrEqual(1);
   });

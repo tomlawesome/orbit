@@ -21,17 +21,15 @@ export function pageTurn(page, count) {
 /**
  * The page a key turns to: ← and PageUp back one, → and PageDown forward
  * one, Home the first, End the last. `null` for a page key with nowhere to
- * go (it is still the page's key, never the belt's), except that a key to
- * the page already shown still answers with that page when `lost` is set, so
- * the press tries it again; `undefined` for any other key.
+ * go (it is still the page's key, never the belt's); `undefined` for any
+ * other key.
  *
  * @param {string} key
  * @param {number} page
  * @param {number | null} count
- * @param {boolean} [lost] the page failed to draw, so a press on it goes again (#1605 W-R10)
  * @returns {number | null | undefined}
  */
-export function pageKeyTarget(key, page, count, lost = false) {
+export function pageKeyTarget(key, page, count) {
   const wanted = key === "ArrowLeft" || key === "PageUp" ? page - 1
     : key === "ArrowRight" || key === "PageDown" ? page + 1
       : key === "Home" ? 1
@@ -40,5 +38,5 @@ export function pageKeyTarget(key, page, count, lost = false) {
   if (wanted === undefined) return undefined;
   if (!count || count < 2) return null;
   const target = Math.min(count, Math.max(1, wanted));
-  return target === page && !lost ? null : target;
+  return target === page ? null : target;
 }
