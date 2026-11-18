@@ -326,6 +326,15 @@ async function openFilm(page) {
   page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
   page.on("pageerror", (error) => errors.push(error.message));
   await installFilmEnded(page);
+  /* #1895: this headless WebKit has no push service, and on a desk context
+     (which, unlike an isMobile one, exposes PushManager) the first
+     `pushManager.getSubscription()` blocks the page's main thread for good.
+     Settings calls it on mount (alerts.js syncAlerts), so chapter 6's walk to
+     /settings froze the page: no timer, no film, no waitForFunction answer.
+     The browser reports no subscription instead, as a fresh one would. */
+  await page.addInitScript(() => {
+    if (window.PushManager) PushManager.prototype.getSubscription = () => Promise.resolve(null);
+  });
   await page.route("**/api/settings/tour", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: '{"tour":{"tourSeenAt":null}}' }));
   await page.goto(`${APP}/home`, { waitUntil: "load" });

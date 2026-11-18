@@ -78,7 +78,7 @@ export default {
 
   /** @param {import("../vocabulary.js").FilmContext} ctx */
   async play(ctx) {
-    const { pocket, setScreen, veil, ctl, goto, unlight, callout, dropCallout } = ctx;
+    const { pocket, setScreen, veil, ctl, goto, unlight, callout, dropCallout, waitForReal } = ctx;
     const S = pocket ? SELECTORS.POCKET : SELECTORS.DESK;
 
     await setScreen("/home");
@@ -88,6 +88,11 @@ export default {
        before the screen changes under it, same as any other setScreen. */
     veil(true);
     await setScreen("/settings");
+
+    /* The desk's Mail card sits inside the settings page's `{#if view}`, which
+       has not rendered when setScreen returns (#1895): wait for the real
+       element, as chapter 8 does, before ctl points at it. */
+    await waitForReal(S.card);
 
     /* "Forward a bill to your relay address and Orbit reads a copy to import
        it." — the whole card, named once. Its second line, "Your mail is never
