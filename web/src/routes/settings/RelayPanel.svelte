@@ -7,7 +7,7 @@
   import { ROTATE_LIMITED, ROTATE_NOT_CONFIRMED, ROTATE_UNCHANGED, ROTATE_UNKNOWN, WorkspaceError, addSender, readRelay, removeSender, rotateRelay, rotateRelayReconciled, sendSenderCheck } from "$lib/data/workspace.js";
   import { failureWords } from "$lib/pocket/words.js";
   import {
-    checkRow, LINK_CHECKED, LINK_FAILED, alreadyCheckedWords, refusalWords, SENDING, sentWords,
+    checkRow, linkCheckedWords, LINK_FAILED, alreadyCheckedWords, refusalWords, SENDING, sentWords,
     withLearnt, ADD, ADD_PLACEHOLDER, AT_LIMIT, atLimit, extraRow, extrasOf, NOT_ADDED, NOT_REMOVED, REMOVE, REMOVE_ARMED, SEND_CHECK,
     removeArmedWords, withCheckSent,
   } from "./mail/sender.js";
@@ -255,7 +255,7 @@
      it); the phone's layout says it in its own way. */
   onMount(() => {
     if (!live || !landing) return;
-    if (landing === "verified") said = LINK_CHECKED;
+    if (landing === "verified") said = linkCheckedWords(relay);
     if (landing === "unverified") refuse(LINK_FAILED);
     onlanded();
   });

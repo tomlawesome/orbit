@@ -286,6 +286,49 @@ describe("#1848 FIX-S1 addendum b, c (opt-in, needs root and a second user)", ()
   });
 });
 
+// #1878 L-F4: acceptance b and c above need real root and a second user, so a normal run never exercised the
+// refusal. The same refusal, with the stat shim saying root owns what the folder's owner should: root run
+// (id -u shimmed), no second user needed.
+describe("#1848 FIX-S1 addendum b, c, simulated (stat shim, any user)", () => {
+  /** The tree minus backups/ and its lock, which the gate may make before a later refusal. */
+  const settled = (targetDir) => treeSnapshot(targetDir).split("\n").filter((line) => !/^\.\/backups( |\/)/u.test(line)).join("\n");
+  const expectRefusal = (targetDir, shims, before) => {
+    const result = run(targetDir, shims);
+    expect(result.stdout).not.toContain(DONE);
+    expect(result.status).toBe(4);
+    expect(result.stderr).toMatch(/retire-smtp-lines refused, nothing was changed: .*orbit-install-backups.*belongs to another user \(root\)/u);
+    expect(result.stderr).toMatch(/remove it if it is empty/u);
+    expect(result.stderr).toMatch(/re-run repair/u);
+    expect(composeUpCalls(result)).toEqual([]);
+    expect(settled(targetDir)).toBe(before);
+    expect(shims.toolCalls().filter((line) => / under=1 /u.test(line) && !/backups/u.test(line)), "something under the folder was changed before the refusal").toEqual([]);
+  };
+
+  it("b: a root-owned orbit-install-backups in the owner's folder is refused, named, with the fix; nothing changed", () => {
+    const targetDir = withMail();
+    mkdirSync(join(targetDir, "orbit-install-backups"), { mode: 0o700 });
+    const shims = privShims(targetDir, { rootOwned: "backups" });
+    expectRefusal(targetDir, shims, settled(targetDir));
+  });
+
+  it("c: an adopted undo folder owned by another user is refused; nothing changed", () => {
+    const targetDir = withMail();
+    const dated = "orbit-install-backups/20260101T000000Z";
+    const folder = join(targetDir, dated);
+    mkdirSync(folder, { recursive: true, mode: 0o700 });
+    writeFileSync(join(folder, ".orbit-smtp-undo"), `copy=${dated}\n`, { mode: 0o600 });
+    const shims = privShims(targetDir, { rootOwned: "undo" });
+    expectRefusal(targetDir, shims, settled(targetDir));
+  });
+
+  it("the same fixtures are not refused when the owner is the folder's owner (the refusal is the ownership, nothing else)", () => {
+    const targetDir = withMail();
+    mkdirSync(join(targetDir, "orbit-install-backups"), { mode: 0o700 });
+    const result = run(targetDir, privShims(targetDir, { rootOwned: "none" }));
+    expect(result.stdout, result.stderr).toContain(DONE);
+  });
+});
+
 describe("#1848 FIX-S1 acceptance 3: root without setpriv on PATH refuses and changes nothing", () => {
   it("names setpriv, exits 4, and leaves .env-orbit, the secret, the overlay and orbit-install-backups as they were", () => {
     const targetDir = withMail();

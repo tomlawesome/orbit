@@ -298,6 +298,8 @@ export function cardMessageFor(code) {
       return "That password is too short or too long.";
     case "setup_token_invalid":
       return "This link has been used already, or it has expired.";
+    case "sign_in_unavailable":
+      return "Sign-in is briefly unavailable. Try again shortly.";
     case "invalid_request":
       return "Fill in every field.";
     default:

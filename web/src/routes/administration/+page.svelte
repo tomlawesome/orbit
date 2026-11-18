@@ -350,8 +350,10 @@
     const payload = {
       intent,
       local: localDraft,
-      systemName,
+      systemName: systemName ?? "",
       resend: about.resend ?? (resendFor ? { personId: resendFor, days: resendDays } : null),
+      // #1604 G11-FR1: a stale draft is an abandoned errand; see restoreDraft.
+      at: Date.now(),
     };
     try { sessionStorage.setItem(DRAFT_KEY, JSON.stringify(payload)); } catch { /* storage refused: the form simply starts empty */ }
   }
@@ -370,6 +372,8 @@
       if (!held) return;
       const draft = JSON.parse(held);
       if (draft.intent !== returnedIntent) return;
+      // #1604 G11-FR1: the step-up has to be answered within 15 minutes; an older draft is an abandoned errand, dropped unread.
+      if (typeof draft.at !== "number" || Date.now() - draft.at > 15 * 60 * 1000) return;
       if (draft.local) localDraft = { ...localDraft, ...draft.local };
       if (draft.intent === "system_create") {
         systemName = draft.systemName ?? "";
@@ -533,6 +537,7 @@
     password = "";
     mailCard.outcome = null;
     mailCard.problem = null;
+    providerOpen = false;
     editing = true;
   }
 
@@ -550,6 +555,7 @@
     landed: (closes) => {
       if (closes) {
         editing = false;
+        providerOpen = false;
         rotating = false;
         aliasRotating = false;
       }
@@ -758,6 +764,10 @@
         restoreDraft(resumed);
         actorHasPassword = false;
         provenIntent = resumed;
+      } else {
+        /* #1604 G11-FR1: a plain visit means the errand came back without its
+           proof and is over; the typed person must not sit in storage. */
+        try { sessionStorage.removeItem(DRAFT_KEY); } catch { /* storage refused: nothing was kept */ }
       }
     }
 
@@ -1627,7 +1637,7 @@
                   provider delivers sub-addressed mail to. The password is stored encrypted and never shown again.</p>
                 <div class="placerow mailboxrow">
                   <button type="submit" disabled={mailCard.busy !== null}>verify and save</button>
-                  <button type="button" onclick={() => { editing = false; password = ""; }}>cancel</button>
+                  <button type="button" onclick={() => { editing = false; providerOpen = false; password = ""; }}>cancel</button>
                 </div>
               </form>
             {/if}

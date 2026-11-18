@@ -109,6 +109,11 @@ describe("private mailbox review mapping", () => {
     expect(failureReasonOf("scan_recovery_expired")).toBe("scanner_off");
   });
 
+  it("r2-documents-2: a structure check that never completed is not worded as an interrupted approval", () => {
+    expect(failureReasonOf("structure_check_unavailable")).not.toBe("interrupted");
+    expect(failureReasonOf("structure_check_unavailable")).not.toBe("unknown");
+  });
+
   it("an item with no stored request cannot be retried: terminal, discard the way out (O-F8)", () => {
     for (const code of ["approval_interrupted", "attachment_transfer_failed", "staging_purge_failed", "attachment_state_changed"]) {
       const state = reviewInboxState("recoverable", code, noStoredRequest);

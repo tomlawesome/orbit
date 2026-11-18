@@ -1086,3 +1086,40 @@ describe("kek rotation visibility at startup (#956)", () => {
     }
   });
 });
+
+/* #1450 (Orbit ruling, 2026-11-17): the claim notice waits for the start-up
+   reports on a condition, with a time limit. It goes ahead as soon as every
+   report has logged its lines; 10 s is only the upper bound for a hung one. */
+describe("start-up reports wait (#1450)", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("goes ahead as soon as every report has settled, long before the limit", async () => {
+    vi.useFakeTimers();
+    const { settleWithin } = await import("@/server/boot");
+    let done = false;
+    const slow = new Promise<void>((resolve) => setTimeout(resolve, 200));
+    void settleWithin([Promise.resolve(), slow], 10_000).then(() => {
+      done = true;
+    });
+    await vi.advanceTimersByTimeAsync(199);
+    expect(done).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(done).toBe(true);
+  });
+
+  it("gives up on a hung report after the 10 s limit, and never rejects", async () => {
+    vi.useFakeTimers();
+    const { settleWithin, STARTUP_REPORTS_WAIT_MS } = await import("@/server/boot");
+    expect(STARTUP_REPORTS_WAIT_MS).toBe(10_000);
+    let done = false;
+    void settleWithin([new Promise<void>(() => {}), Promise.reject(new Error("report failed"))], STARTUP_REPORTS_WAIT_MS).then(() => {
+      done = true;
+    });
+    await vi.advanceTimersByTimeAsync(9_999);
+    expect(done).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(done).toBe(true);
+  });
+});

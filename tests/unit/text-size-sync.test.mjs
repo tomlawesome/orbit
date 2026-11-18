@@ -73,6 +73,17 @@ describe("savePreferences, quick picks", () => {
     expect(puts.at(-1)).toMatchObject({ theme: "dawn", textSize: "large" });
   });
 
+  it("#1604 W-S2: a theme pick sends no notification-channel fields, so a flip made meanwhile is not reverted", async () => {
+    const { savePreferences } = await import(/* @vite-ignore */ url("lib/data/workspace.js"));
+    const saved = savePreferences({ theme: "dawn" });
+    await vi.waitFor(() => expect(puts).toHaveLength(1));
+    release();
+    await saved;
+    expect(puts[0]).toMatchObject({ theme: "dawn" });
+    expect(puts[0]).not.toHaveProperty("emailNotifications");
+    expect(puts[0]).not.toHaveProperty("pushNotifications");
+  });
+
   it("a failed save does not stop the next one", async () => {
     const { savePreferences } = await import(/* @vite-ignore */ url("lib/data/workspace.js"));
     fetch.mockImplementation(async (u, init = {}) => {

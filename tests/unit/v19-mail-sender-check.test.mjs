@@ -246,11 +246,12 @@ const settle = async () => {
  * Mounts the settings mail screen over the relay read the server gives for
  * `sender`, in the desk or the phone layout, landing on `search`.
  */
-async function mountScreen(/** @type {{ sender: object | null, pocket: boolean, search?: string }} */ { sender, pocket, search = "" }) {
+async function mountScreen(/** @type {{ sender: object | null, pocket: boolean, search?: string, ingest?: string }} */ { sender, pocket, search = "", ingest }) {
   media.pocket = pocket;
   mediaWatchers.clear();
   window.matchMedia = /** @type {any} */ (() => phoneQuery);
   server.relay = relayBody(sender);
+  if (ingest) /** @type {any} */ (server.relay).relay.ingest = ingest;
   landOnSettings(search);
   const { mount, unmount } = await import(pathToFileURL(join(svelteSrc, "index-client.js")).href);
   const { default: Page } = await import(/* @vite-ignore */ compiledPage);
@@ -526,6 +527,13 @@ describe.each(LAYOUTS)("#1410: %s after the link in the check email", (_name, po
     expect(buttonSaying("send the check email"), "the way to a new email is on screen").not.toBeNull();
     expect(window.location.search, "?sender= is gone from the address bar").toBe("");
     expect(window.location.pathname).toBe("/settings");
+  });
+
+  it("ST-26: ?sender=verified while ingest is paused does not say the relay is listening", async () => {
+    await mountScreen({ sender: CHECKED, pocket, search: "?sender=verified", ingest: "paused" });
+    const said = statusLines().concat(wakeLines()).join(" | ");
+    expect(said).toMatch(/address checked/u);
+    expect(said).not.toMatch(/listening/u);
   });
 
   it("with no ?sender= nothing is announced and no alert is raised", async () => {

@@ -725,3 +725,20 @@ describe("removeProviderLinks (#1676)", () => {
     expect(JSON.stringify(audits(script.ops))).not.toContain("@");
   });
 });
+
+describe("audit Lows, group 4 (server and API): sign-in address handling", () => {
+  it("ST-16: two creations racing for one address end in the link-it refusal, not a driver error", async () => {
+    const { ops } = use([[], Object.assign(new Error('duplicate key value violates unique constraint "user_email_unique_index"'), { code: "23505" })]);
+    await expect(repository.createLocalUser({ email: "ada@example.test", displayName: "Ada", passwordHash: "$argon2id$hash" }))
+      .rejects.toMatchObject({ code: "link_required" });
+    expect(values(ops, localCredentials)).toHaveLength(0);
+  });
+
+  it("PR-6/P-26: an over-long sign-in address is refused as wrong credentials before it is hashed or looked up", async () => {
+    const { ops } = use([]);
+    const long = `${"a".repeat(321)}@example.test`;
+    const verdict = await repository.verifyCredential(long, "pw");
+    expect(verdict).toEqual({ outcome: "rejected" });
+    expect(ops.filter((op) => op.kind === "select")).toHaveLength(0);
+  });
+});

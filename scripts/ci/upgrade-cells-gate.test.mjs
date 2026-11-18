@@ -102,7 +102,17 @@ const fail = (status) => ({
  * for "no such artefact" (404).
  * A job named "classify" is added to each pipeline with id pipeline*10.
  */
-function fakeFetch({ pipelines = [], mrPipelinesStatus = 200, jobsStatus = 200 } = {}) {
+function fakeFetch({ pipelines = [], others = [], mergeRequests = [], mrPipelinesStatus = 200, jobsStatus = 200 } = {}) {
+  /*
+   * others (#1767): pipelines of the project that are not on this merge
+   * request, each { id, sha, status, source, ref, jobs, gate }. They are served
+   * by the project-wide listing (/projects/:id/pipelines, with source and ref,
+   * as reuse-lookup.mjs reads it) and by /merge_requests/:iid/pipelines of
+   * their own merge request (ref refs/merge-requests/<iid>/head).
+   * mergeRequests: [{ iid, target_branch }] served by /merge_requests, filtered
+   * by ?target_branch= when given. An implementation may use any of these.
+   */
+  const everything = [...pipelines, ...others];
   return async (url, options = {}) => {
     calls.push({ url: String(url), headers: options.headers ?? {} });
     const { pathname } = new URL(String(url));
@@ -112,10 +122,23 @@ function fakeFetch({ pipelines = [], mrPipelinesStatus = 200, jobsStatus = 200 }
       if (mrPipelinesStatus !== 200) return fail(mrPipelinesStatus);
       return ok(pipelines.map(({ id, sha, status = "success" }) => ({ id, sha, status })));
     }
+    if (path === `projects/${PROJECT}/pipelines`) {
+      return ok(everything.map(({ id, sha, status = "success", source = "merge_request_event", ref }) => ({ id, sha, status, source, ref })));
+    }
+    if (path === `projects/${PROJECT}/merge_requests`) {
+      const target = new URL(String(url)).searchParams.get("target_branch");
+      return ok(mergeRequests.filter((entry) => !target || entry.target_branch === target));
+    }
+    const otherMr = path.match(/^projects\/49\/merge_requests\/(\d+)\/pipelines$/u);
+    if (otherMr) {
+      return ok(others
+        .filter((entry) => entry.ref === `refs/merge-requests/${otherMr[1]}/head`)
+        .map(({ id, sha, status = "success", source = "merge_request_event", ref }) => ({ id, sha, status, source, ref })));
+    }
     const jobsMatch = path.match(/^projects\/49\/pipelines\/(\d+)\/jobs$/u);
     if (jobsMatch) {
       if (jobsStatus !== 200) return fail(jobsStatus);
-      const pipeline = pipelines.find((entry) => entry.id === Number(jobsMatch[1]));
+      const pipeline = everything.find((entry) => entry.id === Number(jobsMatch[1]));
       if (!pipeline) return ok([]);
       // pipeline.pages, when given, is a list of job pages served with x-next-page.
       const pages = pipeline.pages ?? [pipeline.jobs];
@@ -126,7 +149,7 @@ function fakeFetch({ pipelines = [], mrPipelinesStatus = 200, jobsStatus = 200 }
     }
     const artefactMatch = path.match(/^projects\/49\/jobs\/(\d+)\/artifacts\/\.orbit-upgrade\/gate\.env$/u);
     if (artefactMatch) {
-      const pipeline = pipelines.find((entry) => entry.id * 10 === Number(artefactMatch[1]));
+      const pipeline = everything.find((entry) => entry.id * 10 === Number(artefactMatch[1]));
       if (!pipeline || pipeline.gate === undefined) return fail(404);
       return ok(pipeline.gate);
     }
@@ -163,7 +186,21 @@ async function gate({ env = {}, fetchImpl } = {}) {
 }
 
 // One earlier pipeline on `sha` whose cells passed and which ran for real.
-const passedRun = (sha, id = 299, gate = gateRun) => ({ id, sha, jobs: [cell("success")], gate });
+const passedRun = (sha, id = 299, gate = gateRun + SLOTS) => ({ id, sha, jobs: [cell("success")], gate });
+
+// A passed run on another merge request (iid `mr`), into preview unless the case says otherwise.
+const previewRun = (sha, id, mr, gate = gateRun, extra = {}) => ({
+  id,
+  sha,
+  jobs: [cell("success")],
+  gate,
+  source: "merge_request_event",
+  ref: `refs/merge-requests/${mr}/head`,
+  ...extra,
+});
+const PREVIEW_MRS = [{ iid: 5, target_branch: "preview" }, { iid: 6, target_branch: "preview" }];
+const SLOTS = "ORBIT_UPGRADE_SLOT_LATEST_1=v1.2.0\nORBIT_UPGRADE_SLOT_LATEST_2=v1.1.0\n";
+const slotEnv = { ORBIT_UPGRADE_SLOT_LATEST_1: "v1.2.0", ORBIT_UPGRADE_SLOT_LATEST_2: "v1.1.0" };
 
 function expectRun(result) {
   expect(result.decision).toBe("run");
@@ -232,12 +269,14 @@ describe("a change to something updates depend on, after a passed run", () => {
     ["the matrix itself", "scripts/ci/upgrade-cell.sh"],
     ["the matrix's manifest writer", "scripts/ci/write-test-manifest.sh"],
     ["the launcher checkout the launcher cell builds from", "scripts/ci/checkout-launcher-source.sh"],
+    ["the registry the cells install from", "scripts/ci/start-installer-registry.sh"],
+    ["the oidc sidecar the oidc cell builds", "tests/oidc/Dockerfile"],
     ["this script", "scripts/ci/upgrade-cells-gate.mjs"],
   ])("writes run for %s (%s)", async (unused, path) => {
     const base = git("rev-parse", "HEAD");
     touch(path);
 
-    const result = await gate({ fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
+    const result = await gate({ env: slotEnv, fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
 
     expectRun(result);
   });
@@ -248,7 +287,7 @@ describe("a change to something updates depend on, after a passed run", () => {
     touch("drizzle/0002_y.sql");
     touch("docs/notes.md");
 
-    const result = await gate({ fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
+    const result = await gate({ env: slotEnv, fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
 
     expectRun(result);
   });
@@ -259,7 +298,7 @@ describe("a change to nothing updates depend on, after a passed run", () => {
     const base = git("rev-parse", "HEAD");
     touch("src/widget.test.ts");
 
-    const result = await gate({ fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
+    const result = await gate({ env: slotEnv, fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
 
     expect(result).toEqual({ decision: "skip", since: base });
     expect(written()).toContain("UPGRADE_CELLS=skip");
@@ -270,7 +309,7 @@ describe("a change to nothing updates depend on, after a passed run", () => {
     const base = git("rev-parse", "HEAD");
     touch("docs/notes.md");
 
-    await gate({ fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
+    await gate({ env: slotEnv, fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
 
     expect(lines()).toContain(base);
   });
@@ -282,7 +321,7 @@ describe("a change to nothing updates depend on, after a passed run", () => {
     touch("web/config/page.ts");
     touch("src/compose/notes.md");
 
-    const result = await gate({ fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
+    const result = await gate({ env: slotEnv, fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
 
     expect(result).toEqual({ decision: "skip", since: base });
   });
@@ -290,7 +329,7 @@ describe("a change to nothing updates depend on, after a passed run", () => {
   it("writes skip when nothing at all changed since the base", async () => {
     const base = git("rev-parse", "HEAD");
 
-    const result = await gate({ fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
+    const result = await gate({ env: slotEnv, fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
 
     expect(result).toEqual({ decision: "skip", since: base });
   });
@@ -303,10 +342,11 @@ describe("a chain of skips", () => {
     touch("src/b.test.ts");
 
     const result = await gate({
+      env: slotEnv,
       fetchImpl: fakeFetch({
         pipelines: [
           // The newest pipeline skipped: its cells exited 0 and count as passed.
-          { id: 299, sha: skipped, jobs: [cell("success")], gate: gateSkip(realRun) },
+          { id: 299, sha: skipped, jobs: [cell("success")], gate: gateSkip(realRun) + SLOTS },
         ],
       }),
     });
@@ -323,8 +363,9 @@ describe("a chain of skips", () => {
     touch("compose/x.yml");
 
     const result = await gate({
+      env: slotEnv,
       fetchImpl: fakeFetch({
-        pipelines: [{ id: 299, sha: skipped, jobs: [cell("success")], gate: gateSkip(realRun) }],
+        pipelines: [{ id: 299, sha: skipped, jobs: [cell("success")], gate: gateSkip(realRun) + SLOTS }],
       }),
     });
 
@@ -338,8 +379,9 @@ describe("a chain of skips", () => {
     touch("src/b.test.ts");
 
     const result = await gate({
+      env: slotEnv,
       fetchImpl: fakeFetch({
-        pipelines: [{ id: 299, sha: skipped, jobs: [cell("success")], gate: gateSkip(realRun) }],
+        pipelines: [{ id: 299, sha: skipped, jobs: [cell("success")], gate: gateSkip(realRun) + SLOTS }],
       }),
     });
 
@@ -354,9 +396,10 @@ describe("which earlier pipeline is the base", () => {
     touch("src/b.test.ts");
 
     const result = await gate({
+      env: slotEnv,
       fetchImpl: fakeFetch({
         pipelines: [
-          { id: 299, sha: newer, jobs: [cell("failed")], gate: gateRun },
+          { id: 299, sha: newer, jobs: [cell("failed")], gate: gateRun + SLOTS },
           passedRun(older, 298),
         ],
       }),
@@ -370,13 +413,14 @@ describe("which earlier pipeline is the base", () => {
     const newer = touch("src/a.test.ts");
 
     const result = await gate({
+      env: slotEnv,
       fetchImpl: fakeFetch({
         pipelines: [
           {
             id: 299,
             sha: newer,
             jobs: [cell("success", "upgrade_cell", 1), cell("failed", "upgrade_cell", 2)],
-            gate: gateRun,
+            gate: gateRun + SLOTS,
           },
           passedRun(older, 298),
         ],
@@ -391,13 +435,14 @@ describe("which earlier pipeline is the base", () => {
     const newer = touch("src/a.test.ts");
 
     const result = await gate({
+      env: slotEnv,
       fetchImpl: fakeFetch({
         pipelines: [
           {
             id: 299,
             sha: newer,
             jobs: [cell("success", "upgrade_cell", 1), cell("failed", "upgrade_cell_launcher", 2)],
-            gate: gateRun,
+            gate: gateRun + SLOTS,
           },
           passedRun(older, 298),
         ],
@@ -413,6 +458,7 @@ describe("which earlier pipeline is the base", () => {
     touch("src/a.test.ts");
 
     const result = await gate({
+      env: slotEnv,
       fetchImpl: fakeFetch({
         pipelines: [passedRun(newer, 299), passedRun(oldest, 298)],
       }),
@@ -427,38 +473,47 @@ describe("which earlier pipeline is the base", () => {
     const current = touch("src/a.test.ts");
 
     const result = await gate({
+      env: slotEnv,
       fetchImpl: fakeFetch({
-        pipelines: [passedRun(current, CURRENT, gateSkip(older)), passedRun(older, 298)],
+        pipelines: [passedRun(current, CURRENT, gateSkip(older) + SLOTS), passedRun(older, 298)],
       }),
     });
 
     expect(result).toEqual({ decision: "skip", since: older });
   });
 
-  it("asks only about this merge request's pipelines, up to twenty", async () => {
+  it("looks beyond this merge request's pipelines, and still reads at most twenty", async () => {
     const base = git("rev-parse", "HEAD");
     touch("src/a.test.ts");
     const pipelines = Array.from({ length: 25 }, (unused, index) => ({
       id: 299 - index,
       sha: base,
-      jobs: index === 22 ? [cell("success")] : [],
-      gate: gateRun,
+      jobs: [],
+      gate: gateRun + SLOTS,
     }));
 
-    const result = await gate({ fetchImpl: fakeFetch({ pipelines }) });
+    const result = await gate({
+      env: slotEnv,
+      fetchImpl: fakeFetch({
+        pipelines,
+        others: [previewRun(base, 150, 5, gateRun + SLOTS)],
+        mergeRequests: [{ iid: 5, target_branch: "preview" }],
+      }),
+    });
 
-    // The only passed pipeline is the 23rd, beyond the cap: no base, so run.
-    expectRun(result);
+    // Nothing of this merge request passed, but a run on another preview merge request did (#1767 U1).
+    expect(result).toEqual({ decision: "skip", since: base });
+    expect(calls.some((call) => new URL(call.url).pathname === `/api/v4/projects/${PROJECT}/pipelines`
+      || /\/merge_requests(\?|\/)/u.test(call.url) && !call.url.includes(`/merge_requests/${MR}/`))).toBe(true);
     const jobCalls = calls.filter((call) => /\/pipelines\/\d+\/jobs/u.test(call.url));
     expect(jobCalls.length).toBeLessThanOrEqual(20);
-    expect(calls[0].url).toContain(`/projects/${PROJECT}/merge_requests/${MR}/pipelines`);
   });
 
   it("reads the gate file from the classify job of the passed pipeline", async () => {
     const base = git("rev-parse", "HEAD");
     touch("src/a.test.ts");
 
-    await gate({ fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
+    await gate({ env: slotEnv, fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
 
     expect(calls.map((call) => new URL(call.url).pathname)).toContain(
       "/api/v4/projects/49/jobs/2990/artifacts/.orbit-upgrade/gate.env",
@@ -470,7 +525,7 @@ describe("the escape hatches and the pipelines that always run", () => {
   async function withASkippablePass(env) {
     const base = git("rev-parse", "HEAD");
     touch("src/a.test.ts");
-    const result = await gate({ env, fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
+    const result = await gate({ env: { ...slotEnv, ...env }, fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
     return result;
   }
 
@@ -546,7 +601,7 @@ describe("any doubt writes run, and the script never throws", () => {
   it("writes run when the merge request's pipelines cannot be listed", async () => {
     touch("src/a.test.ts");
 
-    const result = await gate({ fetchImpl: fakeFetch({ mrPipelinesStatus: 500 }) });
+    const result = await gate({ env: slotEnv, fetchImpl: fakeFetch({ mrPipelinesStatus: 500 }) });
 
     expectRun(result);
     expectNoTokenAnywhere();
@@ -558,7 +613,7 @@ describe("any doubt writes run, and the script never throws", () => {
       throw new Error(`connection refused (token ${TOKEN} must not leak)`);
     };
 
-    const result = await gate({ fetchImpl });
+    const result = await gate({ env: slotEnv, fetchImpl });
 
     expectRun(result);
     expect(lines()).not.toContain(TOKEN);
@@ -569,6 +624,7 @@ describe("any doubt writes run, and the script never throws", () => {
     touch("src/a.test.ts");
 
     const result = await gate({
+      env: slotEnv,
       fetchImpl: fakeFetch({ pipelines: [passedRun(base)], jobsStatus: 500 }),
     });
 
@@ -586,7 +642,7 @@ describe("any doubt writes run, and the script never throws", () => {
       text: async () => "<html>",
     });
 
-    const result = await gate({ fetchImpl });
+    const result = await gate({ env: slotEnv, fetchImpl });
 
     expectRun(result);
   });
@@ -596,6 +652,7 @@ describe("any doubt writes run, and the script never throws", () => {
     touch("src/a.test.ts");
 
     const result = await gate({
+      env: slotEnv,
       fetchImpl: fakeFetch({ pipelines: [{ ...passedRun(base, 299), gate: undefined }] }),
     });
 
@@ -614,6 +671,7 @@ describe("any doubt writes run, and the script never throws", () => {
     touch("src/a.test.ts");
 
     const result = await gate({
+      env: slotEnv,
       fetchImpl: fakeFetch({ pipelines: [passedRun(base, 299, gateText)] }),
     });
 
@@ -625,6 +683,7 @@ describe("any doubt writes run, and the script never throws", () => {
     const unknownBase = "1234567890abcdef1234567890abcdef12345678";
 
     const result = await gate({
+      env: slotEnv,
       fetchImpl: fakeFetch({ pipelines: [passedRun(unknownBase)] }),
     });
 
@@ -652,7 +711,7 @@ describe("the token", () => {
     const base = git("rev-parse", "HEAD");
     touch("src/a.test.ts");
 
-    await gate({ fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
+    await gate({ env: slotEnv, fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
 
     expect(calls.length).toBeGreaterThan(0);
     for (const call of calls) {
@@ -665,7 +724,7 @@ describe("the token", () => {
   });
 
   it("goes to the configured API base", async () => {
-    await gate({ fetchImpl: fakeFetch({ pipelines: [] }) });
+    await gate({ env: slotEnv, fetchImpl: fakeFetch({ pipelines: [] }) });
 
     expect(calls.every((call) => call.url.startsWith(`${API}/`))).toBe(true);
   });
@@ -673,14 +732,14 @@ describe("the token", () => {
   it("appears in no logged line, whatever was decided", async () => {
     const base = git("rev-parse", "HEAD");
     touch("src/a.test.ts");
-    await gate({ fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
+    await gate({ env: slotEnv, fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
     expectNoTokenAnywhere();
 
     touch("scripts/install.sh");
-    await gate({ fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
+    await gate({ env: slotEnv, fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
     expectNoTokenAnywhere();
 
-    await gate({ fetchImpl: fakeFetch({ mrPipelinesStatus: 401 }) });
+    await gate({ env: slotEnv, fetchImpl: fakeFetch({ mrPipelinesStatus: 401 }) });
     expectNoTokenAnywhere();
 
     await gate({ env: { ORBIT_REUSE: "off" }, fetchImpl: fakeFetch() });
@@ -702,10 +761,10 @@ describe("review additions (note 51657)", () => {
       id: 299,
       sha: base,
       pages: [[...filler(99), cell("success", "upgrade_cell", 1)], [cell("failed", "upgrade_cell", 2)]],
-      gate: gateRun,
+      gate: gateRun + SLOTS,
     };
 
-    const result = await gate({ fetchImpl: fakeFetch({ pipelines: [pipeline] }) });
+    const result = await gate({ env: slotEnv, fetchImpl: fakeFetch({ pipelines: [pipeline] }) });
 
     expectRun(result);
     expect(calls.some((call) => new URL(call.url).searchParams.get("page") === "2")).toBe(true);
@@ -718,10 +777,10 @@ describe("review additions (note 51657)", () => {
       id: 299,
       sha: base,
       pages: [[...filler(99), cell("success", "upgrade_cell", 1)], [cell("success", "upgrade_cell", 2)]],
-      gate: gateRun,
+      gate: gateRun + SLOTS,
     };
 
-    const result = await gate({ fetchImpl: fakeFetch({ pipelines: [pipeline] }) });
+    const result = await gate({ env: slotEnv, fetchImpl: fakeFetch({ pipelines: [pipeline] }) });
 
     expect(result).toEqual({ decision: "skip", since: base });
   });
@@ -730,7 +789,7 @@ describe("review additions (note 51657)", () => {
     const base = git("rev-parse", "HEAD");
     touch("config/\u00e9.json");
 
-    const result = await gate({ fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
+    const result = await gate({ env: slotEnv, fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
 
     expectRun(result);
   });
@@ -741,8 +800,9 @@ describe("review additions (note 51657)", () => {
     touch("src/b.test.ts");
 
     const result = await gate({
+      env: slotEnv,
       fetchImpl: fakeFetch({
-        pipelines: [{ ...passedRun(newer, 299, gateRun), status: "running" }, passedRun(older, 298)],
+        pipelines: [{ ...passedRun(newer, 299, gateRun + SLOTS), status: "running" }, passedRun(older, 298)],
       }),
     });
 
@@ -756,6 +816,7 @@ describe("review additions (note 51657)", () => {
       touch("src/a.test.ts");
 
       const result = await gate({
+        env: slotEnv,
         fetchImpl: fakeFetch({ pipelines: [{ ...passedRun(base), status }] }),
       });
 
@@ -835,7 +896,7 @@ describe("the gate watches what upgrade-versions.mjs watches (#1722)", () => {
     const base = git("rev-parse", "HEAD");
     touch("launcher/pin.json");
 
-    const result = await gate({ fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
+    const result = await gate({ env: slotEnv, fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
 
     expectRun(result);
   });
@@ -844,8 +905,184 @@ describe("the gate watches what upgrade-versions.mjs watches (#1722)", () => {
     const base = git("rev-parse", "HEAD");
     touch("src/lib/install-orchestrator/steps.ts");
 
-    const result = await gate({ fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
+    const result = await gate({ env: slotEnv, fetchImpl: fakeFetch({ pipelines: [passedRun(base)] }) });
 
     expectRun(result);
+  });
+});
+
+/*
+ * Reuse across merge requests into preview (#1767 U1-U6). Assumed API shape:
+ * the project-wide pipeline list carries id, sha, status, source and ref; a
+ * run's slot tags are ORBIT_UPGRADE_SLOT_* lines in its gate artefact, and
+ * this pipeline's are in its environment.
+ */
+describe("a passed run on another merge request into preview (#1767)", () => {
+  const crossMr = (env, others, extra = {}) => ({
+    env,
+    fetchImpl: fakeFetch({ others, mergeRequests: PREVIEW_MRS, ...extra }),
+  });
+
+  it("skips when it ran on the same base with the same slot tags", async () => {
+    const base = git("rev-parse", "HEAD");
+    touch("src/a.test.ts");
+
+    const result = await gate(crossMr(slotEnv, [previewRun(base, 250, 5, gateRun + SLOTS)]));
+
+    expect(result).toEqual({ decision: "skip", since: base });
+    expect(written()).toContain(`UPGRADE_CELLS_SINCE=${base}`);
+  });
+
+  it("takes the base B from a skip's own gate artefact, not the run's sha", async () => {
+    const real = git("rev-parse", "HEAD");
+    const reused = touch("src/a.test.ts");
+    touch("src/b.test.ts");
+
+    const result = await gate(crossMr(slotEnv, [previewRun(reused, 250, 5, gateSkip(real) + SLOTS)]));
+
+    expect(result).toEqual({ decision: "skip", since: real });
+  });
+
+  it("runs when a slot tag differs (a new stable release)", async () => {
+    const base = git("rev-parse", "HEAD");
+    touch("src/a.test.ts");
+
+    const result = await gate(crossMr(
+      { ...slotEnv, ORBIT_UPGRADE_SLOT_LATEST_1: "v1.3.0" },
+      [previewRun(base, 250, 5, gateRun + SLOTS)],
+    ));
+
+    expectRun(result);
+  });
+
+  it("runs when the run recorded no slot tags but this pipeline has them", async () => {
+    const base = git("rev-parse", "HEAD");
+    touch("src/a.test.ts");
+
+    expectRun(await gate(crossMr(slotEnv, [previewRun(base, 250, 5, gateRun)])));
+  });
+
+  it("runs when this pipeline has no slot tags, even if a passed run matches otherwise", async () => {
+    const base = git("rev-parse", "HEAD");
+    touch("src/a.test.ts");
+
+    // The run's gate file also has no slot lines: two empty strings must not count as equal.
+    expectRun(await gate(crossMr({}, [previewRun(base, 250, 5, gateRun)])));
+    // ...and a run that did record tags is no match for a pipeline that has none.
+    expectRun(await gate(crossMr({}, [previewRun(base, 250, 5, gateRun + SLOTS)])));
+  });
+
+  it("treats a run whose gate file has no slot lines as missing data and ends the search with run", async () => {
+    const base = git("rev-parse", "HEAD");
+    touch("src/a.test.ts");
+
+    // Newest is a pre-slot artefact; an older run matches in every way. Passing the
+    // newest over and skipping on the older one would be a wrong skip.
+    expectRun(await gate(crossMr(slotEnv, [
+      previewRun(base, 250, 5, gateRun),
+      previewRun(base, 240, 6, gateRun + SLOTS),
+    ])));
+  });
+
+  it("runs when an update-relevant path changed since B", async () => {
+    const base = git("rev-parse", "HEAD");
+    touch("scripts/install.sh");
+
+    expectRun(await gate(crossMr(slotEnv, [previewRun(base, 250, 5, gateRun + SLOTS)])));
+  });
+
+  it("is never a hotfix push or branch pipeline", async () => {
+    const base = git("rev-parse", "HEAD");
+    touch("src/a.test.ts");
+    const others = [
+      previewRun(base, 250, 5, gateRun + SLOTS, { source: "push", ref: "hotfix/1.2.1" }),
+      previewRun(base, 249, 5, gateRun + SLOTS, { source: "push", ref: "preview" }),
+    ];
+
+    expectRun(await gate(crossMr(slotEnv, others)));
+  });
+
+  it("is never a merge request into another branch", async () => {
+    const base = git("rev-parse", "HEAD");
+    touch("src/a.test.ts");
+
+    const result = await gate(crossMr(
+      slotEnv,
+      [previewRun(base, 250, 9, gateRun + SLOTS)],
+      { mergeRequests: [{ iid: 9, target_branch: "dev" }] },
+    ));
+
+    expectRun(result);
+  });
+
+  it("runs when the other run's gate artefact is missing", async () => {
+    const base = git("rev-parse", "HEAD");
+    touch("src/a.test.ts");
+
+    expectRun(await gate(crossMr(slotEnv, [previewRun(base, 250, 5, undefined)])));
+  });
+
+  it("runs when the other run's gate artefact does not parse", async () => {
+    const base = git("rev-parse", "HEAD");
+    touch("src/a.test.ts");
+
+    expectRun(await gate(crossMr(slotEnv, [previewRun(base, 250, 5, "<html>nope</html>")])));
+  });
+
+  it("runs when the other run's base is not a commit in this checkout", async () => {
+    touch("src/a.test.ts");
+    const unknown = "0123456789abcdef0123456789abcdef01234567";
+
+    expectRun(await gate(crossMr(slotEnv, [previewRun(unknown, 250, 5, gateRun + SLOTS)])));
+  });
+
+  it("runs when the project-wide listing cannot be read", async () => {
+    const base = git("rev-parse", "HEAD");
+    touch("src/a.test.ts");
+    const failing = async (url) => {
+      const path = new URL(String(url)).pathname;
+      if (path.endsWith(`/projects/${PROJECT}/pipelines`) || /\/merge_requests$/u.test(path)) return fail(500);
+      return fakeFetch({ others: [previewRun(base, 250, 5, gateRun + SLOTS)], mergeRequests: PREVIEW_MRS })(url);
+    };
+
+    expectRun(await gate({ env: slotEnv, fetchImpl: failing }));
+  });
+
+  it("names the reused run, its sha and the base in the skip line", async () => {
+    const base = git("rev-parse", "HEAD");
+    const reused = touch("src/a.test.ts");
+    touch("src/b.test.ts");
+
+    await gate(crossMr(slotEnv, [previewRun(reused, 250, 5, gateSkip(base) + SLOTS)]));
+
+    expect(lines()).toMatch(/upgrade cells: skip/u);
+    expect(lines()).toContain("250");
+    expect(lines()).toContain(reused);
+    expect(lines()).toContain(base);
+    expectNoTokenAnywhere();
+  });
+
+  it.each([
+    ["no token", { ORBIT_REUSE_TOKEN: "" }],
+    ["the label ci: rerun", { CI_MERGE_REQUEST_LABELS: "ci: rerun" }],
+    ["ORBIT_REUSE=off", { ORBIT_REUSE: "off" }],
+  ])("still runs, asking nothing, with %s", async (unused, force) => {
+    const base = git("rev-parse", "HEAD");
+    touch("src/a.test.ts");
+
+    expectRun(await gate(crossMr({ ...slotEnv, ...force }, [previewRun(base, 250, 5, gateRun + SLOTS)])));
+    expect(calls).toEqual([]);
+  });
+
+  it("keeps reusing this merge request's own passed run (U6)", async () => {
+    const base = git("rev-parse", "HEAD");
+    touch("src/a.test.ts");
+
+    const result = await gate({
+      env: slotEnv,
+      fetchImpl: fakeFetch({ pipelines: [passedRun(base, 299, gateRun + SLOTS)], mergeRequests: PREVIEW_MRS }),
+    });
+
+    expect(result).toEqual({ decision: "skip", since: base });
   });
 });

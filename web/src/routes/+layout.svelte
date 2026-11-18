@@ -50,7 +50,9 @@
   import NavigationBusy from "$lib/NavigationBusy.svelte";
 
   import { onMount } from "svelte";
-  import { page } from "$app/state";
+  import { page, updated } from "$app/state";
+  import { beforeNavigate } from "$app/navigation";
+  import { reloadWhenUpdated } from "$lib/reload-when-updated.js";
   import { readSession, savePreferences } from "$lib/data/workspace.js";
   import { applyTheme } from "$lib/theme-swatches.js";
   import { applyTextSize } from "$lib/text-size.js";
@@ -58,6 +60,11 @@
   import { picksMade } from "$lib/pick.js";
 
   let { children } = $props();
+
+  /* A new app version was found by kit's polling: the next navigation loads the whole page (#1738 A-F1). */
+  beforeNavigate((navigation) => {
+    reloadWhenUpdated(navigation, updated, (href) => { location.href = href; });
+  });
 
   /* The server is the source of truth for theme and text size (#1180);
      localStorage is only the pre-paint cache of it (app.html). Once the

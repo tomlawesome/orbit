@@ -13,8 +13,8 @@ export function isPocket() {
 
 /**
  * Calls `onchange` with the pocket switch's new value each time it flips, and
- * returns the stop. For a page's `$effect`: PageSky's `hidden` prop follows it
- * (#1689), so a page that draws no sky on a phone renders none.
+ * returns the stop. For a page's `$effect`: a page that draws its own sky on a
+ * phone follows it (PageSky is hidden by CSS under the pocket query, #1689).
  * @param {(pocket: boolean) => void} onchange
  * @returns {() => void}
  */

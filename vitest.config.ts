@@ -1,4 +1,5 @@
 import { fileURLToPath } from "node:url";
+import { testWorkers } from "./scripts/test-workers.mjs";
 import { floors } from "./supply-chain/coverage-floors.mjs";
 import { configDefaults, defineConfig, type TestUserConfig } from "vitest/config";
 
@@ -60,6 +61,11 @@ const test: TestUserConfig = {
   // keep meaning what it meant before this fold -- no database required. A
   // --project on the command line overrides it.
   project: ["default"],
+  // The local worker cap (#1864). Root level on purpose: Vitest falls back to
+  // the root maxWorkers for every project that sets none, and an explicit
+  // `--maxWorkers` on the command line replaces the root value, which a cap
+  // written inside each project would shadow. CI sets no cap (see the helper).
+  ...testWorkers(),
   projects: [
     {
       resolve: {
@@ -83,12 +89,14 @@ const test: TestUserConfig = {
       test: {
         name: "default",
         environment: "node",
+        // Builds the orbit CLI once per run for the test shims (#1861).
+        globalSetup: ["./scripts/vitest-global-setup.mjs"],
         // One temporary root per test file, removed when the file ends (#654).
         // The suites leaked every mkdtemp they made: ~88k directories filled
         // this host's /tmp and started failing runs with ENOSPC.
         // The second gives every file a usable encryption key verdict (#1405);
         // a file about the key sets its own.
-        setupFiles: ["./tests/support/temp-root.ts", "./tests/support/key-usable.ts"],
+        setupFiles: ["./tests/support/temp-root.ts", "./tests/support/key-usable.ts", "./scripts/vitest-cli-bundle-setup.mjs"],
         // Vitest's defaults (5s / 10s) already fail a hung test rather than the
         // whole job — pinned here, unchanged, so intent is explicit and can't
         // silently drift. A handful of tests that spawn real subprocesses
@@ -143,6 +151,8 @@ const test: TestUserConfig = {
           "scripts/corpus/stages-rerun.test.mjs",
           // Same reason: uses node:test. Run by scripts/test-backend.sh.
           "scripts/read-environment-value.test.mjs",
+          // Same reason (A-F4, #1789): uses node:test. Run by scripts/test-backend.sh.
+          "scripts/read-environment-value-blanks.test.mjs",
           // Same reason (#1557): uses node:test. Run by scripts/test-backend.sh.
           "scripts/test-backend-build-path.test.mjs",
           // Same reason (#1793): uses node:test. Run by scripts/test-backend.sh.

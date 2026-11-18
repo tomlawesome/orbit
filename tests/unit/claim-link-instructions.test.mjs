@@ -105,4 +105,10 @@ describe("each still says the link is in the app's logs, and how to read them (#
     expect(text).toMatch(/Claim the new Orbit:[^\n]*(?:\n[^\n-][^\n]*){0,3}\blogs?\b/i);
     expect(text).toContain("authentication.md#claiming-a-fresh-install");
   });
+
+  it("#1604 10-22 Claim.svelte: the claim screen calls the thing one word, not both 'claim code' and 'claim link'", () => {
+    const markup = claimScreenMarkup();
+    const says = { code: /claim code/i.test(markup), link: /claim link/i.test(markup) };
+    expect(says, "the label and the note use different nouns for the same thing").not.toEqual({ code: true, link: true });
+  });
 });

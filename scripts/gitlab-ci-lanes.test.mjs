@@ -1578,6 +1578,7 @@ describe("merge requests run changed-reachable tests, the dev push runs everythi
         mkdirSync(join(repo, "web"), { recursive: true });
         mkdirSync(stubs);
         copyFileSync(SCRIPT, join(repo, "scripts", "test-backend.sh"));
+        copyFileSync(join(dirname(SCRIPT), "test-load-warning.sh"), join(repo, "scripts", "test-load-warning.sh"));
         writeFileSync(join(repo, "pnpm-lock.yaml"), "");
         const git = (...args) => execFileSync("git", args, { cwd: repo, stdio: "pipe" });
         git("init", "-q");
@@ -2345,7 +2346,8 @@ describe("upgrade matrix wiring (#1665)", () => {
   };
   // Owner answer 59a (supersedes 43a, which ran the cells on the preview push): the merge
   // request into preview, and pushes to hotfix/*. Nothing else.
-  const RUNS_ON = ["promotionMergeRequest", "hotfixPush"];
+  // #1752 (owner 126a): and the merge request into dev. The `changes:` filter is GitLab's, not evaluated here.
+  const RUNS_ON = ["promotionMergeRequest", "hotfixPush", "devMergeRequest", "labelledDevMergeRequest"];
 
   it.each(UPGRADE_JOBS)("%s exists, in the acceptance stage", (name) => {
     expect(blockOf(name)).toMatch(/^ {2}stage: acceptance$/mu);
@@ -2426,10 +2428,11 @@ describe("upgrade matrix wiring (#1665)", () => {
     expect(blockOf("upgrade_cell_launcher")).not.toMatch(/^ {2}resource_group:/mu);
   });
 
-  it.each(UPGRADE_JOBS)("starts %s on the merge request into preview and on a hotfix push, and on no other event (59a)", (name) => {
+  it.each(UPGRADE_JOBS)("starts %s on the merge request into preview and on a hotfix push, and on no other event, except upgrade_cell on dev merge requests (59a, 126a, #1752)", (name) => {
     blockOf(name);
+    const runsOn = name === "upgrade_cell" ? RUNS_ON : RUNS_ON.filter((event) => !/^(labelled)?devMergeRequest$/iu.test(event));
     for (const [event, environment] of Object.entries(allEvents)) {
-      expect(jobVerdict(name, environment), `${name} on ${event}`).toBe(RUNS_ON.includes(event) ? "run" : "never");
+      expect(jobVerdict(name, environment), `${name} on ${event}`).toBe(runsOn.includes(event) ? "run" : "never");
     }
   });
 
@@ -2456,14 +2459,14 @@ describe("upgrade matrix wiring (#1665)", () => {
   });
 
   // The seven pipeline kinds the spec names, spelled out so a new event in allEvents cannot hide a gap.
-  it.each(UPGRADE_JOBS)("%s: the verdict on each of the seven pipeline kinds (59a)", (name) => {
+  it.each(UPGRADE_JOBS)("%s: the verdict on each of the seven pipeline kinds (59a, 126a)", (name) => {
     const expected = {
       "a merge request into preview": [allEvents.promotionMergeRequest, "run"],
       "a push to hotfix/*": [allEvents.hotfixPush, "run"],
       "a push to preview": [allEvents.previewPush, "never"],
       "a push to main": [allEvents.mainPush, "never"],
       "a schedule": [allEvents.nightly, "never"],
-      "a merge request into dev": [allEvents.devMergeRequest, "never"],
+      "a merge request into dev": [allEvents.devMergeRequest, name === "upgrade_cell" ? "run" : "never"],
       "a merge request into hotfix/*": [allEvents.hotfixMergeRequest, "never"],
     };
     for (const [kind, [environment, verdict]] of Object.entries(expected)) {
@@ -2474,10 +2477,11 @@ describe("upgrade matrix wiring (#1665)", () => {
     expect(jobVerdict(name, fromFeature), `${name} on a merge request into preview from a feature branch`).toBe("run");
   });
 
-  it("gives upgrade_cell_launcher the same rules as upgrade_cell", () => {
+  it("gives upgrade_cell_launcher the rules of upgrade_cell without the dev merge request rule (#1752)", () => {
     blockOf("upgrade_cell_launcher");
     blockOf("upgrade_cell");
-    expect(rulesOf("upgrade_cell_launcher")).toEqual(rulesOf("upgrade_cell"));
+    const withoutDev = rulesOf("upgrade_cell").filter((rule) => !/== "dev"/u.test(rule.if ?? ""));
+    expect(rulesOf("upgrade_cell_launcher")).toEqual(withoutDev);
   });
 
   it("names both jobs in the lane gate, guarded by their own names", () => {
@@ -2717,7 +2721,7 @@ describe("upgrade matrix wiring (#1665)", () => {
       "a push to main": [allEvents.mainPush, false],
       "a push to dev": [allEvents.devPush, false],
       "a schedule": [allEvents.nightly, false],
-      "a merge request into dev": [allEvents.devMergeRequest, false],
+      "a merge request into dev": [allEvents.devMergeRequest, true],
       "a merge request into hotfix/*": [allEvents.hotfixMergeRequest, false],
     };
 
@@ -2761,6 +2765,267 @@ describe("upgrade matrix wiring (#1665)", () => {
         rmSync(directory, { recursive: true, force: true });
       }
     });
+  });
+});
+
+/*
+ * #1752 (owner answer 126a): the upgrade cells also run on merge requests into
+ * `dev`, but only when the merge request changes something an update depends
+ * on -- GitLab's `rules:changes` with `compare_to: refs/heads/dev`, one path
+ * list shared by both jobs as a YAML anchor.
+ *
+ * Interface assumed: a hidden key `.upgrade_cell_paths: &upgrade_cell_paths`
+ * holding a plain list of globs; in each job a rule
+ *   - if: <merge_request_event && target branch == "dev">
+ *     changes:
+ *       paths: *upgrade_cell_paths
+ *       compare_to: refs/heads/dev
+ * placed after `*batch_intake_skip`. The gate exports only `updateRelevant`
+ * (INSTALLER_SCRIPTS is private), so the gate's list is tested through it.
+ */
+describe("upgrade cells on merge requests into dev (#1752)", () => {
+  const UPGRADE_JOBS = ["upgrade_cell", "upgrade_cell_launcher"];
+  const ANCHOR = "upgrade_cell_paths";
+
+  const blockOfJob = (name) => {
+    const block = allBlocks.get(name);
+    expect(block, `${name} is not defined`).toBeDefined();
+    return block;
+  };
+  // The rule entries of a job's `rules:` as raw text, one string per `- ` entry.
+  const ruleEntries = (name) => {
+    const text = rulesText(name);
+    expect(text, `${name} has no rules:`).not.toBeNull();
+    return text.split(/\n(?= {4}- )/u).map((entry) => entry.replace(/\n+$/u, ""));
+  };
+  const devRule = (name) => {
+    const found = ruleEntries(name).filter((entry) => /merge_request_event/u.test(entry) && /== "dev"/u.test(entry));
+    expect(found, `${name}: exactly one rule for the merge request into dev`).toHaveLength(1);
+    return found[0];
+  };
+
+  // The anchor's globs, with quotes and trailing comments dropped.
+  const anchorGlobs = () => {
+    const block = allBlocks.get(`.${ANCHOR}`);
+    expect(block, `.${ANCHOR} is not defined in .gitlab-ci.yml`).toBeDefined();
+    expect(block.split("\n")[0], "the hidden key carries the anchor").toMatch(new RegExp(`^\\.${ANCHOR}:\\s*&${ANCHOR}\\b`, "u"));
+    const globs = block
+      .split("\n")
+      .slice(1)
+      .filter((line) => /^\s*- /u.test(line))
+      .map((line) => line.replace(/^\s*- /u, "").replace(/\s+#.*$/u, "").trim().replace(/^["']|["']$/gu, ""));
+    expect(globs.length, "the anchor lists paths").toBeGreaterThan(0);
+    return globs;
+  };
+
+  // GitLab's fnmatch, enough for this list: `**`, `*`, `?`.
+  const globToRegExp = (glob) => {
+    let out = "";
+    for (let i = 0; i < glob.length; i += 1) {
+      const rest = glob.slice(i);
+      if (rest.startsWith("**/")) { out += "(?:.*/)?"; i += 2; }
+      else if (rest.startsWith("**")) { out += ".*"; i += 1; }
+      else if (glob[i] === "*") out += "[^/]*";
+      else if (glob[i] === "?") out += "[^/]";
+      else out += glob[i].replace(/[.+^${}()|[\]\\]/gu, "\\$&");
+    }
+    return new RegExp(`^${out}$`, "u");
+  };
+  const globMatches = (globs, path) => globs.some((glob) => globToRegExp(glob).test(path));
+  // A concrete path a glob matches.
+  const sampleOf = (glob) => glob.replace(/\*\*\//gu, "deep/").replace(/\*\*/gu, "deep/x").replace(/\*/gu, "x").replace(/\?/gu, "x");
+
+  it.each(["upgrade_cell"])("%s: a rule for merge requests into dev with changes: paths from the shared anchor, compared to dev", (name) => {
+    const rule = devRule(name);
+    expect(rule).toMatch(/^ {4}- if: .*\$CI_PIPELINE_SOURCE == "merge_request_event"/mu);
+    expect(rule).toMatch(/\$CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "dev"/u);
+    expect(rule).toMatch(/^ {6}changes:\s*$/mu);
+    expect(rule).toMatch(new RegExp(`^ {8}paths: \\*${ANCHOR}\\s*$`, "mu"));
+    expect(rule).toMatch(/^ {8}compare_to: ['"]?refs\/heads\/dev['"]?\s*$/mu);
+    expect(rule).not.toMatch(/when: never/u);
+  });
+
+  it.each(["upgrade_cell"])("%s: the dev rule comes after .batch_intake_skip, so batch intake still runs no cells", (name) => {
+    const entries = ruleEntries(name);
+    const skip = entries.findIndex((entry) => /^ {4}- \*batch_intake_skip\s*$/u.test(entry));
+    expect(skip, `${name} keeps *batch_intake_skip`).toBeGreaterThan(-1);
+    expect(entries.indexOf(devRule(name))).toBeGreaterThan(skip);
+  });
+
+  it.each(UPGRADE_JOBS)("%s: a batch-intake merge request into batch-a or batch-b still starts no cells", (name) => {
+    for (const target of ["batch-a", "batch-b"]) {
+      const environment = {
+        CI_PIPELINE_SOURCE: "merge_request_event",
+        CI_MERGE_REQUEST_TARGET_BRANCH_NAME: target,
+        CI_MERGE_REQUEST_SOURCE_BRANCH_NAME: "feature/x",
+        BATCH_INTAKE: "true",
+      };
+      expect(jobVerdict(name, environment), `${name} into ${target}`).toBe("never");
+    }
+  });
+
+  it.each(UPGRADE_JOBS)("%s: the preview and hotfix rules are unchanged: no changes: filter, same conditions", (name) => {
+    const entries = ruleEntries(name);
+    expect(entries).toContain('    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "preview"');
+    expect(entries).toContain('    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH =~ /^hotfix\\//');
+    expect(entries.at(-1)).toBe("    - when: never");
+  });
+
+  it("upgrade_cell_launcher stays promotion-only: no rule for merge requests into dev, no use of the anchor (#1752)", () => {
+    const block = blockOfJob("upgrade_cell_launcher");
+    expect(block).not.toMatch(new RegExp(`\\*${ANCHOR}\\b`, "u"));
+    expect(block).not.toMatch(/^ {6}changes:/mu);
+    expect(ruleEntries("upgrade_cell_launcher").some((entry) => /== "dev"/u.test(entry))).toBe(false);
+  });
+
+  it("defines the path list once, as an anchor, and upgrade_cell alone uses it by alias, not by copy", () => {
+    anchorGlobs();
+    expect(gitlabCi.match(new RegExp(`&${ANCHOR}\\b`, "gu"))).toHaveLength(1);
+    expect(gitlabCi.match(new RegExp(`\\*${ANCHOR}\\b`, "gu"))).toHaveLength(1);
+    expect(blockOfJob("upgrade_cell")).toMatch(new RegExp(`paths: \\*${ANCHOR}\\b`, "u"));
+  });
+
+  it("lists the cell's own files and the launcher pin, and not unrelated paths", () => {
+    const globs = anchorGlobs();
+    for (const path of [
+      "scripts/ci/upgrade-cell.sh",
+      "scripts/ci/upgrade-cell-launcher.sh",
+      "scripts/ci/upgrade-shapes/plain.sh",
+      "scripts/ci/upgrade-shapes/lib.sh",
+      "scripts/ci/upgrade-seed.sh",
+      "scripts/ci/start-installer-registry.sh",
+      "scripts/ci/write-test-manifest.sh",
+      "tests/oidc/some/deep/file.ts",
+      "launcher/pin.json",
+    ]) {
+      expect(globMatches(globs, path), `${path} is covered`).toBe(true);
+    }
+    for (const path of ["README.md", "docs/setup.md", "src/app/page.tsx", "scripts/ci/classify.sh"]) {
+      expect(globMatches(globs, path), `${path} is not covered`).toBe(false);
+    }
+  });
+
+  it("says in the comment above upgrade_cell that the cells run on dev merge requests, citing #1752", () => {
+    const comment = gitlabCi.slice(0, gitlabCi.indexOf("\nupgrade_cell:\n")).split("\n").slice(-30).join("\n");
+    expect(comment).toMatch(/#1752/u);
+    expect(comment).toMatch(/\bdev\b/u);
+  });
+
+  // --- drift between the YAML list and the scripts' lists ---------------------
+  // A sample path for each UPGRADE_MATRIX_PATTERNS regex, by its source. A new
+  // pattern without a sample fails here and must be given one.
+  const MATRIX_SAMPLES = {
+    "^scripts\\/install\\.sh$": "scripts/install.sh",
+    "^scripts\\/configure\\.sh$": "scripts/configure.sh",
+    "^scripts\\/installer-ui\\.sh$": "scripts/installer-ui.sh",
+    "^scripts\\/configuration[^/]*\\.sh$": "scripts/configuration-defaults.sh",
+    "^\\.env-orbit\\.example$": ".env-orbit.example",
+    "^docker-compose[^/]*\\.yml$": "docker-compose.prod.yml",
+    "^src\\/db\\/migrations\\/": "src/db/migrations/0001_init.sql",
+    "^src\\/lib\\/install-orchestrator\\.ts$": "src/lib/install-orchestrator.ts",
+    "^src\\/lib\\/install-orchestrator\\/": "src/lib/install-orchestrator/steps.ts",
+  };
+  // What the gate watches, through its exported updateRelevant (its installer-script set is private).
+  const GATE_SAMPLES = [
+    "scripts/get-orbit.sh",
+    "scripts/repair.sh",
+    "scripts/update-and-start.sh",
+    "scripts/container-entrypoint.sh",
+    "docker-compose.yml",
+    "compose/base.yml",
+    "drizzle/0001_x.sql",
+    ".env-orbit.example",
+    "config/defaults.json",
+    "scripts/ci/upgrade-cell.sh",
+    "scripts/ci/write-test-manifest.sh",
+    "scripts/ci/checkout-launcher-source.sh",
+  ];
+  // The cell's own files named by the spec; the gate must watch them too (D-F3).
+  const CELL_OWN_SAMPLES = [
+    "scripts/ci/upgrade-cell.sh",
+    "scripts/ci/upgrade-cell-launcher.sh",
+    "scripts/ci/upgrade-shapes/plain.sh",
+    "scripts/ci/upgrade-seed.sh",
+    "scripts/ci/start-installer-registry.sh",
+    "scripts/ci/write-test-manifest.sh",
+    "tests/oidc/a.ts",
+  ];
+
+  // The drift check as a function of a glob list, so it can be run on a broken one.
+  const driftOf = (globs, { matrix, updateRelevant, launcherPin }) => {
+    const problems = [];
+    for (const pattern of matrix) {
+      const sample = MATRIX_SAMPLES[pattern.source];
+      if (sample === undefined) { problems.push(`no sample for UPGRADE_MATRIX_PATTERNS ${pattern.source}`); continue; }
+      if (!pattern.test(sample)) problems.push(`sample ${sample} does not match its own pattern ${pattern.source}`);
+      else if (!globMatches(globs, sample)) problems.push(`script path not in YAML list: ${sample}`);
+    }
+    if (!globMatches(globs, launcherPin)) problems.push(`script path not in YAML list: ${launcherPin}`);
+    for (const sample of GATE_SAMPLES) {
+      if (!updateRelevant(sample)) problems.push(`sample ${sample} is not update-relevant per the gate`);
+      else if (!globMatches(globs, sample)) problems.push(`script path not in YAML list: ${sample}`);
+    }
+    for (const sample of CELL_OWN_SAMPLES) {
+      if (!globMatches(globs, sample)) problems.push(`script path not in YAML list: ${sample}`);
+      // D-F3: the gate answers skip on a promotion for anything it does not list,
+      // so a path that starts the cells on a dev merge request must be in it too.
+      if (!updateRelevant(sample)) problems.push(`sample ${sample} is in the YAML list but not update-relevant per the gate`);
+    }
+    for (const glob of globs) {
+      const sample = sampleOf(glob);
+      const known = matrix.some((pattern) => pattern.test(sample)) || sample === launcherPin || updateRelevant(sample)
+        || CELL_OWN_SAMPLES.some((own) => globToRegExp(glob).test(own));
+      if (!known) problems.push(`YAML glob not in the scripts' lists: ${glob}`);
+    }
+    return problems;
+  };
+
+  let versions;
+  let gate;
+  const loadScripts = async () => {
+    versions ??= await import("./ci/upgrade-versions.mjs");
+    gate ??= await import("./ci/upgrade-cells-gate.mjs");
+    return { matrix: versions.UPGRADE_MATRIX_PATTERNS, updateRelevant: gate.updateRelevant, launcherPin: versions.LAUNCHER_PIN };
+  };
+
+  it("no drift: every script path is matched by a YAML glob, and every YAML glob by a script path", async () => {
+    expect(driftOf(anchorGlobs(), await loadScripts())).toEqual([]);
+  });
+
+  it("drift check, script side: dropping the YAML glob for scripts/install.sh or the launcher pin is reported", async () => {
+    const scripts = await loadScripts();
+    const globs = anchorGlobs();
+    const without = globs.filter((glob) => !globToRegExp(glob).test("scripts/install.sh"));
+    expect(without.length, "some glob covers scripts/install.sh").toBeLessThan(globs.length);
+    expect(driftOf(without, scripts)).toContain("script path not in YAML list: scripts/install.sh");
+    const noPin = globs.filter((glob) => !globToRegExp(glob).test("launcher/pin.json"));
+    expect(noPin.length, "some glob covers launcher/pin.json").toBeLessThan(globs.length);
+    expect(driftOf(noPin, scripts)).toContain("script path not in YAML list: launcher/pin.json");
+  });
+
+  it("drift check, gate side: a YAML path the gate does not watch (tests/oidc) is reported (D-F3)", async () => {
+    const scripts = await loadScripts();
+    const blind = (path) => !path.startsWith("tests/oidc/") && scripts.updateRelevant(path);
+    expect(driftOf(anchorGlobs(), { ...scripts, updateRelevant: blind })).toContain(
+      "sample tests/oidc/a.ts is in the YAML list but not update-relevant per the gate",
+    );
+  });
+
+  it("drift check, YAML side: an extra glob no script list covers is reported", async () => {
+    const scripts = await loadScripts();
+    const problems = driftOf([...anchorGlobs(), "src/unrelated/**/*"], scripts);
+    expect(problems).toContain("YAML glob not in the scripts' lists: src/unrelated/**/*");
+  });
+
+  it("drift check: a new UPGRADE_MATRIX_PATTERNS entry the YAML lacks is reported", async () => {
+    const scripts = await loadScripts();
+    const extra = /^src\/new-install-thing\//u;
+    MATRIX_SAMPLES[extra.source] = "src/new-install-thing/a.ts";
+    try {
+      expect(driftOf(anchorGlobs(), { ...scripts, matrix: [...scripts.matrix, extra] })).toContain("script path not in YAML list: src/new-install-thing/a.ts");
+    } finally {
+      delete MATRIX_SAMPLES[extra.source];
+    }
   });
 });
 
@@ -3102,5 +3367,71 @@ describe("signing_image_age warns without failing the pipeline (#1830)", () => {
     const above = gitlabCi.slice(0, gitlabCi.indexOf("\nsigning_image_age:\n")).split("\n").slice(-14).join("\n");
     expect(above).toContain("#1830");
     expect(above).toContain("orbit-base-image #33");
+  });
+});
+
+/*
+ * #1853: `integration` builds the web application when `fast_checks` left none
+ * (the "build if the artefact is missing or stale" stamp check, as fast_checks
+ * and the rig jobs use). Only a job that really tests builds.
+ */
+describe("integration builds a missing web artefact (#1853)", () => {
+  const BUILD = "node scripts/web-build-stamp.mjs check || pnpm --filter orbit-web build";
+  // The job's lines with comments dropped, trimmed of the YAML list dash.
+  const lines = () =>
+    allBlocks
+      .get("integration")
+      .split("\n")
+      .filter((line) => !/^\s*#/u.test(line))
+      .map((line) => line.trim().replace(/^- /u, ""));
+  const at = (matcher) => lines().findIndex((line) => matcher.test(line));
+
+  it("runs the stamp check with the build fallback, once, as its own command", () => {
+    expect(lines().filter((line) => line === BUILD)).toHaveLength(1);
+  });
+
+  it("runs it after pnpm install --frozen-lockfile", () => {
+    const build = lines().indexOf(BUILD);
+    const install = at(/^pnpm install --frozen-lockfile$/u);
+    expect(install).toBeGreaterThan(-1);
+    expect(build).toBeGreaterThan(install);
+  });
+
+  it("runs it before the first vitest run", () => {
+    const build = lines().indexOf(BUILD);
+    const vitest = at(/vitest run/u);
+    expect(vitest).toBeGreaterThan(-1);
+    expect(build).toBeGreaterThan(-1);
+    expect(build).toBeLessThan(vitest);
+  });
+
+  it("runs it after the lane gate, the reuse gate and the ORBIT_INTEGRATION skip exit", () => {
+    const build = lines().indexOf(BUILD);
+    expect(build).toBeGreaterThan(-1);
+    const lane = at(/orbit_lane_admits integration \|\| exit 0/u);
+    const reuse = at(/^\*reuse_gate$/u);
+    const skipMessage = at(/skipped: no integration-risk change/u);
+    expect(lane).toBeGreaterThan(-1);
+    expect(reuse).toBeGreaterThan(-1);
+    expect(skipMessage).toBeGreaterThan(-1);
+    const skipExit = lines().findIndex((line, index) => index > skipMessage && line === "exit 0");
+    expect(skipExit).toBeGreaterThan(-1);
+    for (const gate of [lane, reuse, skipExit]) expect(build).toBeGreaterThan(gate);
+  });
+
+  it("is not inside the skip branch (the build line is not between the ORBIT_INTEGRATION test and its fi)", () => {
+    const text = lines();
+    const open = text.findIndex((line) => /ORBIT_INTEGRATION:-true/u.test(line));
+    const close = text.findIndex((line, index) => index > open && line === "fi");
+    expect(open).toBeGreaterThan(-1);
+    expect(close).toBeGreaterThan(open);
+    const build = text.indexOf(BUILD);
+    expect(build).toBeGreaterThan(close);
+  });
+
+  it("the comment beside fast_checks' web/build artefact says integration builds too", () => {
+    const comment = allBlocks.get("fast_checks").match(/((?:[ \t]*#.*\n)+)[ \t]*- web\/build\//u);
+    expect(comment, "no comment above the web/build artefact").not.toBeNull();
+    expect(comment[1]).toMatch(/integration/u);
   });
 });

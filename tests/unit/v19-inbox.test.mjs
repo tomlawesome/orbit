@@ -145,3 +145,25 @@ describe("archiveOf", () => {
     expect(empty.groups).toEqual([]);
   });
 });
+
+// ST-43: the fixture harness shows what the server would say for a failed receipt.
+import { reviewInboxState } from "../../src/server/mail-in/core/review-state";
+
+describe("INBOX_FIXTURE failed receipts match the server's classification", () => {
+  it("a failed receipt is `unavailable`, never `retry`", () => {
+    const failed = INBOX_FIXTURE.receipts.filter((receipt) => receipt.id === "r-scan-only");
+    expect(failed.length).toBeGreaterThan(0);
+    for (const receipt of failed) {
+      expect(reviewInboxState("failed", "document_too_large").classification).toBe("unavailable");
+      expect(receipt.classification, receipt.id).toBe("unavailable");
+    }
+  });
+
+  it("a failed too-large receipt offers no discard, as the server does (ST-43)", () => {
+    const receipt = INBOX_FIXTURE.receipts.find((one) => one.id === "r-scan-only");
+    const server = reviewInboxState("failed", "document_too_large");
+    expect(server.canDiscard).toBe(false);
+    expect(receipt.canDiscard).toBe(server.canDiscard);
+    expect(receipt.canApprove).toBe(server.canApprove);
+  });
+});
