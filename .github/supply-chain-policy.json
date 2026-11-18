@@ -506,10 +506,10 @@
       "id": "CVE-2026-78661",
       "package": "golang.org/x/net",
       "owner": "Orbit maintainers",
-      "expiresOn": "2026-11-21",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 1759,
       "installedVersion": "v0.61.0",
-      "rationale": "x/net html parser slows on crafted input, in /usr/bin/ollama in ollama/ollama:0.40.15. Fixed in x/net 0.62.0, but the newest release, 0.40.15, still ships v0.61.0, so no image carries the fix. Orbit runs Ollama only under the optional ai profile, with no internet access and no published port (ADR-0025). Owner decision 2026-11-07, question 137: 14 days. Checked 2026-11-09 on 0.40.15."
+      "rationale": "x/net html parser slows on crafted input, in /usr/bin/ollama in ollama/ollama:0.40.15. Fixed in x/net 0.62.0, but the newest release, 0.40.15, still ships v0.61.0, so no image carries the fix. Orbit runs Ollama only under the optional ai profile, with no internet access and no published port (ADR-0025). Owner decision 2026-11-07, question 137: 14 days. Checked 2026-11-09 on 0.40.15. Extended 2026-11-18 to 2027-01-04: Ollama 0.40.16, the newest release, still has golang.org/x/net v0.61.0 (#1759); owner 24a, 2026-11-18."
     },
     {
       "kind": "vulnerability",
