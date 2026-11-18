@@ -519,6 +519,8 @@ async function reserveDocumentMetadata(input: {
   itemId: string;
   /** A staged upload: stored with no item, due to be retired unless bound in time. */
   staged: boolean;
+  /** Whether the #1605 per-member cap judges this staging (the member's own direct upload only). */
+  enforceStagedLimit: boolean;
   displayName: string;
   mediaType: string;
   sizeBytes: number;
@@ -551,7 +553,7 @@ async function reserveDocumentMetadata(input: {
     if (Number(householdUsage.total) + input.sizeBytes > config.householdQuotaBytes) {
       throw new AppError("document_household_quota", "This household has reached its document storage limit", 413);
     }
-    if (input.staged) {
+    if (input.staged && input.enforceStagedLimit) {
       const [{ total: staged }] = await transaction
         .select({ total: sql<number>`count(*)` })
         .from(documents)
@@ -619,6 +621,12 @@ export async function uploadItemDocument(input: {
    * the item. The item need not exist yet.
    */
   staged?: boolean;
+  /**
+   * #1605 P-1 / #1904: set only by the member's own direct staged upload, the one
+   * path the per-member staged cap limits. System staging (archive import, mail
+   * approval) leaves it unset: never refused by the cap.
+   */
+  enforceStagedLimit?: boolean;
   filename: string;
   body: ReadableStream<Uint8Array> | null;
   declaredBytes?: number;
@@ -802,6 +810,7 @@ export async function uploadItemDocument(input: {
       householdId: input.householdId,
       itemId: input.itemId,
       staged,
+      enforceStagedLimit: input.enforceStagedLimit === true,
       displayName,
       mediaType,
       sizeBytes: received.sizeBytes,
