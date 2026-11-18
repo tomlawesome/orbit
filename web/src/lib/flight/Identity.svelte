@@ -2,6 +2,7 @@
   import { onDestroy } from "svelte";
   import { resolve } from "$app/paths";
   import { ringFocusIn, ringFocusOut, ringOpens } from "./ring-closes.js";
+  import { refusalMoment } from "./door-state.js";
 
   onDestroy(ringOpens);
 
@@ -28,6 +29,13 @@
    *     itself is the authorisation, so the card asks who nobody is; the
    *     server knows whose token it is and never says.
    *
+   *   `renew` — the fifth mode (#1881, design/v19/password-after-refusal/
+   *     round-1/r-the-card-again.html, owner verdict 2026-11-17): the setup
+   *     mode's two fields after a sign-in whose password a "This wasn't me"
+   *     marked, with one sentence above them saying when and why, and the
+   *     two rules under the first. `lapsed` is its one state with no fields:
+   *     the hold ran out, and the way on is the door.
+   *
    * WHY ONE COMPONENT AND NOT THREE. The owner ruled "the same card" in every
    * one of these places. Three files would each be free to drift a padding or
    * a word, and the fidelity gate would only catch it screen by screen; one
@@ -45,7 +53,7 @@
    */
   /**
    * @type {{
-   *   mode: "signin" | "create" | "setup",
+   *   mode: "signin" | "create" | "setup" | "renew",
    *   email?: string,
    *   displayName?: string,
    *   password?: string,
@@ -56,6 +64,9 @@
    *   onsubmit?: () => void,
    *   onprovider?: () => void,
    *   signInLine?: boolean,
+   *   refusedAt?: string | null,
+   *   lapsed?: boolean,
+   *   onsignin?: (() => void) | null,
    * }}
    */
   let {
@@ -76,7 +87,20 @@
     /* setup mode, once the link has been refused: the way on is to sign in,
        so the card offers it under the refusal (#1120, proposal §2.14) */
     signInLine = false,
+    /* renew mode: when the sign-in was refused, as the server sent it (ISO);
+       null, or anything not a moment, leaves the sentence without it */
+    refusedAt = null,
+    /* renew mode: the hold ran out before a password was saved */
+    lapsed = false,
+    /* renew mode, lapsed: the host's way back to its own door. The card
+       stands on the door itself, so a link to /login would be a navigation
+       to the page already showing. */
+    onsignin = null,
   } = $props();
+
+  /* The moment as the wording table writes it (refusalMoment): the month in
+     full, and the same UTC minute formatApprovalMoment gives the mail. */
+  const refusedMoment = $derived(refusalMoment(refusedAt));
 
   /* THE REVEAL (#1120, proposal §2.13): a 44px control on every password
      field, because a password typed on glass is typed blind. One switch for
@@ -86,9 +110,10 @@
   let revealed = $state(false);
   const passwordType = $derived(revealed ? "text" : "password");
 
-  const asksEmail = $derived(mode !== "setup");
+  const renew = $derived(mode === "renew");
+  const asksEmail = $derived(mode !== "setup" && !renew);
   const asksName = $derived(mode === "create");
-  const asksAgain = $derived(mode === "setup");
+  const asksAgain = $derived(mode === "setup" || renew);
 
   /* The one refusal this card decides for itself, because it is the one the
      server cannot see: a second password that does not match the first. Said
@@ -107,7 +132,8 @@
   const heading = $derived(
     mode === "signin" ? "Sign in to Orbit"
       : mode === "create" ? "Create the first administrator"
-        : "Choose a password",
+        : renew ? "Choose a new password"
+          : "Choose a password",
   );
 
   /* The refusal line carries whichever is true: the host's answer from the
@@ -117,7 +143,7 @@
 </script>
 
 <div id="formlayer">
-  <form class="card" aria-labelledby="cardask"
+  <form class="card" class:renew class:lapsed={renew && lapsed} aria-labelledby="cardask"
         onfocusin={ringFocusIn} onfocusout={ringFocusOut}
         onsubmit={(event) => { event.preventDefault(); if (ready && !busy) onsubmit(); }}>
     <!-- THE QUESTION. On a phone the ring holds it (#1127 round 1, proposal
@@ -125,6 +151,18 @@
          ratified card carries no visible heading, so there it is read, not
          seen (door-phone.css). -->
     <h2 class="ask asklabel" id="cardask">{heading}</h2>
+    <!-- WHEN, AND WHY (#1881). The refusal's moment in the mail's own words;
+         nothing about who, where or how often. Lapsed, the same place says
+         so, and the quiet "sign in" under the card is the way on. -->
+    {#if renew}
+      {#if lapsed}
+        <p class="note why" role="status">This sign-in has lapsed before a new password was saved. Sign in again and choose one then.</p>
+      {:else if refusedMoment}
+        <p class="note why" role="status">A sign-in with this password was refused on <b>{refusedMoment}</b> — somebody else knew it. Choose a new one and you’re in.</p>
+      {:else}
+        <p class="note why" role="status">A sign-in with this password was refused — somebody else knew it. Choose a new one and you’re in.</p>
+      {/if}
+    {/if}
     {#if asksEmail}
       <div class="field">
         <label for="idemail">email</label>
@@ -147,17 +185,22 @@
     {/if}
 
     <div class="field">
-      <label for="idpassword">password</label>
+      <label for="idpassword">{renew ? "new password" : "password"}</label>
       <div class="pw">
         <input id="idpassword" type={passwordType}
                autocomplete={mode === "signin" ? "current-password" : "new-password"}
                enterkeyhint={asksAgain ? "next" : "go"}
-               aria-label="Password" bind:value={password} />
+               aria-label={renew ? "New password" : "Password"}
+               aria-describedby={renew ? "idrule" : undefined} bind:value={password} />
         <button type="button" class="reveal" aria-pressed={revealed}
                 aria-label={revealed ? "Hide password" : "Show password"}
                 onmousedown={(event) => event.preventDefault()}
                 onclick={() => (revealed = !revealed)}>{revealed ? "hide" : "show"}</button>
       </div>
+      {#if renew}
+        <!-- the two rules the server holds, said before it has to -->
+        <p class="hint" id="idrule">at least 12 characters · not the old one</p>
+      {/if}
       {#if !asksAgain}
         <p class="err" class:shown={Boolean(said)} role="alert">{said}</p>
       {/if}
@@ -165,10 +208,10 @@
 
     {#if asksAgain}
       <div class="field">
-        <label for="idagain">password again</label>
+        <label for="idagain">{renew ? "new password again" : "password again"}</label>
         <div class="pw">
           <input id="idagain" type={passwordType} autocomplete="new-password" enterkeyhint="go"
-                 aria-label="Password again" bind:value={again} />
+                 aria-label={renew ? "New password again" : "Password again"} bind:value={again} />
           <button type="button" class="reveal" aria-pressed={revealed}
                   aria-label={revealed ? "Hide passwords" : "Show passwords"}
                   onmousedown={(event) => event.preventDefault()}
@@ -192,5 +235,14 @@
     {/if}
 
     <button class="act" id="idbtn" type="submit" disabled={!ready || busy}>{label}</button>
+    {#if renew && lapsed}
+      <p class="note after">
+        {#if onsignin}
+          <button type="button" class="quietline" onclick={onsignin}>sign in</button>
+        {:else}
+          <a class="quietline" href={resolve("/login")}>sign in</a>
+        {/if}
+      </p>
+    {/if}
   </form>
 </div>

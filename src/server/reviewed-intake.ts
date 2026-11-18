@@ -475,7 +475,7 @@ async function bindStagedDocuments(householdId: string, itemId: string, document
     if (bindable.length !== documentIds.length) {
       throw new AppError("document_not_available", "That document is no longer available — pick it again", 422);
     }
-    await transaction.update(documents).set({ itemId, deleteAfter: null, updatedAt: new Date() })
+    await transaction.update(documents).set({ itemId, deleteAfter: null, boundAt: sql`coalesce(${documents.boundAt}, now())`, updatedAt: new Date() })
       .where(inArray(documents.id, documentIds));
   });
 }
@@ -946,12 +946,13 @@ async function discardStagedDocuments(householdId: string, documentIds: string[]
         inArray(documents.id, documentIds),
         eq(documents.householdId, householdId),
         isNull(documents.itemId),
+        isNull(documents.boundAt),
         "sealedUnder" in scope
           ? eq(documents.sealedItemId, scope.sealedUnder)
           : sql`${documents.sealedItemId} is distinct from ${scope.exceptSealedUnder}::uuid`,
       ));
     if (!rows.length) return [];
-    await transaction.delete(documents).where(and(inArray(documents.id, rows.map((row) => row.id)), isNull(documents.itemId)));
+    await transaction.delete(documents).where(and(inArray(documents.id, rows.map((row) => row.id)), isNull(documents.itemId), isNull(documents.boundAt)));
     return rows;
   });
   for (const row of removed) {

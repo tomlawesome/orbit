@@ -88,8 +88,57 @@ describe("install.sh: the confirmed model download (#1456 decision, #1474)", () 
     const result = runInstall(targetDir, { ...environment, ...withModelPull, FAKE_MODEL_PULL_FAIL: "1" });
     expect(result.status).toBe(0);
     const output = `${result.stdout}\n${result.stderr}`;
-    expect(output).toMatch(/To try again: docker compose .*--profile ai-model-pull run --rm orbit-ollama-model-pull/u);
+    expect(output).toMatch(/To try again: (cd \S+ && )?docker compose .*--profile ai-model-pull run --rm orbit-ollama-model-pull/u);
     expect(output).not.toContain("orbit-orbit-ollama-model-pull-install");
+  });
+});
+
+describe("install.sh: audit Lows on the model download", () => {
+  const withPull = { FAKE_ENGINE_EXIT: "0", FAKE_ENGINE_OUTCOME: "status=ok\nfresh=0\nprofile=ai\nmodel-pull=1\ndatabase-volume=\n" };
+
+  it("O-F9 (to try again): the command to run the download again starts with cd to the deployment folder", () => {
+    const { targetDir, environment } = modelUpdateFixture();
+    const result = runInstall(targetDir, { ...environment, ...withPull, FAKE_MODEL_PULL_FAIL: "1" });
+    expect(result.status).toBe(0);
+    expect(`${result.stdout}\n${result.stderr}`).toMatch(/To try again: cd \S+ && docker compose /u);
+  });
+
+  it("Body Low (disk full): Docker's reason is still shown when the pull's output file cannot be written", () => {
+    const { targetDir, environment } = modelUpdateFixture();
+    const result = runInstall(targetDir, {
+      ...environment,
+      ...withPull,
+      FAKE_PLANT_PULL_OUT_DIR: "1",
+      FAKE_MODEL_PULL_FAIL: "1",
+      FAKE_MODEL_PULL_STDERR: `pull failed: ${dockerReason}\n`,
+    });
+    expect(result.status).toBe(0);
+    expect(`${result.stdout}\n${result.stderr}`).toContain(dockerReason);
+  });
+
+  it("O-R3: a failed download on a service that was also not ready adds no waiting event of its own", () => {
+    const { targetDir, environment } = modelUpdateFixture();
+    const notReady = { FAKE_PROBE_FAIL: "orbit-ollama", FAKE_CONTAINERS: JSON.stringify({ "orbit-ollama": { status: "running", health: "starting" } }) };
+    const continues = (extra) => {
+      const result = runInstall(targetDir, { ...environment, ...notReady, ...extra });
+      expect(result.status).toBe(0);
+      return componentEvents(result.stdout, "ollama").filter((line) => / state=waiting .* action=continue /.test(line)).length;
+    };
+    const downloadWorked = continues({});
+    const downloadFailed = continues({ FAKE_MODEL_PULL_FAIL: "1" });
+    expect(downloadFailed).toBeLessThanOrEqual(downloadWorked);
+  });
+
+  it("O-R2: the ready screen and claim line are already printed when the model download starts", async () => {
+    const { targetDir, environment } = modelUpdateFixture();
+    const result = await runInstallSignalled(
+      targetDir,
+      { ...environment, FAKE_HANG_MODEL_PULL: "1", ORBIT_INSTALLER_READINESS_TIMEOUT_SECONDS: "60" },
+      { signal: "SIGTERM", marker: "hung-modelpull", settleMs: 200 },
+    );
+    expect(result.signalSent).toBe(true);
+    expect(result.stdoutAtSignal).toContain("Orbit is ready.");
+    expect(result.stdoutAtSignal).toMatch(/Claim this instance/u);
   });
 });
 
@@ -286,7 +335,7 @@ describe("install.sh: a model-pull container left behind by an earlier run", () 
     const result = runInstall(targetDir, { ...environment, ...confirmed, FAKE_MODEL_PULL_FAIL: "1" });
     expect(result.status).toBe(0);
     const note = `${result.stdout}\n${result.stderr}`.split("\n").find((line) => /confirmed download did not complete/.test(line)) ?? "";
-    expect(note).toMatch(/To try again: docker compose /u);
+    expect(note).toMatch(/To try again: (cd \S+ && )?docker compose /u);
     expect(note).not.toContain(leftover);
   });
 });

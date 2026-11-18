@@ -175,8 +175,8 @@ authentication is ADR-0023 §5; the step-up proof cookie is
   a mode question ("Sign in with local accounts only, or also with an
   identity provider? OIDC can be added later with `configure.sh`") sets
   `ORBIT_AUTH_OIDC`; `print_completion_screen` (`install.sh:2030-2061`) adds
-  one line: run `docker compose logs orbit-app` and open the link on its
-  last line to create the first administrator. The installer never prints
+  one line: run `docker compose logs orbit-app` and open the claim link
+  there to create the first administrator. The installer never prints
   the code itself.
 - `scripts/test-install-acceptance.sh` gains a local-only run;
   `docs/installer-guarantees.md` gains one entry: the installer does not
@@ -193,7 +193,7 @@ repurposed for sign-in fields:
 - **Unclaimed**: the ring shows that card with one field, "claim code"
   (pre-filled and submitted from the `#claim=` fragment when the operator
   arrived by the link; typed by hand otherwise), and one sentence saying
-  where the code is (`docker compose logs orbit-app`, last line). No Sign
+  where the code is (`docker compose logs orbit-app`). No Sign
   in gate.
 - **Local-only, claimed**: the ring shows the same card with email (or
   username — the field accepts the account's email) and password.
@@ -364,7 +364,7 @@ Slice 5 lands the callback's kind switch; 7 and 10 add branches to it.
   (local-only run).
 - **Done when:** the guided flow completes with `ORBIT_AUTH_OIDC=false` and
   no OIDC values; the completion screen names `docker compose logs
-  orbit-app` and says the last line is the claim link; the install
+  orbit-app` and says the claim link is in those logs; the install
   acceptance script reaches a healthy `/api/health` local-only and finds
   exactly one `bootstrap.claim` line in the container log; the installer's
   own output never contains the code.

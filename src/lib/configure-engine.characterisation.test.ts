@@ -318,7 +318,11 @@ describe("the bare flow (ported from scripts/configure.test.mjs)", () => {
 
     const refusal = refusalOf(() => runConfigureApply(deployDir, IMAGE));
 
-    expect(refusal.message).toContain(".orbit-secrets/postgres-password is missing on an existing Orbit deployment");
+    // Audit Low Config PR-22: other secrets but no applied-configuration stamp
+    // is a first configure killed part-way, and the refusal now says so.
+    expect(refusal.message).toContain(
+      ".orbit-secrets/postgres-password is missing, but other Orbit secrets are already in .orbit-secrets and .env-orbit has no applied-configuration stamp: an earlier first `orbit configure` was probably interrupted.",
+    );
     expect(refusal.message).toContain("Refusing to generate a replacement");
     expect(existsSync(secretsPath("postgres-password"))).toBe(false);
     expect(existsSync(secretsPath("document-kek"))).toBe(false);

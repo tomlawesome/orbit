@@ -468,4 +468,17 @@ describe("writeSecretFileDurably", () => {
     expect(statSync(target).mode & 0o777).toBe(0o600);
     expect(existsSync(`${target}.tmp`)).toBe(false);
   });
+
+  // #1603 keyless-durable-2: the temp is created before the try block, so a write that fails
+  // after the file exists (here: content writeSync refuses, once the temp has been opened)
+  // left a partial secret at <path>.tmp.
+  it("#1603 keyless-durable-2: a write that fails after the temp file was created leaves no temp file and the old content", () => {
+    const target = join(sandbox, "existing-secret-2");
+    writeFileSync(target, "old\n", { mode: 0o600 });
+
+    expect(() => writeSecretFileDurably(target, 12345 as unknown as string)).toThrow();
+
+    expect(readFileSync(target, "utf8")).toBe("old\n");
+    expect(existsSync(`${target}.tmp`)).toBe(false);
+  });
 });

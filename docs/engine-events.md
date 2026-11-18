@@ -402,7 +402,10 @@ before it on stdout is a `recovery-command:` line ("Recovery command (v0)").
   reason=optional-status action=continue`, the run still ends with
   `phase=complete ... deployment-ready`, and the completion screen names
   each such service. A failed confirmed model download ends the same way
-  for any install (`component=ollama ... action=continue`). An update keeps
+  for any install (`component=ollama ... action=continue`). When a model
+  download is requested, it runs after the completion screen, and
+  `phase=complete` comes only after the download has ended (done or
+  failed), so `complete` is always the run's last event. An update keeps
   failing on an optional service with `optional-unavailable` and `repair`.
 - The private scanner off by choice (#1170: `DOCUMENT_SCAN_MODE=disabled`,
   the engine's outcome `scanner=off`): `clamav` is not pulled or waited on,
@@ -1204,8 +1207,9 @@ compose-file-restored | permissions-safe | secret-recreated |
 authentication-restored | services-healthy | smtp-lines-retired |
 configuration-valid | operator-action`). All three are closed enums; unknown-key tolerance means
 a pre-#681 consumer keeps working unchanged. `execution result=refused`
-carries a `reason=` key (currently only `deployment-version-unsupported`);
-no other execution result does.
+carries a `reason=` key: `deployment-version-unsupported` or `repair-running`
+(#1849, another `--execute` run holds the folder's lock); no other execution
+result does.
 
 Unknown keys are ignored by consumers; unknown enum values are renderable but
 unstyled, exactly as for the installer stream.
@@ -1223,7 +1227,7 @@ execution result=  empty | complete | unactionable | declined | failed
                    | refused
 dangerous result=  empty | complete | refused | failed
 dangerous reason=  none | non-interactive | refused-by-operator
-                   | repair-running | checkpoint-failed | step-failed
+                   | checkpoint-failed | step-failed | repair-running
 ```
 
 `refused` is not a failure: the dangerous batch was never attempted, and
@@ -1452,7 +1456,8 @@ deployment is broken when in fact they are standing in the wrong directory.
 (non-interactive, or declined by the operator). Under either `--execute`
 form it is also the whole-execution refusal on an unsupported deployment
 version (`execution result=refused reason=deployment-version-unsupported`,
-ADR-0016/#681). It is not a failure.
+ADR-0016/#681), or a second `--execute` run on the same folder
+(`reason=repair-running`, #1849). It is not a failure.
 
 `130` is the interrupted-by-signal case, as everywhere else.
 

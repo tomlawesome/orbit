@@ -203,7 +203,10 @@ case "$scenario_choice" in
     if [[ "$top_choice" == install ]]; then
       # Still running at the deadline: not a failure to roll back.
       installer_ui_emit application application failed health-timeout repair
-      printf '\nOrbit installer simulation: Orbit did not report ready within 180 s; it is left running and may still finish starting. Check: docker compose --env-file .env-orbit ps. If it is not ready in a few minutes, run Repair. Nothing is actually running here.\n'
+      # O-Q2/X-F1: the wait the real installer would use; O-F4: its check names the project, as install.sh's does.
+      sim_wait="${ORBIT_INSTALLER_READINESS_TIMEOUT_SECONDS:-180}"
+      [[ "$sim_wait" =~ ^[1-9][0-9]{0,2}$ ]] && (( sim_wait <= 900 )) || sim_wait=180
+      printf '\nOrbit installer simulation: Orbit did not report ready within %s s; it is left running and may still finish starting. Check: docker compose --project-name orbit --env-file .env-orbit ps. If it is not ready in a few minutes, run Repair. Nothing is actually running here.\n' "$sim_wait"
     else
       sim_fail application application health-timeout orbit-app
     fi
