@@ -93,7 +93,7 @@ describe("#1897 T1: as root, the tree-mode listing of the owner's live tree runs
     expect(setprivNaming(shims, /find/u), "the tree-mode find never went through setpriv").not.toEqual([]);
   });
 
-  for (const [kind, reason] of [["stop", /timed out/iu], ["flood", /./u]]) {
+  for (const [kind, reason] of [["stop", /timed out/iu], ["flood", /too large \(over 1 MiB\)/u]]) {
     it(`a find that ${kind === "stop" ? "stalls is timed out" : "floods its output fails"}: 'cannot check', never 'same', within the step limit plus grace`, () => {
       const folder = identicalFolder();
       const shims = shimsFor(folder.targetDir, { variant: { kind, match: "*find*" } });
@@ -194,7 +194,7 @@ function plantEngineLock(targetDir, mode = 0o600) {
 }
 
 /** A BASH_ENV hook that swaps the lock for a FIFO just before engine_lock_idle's open (after its -f check), and records the swap and the open's return. */
-function fifoSwapHook(path) {
+function fifoSwapHook(path, at = "exec {fd}<") {
   const hook = scratchDir("orbit-1897-hook-");
   const flag = join(hook, "swapped");
   const opened = join(hook, "opened");
@@ -206,7 +206,7 @@ __orbit_lock_swap() {
     printf '%s' "\$EPOCHREALTIME" > '${opened}'
     return 0
   fi
-  case "\${BASH_COMMAND-}" in *'exec {fd}<'*) ;; *) return 0;; esac
+  case "\${BASH_COMMAND-}" in *'${at}'*) ;; *) return 0;; esac
   [[ " \${FUNCNAME[*]-} " == *" engine_lock_idle "* ]] || return 0
   [[ -e '${flag}' ]] && return 0
   printf '%s' "\$EPOCHREALTIME" > '${flag}'
@@ -219,6 +219,7 @@ trap __orbit_lock_swap DEBUG
   return { env: { BASH_ENV: join(hook, "env.sh") }, flag, opened };
 }
 
+const STAT_STEP = 'before="$(stat';
 const releaseFifo = (path) => {
   try {
     if (existsSync(path) && lstatSync(path).isFIFO()) closeSync(openSync(path, "r+"));
@@ -243,6 +244,25 @@ describe.skipIf(isRoot)("#1897 T2/T3: engine_lock_idle opens .orbit-engine.lock 
         expect(result.stderr, "a FIFO lock was taken as idle").not.toMatch(SAME_LINE);
         expect(orbitLines(result).some((line) => UNWRITABLE.test(line)), `no refusal naming the cause:\n${result.stderr.slice(0, 1500)}`).toBe(true);
         expect(result.status).not.toBe(0);
+      } finally {
+        releaseFifo(path);
+        shims.cleanup();
+      }
+    });
+
+    it(`${who}: a FIFO swapped in at the before-stat step (after the -f and mtime checks) is refused, never taken as idle, staging kept`, () => {
+      const folder = identicalFolder();
+      const path = plantEngineLock(folder.targetDir);
+      const hook = fifoSwapHook(path, STAT_STEP);
+      const shims = make(folder.targetDir);
+      try {
+        const result = restore(shims, folder, { env: hook.env, capSeconds: 15 });
+        expect(existsSync(hook.flag), "the swap did not happen, so the test proves nothing").toBe(true);
+        expect(result.hung, "repair blocked on the FIFO").toBe(false);
+        expect(result.stderr, "a FIFO lock was taken as idle").not.toMatch(SAME_LINE);
+        expect(orbitLines(result).some((line) => UNWRITABLE.test(line)), `no refusal naming the cause:\n${result.stderr.slice(0, 1500)}`).toBe(true);
+        expect(result.status).not.toBe(0);
+        expect(existsSync(join(folder.targetDir, STAGING)), "the staging folder was removed").toBe(true);
       } finally {
         releaseFifo(path);
         shims.cleanup();
