@@ -620,7 +620,7 @@ function rootShims({ chown = "pass", root = true, plant = null, failWhen = null,
     // setprivFail glob, and otherwise runs the command after `--` as the test user.
     writeFileSync(
       join(dir, "setpriv"),
-      `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >> '${setprivLog}'\n${upsBefore}printf '%s ups=%s\\n' "$*" "$ups" >> '${setprivOrder}'\ncase "$*" in ${setprivFail ?? "__never__"}) exit 1;; esac\nwhile [[ $# -gt 0 && "$1" != -- ]]; do shift; done\nshift\n${setprivPlanting || 'exec "$@"\n'}`,
+      `#!/usr/bin/env bash\ncase " $* " in *" --reuid"*|*" --regid"*|*" --init-groups "*|*" --clear-groups "*) ;; *" --pdeathsig"*) while [[ $# -gt 0 && "$1" != -- ]]; do shift; done; shift; exec "$@";; esac\nprintf '%s\\n' "$*" >> '${setprivLog}'\n${upsBefore}printf '%s ups=%s\\n' "$*" "$ups" >> '${setprivOrder}'\ncase "$*" in ${setprivFail ?? "__never__"}) exit 1;; esac\nwhile [[ $# -gt 0 && "$1" != -- ]]; do shift; done\nshift\n${setprivPlanting || 'exec "$@"\n'}`,
     );
     chmodSync(join(dir, "setpriv"), 0o755);
   }

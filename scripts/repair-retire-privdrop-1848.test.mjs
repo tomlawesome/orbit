@@ -1,9 +1,10 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import { PROCESS_TEST_TIMEOUT_MS } from "./process-budget.mjs";
+import { GID, UID, USER_NAME, privShims, realTool } from "./repair-priv-shims.mjs";
 import { composeUpCalls, makeFixture, runRepair, scratchDir, treeSnapshot } from "./repair-test-harness.mjs";
 
 // #1848 FIX-S1 follow-up (spec: note 60094, approved in note 60099): run as root, retire-smtp-lines
@@ -23,8 +24,6 @@ const IMPORTED = { ...RUNNING, mailStatus: answer("imported") };
 const GATE_FAILS_AFTER = { mailStatusAfterSecretGone: answer("none", false) };
 const DONE = "execute action=retire-smtp-lines resolves=smtp-lines-retirable result=done";
 const RECORD = ".orbit-smtp-retirement";
-const UID = process.getuid();
-const GID = process.getgid();
 const OVERLAY_MODE = "640";
 
 function withMail() {
@@ -50,154 +49,11 @@ function withMail() {
   return targetDir;
 }
 
-const realTool = (name) => spawnSync("bash", ["-c", `command -v ${name}`], { encoding: "utf8" }).stdout.trim();
 const modeOf = (path) => (statSync(path).mode & 0o777).toString(8);
 const secretPath = (targetDir) => join(targetDir, ".orbit-secrets", "smtp-password");
 const envOf = (targetDir) => readFileSync(join(targetDir, ".env-orbit"), "utf8");
 const findIn = (targetDir, args) => spawnSync("find", [targetDir, ...args], { encoding: "utf8" }).stdout.split("\n").filter(Boolean);
 const envBackups = (targetDir) => findIn(targetDir, ["-type", "f", "-name", ".env-orbit*", "-not", "-path", join(targetDir, ".env-orbit"), "-not", "-name", ".env-orbit.example"]);
-const TOOLS = ["mktemp", "chmod", "mv", "rm", "rmdir", "mkdir"];
-
-// Bash source of each tool shim (String.raw, so bash's own ${...} is not JS interpolation; __TOKENS__ are filled in).
-// Besides the marker log, each call records what the process it runs in actually inherited, read from /proc at
-// the moment the tool starts (the real child of setpriv, whatever the code put in between): open fds other than
-// 0-2, where stdin points, the session id, and the parent's command line (to tell the owner-write script,
-// whose stdin legitimately carries the bytes, from every other child).
-const TOOL_SHIM = String.raw`under=0
-for a in "$@"; do
-  [[ "$a" == -* ]] && continue
-  case "$a" in /*) p="$a";; *) p="$PWD/$a";; esac
-  case "$p" in '__TARGET__'|'__TARGET__'/*) under=1;; esac
-done
-find /proc/$$/fd -mindepth 1 -printf '%f:%l\n' > '__FDLIST__' 2>/dev/null
-fds=""
-while IFS=: read -r n t; do
-  case "$n" in 0|1|2|255) continue;; esac
-  case "$t" in /proc/*/fd) continue;; esac
-  fds="$fds $n:$t"
-done < '__FDLIST__'
-si="$(readlink /proc/$$/fd/0 2>/dev/null)"
-sid="$(sed 's/.*) //' /proc/$$/stat | cut -d' ' -f4)"
-pcmd="$(tr '\0' ' ' < /proc/$PPID/cmdline 2>/dev/null)"
-printf '%s|%s|%s|%s|%s|%s\n' '__TOOL__' "\${ORBIT_TEST_PRIVDROP:-0}" "$sid" "$si" "$fds" "$pcmd" >> '__CHILDLOG__'
-printf '%s|%s|%s|%s|%s\n' '__TOOL__' "\${ORBIT_TEST_PRIVDROP:-0}" "$(export -p | grep -c 'secret-marker-1848')" "\${HOME-}:\${USER-}:\${LOGNAME-}" "$(compgen -e | tr '\n' ' ')" >> '__ENVLOG__'
-__FAILRULE__
-printf '%s marker=%s under=%s cwd=%s args=%s\n' '__TOOL__' "\${ORBIT_TEST_PRIVDROP:-0}" "$under" "$PWD" "$*" >> '__TOOLLOG__'
-exec '__REAL__' "$@"
-`.replaceAll("\\${", "${");
-
-// stat shim: lies about what a simulated run cannot make true without a second user. For the folder ".": the
-// group (%g, %G) becomes a gid that is not the test user's primary group. For ".orbit-secrets" (dir) or
-// ".orbit-secrets/smtp-password" (file), "orbit-install-backups" (backups) or a dated folder under it (undo):
-// the owner (%u, %U) becomes root.
-const STAT_SHIM = String.raw`args=("$@"); last="\${args[$((\${#args[@]} - 1))]}"
-if [[ "$last" == . || "$last" == ./ ]] && [[ -n '__FAKEGID__' ]]; then
-  for i in "\${!args[@]}"; do
-    args[$i]="\${args[$i]//%g/__FAKEGID__}"; args[$i]="\${args[$i]//%G/orbit-fake-group}"
-  done
-fi
-case "$last" in
-  *orbit-install-backups|*orbit-install-backups/) lie=backups;;
-  *orbit-install-backups/[0-9]*) lie=undo;;
-  *.orbit-secrets/smtp-password) lie=file;;
-  *.orbit-secrets|*.orbit-secrets/) lie=dir;;
-  *) lie="";;
-esac
-if [[ -n "$lie" && "$lie" == '__ROOTOWNED__' ]]; then
-  for i in "\${!args[@]}"; do
-    args[$i]="\${args[$i]//%u/0}"; args[$i]="\${args[$i]//%U/root}"
-  done
-fi
-exec '__REAL__' "\${args[@]}"
-`.replaceAll("\\${", "${");
-
-/**
- * Builds the shim directory. `setpriv: false` leaves setpriv off PATH altogether (every other executable of the
- * original PATH is linked into a private bin, setpriv excepted). `folderGid` makes `stat` report that gid for the
- * deployment folder; `rootOwned` ("dir" or "file") makes it report root as the owner of .orbit-secrets or its
- * secret file. Logs, one line each:
- *   tools.log:   "<tool> marker=<0|1> under=<0|1> cwd=<cwd> args=<args>"   (under: names a path under the folder)
- *   child.log:   "<tool>|<marker>|<session id>|<stdin target>|<extra fds>|<parent command line>"
- *   setpriv.log: "<argv of the setpriv call>"   (and "BAD <argv>" when it lacks the three required options; exit 99)
- *   chown.log:   "<argv>"
- */
-function privShims(targetDir, { root = true, setpriv = true, setprivFail = null, folderGid = null, rootOwned = null, omit = [], getent = null, setsid = null, toolFail = null, dbGid = GID } = {}) {
-  const dir = scratchDir("orbit-repair-privdrop-shims-");
-  const toolLog = join(dir, "tools.log");
-  const privLog = join(dir, "setpriv.log");
-  const chownLog = join(dir, "chown.log");
-  const childLog = join(dir, "child.log");
-  const envLog = join(dir, "env.log");
-  const idLog = join(dir, "id.log");
-  const write = (name, body) => {
-    writeFileSync(join(dir, name), `#!/usr/bin/env bash\n${body}`);
-    chmodSync(join(dir, name), 0o755);
-  };
-  if (root) write("id", `printf '%s\\n' "$(readlink /proc/$$/fd/0)" >> '${idLog}'\nif [[ $# -eq 1 && "$1" == -u ]]; then echo 0; exit 0; fi\nexec '${realTool("id")}' "$@"\n`);
-  if (setpriv) {
-    // The group options are not checked here (acceptance 3 reads the log); the user and no-new-privs are.
-    write(
-      "setpriv",
-      `printf '%s\\n' "$*" >> '${privLog}'
-ok=0
-[[ " $* " == *" --reuid=${UID} "* && " $* " == *" --regid=${dbGid} "* && " $* " == *" --no-new-privs "* ]] && ok=1
-if [[ $ok -ne 1 ]]; then printf 'BAD %s\\n' "$*" >> '${privLog}'; exit 99; fi
-case "$*" in ${setprivFail ?? "__never__"}) exit 1;; esac
-while [[ $# -gt 0 && "$1" != -- ]]; do shift; done
-shift
-export ORBIT_TEST_PRIVDROP=1
-exec "$@"
-`,
-    );
-  }
-  for (const tool of TOOLS) {
-    const rule = toolFail?.tool === tool ? `if [[ "\${ORBIT_TEST_PRIVDROP:-0}" == 1 ]]; then case "$*" in ${toolFail.match}) ${toolFail.emit}${toolFail.pass ? "" : "; exit 1"};; esac; fi` : "";
-    write(tool, TOOL_SHIM.replaceAll("__FAILRULE__", rule).replaceAll("__ENVLOG__", envLog).replaceAll("__TARGET__", targetDir).replaceAll("__TOOL__", tool).replaceAll("__CHILDLOG__", childLog).replaceAll("__FDLIST__", join(dir, "fds.tmp")).replaceAll("__TOOLLOG__", toolLog).replaceAll("__REAL__", realTool(tool)));
-  }
-  if (folderGid !== null || rootOwned !== null) {
-    write("stat", STAT_SHIM.replaceAll("__FAKEGID__", folderGid === null ? "" : String(folderGid)).replaceAll("__ROOTOWNED__", rootOwned ?? "none").replaceAll("__REAL__", realTool("stat")));
-  }
-  // getent: null (the real one), "fail" (exit 2, no output), or a gid string (an entry for the test user with that primary gid).
-  if (getent === "fail") write("getent", "exit 2\n");
-  else if (getent !== null) write("getent", `if [[ "$1" == passwd && "$2" == ${UID} ]]; then echo '${USER_NAME}:x:${UID}:${getent}:test:/nonexistent:/bin/sh'; exit 0; fi\nexec '${realTool("getent")}' "$@"\n`);
-  // setsid: null (the real one) or "no-wait" (util-linux before 2.31: rejects --wait).
-  if (setsid === "no-wait") {
-    write("setsid", `for a in "$@"; do if [[ "$a" == --wait || "$a" == -w ]]; then echo "setsid: unrecognized option '--wait'" >&2; exit 1; fi; done\ncase "$1" in --version|-V) echo 'setsid from util-linux 2.30';; --help|-h) echo 'Usage: setsid [options] <program> [arguments ...]'; exit 0;; esac\nexec '${realTool("setsid")}' "$@"\n`);
-  }
-  write("chown", `printf '%s\\n' "$*" >> '${chownLog}'\nexec '${realTool("chown")}' "$@"\n`);
-  let path = `${dir}:${process.env.PATH}`;
-  const omitted = new Set([...omit, ...(setpriv ? [] : ["setpriv"])]);
-  if (omitted.size > 0) {
-    const bin = scratchDir("orbit-repair-privdrop-bin-");
-    for (const part of (process.env.PATH ?? "").split(":").filter(Boolean)) {
-      if (!existsSync(part)) continue;
-      for (const name of readdirSync(part)) {
-        if (omitted.has(name) || existsSync(join(bin, name))) continue;
-        try {
-          symlinkSync(join(part, name), join(bin, name));
-        } catch {
-          // a name that cannot be linked is not needed
-        }
-      }
-    }
-    path = `${dir}:${bin}`;
-  }
-  const read = (file) => (existsSync(file) ? readFileSync(file, "utf8").split("\n").filter(Boolean) : []);
-  const children = () =>
-    read(childLog).map((line) => {
-      const [tool, marker, sid, stdin, fds, ...rest] = line.split("|");
-      return { tool, marker, sid, stdin, fds: fds.trim(), parent: rest.join("|"), line };
-    });
-  return {
-    env: { ORBIT_REPAIR_PROMPTS: "machine", PATH: path },
-    toolCalls: () => read(toolLog),
-    setprivCalls: () => read(privLog),
-    chownCalls: () => read(chownLog),
-    envRecords: () => read(envLog).map((line) => { const [tool, marker, leak, ids, names] = line.split("|"); return { tool, marker, leak: Number(leak), ids, names: names.trim().split(/\s+/u).filter(Boolean), line }; }),
-    idStdin: () => read(idLog),
-    children,
-  };
-}
 
 const run = (targetDir, shims, { env: envExtra = {}, ...extra } = {}) =>
   runRepair(targetDir, ["--execute", "--safe-only"], { ...IMPORTED, ...extra, env: { ...shims.env, ...envExtra }, input: "y\n" });
@@ -206,7 +62,7 @@ const run = (targetDir, shims, { env: envExtra = {}, ...extra } = {}) =>
 function expectAllUnderSetpriv(shims) {
   // FIX-S1 addendum: the restore lock's folder and file under backups/ are made as the owner too, so nothing is excluded.
   const under = shims.toolCalls().filter((line) => / under=1 /u.test(line));
-  expect(under.length, `no mktemp/chmod/mv/rm/rmdir/mkdir call named a path under the folder:\n${shims.toolCalls().join("\n")}`).toBeGreaterThan(0);
+  expect(under.length, `no dd/chmod/mv/rm/rmdir/mkdir call named a path under the folder:\n${shims.toolCalls().join("\n")}`).toBeGreaterThan(0);
   const bare = under.filter((line) => !/ marker=1 /u.test(line));
   expect(bare, "calls under the deployment folder made by root, outside setpriv").toEqual([]);
   expect(shims.setprivCalls().filter((line) => line.startsWith("BAD ")), "setpriv called without the required options").toEqual([]);
@@ -221,7 +77,7 @@ function expectAllUnderSetpriv(shims) {
 const notOwnedByTestUser = (targetDir) => findIn(targetDir, ["(", "-not", "-uid", String(UID), "-o", "-not", "-gid", String(GID), ")"]);
 
 describe("#1848 FIX-S1 acceptance 1: every mutation under the folder runs under setpriv; no chown", () => {
-  it("each mktemp, chmod, mv, rm, rmdir and mkdir that names a path under the folder runs under the setpriv shim; chown never runs", () => {
+  it("each dd, chmod, mv, rm, rmdir and mkdir that names a path under the folder runs under the setpriv shim; chown never runs", () => {
     const targetDir = withMail();
     const shims = privShims(targetDir);
     const result = run(targetDir, shims);
@@ -229,7 +85,7 @@ describe("#1848 FIX-S1 acceptance 1: every mutation under the folder runs under 
     const under = expectAllUnderSetpriv(shims);
     expect(shims.setprivCalls().length).toBeGreaterThan(0);
     // The kinds of mutation the action makes: each is among the calls checked.
-    for (const tool of ["mktemp", "chmod", "mv", "rm", "mkdir"]) {
+    for (const tool of ["dd", "chmod", "mv", "rm", "mkdir"]) {
       expect(under.some((line) => line.startsWith(`${tool} `)), `no ${tool} call under the folder was seen:\n${shims.toolCalls().join("\n")}`).toBe(true);
     }
     expect(shims.chownCalls(), "chown was run by retire-smtp-lines under simulated root").toEqual([]);
@@ -590,7 +446,6 @@ describe("#1848 FIX-S1 acceptance 5 (and FR-O5c): an adopted undo folder and a p
 });
 
 // FIX-S1 addendum 2 (note 60194). Items 1, 2, 3, 4 and 6 of its acceptance line.
-const USER_NAME = spawnSync("id", ["-un"], { encoding: "utf8" }).stdout.trim();
 // U's primary group from the user database (not the process's current group, not the folder's).
 const DB_GID = Number(spawnSync("getent", ["passwd", String(UID)], { encoding: "utf8" }).stdout.split(":")[3]);
 const NODE_SID = readFileSync("/proc/self/stat", "utf8").replace(/^.*\) /u, "").split(" ")[3];
@@ -791,11 +646,11 @@ describe("#1848 FIX-S1 addendum 2, item 1 (opt-in, needs root and a second user)
 // the folder), plus this opt-in test, for the owner to run as root: it needs root, a second user
 // (ORBIT_TEST_OTHER_USER, default "nobody") and sudo-style privilege, e.g.
 //   sudo ORBIT_TEST_OTHER_USER=<user> npx vitest run scripts/repair-retire-privdrop-1848.test.mjs
-// Real root, a folder owned by the other user. The temporary names are random (mktemp), so a link cannot be
-// planted at one ahead of time; instead a mktemp shim does what the folder's owner would do in the race: right
-// after mktemp made its file it swaps the file for a link to a root-only file. Whoever then writes to that name
-// (root, before the fix; the owner, after it) is tested: the root-only file must be unchanged. The shim records
-// each swap, so the test cannot pass without one having happened.
+// Real root, a folder owned by the other user. Root picks each temporary name (#1873 X1) and the owner creates
+// exactly that name with `dd of=<name> conv=excl`; instead of an owner planting a link ahead of time, a dd shim does
+// what the folder's owner would do in the race: right before dd runs it plants a link at the name, to a root-only
+// file. Whoever then writes to that name is tested: create-exclusive must refuse the link, so the root-only file must
+// be unchanged. The shim records each plant, so the test cannot pass without one having happened.
 describe("#1848 FIX-S1 acceptance 6 (opt-in, needs root and a second user)", () => {
   it.skipIf(process.getuid?.() !== 0)("a link swapped in at the temporary names the code really uses is not followed by a real root run", () => {
     const other = process.env.ORBIT_TEST_OTHER_USER ?? "nobody";
@@ -811,10 +666,10 @@ describe("#1848 FIX-S1 acceptance 6 (opt-in, needs root and a second user)", () 
     const shimDir = scratchDir("orbit-repair-privdrop-swap-");
     const plantLog = join(shimDir, "planted.log");
     writeFileSync(
-      join(shimDir, "mktemp"),
-      `#!/usr/bin/env bash\nout="$('${realTool("mktemp")}' "$@")" || exit $?\ncase "$out" in '${targetDir}'/*) rm -f -- "$out"; ln -s -- '${victim}' "$out"; printf '%s\\n' "$out" >> '${plantLog}';; esac\nprintf '%s\\n' "$out"\n`,
+      join(shimDir, "dd"),
+      `#!/usr/bin/env bash\nfor a in "$@"; do case "$a" in of=*/dev/null) ;; of=*) out="\${a#of=}"; rm -f -- "$out"; ln -s -- '${victim}' "$out"; printf '%s\\n' "$out" >> '${plantLog}';; esac; done\nexec '${realTool("dd")}' "$@"\n`,
     );
-    chmodSync(join(shimDir, "mktemp"), 0o755);
+    chmodSync(join(shimDir, "dd"), 0o755);
     spawnSync("chmod", ["755", shimDir]);
     const result = runRepair(targetDir, ["--execute", "--safe-only"], {
       ...IMPORTED,
@@ -863,9 +718,9 @@ describe("#1848 FIX-S1 addendum 3, item 1: a failure as the owner says why", () 
     expect(seen * BIG_UNIT.length, "more than 4 KiB of the child's stderr was printed").toBeLessThanOrEqual(4096);
   });
 
-  it("the record write fails as the owner (mktemp): the error text and a repair line naming the record or step reach the output", () => {
+  it("the record write fails as the owner (create step): the error text and a repair line naming the record or step reach the output", () => {
     const targetDir = withMail();
-    const shims = privShims(targetDir, { toolFail: { tool: "mktemp", match: "*orbit-smtp-retirement.XXXXXX*", emit: `echo '${ERR_TEXT}' >&2` } });
+    const shims = privShims(targetDir, { toolFail: { tool: "dd", match: "*of=*orbit-smtp-retirement.*", emit: `echo '${ERR_TEXT}' >&2` } });
     const result = run(targetDir, shims);
     expect(result.stdout).not.toContain(DONE);
     expect(everything(result), "the child's error text was swallowed").toContain(ERR_TEXT);

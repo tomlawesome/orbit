@@ -391,15 +391,18 @@ describe("repair.sh's compose restore is durable and leaves no scratch file (aud
 
   it("O-S2 review: a fresh scratch file that cannot be opened is removed", () => {
     const targetDir = makeDeployment({});
-    const shimDir = scratchDir("orbit-repair-mktemp-unreadable-");
-    writeFileSync(join(shimDir, "mktemp"), [
+    // Merge of #1603 into the owner-writes flow (#1857 S3): the owner makes the
+    // scratch file and sets its mode, so the shim leaves it write-only there,
+    // and the lock holder can't open it.
+    const shimDir = scratchDir("orbit-repair-scratch-unreadable-");
+    writeFileSync(join(shimDir, "chmod"), [
       "#!/bin/sh",
-      'p="$(/usr/bin/mktemp "$@")" || exit 1',
-      'case "$p" in *docker-compose.yml.repair.*) chmod 000 "$p" ;; esac',
-      'printf \'%s\\n\' "$p"',
+      'for last in "$@"; do :; done',
+      'case "$last" in *docker-compose.yml.repair.*) exec /usr/bin/chmod 200 "$last" ;; esac',
+      'exec /usr/bin/chmod "$@"',
       "",
     ].join("\n"));
-    chmodSync(join(shimDir, "mktemp"), 0o755);
+    chmodSync(join(shimDir, "chmod"), 0o755);
     const result = runRepair(targetDir, ["--execute", "--safe-only"], { pathPrefix: shimDir });
     expect(result.stdout, result.combined).toContain("execute action=restore-compose-file resolves=compose-file-restorable result=failed");
     expect(readdirSync(targetDir).filter((name) => name.startsWith(".docker-compose.yml.repair")), result.combined).toEqual([]);
@@ -435,35 +438,7 @@ describe("repair.sh restores a missing docker-compose.yml from the image (#1484)
     expect(file.isSymbolicLink?.() ?? false).toBe(false);
   });
 
-  // FIX-S1 (audit v0.3.9-c, #1844, V6): run as root, the restore gives the mktemp
-  // name the folder's owner without following a link (`chown --no-dereference`).
-  // Root is simulated by shims, as in repair-retire-smtp-1817.test.mjs: `id -u`
-  // prints 0; `chown` logs "<args> exists=<yes|no> link=<yes|no>" for its last
-  // argument and runs the real chown (which succeeds: --reference=. names the
-  // test user's own uid).
-  it("FIX-S1: a root restore chowns the mktemp name with --no-dereference", () => {
-    const targetDir = makeDeployment({});
-    const shimDir = scratchDir("orbit-repair-compose-root-shims-");
-    const log = join(shimDir, "chown.log");
-    const real = (name) => spawnSync("bash", ["-c", `command -v ${name}`], { encoding: "utf8" }).stdout.trim();
-    writeFileSync(join(shimDir, "id"), `#!/usr/bin/env bash\nif [[ $# -eq 1 && "$1" == -u ]]; then echo 0; exit 0; fi\nexec '${real("id")}' "$@"\n`);
-    chmodSync(join(shimDir, "id"), 0o755);
-    writeFileSync(
-      join(shimDir, "chown"),
-      `#!/usr/bin/env bash\nlast="\${@: -1}"\nif [[ -e "$last" || -L "$last" ]]; then there=yes; else there=no; fi\nif [[ -L "$last" ]]; then link=yes; else link=no; fi\nprintf '%s exists=%s link=%s\\n' "$*" "$there" "$link" >> '${log}'\nexec '${real("chown")}' "$@"\n`,
-    );
-    chmodSync(join(shimDir, "chown"), 0o755);
-
-    const result = runRepair(targetDir, ["--execute", "--safe-only"], { pathPrefix: shimDir });
-
-    const restored = join(targetDir, "docker-compose.yml");
-    expect(existsSync(restored), `docker-compose.yml was not restored.\n${result.combined}`).toBe(true);
-    expect(readFileSync(restored).equals(IMAGE_COMPOSE)).toBe(true);
-    expect(fileMode(restored)).toBe("644");
-    const calls = existsSync(log) ? lines(readFileSync(log, "utf8")) : [];
-    expect(calls, `chown calls:\n${calls.join("\n")}`).toHaveLength(1);
-    expect(calls[0]).toMatch(/^--no-dereference --reference=\. -- \.\/\.docker-compose\.yml\.repair\.[A-Za-z0-9]{6} exists=yes link=no$/u);
-  });
+  // FIX-S1 (root restore chowns the mktemp name) retired: #1857 S3 moved the write to the folder owner through setpriv with no root chown; covered by "the temporary file, its mode and the rename all run under setpriv" in repair-owner-writes-1857.test.mjs.
 
   it("reads the file from the image pinned in .env-orbit (the digest, never a tag or a pull)", () => {
     const targetDir = makeDeployment({});
@@ -539,7 +514,6 @@ describe("repair.sh reports, but never replaces, a docker-compose.yml that diffe
     const result = runRepair(targetDir, ["--check"]);
 
     expect(result.stderr).toContain("restart: unless-stopped");
-    // eslint-disable-next-line no-control-regex
     expect(result.stderr).not.toMatch(/[\x00-\x08\x0b-\x1f\x7f]/);
   });
 
