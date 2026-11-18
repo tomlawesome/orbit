@@ -139,7 +139,7 @@ describe("W-R1 (#1848): the conditional rotate on the client", () => {
     expect(calls.puts).toEqual([null, '"3"']);
   });
 
-  it("a 412 is an unknown outcome: it re-reads, and an address that changed is shown as rotated", async () => {
+  it("a 412 re-reads, and an address that changed (another tab rotated) is shown but is not this press's rotation (#1879 W-F1)", async () => {
     const calls = stubRelayServer({
       put: () => new Response(errorBody("relay_changed"), { status: 412 }),
       gets: [{ etag: '"4"', relay: { address: NEW } }],
@@ -147,7 +147,7 @@ describe("W-R1 (#1848): the conditional rotate on the client", () => {
     const { rotateRelayReconciled } = await import("../../web/src/lib/data/workspace.js");
     const outcome = await rotateRelayReconciled(OLD);
     expect(calls.gets).toBe(1);
-    expect(outcome.rotated).toBe(true);
+    expect(outcome.rotated).toBe(false);
     expect(outcome.relay?.address).toBe(NEW);
   });
 

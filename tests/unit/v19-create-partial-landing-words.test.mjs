@@ -4,6 +4,9 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { anyUnsaved } from "../../web/src/lib/unsaved.js";
+/* One shared registry instance for the test and the compiled pocket (a plain import would load it twice, #1879 W-S1). */
+vi.mock("../../web/src/lib/unsaved.js", async (orig) => await orig());
 
 /*
  * #1316 (owner, 2026-10-13): creating an item with a document is
@@ -49,7 +52,7 @@ vi.mock("../../web/src/lib/pocket/Sheet.svelte", () => ({ default: () => {} }));
 vi.mock("../../web/src/lib/pocket/Sky.svelte", () => ({ default: () => {} }));
 
 const goto = vi.fn(async () => {});
-/** The pocket's leave guard, as SvelteKit would call it. */
+/** Kit's beforeNavigate guards (the desk form's own, if it registers one). */
 const navGuards = vi.hoisted(() => /** @type {Array<(nav: any) => void>} */ ([]));
 vi.mock("$app/navigation", () => ({ goto: (...args) => goto(...args), beforeNavigate: (/** @type {(nav: any) => void} */ guard) => { navGuards.push(guard); } }));
 
@@ -842,19 +845,22 @@ describe("#1437 review M2: following the alert's link leaves without asking only
     expect(mounted?.isDirty()).toBe(true);
   });
 
-  it("the phone: the open row leaves without asking, and the guard is back if it stays", async () => {
+  it("the phone: the open row leaves without asking, and the unsaved holder reads dirty again if it stays", async () => {
     stageAnswers = [stagedHeld()];
     await fillPocket();
     expect(entryForm.props.picked?.held, "the alert is up").toBeTruthy();
-    const guard = navGuards.at(-1);
-    expect(guard).toBeTruthy();
-    const to = { url: new URL("http://localhost/home?item=i0") };
-    const cancelled = vi.fn();
+    // #1879 W-S1: the pocket registers with the shared registry (the root
+    // layout asks it); opening a held row sets `leaving`, so it reads clean
+    // while the router navigates.
+    expect(anyUnsaved(), "typed work is held").toBe(true);
+    let dirtyWhileLeaving = null;
+    goto.mockImplementationOnce(async () => { dirtyWhileLeaving = anyUnsaved(); });
     entryForm.props.onopenheld();
-    guard?.({ cancel: cancelled, to, type: "goto" });
-    expect(cancelled, "following the row is not a discard").not.toHaveBeenCalled();
+    expect(goto).toHaveBeenCalledTimes(1);
+    expect(String(goto.mock.calls[0][0])).toContain("/home?item=i0");
+    expect(dirtyWhileLeaving, "following the row is not a discard").toBe(false);
     await settle();
-    guard?.({ cancel: cancelled, to, type: "link" });
-    expect(cancelled, "still here: leaving asks again").toHaveBeenCalledTimes(1);
+    expect(anyUnsaved(), "still here: leaving asks again").toBe(true);
   });
+
 });

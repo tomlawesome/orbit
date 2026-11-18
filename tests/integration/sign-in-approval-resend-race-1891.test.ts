@@ -306,3 +306,42 @@ describe("a resend whose send fails undoes itself and nothing more (#1891)", () 
     expect(await decideSignInApproval(tokenIn(delivered[0]), "approved")).toEqual({ recorded: true });
   }, 60_000);
 });
+
+/*
+ * Ruling on #1879 (note 64435), point 2: two-phase stage then switch. The
+ * resend's send time is written under the lock, but the new link is
+ * switched into the row only once its mail is accepted, so while the mail
+ * is in flight the old link still approves.
+ */
+describe("a resend switches the link only after its mail is accepted (#1879, #1891)", () => {
+  it("the old link approves while the resend's mail is still in flight", async () => {
+    const userId = await account();
+    const approval = await pendingWithLink(userId);
+    let inMailer!: () => void;
+    const started = new Promise<void>((resolve) => { inMailer = resolve; });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let mailed = "";
+    const gated = {
+      async sendEmail(notification: SmtpNotification) {
+        mailed = tokenIn(notification);
+        inMailer();
+        await gate;
+        delivered.push({ to: notification.to, text: notification.text });
+      },
+    };
+
+    const sending = resendSignInApproval(approval.claim, { mailer: gated });
+    await started;
+    const oldApproves = await decideSignInApproval(approval.oldToken, "approved");
+    release();
+    const result = await sending;
+
+    expect(oldApproves).toEqual({ recorded: true });
+    expect(result).toMatchObject({ state: "sent", sendError: null });
+    expect(mailed).not.toBe("");
+    /* The approval is decided, so the new link has nothing left to approve. */
+    expect(await decideSignInApproval(mailed, "approved")).toEqual({ recorded: false });
+    expect(await outcomeOf(approval.id)).toBe("approved");
+  }, 60_000);
+});

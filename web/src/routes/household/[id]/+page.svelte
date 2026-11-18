@@ -26,6 +26,7 @@
   import ChooserCard from "$lib/editing/ChooserCard.svelte";
   import SectionSwatches from "$lib/editing/SectionSwatches.svelte";
   import { sectionColourOf } from "$lib/option-colour.js";
+  import { settleColourPick, startColourPick } from "$lib/section-colours.js";
   import { WIDE_QUERY } from "../../home/preview-pair.js";
   import "./household.css";
 
@@ -120,6 +121,8 @@
   let saidSections = $state(false);
   /** @type {string | null} */
   let sectionsProblem = $state(null);
+  /** Per-section "not saved — …" lines from a failed colour pick (#1879 W-R3), by section id. */
+  let colourProblems = $state(/** @type {Record<string, string>} */ ({}));
 
   let handoverOpen = $state(false);
   /** @type {string | null} */
@@ -438,7 +441,7 @@
   /** @param {string} id @param {string} colour */
   async function saveColours(id, colour) {
     const savedRows = data.household.sections.map(editorRowOf);
-    sectionsProblem = null;
+    colourProblems = startColourPick(colourProblems, id);
     try {
       await writeSections(v.id, savedRows.map((one) => (pickedColours.has(one.id) ? { ...one, colour: pickedColours.get(one.id) } : one)));
       sectionsBaseline = JSON.stringify(JSON.parse(sectionsBaseline).map((/** @type {{ id: string }} */ one) => (one.id === id ? { ...one, colour } : one)));
@@ -446,7 +449,10 @@
       for (const one of data.household.sections) if (pickedColours.get(one.id) === one.colour) pickedColours.delete(one.id);
     } catch (error) {
       if (pickedColours.get(id) === colour) pickedColours.delete(id);
-      sectionsProblem = wordsOf(error);
+      const saved = Object.fromEntries(data.household.sections.map((one) => [one.id, one.colour]));
+      const settled = settleColourPick({ rows, saved, problems: colourProblems, id, colour, error: wordsOf(error) });
+      rows = settled.rows;
+      colourProblems = settled.problems;
     }
   }
 
@@ -533,6 +539,7 @@
 
   async function saveSections() {
     sectionsProblem = null;
+    colourProblems = {};
     saidSections = false;
     sectionSaid = "";
     try {
@@ -1159,6 +1166,7 @@
         {/if}
         <p class="moved" class:show={sectionSaid} role="status">{sectionSaid}</p>
         {#if sectionsProblem}<p class="problem">not saved — {sectionsProblem}</p>{/if}
+        {#each Object.entries(colourProblems) as [id, text] (id)}<p class="problem">{text}</p>{/each}
         <!-- round 2 (#481): one button under one list says the list saves
              whole, and the × that only exists on empty rows says "hidden,
              never removed". The open question — choosing a mark for a NEW

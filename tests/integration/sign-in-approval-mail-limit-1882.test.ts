@@ -228,21 +228,31 @@ describe("the lock closes a wide gap between the count and the reservation (#188
   }, 120_000);
 });
 
-/** A mailer that fails the first `failures` mails it is asked for, and delivers the rest. */
+/**
+ * A mailer that fails the first `failures` mails it is asked for, and
+ * delivers the rest; `asked` is every attempt that reached it.
+ */
 function flakyMailer(failures: number) {
-  let asked = 0;
-  return {
+  const mailer = {
+    asked: 0,
     async sendEmail(notification: SmtpNotification) {
-      const mine = asked++;
+      const mine = mailer.asked++;
       await new Promise((resolve) => setTimeout(resolve, 100));
       if (mine < failures) throw new Error("relay refused");
       delivered.push(notification.to);
     },
   };
+  return mailer;
 }
 
-describe("a failed send hands its slot back and takes only its own row (#1882)", () => {
-  it("open: a send that fails leaves the allowance unspent, so a later request can send", async () => {
+/*
+ * Ruling on #1879 (note 64435), point 1: the limit counts attempts, not
+ * successes. A send reported failed may still have been delivered (#1896),
+ * so handing its slot back could under-count, the unsafe side of ADR-0027
+ * section 8. A failed send keeps its row.
+ */
+describe("a failed send spends its slot (#1879, #1882)", () => {
+  it("open: with four sent, a failed open leaves five rows and the next request answers limited", async () => {
     const userId = await account();
     await alreadySent(userId, APPROVAL_SENDS_PER_HOUR - 1);
 
@@ -250,14 +260,14 @@ describe("a failed send hands its slot back and takes only its own row (#1882)",
     expect(failed.sendError).not.toBeNull();
     expect(failed.limited).toBe(false);
     expect(delivered).toHaveLength(0);
-    expect(await sendsInTheHour(userId)).toBe(APPROVAL_SENDS_PER_HOUR - 1);
+    expect(await sendsInTheHour(userId)).toBe(APPROVAL_SENDS_PER_HOUR);
 
-    expect(await open(userId)).toMatchObject({ limited: false, sendError: null });
-    expect(delivered).toHaveLength(1);
+    expect(await open(userId)).toMatchObject({ limited: true });
+    expect(delivered).toHaveLength(0);
     expect(await sendsInTheHour(userId)).toBe(APPROVAL_SENDS_PER_HOUR);
   }, 60_000);
 
-  it("resend: a send that fails leaves the allowance unspent, so a later resend can send", async () => {
+  it("resend: with four sent, a failed resend leaves five rows and the next resend answers limited", async () => {
     const userId = await account();
     await alreadySent(userId, APPROVAL_SENDS_PER_HOUR - 1);
     const first = await pending(userId);
@@ -266,14 +276,14 @@ describe("a failed send hands its slot back and takes only its own row (#1882)",
     const failed = await resendSignInApproval(first.claim, { mailer: flakyMailer(1) });
     expect(failed).toMatchObject({ state: "sent" });
     expect((failed as { sendError: unknown }).sendError).not.toBeNull();
-    expect(await sendsInTheHour(userId)).toBe(APPROVAL_SENDS_PER_HOUR - 1);
+    expect(await sendsInTheHour(userId)).toBe(APPROVAL_SENDS_PER_HOUR);
 
-    expect(await resend(second.claim)).toMatchObject({ state: "sent", sendError: null });
-    expect(delivered).toHaveLength(1);
+    expect(isLimitedResend(await resend(second.claim))).toBe(true);
+    expect(delivered).toHaveLength(0);
     expect(await sendsInTheHour(userId)).toBe(APPROVAL_SENDS_PER_HOUR);
   }, 60_000);
 
-  it("a failure among concurrent sends deletes only its own row and the cap still holds", async () => {
+  it("a failure among concurrent sends: rows equal the attempts that reached the mailer, never more than five", async () => {
     const userId = await account();
     const mailer = flakyMailer(2);
 
@@ -282,11 +292,12 @@ describe("a failed send hands its slot back and takes only its own row (#1882)",
 
     const failures = results.filter((result) => result.sendError !== null);
     expect(failures).toHaveLength(2);
-    expect(delivered.length).toBeLessThanOrEqual(APPROVAL_SENDS_PER_HOUR);
-    expect(delivered.length).toBeGreaterThanOrEqual(3);
-    /* Every delivered mail still has its row, and nothing else does: a
-       failure that deleted a neighbour's row would leave fewer rows than
-       mails. */
-    expect(await sendsInTheHour(userId)).toBe(delivered.length);
+    expect(mailer.asked).toBe(delivered.length + failures.length);
+    expect(mailer.asked).toBeLessThanOrEqual(APPROVAL_SENDS_PER_HOUR);
+    /* Every attempt keeps its row, delivered or failed, and nothing else
+       has one. */
+    const rows = await sendsInTheHour(userId);
+    expect(rows).toBe(delivered.length + failures.length);
+    expect(rows).toBeLessThanOrEqual(APPROVAL_SENDS_PER_HOUR);
   }, 120_000);
 });
