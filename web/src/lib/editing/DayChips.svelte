@@ -3,6 +3,7 @@
   import { addDays } from "./calendar.js";
   import { dayMonth } from "$lib/format.js";
   import { REMINDER_MAX, REMINDER_PRESETS, REMINDER_REFUSAL, reminderDayOf } from "./reminder-days.js";
+  const uid = $props.id();
 
   /**
    * THE REMINDER DAYS (#1468, round 6 Q): the chooser card's body for "how
@@ -40,7 +41,6 @@
   /** @type {"none" | "add" | "refused" | "already"} */
   let voice = $state("none");
   let said = $state(0);
-  const uid = $props.id();
   /** @type {number | null} */
   let nudged = $state(null);
   /** @param {string} text */
@@ -155,7 +155,7 @@
        border:1.5px dashed color-mix(in srgb,var(--accent) 45%,var(--line-soft));transition:border-color .15s}
   .own:focus-within{border-color:var(--accent);border-style:solid}
   .own.bad{border-color:color-mix(in srgb,var(--warm) 70%,var(--line))}
-  .own input{width:100%;min-width:0;height:100%;padding:0 8px;border:0;background:none;color:var(--ink);text-align:center;
+  .own input{width:100%;min-width:0;height:100%;min-height:var(--p-hit);padding:0 8px;border:0;background:none;color:var(--ink);text-align:center;
        font:var(--p-type-meta) var(--mono);outline:none;-moz-appearance:textfield;appearance:textfield}
   .own input::-webkit-outer-spin-button,.own input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
   .own input::placeholder{color:var(--ink-quiet)}
@@ -166,11 +166,11 @@
   .chip:disabled:hover{color:var(--ink-mid)}
   /* one line, four voices in turn; it keeps its height so the card never jumps */
   .line{display:flex;align-items:center;min-height:24px;margin-top:4px;font:var(--p-type-meta) var(--mono);color:var(--ink-quiet);letter-spacing:.02em}
-  .line .add{appearance:none;display:inline-flex;align-items:center;min-height:24px;padding:0 10px;margin-left:-10px;border:0;border-radius:15px;background:none;
+  .line .add{appearance:none;display:inline-flex;align-items:center;min-height:var(--p-hit);padding:0 10px;margin:calc((24px - var(--p-hit)) / 2) 0 calc((24px - var(--p-hit)) / 2) -10px;border:0;border-radius:15px;background:none;
         cursor:pointer;font:var(--p-type-meta) var(--mono);color:var(--accent)}
   .line .add:hover{background:color-mix(in srgb,var(--accent) 10%,transparent)}
   .line .add .kb{color:var(--ink-quiet);margin-left:8px}
-  .line.warm{color:var(--warm)}
+  .line.warm{color:var(--warm-text)}
   .line .in{animation:errin .35s ease both}
   @keyframes errin{from{opacity:0;transform:translateY(-3px)}}
   /* the calendar's foot line */

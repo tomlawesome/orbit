@@ -160,7 +160,8 @@
   }
 
   /* #1870: ask again for the lost page; focus returns to the stage once drawn. */
-  function retry(/** @type {Event} [event] */ event) {
+  /** @param {Event} [event] */
+  function retry(event) {
     if (retrying) return;
     const broken = brokenSrc !== "" && brokenSrc === shownSrc;
     brokenSrc = "";

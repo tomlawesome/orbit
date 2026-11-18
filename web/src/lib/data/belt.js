@@ -138,6 +138,8 @@ export function documentPreviewStateOf(doc) {
  *   mail and is attached only on acceptance -- no `documents` row, and no
  *   download -- but its page one draws the same as an accepted document's
  *   wherever `previewHref` names one (#1155)
+ * @property {boolean} [flagged]  the scanner flagged the file (#1795): kept in the
+ *   list, never drawn, no preview
  * @property {?string} [attachmentId]  the staged attachment's own id, for a
  *   staged paper with a name (null for the count-only fallback)
  */
