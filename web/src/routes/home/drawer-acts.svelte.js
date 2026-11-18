@@ -314,6 +314,9 @@ export function createDrawerActs({
      read a re-read overtook never writes its older papers over the newer
      (the same household object no longer tells the two reads apart). */
   let searchReads = 0;
+  /* #1905: the newest read's answer, the items it could not read. */
+  /** @type {Promise<Set<string>>} */
+  let searchLoad = Promise.resolve(new Set());
 
   /** #1151 W1-Q8: pocket-search.js's readSearchDocuments carries the
    *  concurrency cap (#1151 W1-R9). Answers the items whose papers could
@@ -341,6 +344,14 @@ export function createDrawerActs({
     }
     return failed;
   }
+  /** #1905: every load goes through here, so the newest read's answer is kept
+      for a re-read it overtook to await. @param {string | null} [also] */
+  function loadNewest(also = null) {
+    const before = searchReads;
+    const loading = loadSearchDocuments(also);
+    if (searchReads !== before) searchLoad = loading;
+    return loading;
+  }
   /** The papers again, after one was attached, removed or restored. Rejects
       when `mustRead`'s own papers could not be read: the drawer that acted on
       that item would show it stale, so the act that asked says done-but-unread
@@ -349,7 +360,16 @@ export function createDrawerActs({
   async function rereadSearchDocuments(also = null, mustRead = null) {
     searchDocumentsFor = null;
     papersReady = false;
-    const failed = await loadSearchDocuments(also);
+    const loading = loadNewest(also);
+    const read = searchReads;
+    const failed = await loading;
+    /* #1905: a newer read overtook this one, which stopped early and may never
+       have reached `mustRead`. Await the read that superseded it, and any that
+       superseded that, so a failure either read saw is still answered. */
+    for (let seen = read; seen !== searchReads;) {
+      seen = searchReads;
+      for (const id of await searchLoad) failed.add(id);
+    }
     if (mustRead && failed.has(mustRead)) throw new Error(`the papers of ${mustRead} could not be read`);
   }
 
@@ -482,7 +502,7 @@ export function createDrawerActs({
     get papersReady() { return papersReady; },
     startAmend, addAmended,
     openPreview, closePreview, removePaper, restorePaper,
-    loadSearchDocuments, rereadSearchDocuments,
+    loadSearchDocuments: loadNewest, rereadSearchDocuments,
     copyLink, runRowAct, attach, pickChoice, save, record,
   };
 }
