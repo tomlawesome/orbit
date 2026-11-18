@@ -1646,7 +1646,7 @@ test.describe("the phone's callouts sit on the sky line and on the sheet (#1895)
           if (!sameBox(anchorBox(lands.anchor), sun)) wrong.push(`lands-body: anchored on ${lands.anchor}, not the sun's box`);
           if (lands.side !== "bottom") wrong.push(`lands-body: side ${lands.side}, not bottom`);
           if (Math.abs(lands.dy) !== 30) wrong.push(`lands-body: dy ${lands.dy}, not 30`);
-          if (!lands.litSels.some((s) => String(s).includes("tourfilm-lands-body"))) wrong.push("lands-body: the demo body is not ringed");
+          if (!lands.litSels.some((/** @type {unknown} */ s) => String(s).includes("tourfilm-lands-body"))) wrong.push("lands-body: the demo body is not ringed");
           const b = lands.box;
           if (b.x < dial.x - 0.5 || b.right > dial.right + 0.5 || b.y < dial.y - 0.5 || b.bottom > dial.bottom + 0.5) wrong.push("lands-body: the callout is not wholly inside the dial");
           if (b.y < sun.bottom - 0.5) wrong.push(`lands-body: the callout (top ${Math.round(b.y)}) is not below the sun (bottom ${Math.round(sun.bottom)})`);

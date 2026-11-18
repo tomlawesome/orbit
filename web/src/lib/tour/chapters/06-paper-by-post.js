@@ -102,7 +102,7 @@ export default {
     /* The pocket's card draws its address only once the relay read lands
        (or its read-failed line, which has no address and falls back to the
        card): wait for either, so ctl does not measure an empty card. */
-    if (pocket) await waitForReal(`${S.address}, ${S.card} .st-problem`);
+    if (pocket && "address" in S) await waitForReal(`${S.address}, ${S.card} .st-problem`);
 
     /* "Forward a bill to your relay address and Orbit reads a copy to import
        it." — the whole card, named once. Its second line, "Your mail is never
