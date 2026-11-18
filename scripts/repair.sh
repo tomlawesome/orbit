@@ -2274,10 +2274,10 @@ read_image_deployment_asset() {
 # (restore-compose-file streams it to the folder's owner, #1857 S3).
 image_deployment_asset_bytes() {
   local image="$1" asset="$2" assets_root
-  assets_root="$(timeout "$docker_probe_timeout" docker image inspect \
+  assets_root="$(timeout -k "$owner_step_grace" "$docker_probe_timeout" docker image inspect \
     --format '{{index .Config.Labels "io.orbit.deployment-assets"}}' "$image" 2>/dev/null)" || return 1
   [[ "$assets_root" == "$deployment_assets_root" ]] || return 1
-  timeout "$docker_image_read_timeout" docker run --rm --pull never --network none --entrypoint cat \
+  timeout -k "$owner_step_grace" "$docker_image_read_timeout" docker run --rm --pull never --network none --entrypoint cat \
     "$image" "${deployment_assets_root}/${asset}" 2>/dev/null
 }
 
@@ -4524,15 +4524,33 @@ readonly owner_lock_script='exec 3<"$1" || exit 1; s=0; '\
 '((s != 75)) || exit 75; [[ -f "$1" && ! -L "$1" ]] || exit 1; printf "locked\n"; read -r _ || true'
 compose_restore_lock_pid=""
 compose_restore_lock_since=0
-# The holder's limit: the image read (probe and read, 35 s) and four owner
-# steps with their grace (the fill, the sync, the rename and one to spare).
-readonly compose_restore_lock_limit=$((35 + 4 * (owner_step_timeout + owner_step_grace)))
+# The holder's limit, which starts as root starts waiting for its word: that
+# wait (one owner step with its grace), the image's probe and read (5 s and
+# 30 s, each with the grace) and, alongside the read, the fill, then the
+# sync and the rename (each an owner step with its grace). The fill ends with
+# the read or within its own limit, so the larger of the two counts; both
+# are counted here, the simpler and safe bound.
+readonly compose_restore_lock_limit=$((35 + 2 * owner_step_grace + 4 * (owner_step_timeout + owner_step_grace)))
+# Slack at the limit for the margin check (compose_restore_lock_lost).
+readonly compose_restore_lock_slack=3
+# monotonic_seconds: whole seconds since boot (/proc/uptime), which a clock
+# step does not move, as timeout(1) counts; SECONDS where it can't be read.
+monotonic_seconds() {
+  local up=""
+  { read -r up _ </proc/uptime; } 2>/dev/null || up=""
+  up="${up%%.*}"
+  if [[ "$up" =~ ^[0-9]+$ ]]; then
+    printf '%s' "$up"
+  else
+    printf '%s' "$SECONDS"
+  fi
+}
 # hold_compose_restore_lock <scratch-file>: 0 once the holder says it holds
 # the lock (or goes ahead without one), 1 otherwise (it is stopped first).
 # Root's wait for that word is bounded like any owner step.
 hold_compose_restore_lock() {
   local line=""
-  compose_restore_lock_since="$SECONDS"
+  compose_restore_lock_since="$(monotonic_seconds)"
   # The holder's own shell closes every descriptor above 2 it inherited
   # from root (the held locks' included) before the owner step starts.
   coproc compose_restore_lock {
@@ -4555,8 +4573,9 @@ hold_compose_restore_lock() {
 # compose_restore_lock_lost [<seconds>]: 0 when the holder has ended, so the
 # scratch file's lock is gone, or, with <seconds> given and a holder that
 # has a limit (root in a folder another user owns), when that limit could
-# run out within that many seconds; 1 otherwise. SECONDS was read before
-# the holder started, so the margin errs early. Bash unsets the coproc's
+# run out within that many seconds, plus $compose_restore_lock_slack s; 1
+# otherwise. The start was read (monotonic_seconds) before the holder
+# started, so the margin errs early. Bash unsets the coproc's
 # descriptors once it has reaped it; before that, the holder's stdout says
 # nothing after its one word, so anything readable on it (end of file
 # included) means every process holding it has ended.
@@ -4565,7 +4584,7 @@ compose_restore_lock_lost() {
   [[ -n "$compose_restore_lock_pid" && -n "$fd" ]] || return 0
   kill -0 "$compose_restore_lock_pid" 2>/dev/null || return 0
   if [[ -n "${1:-}" && "$(id -u)" == 0 && "$smtp_folder_uid" != 0 ]] &&
-    ((SECONDS - compose_restore_lock_since + $1 + 1 >= compose_restore_lock_limit)); then
+    (($(monotonic_seconds) - compose_restore_lock_since + $1 + 1 + compose_restore_lock_slack >= compose_restore_lock_limit)); then
     return 0
   fi
   read -r -t 0 -u "$fd" _
