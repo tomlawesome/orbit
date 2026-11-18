@@ -625,6 +625,25 @@ const coveredElsewhere: Record<string, { file: string; why: string }> = {
   sign_in_unavailable: {
     file: "tests/integration/sign-in-second-factor.test.ts",
     why: "the sending-row read has to fail under the right password, which only that suite's mocked sending seam can make happen",
+  },  password_change_required: {
+    file: "tests/integration/forced-reset-after-refusal-1881.test.ts",
+    why: "a refused sign-in approval has to mark the password first, which that suite sets up end to end",
+  },
+  password_unchanged: {
+    file: "tests/integration/forced-reset-after-refusal-1881.test.ts",
+    why: "the forced new-password step has to be reached first, through a refused approval",
+  },
+  password_mismatch: {
+    file: "tests/integration/forced-reset-after-refusal-1881.test.ts",
+    why: "the forced new-password step has to be reached first, through a refused approval",
+  },
+  password_change_lapsed: {
+    file: "tests/integration/forced-reset-after-refusal-1881.test.ts",
+    why: "the forced new-password step's hold has to lapse, which that suite drives with its own clock",
+  },
+  password_recovery_required: {
+    file: "tests/integration/forced-reset-after-refusal-1881.test.ts",
+    why: "the account has to be marked with no way to reach the step, which only that suite builds",
   },
 };
 
