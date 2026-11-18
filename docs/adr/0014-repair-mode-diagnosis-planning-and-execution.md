@@ -515,3 +515,16 @@ when marked committed, when no engine transaction is active (no
 reclaim age) the lock file is readable and no other process holds it, at least one original was saved, and every saved file matches the live one exactly (no managed
 path live without a saved original, no differing mode). Otherwise the
 restore-transaction rules above apply unchanged.
+
+*Addendum 2026-11-18 (#1890, amends the #1820 addendum's "opened read-only"):*
+repair opens the backup/restore lock read-write only, never read-only,
+whoever runs it, and refuses a lock it cannot open that way as `unwritable`
+(exit 4 for the acquiring actions, as for `unreadable`). Why: a read-write
+open of a FIFO swapped in after the lstat returns at once (POSIX), where a
+read-only one waits for a writer, so the #1873 X3 lstat-open-fstat-compare
+holds with no wait. The open writes, truncates and changes nothing. The cost
+is a lock the user can read but not write, which the engine (mode 0600) and
+repair (`umask 077`) never make; root already opened it read-write. Rejected:
+(b) a timeout-bounded read-only open, which races the swap; (c) a helper
+that opens with `O_NONBLOCK` (python3, perl or node), which repair.sh does
+not depend on today.

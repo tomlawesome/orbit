@@ -3645,19 +3645,19 @@ restore_journal_named() {
 
 # #1804 point 1, execution only: the backup/restore lock, held by backup.sh,
 # restore.sh and a recovery-bundle export (their engine). Prints `held`,
-# `unreadable`, `untestable <flock's words>` or nothing (an acquire can also
-# leave `uncreatable`: the backups folder or lock file could not be made). A
-# lock that is anything but a regular, non-symlink, readable file is
-# `unreadable` and never
-# opened (a FIFO would block; review 5). A regular file is opened
-# read-write when the user running repair may write it, else read-only, and
-# must still be the file checked (#1873 X3); one that -w calls writable but
-# that will not open read-write is `unwritable` (never reopened read-only);
-# one that otherwise cannot be opened, or is not that file, is `unreadable`
-# too. A non-blocking lock has three outcomes (audit
-# v0.3.9-b O-R1): taken (prints nothing); held by another process, which
-# flock reports only as a silent exit 1 (`held`); or not takeable at all,
-# e.g. NFSv4 refusing an exclusive lock on a read-only descriptor, which
+# `unreadable`, `unwritable`, `untestable <flock's words>` or nothing (an
+# acquire can also leave `uncreatable`: the backups folder or lock file
+# could not be made). A lock that is anything but a regular, non-symlink,
+# readable file is `unreadable` and never opened (review 5). A regular file
+# is opened read-write only, never read-only, whoever runs repair (#1890):
+# a read-write open of a FIFO swapped in meanwhile returns at once (POSIX),
+# where a read-only one would wait for a writer. The descriptor must still
+# be the file checked (#1873 X3), else it is `unreadable`; a lock that will
+# not open read-write is `unwritable` (never reopened read-only). The open
+# writes, truncates and changes nothing. A non-blocking lock has three
+# outcomes (audit v0.3.9-b O-R1): taken (prints nothing); held by another
+# process, which flock reports only as a silent exit 1 (`held`); or not
+# takeable at all, e.g. a filesystem refusing an exclusive lock, which
 # flock reports with a sysexits code and its words (`untestable`, never
 # `held`). Without flock on PATH the lock is not checked (the journal still
 # is).
@@ -3674,7 +3674,7 @@ backup_restore_lock_state() {
 # retire-smtp-lines, #1848 FIX-S1 addendum; start-services and
 # recreate-services, #1857 S2), root makes a missing backups folder or lock file as the
 # deployment folder's owner (as_folder_owner), never itself; root then only
-# opens the lock (read-write when it may write it, #1873 X3).
+# opens the lock (read-write only, #1873 X3, #1890).
 held_lock_fd=""
 lock_probe_state=""
 lock_made_as_owner=0
@@ -3706,11 +3706,11 @@ probe_backup_restore_lock() {
     return 0
   fi
   # #1873 X3, lstat-open-fstat-compare: the open must never block and never
-  # take a swapped-in file. A writable lock is opened read-write, which on
-  # a FIFO swapped in after the checks above returns at once instead of
-  # waiting for a writer; then the descriptor must be the very regular file
-  # lstat saw (same device and inode), so a link or a FIFO swapped in is
-  # closed again and refused as `unreadable`, with no wait.
+  # take a swapped-in file. The lock is opened read-write only (#1890),
+  # which on a FIFO swapped in after the checks above returns at once
+  # instead of waiting for a writer; then the descriptor must be the very
+  # regular file lstat saw (same device and inode), so a link or a FIFO
+  # swapped in is closed again and refused as `unreadable`, with no wait.
   before="$(stat -c '%d:%i %F' -- "$backup_restore_lock_path" 2>/dev/null)" || before=""
   case "${before#* }" in
     "regular file" | "regular empty file") ;;
@@ -3719,20 +3719,12 @@ probe_backup_restore_lock() {
       return 0
       ;;
   esac
-  if [[ -w "$backup_restore_lock_path" ]]; then
-    # No read-only fallback: -w said writable, so a refused read-write
-    # open (NFS root_squash, a mode changed meanwhile) fails closed and is
-    # named as such (`unwritable`).
-    { exec {fd}<>"$backup_restore_lock_path"; } 2>/dev/null || fd=""
-    if [[ -z "$fd" ]]; then
-      lock_probe_state=unwritable
-      return 0
-    fi
-  else
-    { exec {fd}<"$backup_restore_lock_path"; } 2>/dev/null || fd=""
-  fi
+  # No read-only open or fallback, whoever runs repair: a refused
+  # read-write open (a lock the user may only read, NFS root_squash, a mode
+  # changed meanwhile) fails closed and is named as such (`unwritable`).
+  { exec {fd}<>"$backup_restore_lock_path"; } 2>/dev/null || fd=""
   if [[ -z "$fd" ]]; then
-    lock_probe_state=unreadable
+    lock_probe_state=unwritable
     return 0
   fi
   opened="$(stat -L -c '%d:%i %F' -- "/dev/fd/$fd" 2>/dev/null)" || opened=""
@@ -3771,8 +3763,8 @@ lock_state_refusal() {
     printf "repair can't check whether a backup, restore or export is running: the lock at %s can't be read" \
       "$backup_restore_lock_path"
   elif [[ "$lock_state" == unwritable ]]; then
-    # #1873 X3: -w said writable, the read-write open was refused.
-    printf "repair can't check whether a backup, restore or export is running: the lock at %s could not be opened for writing, although its permissions say it can be; make it writable for the user running repair (on NFS, check root_squash), then re-run repair" \
+    # #1873 X3, #1890: the read-write open (the only one) was refused.
+    printf "repair can't check whether a backup, restore or export is running: the lock at %s could not be opened for writing by the user running repair (repair opens it read-write so that the open can never wait); run repair as root or as the owner of the backups folder, or make the lock file writable for the user running repair" \
       "$backup_restore_lock_path"
   elif [[ "$lock_state" == uncreatable ]]; then
     if [[ "$lock_made_as_owner" == 1 && "$(id -u)" == 0 && "${smtp_folder_uid:-0}" != 0 ]]; then
