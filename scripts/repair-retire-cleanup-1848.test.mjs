@@ -87,7 +87,7 @@ function shims({ root = false, fail = null, intrude = false, signal = null } = {
   const setprivLog = join(dir, "setpriv.log");
   const chownLog = join(dir, "chown.log");
   if (root) {
-    sh("setpriv", `printf '%s\\n' "$*" >> '${setprivLog}'\ncase "$*" in ${setprivFail ?? "__never__"}) ${failNow};; esac\nwhile [[ $# -gt 0 && "$1" != -- ]]; do shift; done\nshift\nexec "$@"`);
+    sh("setpriv", `case " $* " in *" --reuid"*|*" --regid"*|*" --init-groups "*|*" --clear-groups "*) ;; *" --pdeathsig"*) while [[ $# -gt 0 && "$1" != -- ]]; do shift; done; shift; exec "$@";; esac\nprintf '%s\\n' "$*" >> '${setprivLog}'\ncase "$*" in ${setprivFail ?? "__never__"}) ${failNow};; esac\nwhile [[ $# -gt 0 && "$1" != -- ]]; do shift; done\nshift\nexec "$@"`);
   }
   // A root run no longer chowns: the shim only records a call, then runs the real chown.
   sh("chown", `printf '%s\\n' "$*" >> '${chownLog}'\nexec '${realTool("chown")}' "$@"`);
