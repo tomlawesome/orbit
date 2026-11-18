@@ -17,8 +17,10 @@
 export const headroom = 5;
 
 export const floors = {
-  // measured on `dev` 230e6396, pipeline 3049, job `fast` 39963, 2026-10-27
-  "scripts": { statements: 51, branches: 53, functions: 57, lines: 51 },
+  // measured on `dev` 230e6396, pipeline 3049, job `fast` 39963, 2026-10-27;
+  // statements, functions and lines raised to batch-a 3fe2b996's 56.48, 63.18
+  // and 56.88 (pipeline 4510, job `fast` 54598, 2026-11-17; #1889)
+  "scripts": { statements: 56, branches: 53, functions: 63, lines: 56 },
   // measured on `dev` 230e6396, pipeline 3049, job `fast` 39963, 2026-10-27
   // the CLI is exercised by the install acceptance stacks, not unit tests;
   // below the 70-85 band and known
