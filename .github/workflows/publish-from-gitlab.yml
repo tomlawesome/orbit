@@ -218,7 +218,7 @@ jobs:
           subject="The handoff index"
           label=""
           readonly MAX_BUNDLE_BYTES=$((16 * 1024 * 1024))
-          # 4 MiB: the OCI distribution spec's ceiling for manifests a registry must accept.
+          # 4 MiB: the OCI distribution spec's minimum manifest size registries should support; nothing here is larger.
           readonly MAX_MANIFEST_BYTES=$((4 * 1024 * 1024))
           refuse() {
             printf '%s did not verify under cosign.pub%s for %s (%s); copying nothing.\n' \
