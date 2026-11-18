@@ -63,13 +63,14 @@ const restore = (shims, folder, options = {}) => runOwner(folder.targetDir, { sh
 /**
  * A `diff` in front of the real one: for the .orbit-secrets compare (the last call before the tree-mode listing) it
  * replaces the live .orbit-secrets folder with a regular file and reports "no difference", i.e. the live path is
- * swapped to a non-directory after repair's -d check. Every other diff runs for real.
+ * swapped to a non-directory after repair's -d check. It writes <dir>/swapped when it does the swap (the folder's final
+ * state cannot show it: restore-transaction puts the saved folder back). Every other diff runs for real.
  */
 function swapDiff(targetDir) {
   const dir = scratchDir("orbit-1897-diff-");
   writeFileSync(
     join(dir, "diff"),
-    `#!/usr/bin/env bash\ncase "$*" in *.orbit-secrets*) ${realTool("rm")} -rf -- '${join(targetDir, ".orbit-secrets")}' && : > '${join(targetDir, ".orbit-secrets")}'; exit 0;; esac\nexec '${realTool("diff")}' "$@"\n`,
+    `#!/usr/bin/env bash\ncase "$*" in *.orbit-secrets*) ${realTool("rm")} -rf -- '${join(targetDir, ".orbit-secrets")}' && : > '${join(targetDir, ".orbit-secrets")}' && : > '${join(dir, "swapped")}'; exit 0;; esac\nexec '${realTool("diff")}' "$@"\n`,
   );
   chmodSync(join(dir, "diff"), 0o755);
   return dir;
@@ -121,9 +122,10 @@ describe("#1897 T1: as root, the tree-mode listing of the owner's live tree runs
     const folder = identicalFolder();
     emptySavedSecrets(folder);
     const shims = shimsFor(folder.targetDir);
-    const result = restore(shims, folder, { env: { PATH: `${swapDiff(folder.targetDir)}:${shims.env.PATH}` } });
+    const swapDir = swapDiff(folder.targetDir);
+    const result = restore(shims, folder, { env: { PATH: `${swapDir}:${shims.env.PATH}` } });
     expect(result.hung).toBe(false);
-    expect(statSync(join(folder.targetDir, ".orbit-secrets")).isFile(), "the swap did not happen, so the test proves nothing").toBe(true);
+    expect(existsSync(join(swapDir, "swapped")), "the swap did not happen, so the test proves nothing").toBe(true);
     expect(result.stderr, "a live path that is not a directory listed as empty and compared as the same").not.toMatch(SAME_LINE);
   });
 });
@@ -146,8 +148,10 @@ describe("#1897 T3: not root, the listing is unchanged but for pipefail", () => 
     const folder = identicalFolder();
     emptySavedSecrets(folder);
     const shims = notRoot(folder.targetDir);
-    const result = restore(shims, folder, { env: { PATH: `${swapDiff(folder.targetDir)}:${shims.env.PATH}` } });
+    const swapDir = swapDiff(folder.targetDir);
+    const result = restore(shims, folder, { env: { PATH: `${swapDir}:${shims.env.PATH}` } });
     expect(result.hung).toBe(false);
+    expect(existsSync(join(swapDir, "swapped")), "the swap did not happen, so the test proves nothing").toBe(true);
     expect(result.stderr, "a live path that is not a directory listed as empty and compared as the same").not.toMatch(SAME_LINE);
   });
 
