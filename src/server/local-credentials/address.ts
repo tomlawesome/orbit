@@ -31,6 +31,8 @@ export interface SetUserAddressOptions {
   /** Supplied by tests; unset means the instance's configured SMTP transport. */
   mailer?: InvitationMailer | null;
   now?: Date;
+  /** The address typed again on the armed press; required when the actor changes their own (#1869). */
+  confirmEmail?: string;
 }
 
 export interface SetUserAddressResult {
@@ -64,6 +66,18 @@ export async function setUserAddress(
   const email = address.trim();
   if (!emailSchema.safeParse(email).success) {
     throw new AuthError("invalid_request", "Enter a valid email address", 400);
+  }
+
+  /* Your own address: a mistyped one locks you out once this session ends, so
+     the armed press must send the address again. Checked before anything is
+     written. A sole administrator is not refused: this is their rescue. */
+  const self = actorUserId === userId;
+  if (self && options.confirmEmail?.trim().toLowerCase() !== email.toLowerCase()) {
+    throw new AppError(
+      "address_confirmation_required",
+      "Confirm your own address by sending it again; the address was not changed",
+      422,
+    );
   }
 
   const committed = await getDb().transaction(async (transaction) => {
@@ -161,7 +175,7 @@ export async function setUserAddress(
       entityType: "user",
       entityId: userId,
       action: "email_address_set",
-      changes: { userId, previous: previous === null ? "unreadable" : "readable" },
+      changes: { userId, previous: previous === null ? "unreadable" : "readable", self },
     });
 
     return { displayName: target.displayName, previous };

@@ -122,6 +122,8 @@ describe("administration on a phone, mounted", () => {
     for (const name of ["Place Emma Harlow in a system", "Send Emma Harlow a new setup link", "Disable Emma Harlow"]) {
       expect(reachable(control(name, emma)), name).toBe(true);
     }
+    /* Others' rows keep the old address act name. */
+    expect(reachable(control("Change the address of Emma Harlow", emma))).toBe(true);
     /* Your own row offers only "change address…" (#1869 allows the actor's
        own row): no place, no setup link, no disable. */
     const mine = row("[data-ad=people]", "· you");
@@ -129,7 +131,8 @@ describe("administration on a phone, mounted", () => {
     await open(mine, settle);
     const acts = $$("[data-row-acts] button, [data-row-acts] a", mine)
       .map((el) => (el.getAttribute("aria-label") ?? el.textContent ?? "").trim());
-    expect(acts).toEqual([`Change the address of ${myName}`]);
+    expect(acts).toEqual(["change your address"]);
+    expect(acts).not.toContain(`Change the address of ${myName}`);
   });
 
   it("disable arms before it fires", async () => {
