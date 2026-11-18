@@ -442,10 +442,20 @@ case "$1" in
   digest) printf '%s\n' "$STUB_IMAGE_DIGEST" ;;
   manifest)
     case "$2" in
-      *:sha256-*) cat "$STUB_DIR/index.json" ;;
-      *@sha256:*) d="@{2##*@sha256:}"; cat "$STUB_DIR/manifest-$d.json" ;;
+      *:sha256-*)
+        cat "$STUB_DIR/index.json"
+        [[ -f "$STUB_DIR/indexpad" ]] && head -c "$(cat "$STUB_DIR/indexpad")" /dev/zero | tr '\0' ' '
+        exit 0 ;;
+      *@sha256:*)
+        d="@{2##*@sha256:}"; cat "$STUB_DIR/manifest-$d.json"
+        [[ -f "$STUB_DIR/manifestpad-$d" ]] && head -c "$(cat "$STUB_DIR/manifestpad-$d")" /dev/zero | tr '\0' ' '
+        exit 0 ;;
     esac ;;
-  blob) d="@{2##*@sha256:}"; cat "$STUB_DIR/bundle-$d.json" ;;
+  blob)
+    d="@{2##*@sha256:}"; cat "$STUB_DIR/bundle-$d.json" || exit 1
+    # Streams padding past what the manifest declared: a registry is not bound by it.
+    [[ -f "$STUB_DIR/blobpad-$d" ]] && head -c "$(cat "$STUB_DIR/blobpad-$d")" /dev/zero | tr '\0' ' '
+    exit 0 ;;
   copy) ;;
   *) printf 'crane test stub: unsupported subcommand: %s\n' "$*" >&2; exit 97 ;;
 esac
@@ -502,7 +512,7 @@ printf '{"payloadType":"application/vnd.in-toto+json","payload":"%s","signatures
    * bundleSubject = the image, manifestSubject = the image, blobMissing = false,
    * layerSize = 1 }]
    */
-  const runCopy = (referrers) => {
+  const runCopy = (referrers, { indexPad } = {}) => {
     const root = mkdtempSync(join(tmpdir(), "orbit-copy-step-"));
     const bin = join(root, "bin");
     const stub = join(root, "stub");
@@ -531,7 +541,10 @@ printf '{"payloadType":"application/vnd.in-toto+json","payload":"%s","signatures
         })),
       }),
     );
+    if (indexPad) writeFileSync(join(stub, "indexpad"), String(indexPad));
     for (const r of referrers) {
+      if (r.manifestPad) writeFileSync(join(stub, `manifestpad-${hex(r.digest)}`), String(r.manifestPad));
+      if (r.blobPad) writeFileSync(join(stub, `blobpad-${hex(r.digest)}`), String(r.blobPad));
       writeFileSync(
         join(stub, `manifest-${hex(r.digest)}.json`),
         JSON.stringify({
@@ -682,6 +695,54 @@ printf '{"payloadType":"application/vnd.in-toto+json","payload":"%s","signatures
     it("accepts a referrer whose bundle layer is exactly 16 MiB", () => {
       const edge = { digest: d("3"), label: SPDX_TYPE, layerSize: LIMIT };
       const { result, copies } = runCopy([ok, edge]);
+      expect(result.status, result.stderr).toBe(0);
+      expect(copies).toHaveLength(3);
+    });
+  });
+
+  describe("every registry read is cut off at a hard limit (#1862)", () => {
+    const LIMIT = 16 * 1024 * 1024;
+    const OVER = LIMIT + 4 * 1024 * 1024;
+    const tooLarge = /too large|exceed|larger than|over the (?:16 ?MiB )?limit|limit/iu;
+
+    it("refuses a bundle blob that streams past its declared size and the cap, and copies nothing", () => {
+      const liar = { digest: d("6"), label: SPDX_TYPE, layerSize: 1, blobPad: OVER };
+      const { result, copies } = runCopy([ok, liar]);
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(liar.digest);
+      expect(result.stderr).toMatch(tooLarge);
+      expect(copies).toEqual([]);
+    });
+
+    it("refuses a bundle blob that streams past the cap although it declares exactly 16 MiB, and copies nothing", () => {
+      const liar = { digest: d("7"), label: SPDX_TYPE, layerSize: LIMIT, blobPad: OVER };
+      const { result, copies } = runCopy([ok, liar]);
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(liar.digest);
+      expect(result.stderr).toMatch(tooLarge);
+      expect(copies).toEqual([]);
+    });
+
+    it("refuses an oversized handoff index, naming the index, and copies nothing", () => {
+      const { result, copies } = runCopy([ok, okSbom], { indexPad: OVER });
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toMatch(/index/iu);
+      expect(result.stderr).toMatch(tooLarge);
+      expect(copies).toEqual([]);
+    });
+
+    it("refuses an oversized referrer manifest, naming the referrer, and copies nothing", () => {
+      const big = { digest: d("9"), label: SPDX_TYPE, manifestPad: OVER };
+      const { result, copies } = runCopy([ok, big]);
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(big.digest);
+      expect(result.stderr).toMatch(tooLarge);
+      expect(copies).toEqual([]);
+    });
+
+    it("still copies everything when the index, manifests and blobs are in limit, with some padding", () => {
+      const padded = { digest: d("d"), label: SPDX_TYPE, layerSize: 4096, blobPad: 4000, manifestPad: 1024 };
+      const { result, copies } = runCopy([ok, padded], { indexPad: 1024 });
       expect(result.status, result.stderr).toBe(0);
       expect(copies).toHaveLength(3);
     });
