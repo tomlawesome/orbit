@@ -1,8 +1,8 @@
 import { sessionCookieName, setSessionCookie } from "orbit/lib/auth/cookies";
-import { AuthError } from "orbit/lib/auth/errors";
+import { AuthError, PasswordChangeRequiredError } from "orbit/lib/auth/errors";
 import { authErrorResponse } from "orbit/lib/auth/http";
 import { checkPasswordBounds, hashPassword, MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from "orbit/lib/auth/password";
-import { clearPasswordChangeCookie, openPasswordChangeHold } from "orbit/lib/auth/password-change-hold";
+import { clearPasswordChangeCookie, issuePasswordChangeHold, openPasswordChangeHold } from "orbit/lib/auth/password-change-hold";
 import { assertSameOrigin, createSession, deleteSessionToken } from "orbit/lib/auth/session";
 import { VerificationGateRefusedError } from "orbit/lib/auth/verification-gate";
 import { getAuthConfig } from "orbit/lib/env";
@@ -32,6 +32,14 @@ import { api } from "$lib/server/api.js";
  * account held revoked and `password_changed` recorded. Then, and only then,
  * a session is minted for this browser.
  */
+/** @param {Record<string, unknown>} payload */
+function answer(payload) {
+  return new Response(
+    JSON.stringify(payload),
+    { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store" } },
+  );
+}
+
 export const POST = api(
   async (event) => {
     const config = getAuthConfig();
@@ -77,16 +85,30 @@ export const POST = api(
     }
 
     await completePasswordRenewal(hold.userId, hold.requiredAt, passwordHash);
-    clearPasswordChangeCookie(event.cookies, config);
 
+    /* Saved. The hold stays until a session exists (#1901 ruling 1): a mint
+       that fails leaves this browser either a fresh hold or a plain "sign in
+       with it", never a lost hold and no session. The save stands and is
+       reported, as the password route reports it. */
     await deleteSessionToken(event.cookies.get(sessionCookieName(config)));
-    const session = await createSession(hold.userId, config, event.request.headers.get("user-agent"));
+    let session;
+    try {
+      session = await createSession(hold.userId, config, event.request.headers.get("user-agent"));
+    } catch (error) {
+      if (error instanceof PasswordChangeRequiredError) {
+        /* A refusal re-marked the account between the save and the mint. */
+        const fresh = await issuePasswordChangeHold(event.cookies, error, config);
+        return answer({ saved: true, state: "password_change_required", refusedAt: fresh.refusedAt });
+      }
+      /* Anything else: the password is saved, the reader signs in with it.
+         Nothing about the failure is told. */
+      clearPasswordChangeCookie(event.cookies, config);
+      return answer({ saved: true, state: "sign_in_again" });
+    }
+    clearPasswordChangeCookie(event.cookies, config);
     setSessionCookie(event.cookies, session.token, config);
 
-    return new Response(
-      JSON.stringify({ authenticated: true }),
-      { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store" } },
-    );
+    return answer({ authenticated: true });
   },
   { errorResponse: authErrorResponse },
 );

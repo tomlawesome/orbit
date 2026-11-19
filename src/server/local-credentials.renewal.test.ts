@@ -63,12 +63,20 @@ describe("completePasswordRenewal", () => {
   it.each([
     ["the account has no password", []],
     ["the account is disabled", [{ requiredAt: MARK, disabledAt: new Date() }]],
-    ["the mark was cleared by a saved password", [{ requiredAt: null, disabledAt: null }]],
     ["a later refusal replaced the mark", [{ requiredAt: new Date(MARK.getTime() + 1), disabledAt: null }]],
   ])("answers lapsed and writes nothing when %s", async (_why, rows) => {
     state.answers = [rows];
     await expect(completePasswordRenewal(USER, MARK, "new-hash")).rejects.toMatchObject({
       code: "password_change_lapsed",
+      status: 400,
+    });
+    expect(state.writes).toEqual([]);
+  });
+
+  it("answers saved and writes nothing when the mark was cleared by a saved password (#1901)", async () => {
+    state.answers = [[{ requiredAt: null, disabledAt: null }]];
+    await expect(completePasswordRenewal(USER, MARK, "new-hash")).rejects.toMatchObject({
+      code: "password_change_saved",
       status: 400,
     });
     expect(state.writes).toEqual([]);

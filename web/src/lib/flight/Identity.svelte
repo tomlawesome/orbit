@@ -66,6 +66,7 @@
    *   signInLine?: boolean,
    *   refusedAt?: string | null,
    *   lapsed?: boolean,
+   *   saved?: boolean,
    *   onsignin?: (() => void) | null,
    * }}
    */
@@ -92,6 +93,9 @@
     refusedAt = null,
     /* renew mode: the hold ran out before a password was saved */
     lapsed = false,
+    /* renew mode, lapsed because the password IS saved and only the session
+       is missing (#1901): the same field-less card, its own sentence */
+    saved = false,
     /* renew mode, lapsed: the host's way back to its own door. The card
        stands on the door itself, so a link to /login would be a navigation
        to the page already showing. */
@@ -155,7 +159,9 @@
          nothing about who, where or how often. Lapsed, the same place says
          so, and the quiet "sign in" under the card is the way on. -->
     {#if renew}
-      {#if lapsed}
+      {#if lapsed && saved}
+        <p class="note why" role="status">Your new password is saved. Sign in with it.</p>
+      {:else if lapsed}
         <p class="note why" role="status">This sign-in has lapsed before a new password was saved. Sign in again and choose one then.</p>
       {:else if refusedMoment}
         <p class="note why" role="status">A sign-in with this password was refused on <b>{refusedMoment}</b> — somebody else knew it. Choose a new one and you’re in.</p>

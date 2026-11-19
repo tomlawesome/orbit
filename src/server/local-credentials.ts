@@ -916,7 +916,7 @@ export async function setupTokenOwner(token: string): Promise<string | null> {
  * the new hash and clears it: a hold whose mark has since been cleared (the
  * password already saved, by this hold or a recovery link) or replaced (a
  * later refusal) is `password_change_lapsed`, so a hold spends once and a
- * stale one buys nothing. The change is ADR-0023 §7's like any other: every
+ * stale one buys nothing; a cleared one is `password_change_saved` (#1901). The change is ADR-0023 §7's like any other: every
  * session the account held is revoked and `password_changed` recorded.
  */
 export async function completePasswordRenewal(
@@ -935,7 +935,16 @@ export async function completePasswordRenewal(
     /* A disabled account's hold changes nothing (#1881 review): disabling
        is an administrator's decision and outranks the reader's renewal. It
        answers as lapsed, the one word every dead hold gets. */
-    if (!row || row.disabledAt || !row.requiredAt || row.requiredAt.getTime() !== requiredAt.getTime()) {
+    if (!row || row.disabledAt) {
+      throw new AuthError("password_change_lapsed", "This sign-in has lapsed; sign in again", 400);
+    }
+    /* A live hold whose mark is gone was spent by a save: a retry after a
+       lost answer is told so, rather than "lapsed", which is false after a
+       save (#1901 ruling 1). It saves nothing and mints nothing. */
+    if (!row.requiredAt) {
+      throw new AuthError("password_change_saved", "Your new password is already saved; sign in with it", 400);
+    }
+    if (row.requiredAt.getTime() !== requiredAt.getTime()) {
       throw new AuthError("password_change_lapsed", "This sign-in has lapsed; sign in again", 400);
     }
     return applyPasswordChange(transaction, userId, passwordHash, userId);
