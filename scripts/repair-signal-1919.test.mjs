@@ -195,7 +195,8 @@ describe("#1919: the holder says once that the stop was asked for", () => {
     await until(() => r.output().includes(STOP_LINE) || r.status() !== null, "the holder's stop line or the end of the run");
     process.kill(holder, "SIGTERM");
     process.kill(holder, "SIGHUP");
-    expect(await done(r)).toBe(143);
+    // With TERM and HUP both pending bash runs the lower-numbered HUP first, so the exit is 129 or 143.
+    expect([129, 143], "exit status").toContain(await done(r));
     expect(r.output().split(STOP_LINE).length - 1, "the stop line is printed on the first signal only").toBe(1);
     expect(recoveryCopies(r.targetDir)).toEqual([]);
   });
