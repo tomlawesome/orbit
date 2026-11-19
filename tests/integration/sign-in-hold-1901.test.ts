@@ -44,7 +44,7 @@ import * as oidc from "@/lib/auth/oidc";
 import type { OidcMetadata } from "@/lib/auth/oidc";
 import { hashPassword } from "@/lib/auth/password";
 import { getAuthConfig, resetAuthConfigForTests } from "@/lib/env";
-import { createLocalUser } from "@/server/local-credentials";
+import { createLocalUser, LOCAL_LOCKOUT_CEILING_MS, LOCAL_SIGN_IN_FREE_ATTEMPTS } from "@/server/local-credentials";
 import { PASSWORD_CHANGE_HOLD_TTL_MS } from "@/lib/auth/password-change-hold";
 import { ORIGIN } from "./support/auth";
 import { cleanupIntegrationEnvironment } from "./support/fixtures";
@@ -357,6 +357,51 @@ describe("a cleared mark is 'saved' only if the typed password is the stored one
     expect(answered.status).toBe(400);
     expect(await errorCode(answered)).toBe("password_change_saved");
     expect(await storedHash(account.id)).toBe(before);
+  });
+});
+
+describe("a miss on a cleared mark counts as a failed password attempt, as at the door (#1901)", () => {
+  const OTHER_PATH_PASSWORD = "set-by-a-recovery-link-1901";
+
+  async function failureState(userId: string) {
+    const [row] = await getDb()
+      .select({ count: localCredentials.failedAttemptCount, lockedUntil: localCredentials.lockedUntil })
+      .from(localCredentials).where(eq(localCredentials.userId, userId));
+    return row;
+  }
+
+  async function clearElsewhere(userId: string): Promise<void> {
+    await getDb().update(localCredentials)
+      .set({ passwordHash: await hashPassword(OTHER_PATH_PASSWORD), passwordChangeRequiredAt: null })
+      .where(eq(localCredentials.userId, userId));
+  }
+
+  it("each wrong password raises failedAttemptCount by one, and past the door's free attempts the account locks as at the door", async () => {
+    const { account, hold } = await landOnTheStep("miss-counts");
+    await clearElsewhere(account.id);
+    const before = (await failureState(account.id))?.count ?? 0;
+    const free = LOCAL_SIGN_IN_FREE_ATTEMPTS;
+
+    for (let miss = 1; miss <= free + 1; miss += 1) {
+      const guess = `a-wrong-guess-number-${miss}-1901`;
+      const answered = await save({ password: guess, passwordAgain: guess }, hold);
+      expect(await errorCode(answered)).toBe("password_change_lapsed");
+      const after = await failureState(account.id);
+      expect(after?.count, `after miss ${miss}`).toBe(before + miss);
+      if (before + miss <= free) expect(after?.lockedUntil).toBeNull();
+    }
+    const locked = await failureState(account.id);
+    expect(locked?.lockedUntil, "the account was not locked past the free attempts").not.toBeNull();
+    expect(locked!.lockedUntil!.getTime()).toBeLessThanOrEqual(Date.now() + LOCAL_LOCKOUT_CEILING_MS);
+  });
+
+  it("a match leaves failedAttemptCount unchanged", async () => {
+    const { account, hold } = await landOnTheStep("match-uncounted");
+    await clearElsewhere(account.id);
+    await getDb().update(localCredentials).set({ failedAttemptCount: 2 }).where(eq(localCredentials.userId, account.id));
+    const answered = await save({ password: OTHER_PATH_PASSWORD, passwordAgain: OTHER_PATH_PASSWORD }, hold);
+    expect(await errorCode(answered)).toBe("password_change_saved");
+    expect((await failureState(account.id))?.count).toBe(2);
   });
 });
 
