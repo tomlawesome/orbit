@@ -320,9 +320,10 @@ async function spreadOf(page, clip) {
 }
 
 /** @param {import("@playwright/test").Page} page */
-async function openFilm(page) {
+async function openFilm(page, { fakeClock = false } = {}) {
   /** @type {string[]} */
   const errors = [];
+  if (fakeClock) await page.clock.install();
   page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
   page.on("pageerror", (error) => errors.push(error.message));
   await installFilmEnded(page);
@@ -355,6 +356,42 @@ async function openFilm(page) {
  */
 async function settled(page) {
   await finiteMotionSettled(page);
+}
+
+/**
+ * The film runs on the page's faked clock (#1914): `page.clock.install()` goes
+ * before the page loads, and the film is moved on in 250 ms steps of faked
+ * time. No wall-clock wait: a step that never gets there ends at the virtual
+ * cap and the caller reports it; the test's own setTimeout is the hang guard.
+ * `fastForward` would not do, as the film caps a frame at 120 ms.
+ * @param {import("@playwright/test").Page} page
+ * @param {() => Promise<boolean>} reached
+ * @param {number} [cap] the most faked milliseconds to run
+ */
+async function runClockUntil(page, reached, cap = 400_000) {
+  for (let spent = 0; spent < cap; spent += 250) {
+    if (await reached()) return true;
+    await page.clock.runFor(250);
+  }
+  return reached();
+}
+
+/** Runs the faked clock until the film holds `mark`.
+ *  @param {import("@playwright/test").Page} page @param {string} mark @param {number} [cap] */
+function runClockToHold(page, mark, cap) {
+  return runClockUntil(page, () => page.evaluate((m) => /** @type {any} */ (window).__held === m, mark), cap);
+}
+
+/** `settled`, with the faked clock stepped along (its frames are faked ones).
+ *  @param {import("@playwright/test").Page} page */
+async function settledOnClock(page) {
+  let done = false;
+  const wait = settled(page).finally(() => { done = true; });
+  for (let i = 0; i < 400 && !done; i++) {
+    await page.clock.runFor(50);
+    await new Promise((r) => setImmediate(r));
+  }
+  await wait;
 }
 
 /** The pill at rest: not between places (20s at most for a move that never
@@ -854,25 +891,20 @@ test.describe("the pocket film in WebKit (#1174)", () => {
 test.describe("chapter 4 takes the page down to the manifest (#1174 round 4)", () => {
   for (const phone of PHONES) {
     test(`at ${phone.width}x${phone.height} the manifest is on the screen at chapter 4's line`, async ({ browser }) => {
-      test.setTimeout(240_000);
+      test.setTimeout(120_000); // hang guard only; the film runs on the faked clock (#1914)
       const context = await browser.newContext({
         viewport: { width: phone.width, height: phone.height }, isMobile: true, hasTouch: true, deviceScaleFactor: 2,
         reducedMotion: "no-preference",
       });
       const page = await context.newPage();
-      const errors = await openFilm(page);
+      const errors = await openFilm(page, { fakeClock: true });
       /** @type {string[]} */
       const wrong = [];
       const mark = "manifest-today";
       await page.evaluate((m) => { const hooks = /** @type {any} */ (window); hooks.__held = null; hooks.__hold = m; }, mark);
-      let reached = true;
-      try {
-        await page.waitForFunction((m) => /** @type {any} */ (window).__held === m, mark, { timeout: 150_000 });
-      } catch {
-        wrong.push(`${mark}: never reached`);
-        reached = false;
-      }
-      if (reached) await settled(page);
+      const reached = await runClockToHold(page, mark);
+      if (!reached) wrong.push(`${mark}: never reached`);
+      else await settledOnClock(page);
       for (const [what, sel] of reached ? [["the header", ".pocket .pk-below h2.p-caps"], ["the first row", ".pocket .pk-below .p-row"]] : []) {
         const seen = await page.evaluate((s) => {
           const el = document.querySelector(s);
@@ -897,13 +929,11 @@ test.describe("chapter 4 takes the page down to the manifest (#1174 round 4)", (
       /* and chapter 5 opens on the page as the film found it: at its top,
          with nothing of the film's own left below it */
       await page.evaluate(() => { const hooks = /** @type {any} */ (window); hooks.__held = null; hooks.__hold = "time-warmed"; hooks.__play(); });
-      try {
-        await page.waitForFunction(() => /** @type {any} */ (window).__held === "time-warmed", null, { timeout: 60_000 });
+      if (!(await runClockToHold(page, "time-warmed"))) wrong.push("time-warmed: never reached");
+      else {
         const after = await page.evaluate(() => ({ y: Math.round(window.scrollY), room: document.querySelectorAll(".tourfilm-room").length }));
         if (after.y !== 0) wrong.push(`time-warmed: the page left scrolled ${after.y}px after chapter 4`);
         if (after.room !== 0) wrong.push("time-warmed: chapter 4's room below the page left behind");
-      } catch {
-        wrong.push("time-warmed: never reached");
       }
       await context.close();
       expect(errors, "no error in the console").toEqual([]);
@@ -1314,20 +1344,20 @@ test.describe("the danger-zone ring pulses red while chapter 5 shows it (#1174 r
   ];
   for (const one of CASES) {
     test(`${one.name}: red on every pack at time-warmed, ${one.reduced ? "steady" : "moving"}, and gone in chapter 6`, async ({ browser }) => {
-      test.setTimeout(150_000);
+      test.setTimeout(120_000); // hang guard only; the film runs on the faked clock (#1914)
       const context = await browser.newContext({
         viewport: one.viewport, isMobile: one.phone, hasTouch: one.phone, deviceScaleFactor: one.phone ? 2 : 1,
         reducedMotion: one.reduced ? "reduce" : "no-preference",
       });
       const page = await context.newPage();
-      const errors = await openFilm(page);
+      const errors = await openFilm(page, { fakeClock: true });
       const index = await page.evaluate(() => /** @type {any} */ (window).__chapters.findIndex((/** @type {any} */ c) => c.id === "time"));
       /** @type {string[]} */
       const wrong = [];
       await page.evaluate((k) => { const hooks = /** @type {any} */ (window); hooks.__held = null; hooks.__hold = "time-warmed"; hooks.__jump(k); }, index);
       try {
-        await page.waitForFunction(() => /** @type {any} */ (window).__held === "time-warmed", null, { timeout: 60_000 });
-        await settled(page);
+        if (!(await runClockToHold(page, "time-warmed"))) throw new Error("not held");
+        await settledOnClock(page);
         const held = await page.evaluate(dangerRing, THEME_PACKS);
         if (!held) wrong.push("time-warmed: no danger ring drawn");
         else {
@@ -1376,7 +1406,7 @@ test.describe("the danger-zone ring pulses red while chapter 5 shows it (#1174 r
       }
       await page.evaluate(() => { const hooks = /** @type {any} */ (window); hooks.__held = null; hooks.__hold = "relay-addr"; hooks.__play(); });
       try {
-        await page.waitForFunction(() => /** @type {any} */ (window).__held === "relay-addr", null, { timeout: 90_000 });
+        if (!(await runClockToHold(page, "relay-addr"))) throw new Error("not held");
         if (await page.evaluate(() => document.querySelectorAll(".tourfilm-danger").length)) wrong.push("relay-addr: the danger ring outlived chapter 5");
       } catch {
         wrong.push("relay-addr: never reached");
