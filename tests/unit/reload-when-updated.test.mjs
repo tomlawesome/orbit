@@ -271,12 +271,40 @@ describe("the leaving flag is undone when the agreed navigation does not leave (
     expect(undo).toHaveBeenCalledTimes(1);
   });
 
-  it("a reload to another page unloads it: the undo does not run", async () => {
+  it("a reload to another page: the undo runs too, so a cancelled unload restores state (#1915 W-F1 supersedes 'does not run')", async () => {
     const undo = vi.fn();
     const result = reloadWhenUpdated(nav("https://o.test/create", "https://o.test/home"), { current: true }, vi.fn(),
       { isDirty: () => true, ask: () => true, leaving: () => undo });
     await settled(result);
-    expect(undo).not.toHaveBeenCalled();
+    expect(undo).toHaveBeenCalledTimes(1);
+  });
+
+  it("#1915 W-F1: a full-document reload that is cancelled (the browser's own leave prompt declined) restores the flag", async () => {
+    const undo = vi.fn();
+    const go = vi.fn(); // returns: the page was not unloaded, so we are still here
+    const result = reloadWhenUpdated(nav("https://o.test/create", "https://o.test/home"), { current: true }, go,
+      { isDirty: () => true, ask: () => true, leaving: () => undo });
+    await settled(result);
+    expect(go).toHaveBeenCalledTimes(1);
+    expect(undo).toHaveBeenCalledTimes(1);
+  });
+
+  it("#1915 W-F1: the same for a holder's yes", async () => {
+    const undo = vi.fn();
+    const result = reloadWhenUpdated(nav("https://o.test/create", "https://o.test/home"), { current: true }, vi.fn(),
+      { isDirty: () => true, ask: () => true, holderAsk: async () => true, leaving: () => undo });
+    await settled(result);
+    expect(undo).toHaveBeenCalledTimes(1);
+  });
+
+  it("#1915 T-F2: nothing dirty and an update pending: the reload goes ahead with no discard ask", () => {
+    const ask = vi.fn(() => false);
+    const go = vi.fn();
+    const navigation = nav("https://o.test/create", "https://o.test/home");
+    reloadWhenUpdated(navigation, { current: true }, go, { isDirty: () => false, ask });
+    expect(ask).not.toHaveBeenCalled();
+    expect(navigation.cancel).not.toHaveBeenCalled();
+    expect(go).toHaveBeenCalledWith("https://o.test/home");
   });
 
   it("the layout resets the flag on a persisted pageshow", () => {
