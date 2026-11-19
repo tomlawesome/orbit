@@ -468,12 +468,6 @@ timeout on this one case rather than a global raise.
 - 2026-11-05 · feat/v037-three-sky 9834d7e8 · local sky-run.sh rig-webkit-desktop, `--cpus=3`, shared host at load 15-18 · `body[data-home-ready]` not reached after a reload within the 5s expect default; passed when the drawer tests were re-run alone. First sighting.
 - 2026-11-05 · feat/v037-three-sky 20d05324 (waits now 20s SETTLE) · same · the test's 60s budget ran out waiting for home after the reload; the next run of the file passed (20 of 20). Second sighting.
 
-## web/tests/rig/v19-home-drawer-scrolled.spec.js:268 "Space on the focused north star, with a row opened part-way down and the page scrolled further, ..." — rig-firefox (#1717)
-
-- 2026-11-05 · c9805ba8 (dev; the spec was at :237) · pipeline 3577 / `rig_firefox` job 45967 · "the page moved 273px from scrollY 1393 when the north star was pressed". First sighting.
-- 2026-11-05 · 34e87dae (chore/batch-a-intake-1, !1174) · pipeline 3609 / `rig_firefox` job 46352 · the same 273px from scrollY 1393. Local rig-firefox on the same commit passed 7 of 7 (the spec once, then the case `--repeat-each=6` at four workers). The identical figures on two CI runs suggest something the CI Firefox runner does every time, not a race. Second sighting.
-- 2026-11-05 · dbc2e3ba (chore/batch-a-intake-1, !1174) · pipeline 3615 / `rig_firefox` job 46465 · the same "page moved 273px from scrollY 1393", this time the Enter case of the loop at :268. host load; code unchanged since 3614. Third sighting: filed as #1717 (north star press moves the page on CI Firefox); the loop's two tests are quarantined.
-
 ## web/tests/rig/v19-screen-reader.spec.js:172 "/home?item=<id>: the item drawer, read and edited" — rig-firefox
 
 - 2026-11-05 · 34e87dae (chore/batch-a-intake-1, !1174) · pipeline 3609 / `rig_firefox` job 46352 · in the editing walk, links #9 to #14 (the dial's last body link and the manifest rows, by a local probe of the same state) read an empty accessible name, until the 30 s test timeout. Local rig-firefox on the same commit passed 16 of 16 at eight workers, and every one of those links is named there. Same run, rig-webkit-desktop timed out at `locator.count()` in the same walk. First sighting.
@@ -494,10 +488,6 @@ timeout on this one case rather than a global raise.
 ## web/tests/rig/local-sign-in.spec.js:112 "no sign-in card sits over the arrival with no climb owed" — rig-webkit-phone
 
 - 2026-11-05 · dbc2e3ba (chore/batch-a-intake-1, !1174) · pipeline 3615 / `rig_webkit` job 46466 · `locator.click` at :130 on "name your own system": "waiting for element to be visible, enabled and stable" until the 30 s test timeout. host load; code unchanged since 3614. First sighting.
-
-## web/tests/rig/v19-home-drawer-scrolled.spec.js:258 "a row opened part-way down, then scrolled further, one press on the north star opens the drawer and the page stays put" — rig-firefox (#1717)
-
-- 2026-11-05 · dbc2e3ba (chore/batch-a-intake-1, !1174) · pipeline 3615 / `rig_firefox` job 46465 · "the page moved 273px from scrollY 1393 when the north star was pressed", the same figures as the :268 cases above (#1717). host load; code unchanged since 3614. First sighting.
 
 ## `film_webkit` job: killed at its 35 min limit (host) (#1546)
 
