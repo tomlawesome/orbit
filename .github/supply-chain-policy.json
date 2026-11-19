@@ -449,6 +449,16 @@
     {
       "kind": "vulnerability",
       "scope": "image",
+      "id": "CVE-2026-114938",
+      "package": "openjdk-25-jre-headless",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-11-26",
+      "trackingIssue": 1918,
+      "rationale": "Java runtime in apache/tika:4.2.0-full; Tika runs on it to parse uploaded documents, so reachability has not been ruled out. Fixed in the 25.0.5 update 1 build (Debian revision 2-1~26.04.1); installedVersion is left out because the scanner's four-part Java version reads as a network address to the private-details check. No published Tika image ships it yet (checked 2026-11-19 on 4.2.0-full, 4.2.1-SNAPSHOT-full and the 4.3.0-SNAPSHOT-full nightly). Owner granted 7 days and a re-check, 2026-11-19 (#1918, 69a)."
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
       "id": "CVE-2026-109518",
       "package": "apt",
       "owner": "Orbit maintainers",
@@ -715,8 +725,8 @@
     {
       "name": "Orbit base image (Alpine plus Node from official signed source)",
       "tag": "ghcr.io/tomlawesome/orbit-base-image:latest",
-      "reference": "ghcr.io/tomlawesome/orbit-base-image:latest@sha256:ed90d17aaa54cc4fec123bc1270616bd4925b8598e7a7fb87b1e87e619253cda",
-      "indexDigest": "sha256:ed90d17aaa54cc4fec123bc1270616bd4925b8598e7a7fb87b1e87e619253cda",
+      "reference": "ghcr.io/tomlawesome/orbit-base-image:latest@sha256:899a5fe4cdeb76138307bb1ecedb91c71f21b83bafb386cf83d1d1a0a30e82fa",
+      "indexDigest": "sha256:899a5fe4cdeb76138307bb1ecedb91c71f21b83bafb386cf83d1d1a0a30e82fa",
       "platform": "linux/amd64",
       "locations": [
         "Dockerfile"
@@ -726,7 +736,7 @@
       "license": "MIT",
       "licenseSource": "https://github.com/nodejs/node/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-11-16",
+      "resolvedOn": "2026-11-19",
       "reviewBy": "2026-11-30"
     },
     {
