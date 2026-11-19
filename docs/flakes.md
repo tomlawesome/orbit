@@ -527,3 +527,7 @@ timeout on this one case rather than a global raise.
 ## src/server/documents/image-sandbox.test.ts "accepts a 1x1 JPEG/PNG padded to the size limit ..." (:185)
 
 - 2026-11-18 · !1371 batch-a 5866edd4 (the batch-a dev gate: pins and exceptions only, nowhere near the image sandbox) · pipeline 4563 / fast (job 55116) · "expected 'structure_check_unavailable' to be 'supported_structure'" in a 1320 s job on a loaded runner: the child decode did not answer in time. The image-sandbox files are unchanged since, and the fast job passed on !1371's next pipeline and on !1395. First sighting.
+
+## tour-pocket-webkit.spec.js:685 "the pocket film in WebKit (#1174) › plays end to end at 430x932 under normal motion" — pocket-webkit
+
+- 2026-11-19 · bed6d036 (batch-b, local run in the Playwright image) · `locator.tap` on `#pocket-entry .pc-chip[data-imp="low"]` (line 818) retried "element was detached from the DOM" until the 600 s test timeout. 27 others passed. Rerun of the same case on unchanged code: passed (3.4m). First sighting.
