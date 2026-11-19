@@ -163,9 +163,13 @@ require_live_key() {
 }
 
 # A dangling document-key link is neither a key nor its absence: name the link and how to put
-# the key back, never only "the key is missing" (#1536 O-F2, X-F3; #1603 O-S1, ops-2).
+# the key back, never only "the key is missing" (#1536 O-F2, X-F3; #1603 O-S1, ops-2). The two
+# recovery paths pass `recovery`: they put the key back themselves (#1901 O-S2).
 refuse_dangling_key() {
-  [[ ! -L "$secrets_directory/document-kek" || -e "$secrets_directory/document-kek" ]] || fail 'preflight/key failed; .orbit-secrets/document-kek is a link to a file that does not exist, so the key file is missing. Remove the link and restore the document key from your kept copy of the secrets directory: rm .orbit-secrets/document-kek && install -m 0600 /path/to/your/copy/document-kek .orbit-secrets/document-kek, then run again.'
+  if [[ -L "$secrets_directory/document-kek" && ! -e "$secrets_directory/document-kek" ]]; then
+    [[ "${1:-}" != recovery ]] || fail 'preflight/key failed; .orbit-secrets/document-kek is a link to a file that does not exist. This recovery puts the key back itself, so remove the link and run again: rm .orbit-secrets/document-kek, then run again.'
+    fail 'preflight/key failed; .orbit-secrets/document-kek is a link to a file that does not exist, so the key file is missing. Remove the link and restore the document key from your kept copy of the secrets directory: rm .orbit-secrets/document-kek && install -m 0600 /path/to/your/copy/document-kek .orbit-secrets/document-kek, then run again.'
+  fi
 }
 
 # Who owns what the engine writes (#1210 D5, #1258). The one-off runs as the
@@ -297,7 +301,7 @@ recovery_bundle="$1"
 require_deployment health
 # A dangling document-key link is neither a key nor its absence: refuse it before Orbit is
 # touched, naming the link and what to do (#1536 O-F2, X-F3).
-refuse_dangling_key
+refuse_dangling_key recovery
 engine_host_identity
 run_engine "$recovery_bundle" import-recovery-bundle --preflight /orbit-input/bundle.tar </dev/null || exit $?
 keep_stopped_message='Orbit recovery import: the inner restore evidence was preserved; keep Orbit stopped and run bash scripts/restore.sh --recover.'
