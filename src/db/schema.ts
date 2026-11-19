@@ -482,6 +482,13 @@ export const signInApprovals = pgTable("sign_in_approvals", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   tokenHash: text("token_hash").notNull().unique(),
+  /* The link of the newest resend until that send is confirmed or proven not
+     to have left (#1896, ADR-0027 §8 amendment of 2026-11-18). Written under
+     the lock before the mail goes, so the row resolves both this digest and
+     `tokenHash` while the outcome is unknown: at most two links. A confirmed
+     send moves it into `tokenHash`; a send the mailer proves never left
+     clears it; a maybe-delivered one keeps it. */
+  stagedTokenHash: text("staged_token_hash").unique(),
   claimHash: text("claim_hash").notNull().unique(),
   userAgent: text("user_agent"),
   clientAddress: text("client_address"),
