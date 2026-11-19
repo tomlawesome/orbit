@@ -48,6 +48,7 @@ vi.mock("@/db", () => {
 });
 
 import { auditLog, localCredentials, sessions, signInApprovals } from "@/db/schema";
+import { hashPassword } from "@/lib/auth/password";
 import { completePasswordRenewal, persistSetupToken } from "@/server/local-credentials";
 
 const USER = "00000000-0000-4000-8000-000000000001";
@@ -73,9 +74,27 @@ describe("completePasswordRenewal", () => {
     expect(state.writes).toEqual([]);
   });
 
-  it("answers saved and writes nothing when the mark was cleared by a saved password (#1901)", async () => {
-    state.answers = [[{ requiredAt: null, disabledAt: null }]];
-    await expect(completePasswordRenewal(USER, MARK, "new-hash")).rejects.toMatchObject({
+  it("answers saved and writes nothing when the mark was cleared by a saved password and the typed one is the stored one (#1901)", async () => {
+    state.answers = [[{ requiredAt: null, disabledAt: null, passwordHash: await hashPassword("typed-password-P1-1901") }]];
+    await expect(completePasswordRenewal(USER, MARK, "new-hash", "typed-password-P1-1901")).rejects.toMatchObject({
+      code: "password_change_saved",
+      status: 400,
+    });
+    expect(state.writes).toEqual([]);
+  });
+
+  it("answers lapsed and writes nothing when the mark was cleared elsewhere and the typed password is not the stored one (#1901)", async () => {
+    state.answers = [[{ requiredAt: null, disabledAt: null, passwordHash: await hashPassword("stored-password-P0-1901") }]];
+    await expect(completePasswordRenewal(USER, MARK, "new-hash", "typed-password-P2-1901")).rejects.toMatchObject({
+      code: "password_change_lapsed",
+      status: 400,
+    });
+    expect(state.writes).toEqual([]);
+  });
+
+  it("answers saved and writes nothing when the mark was cleared elsewhere but the typed password matches the stored one (#1901)", async () => {
+    state.answers = [[{ requiredAt: null, disabledAt: null, passwordHash: await hashPassword("stored-password-P0-1901") }]];
+    await expect(completePasswordRenewal(USER, MARK, "new-hash", "stored-password-P0-1901")).rejects.toMatchObject({
       code: "password_change_saved",
       status: 400,
     });

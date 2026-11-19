@@ -314,6 +314,52 @@ describe("a retry after a save is told the password is saved, not that the sign-
   });
 });
 
+describe("a cleared mark is 'saved' only if the typed password is the stored one (#1901 ruling 1 review)", () => {
+  const OTHER_PATH_PASSWORD = "set-by-a-recovery-link-1901";
+  const TYPED_BY_HOLD = "typed-by-the-hold-after-clear-1901";
+
+  async function storedHash(userId: string): Promise<string | undefined> {
+    const [row] = await getDb().select({ hash: localCredentials.passwordHash })
+      .from(localCredentials).where(eq(localCredentials.userId, userId));
+    return row?.hash;
+  }
+
+  /* What a recovery link or a signed-in change does: new hash, mark cleared. */
+  async function clearElsewhere(userId: string): Promise<string> {
+    const hash = await hashPassword(OTHER_PATH_PASSWORD);
+    await getDb().update(localCredentials).set({ passwordHash: hash, passwordChangeRequiredAt: null })
+      .where(eq(localCredentials.userId, userId));
+    return hash;
+  }
+
+  it("(a) the hold saves P1, a retry with P1 answers password_change_saved", async () => {
+    const { account, hold } = await landOnTheStep("clear-own-save");
+    await expectSavedAndSignedIn(await save({ password: NEW_PASSWORD, passwordAgain: NEW_PASSWORD }, hold), account.id);
+    const retry = await save({ password: NEW_PASSWORD, passwordAgain: NEW_PASSWORD }, hold);
+    expect(retry.status).toBe(400);
+    expect(await errorCode(retry)).toBe("password_change_saved");
+  });
+
+  it("(b) mark cleared elsewhere with P0, the hold submits P2: password_change_lapsed, stored hash still P0", async () => {
+    const { account, hold } = await landOnTheStep("clear-elsewhere-other");
+    const before = await clearElsewhere(account.id);
+    const answered = await save({ password: TYPED_BY_HOLD, passwordAgain: TYPED_BY_HOLD }, hold);
+    expect(answered.status).toBe(400);
+    expect(await errorCode(answered)).toBe("password_change_lapsed");
+    expect(sessionCookieOf(answered)).toBeUndefined();
+    expect(await storedHash(account.id)).toBe(before);
+  });
+
+  it("(c) mark cleared elsewhere with P0, the hold submits P0: password_change_saved, nothing written", async () => {
+    const { account, hold } = await landOnTheStep("clear-elsewhere-same");
+    const before = await clearElsewhere(account.id);
+    const answered = await save({ password: OTHER_PATH_PASSWORD, passwordAgain: OTHER_PATH_PASSWORD }, hold);
+    expect(answered.status).toBe(400);
+    expect(await errorCode(answered)).toBe("password_change_saved");
+    expect(await storedHash(account.id)).toBe(before);
+  });
+});
+
 describe("a lost pending answer is re-issued from the spent approval (#1901 ruling 2, W-R2)", () => {
   /** Lands on the step once, and keeps the claim so the same tab can poll again. */
   async function landKeepingTheClaim(label: string) {
