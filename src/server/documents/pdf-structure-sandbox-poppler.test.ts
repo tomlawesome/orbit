@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { syntheticOwnerPasswordPdf, syntheticUserPasswordPdf } from "../../../tests/support/encrypted-pdf-documents";
@@ -240,6 +240,9 @@ describe("the structure check's stops, with a stand-in pdfinfo (§1.5 line 4)", 
   }, 10_000);
 });
 
+/** Child kill budget for the reported-not-gated render tests: only stops a hang, never a slow host (#1912). */
+const HANG_GUARD_MS = 50_000;
+
 describe(`page draws are pdftoppm ${NEEDS_POPPLER}`, () => {
   popplerIt("§1.5 line 5: page 1 of the text PDF draws as image/jpeg starting FF D8 FF, long edge 1,200, with dark text pixels where the text is", async () => {
     const answer = await render(fileOf("text-1p.pdf"), 1, DOCUMENT_PREVIEW_RENDER_BUDGET_MS);
@@ -263,7 +266,7 @@ describe(`page draws are pdftoppm ${NEEDS_POPPLER}`, () => {
   popplerIt("§1.5 line 6: the 600 dpi colour A4 scan (DCT, 4960x7016) draws inside the production budget, child peak RSS under 64 MiB", async () => {
     const file = stash("scan-600.pdf", colourScanPdf(600));
     const started = Date.now();
-    const { result, peakBytes } = await peakChildMemory(() => render(file, 1, DOCUMENT_PREVIEW_RENDER_BUDGET_MS));
+    const { result, peakBytes } = await peakChildMemory(() => render(file, 1, HANG_GUARD_MS));
     expect(result.outcome).toBe("drawn");
     // Reported, not gated (#1912): the elapsed time is not asserted; the test's own timeout only guards a hang.
     console.log(`[#1912] §1.5 line 6 600 dpi scan drew in ${Date.now() - started} ms (production budget ${DOCUMENT_PREVIEW_RENDER_BUDGET_MS} ms; reported, not asserted)`);
@@ -277,7 +280,7 @@ describe(`page draws are pdftoppm ${NEEDS_POPPLER}`, () => {
   ] as const)("§1.5 line 7: %s draws under 64 MiB child peak", async (_name, name, build) => {
     const file = stash(name, build());
     const started = Date.now();
-    const { result, peakBytes } = await peakChildMemory(() => render(file, 1, DOCUMENT_PREVIEW_RENDER_BUDGET_MS));
+    const { result, peakBytes } = await peakChildMemory(() => render(file, 1, HANG_GUARD_MS));
     expect(result.outcome).toBe("drawn");
     console.log(`[#1912] §1.5 line 7 ${_name} drew in ${Date.now() - started} ms (design note: 5 s; reported, not asserted)`);
     expect(peakBytes).toBeGreaterThan(0);
@@ -475,14 +478,14 @@ describe("the child's kernel limits, environment and priority, with stand-in too
 
 describe("§1.5 line 14 and D5: three slot pools, with stand-in tools", () => {
   /** A stand-in pdftoppm that is slow (1.5 s) for page 2 only, and a pdfinfo that says 3 pages. */
-  function poolTools(hold?: string): { pdfinfo: string; pdftoppm: string } {
+  function poolTools(hold?: string, log?: string): { pdfinfo: string; pdftoppm: string } {
     const jpegPath = join(directory, "pool.jpg");
     writeFileSync(jpegPath, jpegOf(848, 1_200));
     return {
       pdfinfo: writeStubTool(directory, "pool-pdfinfo", "/usr/bin/printf 'Pages:          3\\nEncrypted:      no\\nPage    1 size: 595 x 842 pts (A4)\\n'"),
       // Arguments: -f <page> -l <page> ..., so $2 is the page.
       // With `hold`, page 2 waits until the test creates that file instead of sleeping.
-      pdftoppm: writeStubTool(directory, "pool-pdftoppm", `/bin/echo "$2" >> "${join(directory, "pool-invocations")}"\nif [ "$2" = "2" ]; then ${hold ? `while [ ! -e "${hold}" ]; do /bin/sleep 0.02; done` : "/bin/sleep 1.5"}; fi\nexec /bin/cat "${jpegPath}"`),
+      pdftoppm: writeStubTool(directory, "pool-pdftoppm", `${log ? `/bin/echo start >> "${log}"\n` : ""}if [ "$2" = "2" ]; then ${hold ? `while [ ! -e "${hold}" ]; do /bin/sleep 0.02; done` : "/bin/sleep 1.5"}; fi\n${log ? `/bin/echo end >> "${log}"\n` : ""}exec /bin/cat "${jpegPath}"`),
     };
   }
 
@@ -506,24 +509,20 @@ describe("§1.5 line 14 and D5: three slot pools, with stand-in tools", () => {
     expect((await slow).outcome).toBe("drawn");
   }, 20_000);
 
-  it("line 14: with view 1, two renders queue one behind the other (the second does not start while the first is held)", async () => {
+  it("line 14: with view 1, two renders queue one behind the other (start, end, start, end, not start, start, end, end)", async () => {
     const release = join(directory, "release-queue");
-    const invocations = join(directory, "pool-invocations");
-    rmSync(invocations, { force: true });
-    const started = () => (existsSync(invocations) ? readFileSync(invocations, "utf8").split("\n").filter(Boolean).length : 0);
-    const tools = poolTools(release);
+    const log = join(directory, "order-queue.log");
+    const tools = poolTools(release, log);
     setLimits({ pdfinfoPath: tools.pdfinfo, pdftoppmPath: tools.pdftoppm, concurrency: { check: 1, view: 1, background: 1 } });
     const first = render(fileOf("synthetic.pdf"), 2, 10_000, "view");
     await untilInFlight(1);
     const second = render(fileOf("synthetic.pdf"), 2, 10_000, "view");
-    // Give the second every chance to start; it must not while the first holds the one view slot.
-    for (let turn = 0; turn < 20; turn += 1) await new Promise((resolve) => setTimeout(resolve, 5));
-    expect(started(), "only the first render's tool has been invoked").toBe(1);
+    // Both renders wait on the one release; a queue shows as the second starting only after the first ends.
     writeFileSync(release, "");
     const [one, two] = await Promise.all([first, second]);
     expect(one.outcome).toBe("drawn");
     expect(two.outcome).toBe("drawn");
-    expect(started()).toBe(2);
+    expect(readFileSync(log, "utf8").split("\n").filter(Boolean)).toEqual(["start", "end", "start", "end"]);
   }, 20_000);
 
   it("D5: a background draw holding its one slot does not delay a view draw (the view draw completes while the background draw is still held)", async () => {
