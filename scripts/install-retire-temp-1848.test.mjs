@@ -204,4 +204,26 @@ describe("#1901 O-R3 retire_smtp_steps sweeps stale .env-orbit.retire-smtp.* fil
     expect(existsSync(join(targetDir, ".env-orbit"))).toBe(true);
     expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).not.toContain("SMTP_HOST=");
   });
+
+  it("removes only a regular file named .env-orbit.retire-smtp.<6 alphanumerics>: a link, a folder and near-miss names survive", () => {
+    const targetDir = folderWithSmtp();
+    const victim = victimIn();
+    const real = ".env-orbit.retire-smtp.Qw3Er4";
+    writeFileSync(join(targetDir, real), "SMTP_PASSWORD=stale-copy\n", { mode: 0o600 });
+    const link = ".env-orbit.retire-smtp.ABC123";
+    symlinkSync(victim, join(targetDir, link));
+    const folder = ".env-orbit.retire-smtp.Dir123";
+    mkdirSync(join(targetDir, folder));
+    writeFileSync(join(targetDir, folder, "inside"), "inside\n");
+    const nearMisses = [".env-orbit.retire-smtp.Ab12C", ".env-orbit.retire-smtp.Ab12Cde", ".env-orbit.retire-smtp.Ab-2Cd"];
+    for (const name of nearMisses) writeFileSync(join(targetDir, name), "mine\n");
+    const result = update(targetDir, { extraEnv: NONE_AFTER });
+    expect(result.status).toBe(0);
+    expect(existsSync(join(targetDir, real)), "the real leftover goes").toBe(false);
+    expect(lstatSync(join(targetDir, link)).isSymbolicLink(), "the link stays a link").toBe(true);
+    expect(readlinkSync(join(targetDir, link))).toBe(victim);
+    expect(readFileSync(victim, "utf8")).toBe(VICTIM_TEXT);
+    expect(readFileSync(join(targetDir, folder, "inside"), "utf8")).toBe("inside\n");
+    for (const name of nearMisses) expect(readFileSync(join(targetDir, name), "utf8"), name).toBe("mine\n");
+  });
 });

@@ -8,7 +8,7 @@
 // Harness as in install.update-prune-undo-copies.test.mjs (same names, copied: that file exports nothing).
 
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -271,6 +271,30 @@ describe("#1874 install.sh prune: Ctrl-C at the undo-copy prompt with stdin redi
   });
 });
 
+// #1915 O-F1: smtp_discard_copy removes exactly the names the prune's qualifier accepts; a wider glob would also
+// take these near-miss names, which must survive (and keep the folder).
+describe("#1915 O-F1 install.sh smtp_discard_copy: near-miss names are kept", () => {
+  it("a confirmed retirement removes the exact leftovers but not names with 5 or 7 characters, a non-alphanumeric suffix or another prefix", () => {
+    const targetDir = installedFolder();
+    const envBlock = ["COMPOSE_FILE=docker-compose.yml:docker-compose.mail.yml", "SMTP_HOST=smtp.example.test", "SMTP_PORT=587", "SMTP_SECURITY=starttls", "SMTP_USER=orbit@example.test", "SMTP_PASSWORD_FILE=/run/orbit-secrets/orbit-smtp-password", "SMTP_FROM=Orbit <orbit@example.test>", ""];
+    const envPath = join(targetDir, ".env-orbit");
+    writeFileSync(envPath, `${readFileSync(envPath, "utf8")}${envBlock.join("\n")}`, { mode: 0o600 });
+    writeFileSync(join(targetDir, ".orbit-secrets", "smtp-password"), "TEST-NOT-A-REAL-PASSWORD", { mode: 0o600 });
+    const IMPORTED = "mail-sending source=imported imported-from-environment=true";
+    const NONE = "mail-sending source=none imported-from-environment=false";
+    expect(update(targetDir, { FAKE_MAIL_SENDING_STATUS: IMPORTED, FAKE_MAIL_SENDING_STATUS_AFTER_SECRET_GONE: NONE }).status).toBe(0);
+    const record = readFileSync(join(targetDir, ".orbit-smtp-retirement"), "utf8");
+    const copy = record.match(/^copy=(orbit-install-backups\/\S+)$/mu)?.[1];
+    expect(copy, record).toBeDefined();
+    const exact = [ENV_LEFTOVER, OVERLAY_LEFTOVER, `${MARKER}.Ab12Cd`];
+    const nearMisses = [".env-orbit.smtp-copy.Ab12C", ".env-orbit.smtp-copy.Ab12Cde", ".env-orbit.smtp-copy.Ab-2Cd", "docker-compose.mail.yml.smtp-copy.Ab12C", "docker-compose.mail.yml.smtp-copy.Ab12Cde", "docker-compose.mail.yml.smtp-copy.Ab_2Cd", `${MARKER}.Ab12C`, `${MARKER}.Ab12Cde`, `${MARKER}.Ab-2Cd`, ".env-orbit.smtp-copy.tmp.bak", ".env-orbit.other.Ab12Cd"];
+    for (const name of [...exact, ...nearMisses]) writeFileSync(join(targetDir, copy, name), "x\n", { mode: 0o600 });
+    expect(update(targetDir, { FAKE_MAIL_SENDING_STATUS: IMPORTED }).status).toBe(0);
+    for (const name of exact) expect(existsSync(join(targetDir, copy, name)), `${name} goes`).toBe(false);
+    for (const name of nearMisses) expect(readFileSync(join(targetDir, copy, name), "utf8"), `${name} stays`).toBe("x\n");
+  });
+});
+
 // #1915 O-F1 / O-F3: the discard loop ignored the copy marker's own temporary file (.orbit-smtp-undo.<6>), which the
 // prune's qualifier accepts, so a killed repair's folder survived a confirmed retirement.
 describe("#1915 O-F1/O-F3 install.sh smtp_discard_copy: the copy marker's temporary file", () => {
@@ -330,5 +354,33 @@ describe("#1915 O-R1 install.sh exit cleanup as a background job on a terminal",
       child.on("close", () => { clearTimeout(timer); resolve(stdout); });
     });
     expect(output.replace(/\r/gu, "")).toContain("BG-RESULT=finished");
+  });
+});
+
+// #1915 O-R1, foreground: the same exit cleanup must still restore the terminal when the installer's group owns
+// it. A stty shim logs each call, so a restore that never runs (terminal_background_job always true) fails here.
+describe("#1915 O-R1 install.sh exit cleanup in the terminal's foreground", () => {
+  it("restores the terminal: stty is called with the saved settings and then with echo", async () => {
+    const targetDir = installedFolder();
+    const binDir = makeFakeBin();
+    const logDir = mkdtempSync(join(tmpdir(), "orbit-install-log-"));
+    const shim = mkdtempSync(join(tmpdir(), "orbit-stty-shim-"));
+    const sttyLog = join(shim, "stty.log");
+    const real = spawnSync("bash", ["-c", "command -v stty"], { encoding: "utf8" }).stdout.trim();
+    writeFileSync(join(shim, "stty"), `#!/bin/bash\nprintf '%s\\n' "$*" >> '${sttyLog}'\nexec '${real}' "$@"\n`);
+    chmodSync(join(shim, "stty"), 0o755);
+    const base = { ...baseEnvironment(binDir, logDir), ...updateEnv() };
+    const env = { ...base, PATH: `${shim}:${base.PATH}` };
+    await new Promise((resolve, reject) => {
+      const child = spawn("script", ["-qeE", "never", "-c", `bash ${installScript} --plain --update </dev/null >/dev/null 2>&1`, "/dev/null"], { cwd: targetDir, env });
+      const timer = setTimeout(() => { child.kill("SIGKILL"); reject(new Error("timed out")); }, PROCESS_TEST_TIMEOUT_MS);
+      child.on("error", reject);
+      child.on("close", () => { clearTimeout(timer); resolve(); });
+    });
+    const calls = existsSync(sttyLog) ? readFileSync(sttyLog, "utf8").split("\n").filter(Boolean) : [];
+    const saved = calls.indexOf("-g");
+    expect(saved, calls.join(" | ")).toBeGreaterThanOrEqual(0);
+    expect(calls.slice(saved + 1), "the restore after the save").toContain("echo");
+    expect(calls.slice(saved + 1).some((call) => call !== "echo" && call !== "-g"), "the saved settings are put back").toBe(true);
   });
 });

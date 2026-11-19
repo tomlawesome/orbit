@@ -22,8 +22,9 @@ import {
   committedCanned,
   onlyStamp,
   originalsIn,
+  filesNamed,
+  backupsDir,
   ownTree,
-  treeSnapshot,
 } from "./install-test-support.mjs";
 
 vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
@@ -114,16 +115,28 @@ describe("install.sh: the rollback restore falls back to a rename-aside when the
 });
 
 describe("install.sh: snapshot_fresh_target knows the rollback's aside name (#1901 O-R1)", () => {
+  // Guarantee 58: a leftover aside of either name does not stop a folder counting as fresh and is not copied into
+  // originals/ (it is the installer's own); a verified restore then releases originals/, and the aside is moved
+  // into moved/, never deleted.
   it.each([
     [".env-orbit", "..env-orbit.orbit-restore.4242.aside"],
     [".orbit-secrets", "..orbit-secrets.orbit-restore.4242.aside"],
-  ])("a folder holding only its originals and a leftover %s aside is still a fresh folder: it gets a start record", (_name, aside) => {
-    const { targetDir, environment } = recoveryFixture();
+  ])("a folder holding only its originals and a leftover %s aside is still a fresh folder: it gets a start record, the aside is not an original, and the folder ends restored", (_name, aside) => {
+    const { targetDir, environment, before } = recoveryFixture();
     writeFileSync(join(targetDir, aside), "left by an interrupted restore\n");
     const result = runInstall(targetDir, { ...environment, ...committedCanned(), FAKE_COMPOSE_UP_FAIL: "1" });
     expect(result.status).toBe(1);
-    const stamp = onlyStamp(targetDir);
-    expect(existsSync(join(stamp, "originals", ".env-orbit"))).toBe(true);
-    expect(treeSnapshot(join(stamp, "originals"))).toHaveProperty([".orbit-secrets/oidc-client-secret"]);
+    // A start record was taken: the rollback ran (a non-fresh folder is an update and is never rolled back).
+    expect(terminalFailure(result.stdout)).toMatch(/ action=retry /u);
+    expect(result.stderr).toContain("rolled back");
+    // Never copied into originals/; originals/ itself is released after the verified restore.
+    expect(filesNamed(backupsDir(targetDir), [aside]).filter((path) => path.includes("/originals/"))).toEqual([]);
+    expect(filesNamed(backupsDir(targetDir), ["originals"])).toEqual([]);
+    // Not deleted: the rollback moved it into moved/.
+    const kept = filesNamed(backupsDir(targetDir), [aside]);
+    expect(kept).toHaveLength(1);
+    expect(kept[0]).toContain("/moved/");
+    expect(readFileSync(kept[0], "utf8")).toBe("left by an interrupted restore\n");
+    expect(originalsIn(ownTree(targetDir))).toEqual(originalsIn(before));
   });
 });
