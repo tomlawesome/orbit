@@ -202,7 +202,11 @@ export async function GET(event) {
       /* The moment only, for the card's sentence; the door takes both out of
          the address bar before it draws. */
       door.searchParams.set("refusedAt", hold.refusedAt);
-      door.searchParams.set("returnTo", transaction.returnTo);
+      /* Where the save then lands, worked out as the success path below
+         works it out (#1901 ruling 3): an invited reader goes back to the
+         invitation. The invitation cookie stays for /invite/[token] to
+         clear. */
+      door.searchParams.set("returnTo", signedInDestination(event, config, transaction.returnTo));
       return new Response(null, {
         status: 303,
         headers: { location: door.href, "cache-control": "no-store" },
@@ -219,10 +223,7 @@ export async function GET(event) {
        because returnTo comes off a query string a stranger can write and this
        cookie is only ever set after the invitation was found and found open.
        The invite screen clears it, whatever the outcome. */
-    const pendingInvitation = readInvitationCookie(event.cookies, config);
-    const destination = pendingInvitation
-      ? new URL(`/invite/${encodeURIComponent(pendingInvitation)}`, config.appUrl)
-      : new URL(transaction.returnTo, config.appUrl);
+    const destination = new URL(signedInDestination(event, config, transaction.returnTo), config.appUrl);
 
     return new Response(null, {
       status: 303,
@@ -234,4 +235,19 @@ export async function GET(event) {
   } catch (error) {
     return callbackFailure(error, config, event);
   }
+}
+
+/**
+ * Where a signed-in reader goes next (#481): the invitation the sign-in
+ * started from, read from Orbit's own cookie, else the transaction's sealed
+ * returnTo. Shared by the success path and the change-password hold (#1901).
+ *
+ * @param {{ cookies: { get(name: string): string | undefined } }} event
+ * @param {import("orbit/lib/env").AuthConfig} config
+ * @param {string} returnTo
+ * @returns {string}
+ */
+function signedInDestination(event, config, returnTo) {
+  const pendingInvitation = readInvitationCookie(event.cookies, config);
+  return pendingInvitation ? `/invite/${encodeURIComponent(pendingInvitation)}` : returnTo;
 }

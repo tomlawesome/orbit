@@ -178,6 +178,10 @@
   let refusedAt = $state(/** @type {string | null} */ (null));
   /** The hold ran out before a password was saved. */
   let renewLapsed = $state(false);
+  /** The password is saved but no session came with it (#1901): the route
+      answered `sign_in_again`, or a retry was refused `password_change_saved`.
+      The card says so and offers the fresh door, as the lapsed card does. */
+  let renewSaved = $state(false);
   /** @type {ReturnType<typeof setTimeout> | undefined} */
   let renewTimer;
   /** The error code of the last refused POST, for the one refusal that
@@ -453,6 +457,7 @@
     again = "";
     refusedAt = typeof refusedAtIso === "string" ? refusedAtIso : null;
     renewLapsed = false;
+    renewSaved = false;
     card = "renew";
     showCard(true);
     clearTimeout(renewTimer);
@@ -461,9 +466,25 @@
 
   /** Saves the new password; saving is the launch (#1881). */
   async function submitNewPassword() {
-    if (busy || renewLapsed) return;
+    if (busy || renewLapsed || renewSaved) return;
     fetchFlightAhead({ hurry: true });
-    if (await present("/api/auth/local/login/new-password", { password, passwordAgain: again })) {
+    const answer = await present("/api/auth/local/login/new-password", { password, passwordAgain: again });
+    if (answer?.state === "password_change_required") {
+      /* Saved, but a refusal re-marked the account before the session was
+         minted (#1901): a fresh hold, ten minutes from now, as the pending
+         poll's own answer starts one. */
+      chooseNewPassword(answer.refusedAt, Date.now() + RENEW_HOLD_MS);
+      return;
+    }
+    if (answer?.state === "sign_in_again" || (!answer && lastCode === "password_change_saved")) {
+      clearTimeout(renewTimer);
+      password = "";
+      again = "";
+      message = "";
+      renewSaved = true;
+      return;
+    }
+    if (answer) {
       clearTimeout(renewTimer);
       password = "";
       again = "";
@@ -806,7 +827,7 @@
       <Waiting phase={pendingState} {canResendAt} {limited} {busy} {message} onresend={resendApproval} />
     {:else if card === "renew"}
       <Identity mode="renew" bind:password bind:again {busy} {message} {refusedAt}
-                lapsed={renewLapsed} onsignin={signInAgain} onsubmit={submitNewPassword} />
+                lapsed={renewLapsed || renewSaved} saved={renewSaved} onsignin={signInAgain} onsubmit={submitNewPassword} />
     {:else if card === "create"}
       <Identity mode="create" bind:email bind:displayName bind:password
                 provider={providerOffered} {busy} {message}
