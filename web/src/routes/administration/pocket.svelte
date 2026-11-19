@@ -14,7 +14,7 @@
   import { NAME_LIMIT } from "$lib/arrival/stage.js";
   import {
     ALIAS_GRACE_DAYS, JOB_KINDS, JOB_STATES, SETUP_LINK_DAYS, blankMailDraft, providerAsk, daysLeft, probeWords, fetchNowRefusal, fetchNowWords,
-    expired, failedHalvesOf, freshInvite, ingestShort, jobCountsOf, jobMetaOf, jobsOf, lapsesShort, mailDraftOf, exportsKeptShort, megabytes, documentsOwed, storeSize,
+    expired, failedHalvesOf, freshInvite, ingestShort, jobCountsOf, jobMetaOf, jobsOf, lapsesShort, mailDraftOf, exportsKeptTitle, gigabytes, megabytes, documentsOwed, storeSize,
     openFor, plainly, sendWords, shortDay, stamp, systemDotsOf, tellsOf, testMetaOf, testVerdict, versionLine,
     namesOf, notMailedWords, providerHost,
     SENDING_HOW_HREF, SENDING_NOT_SET, blankSendDraft, importSkippedWords, mailboxSubmissionHost, sendDraftOf, sendingOutcomeWords, sendingRowsOf,
@@ -966,8 +966,8 @@
         <section class="p-card ad-card ad-flush" style:--i="5" id="ad-archives" tabindex="-1"
                  aria-labelledby="ad-archives-head" data-ad="archives">
           <div class="ad-cardhead"><h2 class="p-caps" id="ad-archives-head">Exports kept</h2></div>
-          <Row title="Exports kept"
-               meta={exportsKeptShort(view.archiveStorage, " per system")}
+          <Row title={exportsKeptTitle(view.archiveStorage)}
+               meta={gigabytes(view.archiveStorage.maxTotalBytes)}
                trail="change" trailTone="var(--accent-text)" trailName="change the export settings"
                onactivate={openArchiveStorage}>
             {#snippet mark()}<span class="ad-kmark">↓</span>{/snippet}

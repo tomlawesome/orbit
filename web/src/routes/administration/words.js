@@ -107,6 +107,9 @@ export const gigabytes = (bytes) => `${bytes / 1073741824} GB`;
 /** The export settings in short, for the phone's row and the desk's "defaults" line (#1792). @param {{ retentionHours: number, keepPerHousehold: number, maxTotalBytes: number }} kept @param {string} [per] */
 export const exportsKeptShort = (kept, per = "") => `${kept.retentionHours} h · ${kept.keepPerHousehold}${per} · ${gigabytes(kept.maxTotalBytes)}`;
 
+/** The phone's Exports kept row title: hours and count, with the size as the row's meta (#1913, R5). @param {{ retentionHours: number, keepPerHousehold: number }} kept */
+export const exportsKeptTitle = (kept) => `${kept.retentionHours} h · ${kept.keepPerHousehold} per system`;
+
 /** @param {string} word */
 export const plainly = (word) => word.replaceAll("_", " ");
 
