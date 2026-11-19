@@ -1402,7 +1402,9 @@ snapshot_fresh_target() {
   for name in "${entries[@]}"; do
     case "$name" in
       .env-orbit | .orbit-secrets) originals+=("$name") ;;
-      orbit-install-backups) ;;
+      # O-R1: a rollback's aside left by an interrupted restore is the
+      # installer's own; it is not an original and is not copied.
+      orbit-install-backups | ..env-orbit.orbit-restore.*.aside | ..orbit-secrets.orbit-restore.*.aside) ;;
       *) return 0 ;;
     esac
   done
@@ -1817,7 +1819,12 @@ restore_originals() {
     if ! cp -a -- "${copy}/${name}" "$staged" ||
       ! diff -r --no-dereference -- "${copy}/${name}" "$staged" >/dev/null 2>&1; then
       rm -rf -- "$staged" 2>/dev/null || true
-      rollback_restore_failed "$path"
+      # O-R1: with the path still there, put it aside and copy into place.
+      if [[ -e "$path" || -L "$path" ]]; then
+        restore_original_aside "$name" "$staged" || rollback_restore_failed "$path"
+      else
+        rollback_restore_failed "$path"
+      fi
       continue
     fi
     if [[ -e "$path" || -L "$path" ]]; then
@@ -1838,6 +1845,40 @@ restore_originals() {
       rollback_restore_failed "$path"
     fi
   done
+}
+
+# restore_original_aside <name> <staged>
+#
+# O-R1: the fallback when the staged copy could not be made. The current
+# entry is renamed to "<staged>.aside" (or, when the containers could not be
+# stopped, moved into engine/ as before), the original is copied straight
+# into place with `cp -a` and checked with `diff -r`, and only then is the
+# aside removed. If that copy fails too, the partial copy is removed (the
+# original is still in originals/) and the aside is moved back; an aside
+# that cannot be moved back is kept and named. Returns 1 when the original
+# is not back in place.
+restore_original_aside() {
+  local name="$1" path="${target_dir}/$1" source="${backup_dir}/originals/$1" aside="$2.aside"
+  if [[ "$rollback_down_failed" == 1 ]]; then
+    aside="${backup_dir}/engine/${name}"
+    rollback_move "$name" engine || return 1
+  else
+    [[ ! -e "$aside" && ! -L "$aside" ]] || return 1
+    mv -- "$path" "$aside" || return 1
+  fi
+  if cp -a -- "$source" "$path" &&
+    diff -r --no-dereference -- "$source" "$path" >/dev/null 2>&1; then
+    if [[ "$rollback_down_failed" != 1 ]] && ! rm -rf -- "$aside"; then
+      rollback_obstacle 'Could not remove %s, which holds what the install left in place of the original.' "$aside"
+    fi
+    return 0
+  fi
+  if { [[ ! -e "$path" && ! -L "$path" ]] || rm -rf -- "$path"; } &&
+    [[ ! -e "$path" && ! -L "$path" ]] && mv -- "$aside" "$path"; then
+    return 1
+  fi
+  rollback_obstacle 'Could not move %s back; it holds what the install left in place of the original.' "$aside"
+  return 1
 }
 
 rollback_restore_failed() {
