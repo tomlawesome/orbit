@@ -1901,7 +1901,7 @@ describe("rig jobs by runner (#1615, ADR-0039)", () => {
       const needs = jobNeeds(name);
       for (const need of gated) expect(needs, `${name}: keeps need ${need.job}`).toContainEqual(need);
       expect(needs.find((need) => need.job === "fast_checks"), `${name}: fast_checks with artifacts (#1831)`).toMatchObject({ artifacts: true });
-      expect(block, `${name}: no Docker`).not.toMatch(/^ {2}(extends|services|resource_group):/mu);
+      expect(block, `${name}: no Docker`).not.toMatch(/^ {2}(extends|services):/mu);
       expect(commandsOf(name), `${name}: no Docker`).not.toMatch(/docker/u);
       // Workers are set, not taken from the host's CPU count: os.cpus() in a
       // job container sees the whole host, not the per-job cap (ADR-0039 section 5).
@@ -2221,7 +2221,7 @@ exit 0
     expect(block).toMatch(/^ {2}needs: \*needs_rig$/mu);
     expect(commandsOf("screens_chromium")).toMatch(/orbit_lane_admits screens_chromium \|\| exit 0/u);
     expect(commandsOf("screens_chromium")).toMatch(/^\s+- \*reuse_gate$/mu);
-    expect(block, "no Docker").not.toMatch(/^ {2}(extends|services|resource_group):/mu);
+    expect(block, "no Docker").not.toMatch(/^ {2}(extends|services):/mu);
     expect(block).toMatch(/\n {2}allow_failure:\n {4}exit_codes:\n {6}- 3\n/u);
     expect(commandsOf("screens_chromium")).toMatch(/^\s+- \*reuse_evidence$/mu);
     expect(commandsOf("screens_chromium")).toMatch(/- if \[ -f \.quarantine-failed \]; then exit 3; fi/u);
@@ -3433,5 +3433,66 @@ describe("integration builds a missing web artefact (#1853)", () => {
     const comment = allBlocks.get("fast_checks").match(/((?:[ \t]*#.*\n)+)[ \t]*- web\/build\//u);
     expect(comment, "no comment above the web/build artefact").not.toBeNull();
     expect(comment[1]).toMatch(/integration/u);
+  });
+});
+
+// #1921: the nightly's rig jobs run through two resource_group slots, and the
+// stack jobs say so when the runner starves them or the daemon goes away.
+describe("nightly browser slots and starved-run messages (#1921)", () => {
+  const SLOT_OF = {
+    rig_webkit: "rig-slot-webkit",
+    film_webkit: "rig-slot-webkit",
+    rig_chromium: "rig-slot-chromium",
+    rig_firefox: "rig-slot-chromium",
+    screens_chromium: "rig-slot-chromium",
+    pocket_measure: "rig-slot-chromium",
+  };
+  const STACK_JOBS = ["smoke", "smoke_webkit", "smoke_webkit_mobile", "smoke_local_only"];
+  const groupOf = (name) => allBlocks.get(name)?.match(/^ {2}resource_group: *(\S+)/mu)?.[1];
+
+  it.each(Object.entries(SLOT_OF))("%s has resource_group %s", (name, slot) => {
+    expect(allBlocks.get(name), `${name} is not defined`).toBeDefined();
+    expect(groupOf(name)).toBe(slot);
+  });
+
+  it("has exactly two distinct rig-slot-* names in the file", () => {
+    const names = new Set(gitlabCi.match(/rig-slot-[A-Za-z0-9_-]+/gu) ?? []);
+    expect([...names].sort()).toEqual(["rig-slot-chromium", "rig-slot-webkit"]);
+  });
+
+  it("shares one slot between rig_webkit and film_webkit and the other between the other four", () => {
+    expect(groupOf("rig_webkit")).toBeDefined();
+    expect(groupOf("film_webkit")).toBe(groupOf("rig_webkit"));
+    const other = ["rig_chromium", "rig_firefox", "screens_chromium", "pocket_measure"].map(groupOf);
+    expect(new Set(other).size).toBe(1);
+    expect(other[0]).toBeDefined();
+    expect(other[0]).not.toBe(groupOf("rig_webkit"));
+  });
+
+  it("gives no other job a rig-slot-* group", () => {
+    for (const [name, block] of jobs) {
+      if (name in SLOT_OF) continue;
+      expect(block, `${name}: no rig slot`).not.toMatch(/^ {2}resource_group: *rig-slot-/mu);
+    }
+  });
+
+  it.each(STACK_JOBS)("%s keeps resource_group heavy-%s", (name) => {
+    expect(groupOf(name)).toBe(`heavy-${name}`);
+  });
+
+  it.each(STACK_JOBS)("%s caps the suite under its own timeout and names #1921", (name) => {
+    const block = allBlocks.get(name);
+    const jobMinutes = Number(block.match(/^ {2}timeout: (\d+)m$/mu)?.[1]);
+    expect(jobMinutes, `${name}: timeout`).toBeGreaterThan(0);
+    const wrapped = block.match(/timeout -k 30s (\d+)m bash scripts\/test-frontend\.sh(?! --quarantine)(?=\s|$|\))/mu);
+    expect(wrapped, `${name}: the suite call is wrapped in timeout -k 30s Nm`).not.toBeNull();
+    expect(Number(wrapped[1]), `${name}: N at least 5 below the job timeout`).toBeLessThanOrEqual(jobMinutes - 5);
+    expect(block, `${name}: failure message`).toMatch(/#1921[^\n]*starved|starved[^\n]*#1921/u);
+  });
+
+  it("makes show-stack-diagnostics.sh check the Docker daemon and say so (#1921)", () => {
+    const script = readFileSync(new URL("./ci/show-stack-diagnostics.sh", import.meta.url), "utf8");
+    expect(script).toMatch(/docker info/u);
+    expect(script).toContain("Docker daemon lost during the job (#1921)");
   });
 });
