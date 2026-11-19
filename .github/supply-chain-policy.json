@@ -696,7 +696,7 @@
       "reason": "CI image for the weekly dependency-update job; ships nothing to operators. Pinned under an `image:`/`services:` key in .gitlab-ci.yml, which Renovate's gitlabci manager proposes updates for; not watched by sidecar-pins."
     },
     {
-      "reference": "greenmail/standalone:2.1.13@sha256:3df66b7edd01c8a301343ca5e3601d8674760d4708655573560c24745e624fb2",
+      "reference": "greenmail/standalone:2.1.15@sha256:309ba544ea482e5d4265d09921cdab07c8dad2cc4481d715c9b8ff5d3f0a149f",
       "locations": [
         "compose/docker-compose.acceptance.yml"
       ],
