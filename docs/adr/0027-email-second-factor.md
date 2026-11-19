@@ -143,3 +143,20 @@ change of memorized secret on evidence of compromise.
   refusal is said on the new-password step instead (design round
   `design/v19/password-after-refusal/round-1/`, direction R, owner verdict
   2026-11-17). This closes #1879 A-S1.
+
+## Amendment of 2026-11-18: a maybe-delivered resend keeps both links (#1896)
+
+**Ruled (2026-11-18, #1896 note 65074)**, replacing §8's "one live link per
+pending sign-in" with "one link per mail that may have arrived, at most two".
+A resend stages its link: the new digest is written beside the current one
+(`sign_in_approvals.staged_token_hash`) under the per-user lock before the
+mail goes, and the row resolves the current link and the staged one until the
+send is confirmed, when staged becomes current and the old link stops
+working, or proven not to have left (the provider answered with a numbered
+reply, or no connection could be made), when staged is cleared and the send
+time put back. Any other outcome, a timeout or a reset connection above all,
+is treated as maybe delivered and keeps both, since the sender cannot tell a
+lost acknowledgement from a lost message (at-least-once delivery with
+idempotent acceptance). A later resend replaces the staged digest, so at most
+two links resolve for one pending sign-in. Expiry and single use are the
+row's: deciding through either link spends both, and the sweep removes both.

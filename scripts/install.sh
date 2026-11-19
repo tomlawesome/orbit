@@ -3174,10 +3174,18 @@ smtp_copy_dir=""
 smtp_record_step=""
 
 # smtp_write_record <step>: the step record, written beside its target and
-# renamed; it names the undo copy's folder when one is known.
+# renamed; it names the undo copy's folder when one is known. #1848: a
+# unique mktemp name beside it, never the old fixed .tmp name.
 smtp_write_record() {
-  ( umask 077 && { printf 'step=%s\n' "$1" && if [[ -n "$smtp_copy_dir" ]]; then printf 'copy=%s\n' "$smtp_copy_dir"; fi; } > "${smtp_retirement_record}.tmp" ) &&
-    mv -f -- "${smtp_retirement_record}.tmp" "$smtp_retirement_record"
+  local tmp=""
+  if tmp="$(mktemp "${smtp_retirement_record}.XXXXXX")" &&
+    ( umask 077 && { printf 'step=%s\n' "$1" && if [[ -n "$smtp_copy_dir" ]]; then printf 'copy=%s\n' "$smtp_copy_dir"; fi; } > "$tmp" ) &&
+    chmod 600 -- "$tmp" &&
+    mv -f -- "$tmp" "$smtp_retirement_record"; then
+    return 0
+  fi
+  [[ -z "$tmp" ]] || rm -f -- "$tmp"
+  return 1
 }
 
 # smtp_read_record: sets $smtp_record_step and $smtp_copy_dir from the step
@@ -3251,13 +3259,26 @@ smtp_find_orphan_copy() {
 # smtp_write_copy <folder>: the undo copy of the lines the retirement removes
 # from .env-orbit, written to a temporary file in <folder> and renamed over
 # <folder>/.env-orbit, so an existing copy (a hard link included) is
-# replaced, never written through (#1834).
+# replaced, never written through (#1834). #1848: the temporary file has a
+# unique mktemp name, as repair.sh's FIX-S1 does; the old fixed .tmp name is
+# never opened, followed or removed here.
 smtp_write_copy() {
-  local tmp="$1/.env-orbit.smtp-copy.tmp"
-  rm -f -- "$tmp" &&
+  local tmp="" saved_options entry
+  # A run killed mid-copy leaves its mktemp file; an adopted folder's go
+  # first so it keeps one copy. The old fixed .tmp name is not matched.
+  saved_options="$(shopt -p nullglob)" || true
+  shopt -s nullglob
+  for entry in "$1"/.env-orbit.smtp-copy.??????; do
+    if smtp_copy_tmp_name "${entry##*/}" && [[ -f "$entry" && ! -L "$entry" ]]; then rm -f -- "$entry"; fi
+  done
+  eval "$saved_options"
+  if tmp="$(mktemp "$1/.env-orbit.smtp-copy.XXXXXX")" &&
     ( umask 077 && smtp_env_rewrite backup < "$environment_file" > "$tmp" ) &&
-    mv -f -- "$tmp" "$1/$environment_file" && return 0
-  rm -f -- "$tmp"
+    chmod 600 -- "$tmp" &&
+    mv -f -- "$tmp" "$1/$environment_file"; then
+    return 0
+  fi
+  [[ -z "$tmp" ]] || rm -f -- "$tmp"
   return 1
 }
 

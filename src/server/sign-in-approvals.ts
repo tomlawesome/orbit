@@ -37,7 +37,7 @@
  */
 
 import { createHash, randomBytes } from "node:crypto";
-import { and, eq, gt, isNull, lt, lte, sql } from "drizzle-orm";
+import { and, eq, gt, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { base64url } from "jose";
 import { getDb } from "@/db";
 import { auditLog, localCredentials, signInApprovalSends, signInApprovals, users } from "@/db/schema";
@@ -306,7 +306,9 @@ async function sendsInWindow(
  * False when the hour's allowance is spent; true once the reservation is
  * written, which the caller commits before the mail goes. It is kept whether or not the mail
  * goes: the limit counts attempts, not successes (#1879 ruling, note 64435),
- * because a "failed" send can still have reached the provider and the inbox.
+ * because a "failed" send can still have reached the provider and the inbox
+ * -- the same fact that keeps a maybe-delivered resend's link alive (#1891,
+ * #1896).
  */
 async function reserveSend(
   transaction: Transaction,
@@ -320,19 +322,26 @@ async function reserveSend(
 }
 
 /**
- * Puts a failed resend's send time back, so the minute runs from the last
- * mail that actually went (#1891). The hour's count row stays (#1879). Only
- * while the row still carries this resend's own time, so a later resend that
- * committed meanwhile is never undone. Under the same lock as the stamp.
+ * Undoes a resend whose mail provably never left (#1891, #1896): its staged
+ * link is cleared, and its send time put back so the minute runs from the
+ * last mail that actually went. The hour's count row stays (#1879). The
+ * staged link only while it is still this resend's, and the time only while
+ * the row still carries this resend's own stamp, so a later resend that
+ * committed meanwhile is never undone. Under the same lock as the stamp. A
+ * maybe-delivered send never comes here: its link and its minute stand.
  */
 async function restoreSendTime(
   userId: string,
   approvalId: string,
+  stagedDigest: string,
   stampedAt: Date,
   previousLastSentAt: Date | null,
 ): Promise<void> {
   await getDb().transaction(async (transaction) => {
     await lockUser(transaction, userId);
+    await transaction.update(signInApprovals)
+      .set({ stagedTokenHash: null })
+      .where(and(eq(signInApprovals.id, approvalId), eq(signInApprovals.stagedTokenHash, stagedDigest)));
     await transaction.update(signInApprovals)
       .set({ lastSentAt: previousLastSentAt })
       .where(and(eq(signInApprovals.id, approvalId), eq(signInApprovals.lastSentAt, stampedAt)));
@@ -366,6 +375,16 @@ async function sweepExpiredApprovals(now: Date): Promise<void> {
   }
 }
 
+/**
+ * What one approval mail did: the bounded failure, and whether the mail may
+ * have arrived anyway (#1896). Nothing was sent when no address or link
+ * existed, so those are never maybe delivered.
+ */
+interface ApprovalMailOutcome {
+  sendError: ApprovalSendError | null;
+  maybeDelivered: boolean;
+}
+
 /** Puts one approval mail on the wire. Never throws for a provider failure. */
 async function mailApproval(
   recipient: Recipient,
@@ -374,12 +393,12 @@ async function mailApproval(
   requestedAt: Date,
   expiresAt: Date,
   options: SignInApprovalOptions,
-): Promise<ApprovalSendError | null> {
+): Promise<ApprovalMailOutcome> {
   if (!recipient.email) {
     /* No readable address means no way to ask (#969). The door stays shut and
        the administration screen's setup link is the way through, exactly as
        ADR-0027 §7 intends for an undeliverable mailbox. */
-    return "unknown";
+    return { sendError: "unknown", maybeDelivered: false };
   }
   let mail;
   try {
@@ -398,7 +417,7 @@ async function mailApproval(
        it is reported, not thrown. Throwing here would turn a misconfigured
        instance's sign-in into a 502 and tell the reader their password was
        the problem. */
-    return "unknown";
+    return { sendError: "unknown", maybeDelivered: false };
   }
   const outcome = await sendBoundedMail(
     recipient.email,
@@ -420,7 +439,7 @@ async function mailApproval(
       impact: "sign_in_blocked",
     });
   }
-  return outcome.sendError;
+  return { sendError: outcome.sendError, maybeDelivered: outcome.maybeDelivered };
 }
 
 /**
@@ -484,7 +503,7 @@ export async function startSignInApproval(
   const sendError: ApprovalSendError | null = limited
     ? null
     : recipient
-      ? await mailApproval(recipient, token, facts, now, expiresAt, options)
+      ? (await mailApproval(recipient, token, facts, now, expiresAt, options)).sendError
       : "unknown";
 
   if (!limited && sendError === null) {
@@ -517,6 +536,17 @@ export interface ApprovalRequestView {
 }
 
 /**
+ * The row a link belongs to: by its current digest or by the staged one a
+ * resend left while its mail's fate is unknown (#1896, ADR-0027 §8 amendment
+ * of 2026-11-18). A digest is 256 random bits, so it names one row, and
+ * the outcome, expiry and `consumed_at` are the row's: deciding through
+ * either link spends both.
+ */
+function byLink(digest: string) {
+  return or(eq(signInApprovals.tokenHash, digest), eq(signInApprovals.stagedTokenHash, digest));
+}
+
+/**
  * Reads a pending sign-in for display. A PURE READ, deliberately: mail
  * scanners follow links, so opening one must change nothing at all (build
  * ruling, 2026-09-18).
@@ -539,7 +569,7 @@ export async function readSignInApproval(
       outcome: signInApprovals.outcome,
     })
     .from(signInApprovals)
-    .where(eq(signInApprovals.tokenHash, secretDigest(token)))
+    .where(byLink(secretDigest(token)))
     .limit(1);
   if (!row) return null;
 
@@ -601,7 +631,7 @@ export async function decideSignInApproval(
         createdAt: signInApprovals.createdAt,
       })
       .from(signInApprovals)
-      .where(eq(signInApprovals.tokenHash, tokenHash))
+      .where(byLink(tokenHash))
       .for("update")
       .limit(1);
 
@@ -779,11 +809,12 @@ export type ResendOutcome =
   | { state: "unknown" };
 
 /**
- * Sends the waiting tab's link again, inside ADR-0027 §8's limits: one live
- * link per pending sign-in, so this REPLACES the token rather than adding a
- * second one; not inside a minute of the last send; and never past five sends
- * for the account in an hour, where the answer is to read the mail already
- * sent rather than to ask for another.
+ * Sends the waiting tab's link again, inside ADR-0027 §8's limits: one link
+ * per mail that may have arrived, at most two (amendment of 2026-11-18,
+ * #1896), so a confirmed resend REPLACES the token and an unconfirmed one
+ * keeps the old link beside the new; not inside a minute of the last send;
+ * and never past five sends for the account in an hour, where the answer is
+ * to read the mail already sent rather than to ask for another.
  */
 export async function resendSignInApproval(
   claim: string,
@@ -831,10 +862,12 @@ export async function resendSignInApproval(
      A resend queued behind this one reads the send time written here and
      answers too_soon, so one mail goes. The lock is not held across the
      network send.
-     The new link is staged, not switched (#1879 ruling, note 64435): the row
-     keeps the old digest while the mail is in flight, so the old link still
-     reads open and approves, and a process that stops before the send leaves
-     a working link rather than a dead one. */
+     The new link is staged, not switched (#1879 ruling, note 64435; #1896):
+     its digest is written to `staged_token_hash` here, under the lock, and
+     the row keeps the old digest beside it while the mail is in flight, so
+     both links read open and approve, and a process that stops before or
+     during the send leaves a working link rather than a dead one. An earlier
+     staged digest is replaced, so no more than two links ever resolve. */
   const reserved = await db.transaction(async (transaction) => {
     await lockUser(transaction, found.userId);
     const [row] = await transaction
@@ -852,7 +885,7 @@ export async function resendSignInApproval(
     if (!(await reserveSend(transaction, row.id, row.userId, now))) return "limited" as const;
     await transaction
       .update(signInApprovals)
-      .set({ lastSentAt: now })
+      .set({ lastSentAt: now, stagedTokenHash: tokenHash })
       .where(eq(signInApprovals.id, row.id));
     return { state: "reserved", row, recipient } as const;
   });
@@ -861,26 +894,45 @@ export async function resendSignInApproval(
   if (reserved.state === "too_soon") return reserved;
   const { row, recipient } = reserved;
 
-  let sendError: ApprovalSendError | null;
+  let mailed: ApprovalMailOutcome;
   try {
-    sendError = await mailApproval(recipient, token, row, row.createdAt, row.expiresAt, options);
+    mailed = await mailApproval(recipient, token, row, row.createdAt, row.expiresAt, options);
   } catch (error) {
-    await restoreSendTime(row.userId, row.id, now, row.lastSentAt);
+    /* A throw may come after the mail went, so it is maybe delivered
+       (#1896): both links, the send time and the count row all stay. One
+       bounded line, then the error goes on. */
+    log.warn({
+      event: "auth.local",
+      state: "degraded",
+      reason: "unexpected_failure",
+      action: "check_provider",
+      impact: "sign_in_blocked",
+    });
     throw error;
   }
+  const { sendError, maybeDelivered } = mailed;
   if (sendError === null) {
-    /* The mail is in the post: switch the row to its link. Only while the row
-       still carries the digest read under the lock, so a row cancelled or
-       rewritten meanwhile (#1898) is left as it is. */
+    /* The mail is in the post: promote its link to current and drop the old
+       one. Only while the row still carries the digest read under the lock
+       and this resend's staged one, so a row cancelled or rewritten
+       meanwhile (#1898), or restaged by a later resend, is left as it is. */
     await db
       .update(signInApprovals)
-      .set({ tokenHash, sendCount: sql`${signInApprovals.sendCount} + 1` })
-      .where(and(eq(signInApprovals.id, row.id), eq(signInApprovals.tokenHash, row.tokenHash)));
-  } else {
-    /* The new link never arrived and the old one was never replaced: only
-       the send time goes back. The count row stays (#1879). */
-    await restoreSendTime(row.userId, row.id, now, row.lastSentAt);
+      .set({ tokenHash, stagedTokenHash: null, sendCount: sql`${signInApprovals.sendCount} + 1` })
+      .where(and(
+        eq(signInApprovals.id, row.id),
+        eq(signInApprovals.tokenHash, row.tokenHash),
+        eq(signInApprovals.stagedTokenHash, tokenHash),
+      ));
+  } else if (!maybeDelivered) {
+    /* The provider refused it or was never reached: the new link never
+       arrived and the old one was never replaced, so the staged link is
+       cleared and the send time goes back. The count row stays (#1879). */
+    await restoreSendTime(row.userId, row.id, tokenHash, now, row.lastSentAt);
   }
+  /* Otherwise maybe delivered (#1896): a mail may be arriving with the new
+     link, so both links stay until the next resend or a decision, and the
+     minute runs from this send. */
 
   return {
     state: "sent",
