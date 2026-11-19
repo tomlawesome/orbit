@@ -1,4 +1,4 @@
-import { closeSync, constants as fsConstants, fstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, constants as fsConstants, fstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -80,6 +80,15 @@ afterEach(() => {
   rmSync(target, { recursive: true, force: true });
 });
 
+// writeFileSync's `mode` is filtered by the process umask (0644 becomes 0640
+// under umask 027), so a fixture that must be exactly 0644 is chmod'ed
+// explicitly. The product copies the source mode faithfully; the golden's
+// 0644 is the fixture's mode, not something the umask may change (#1923).
+function writeFileExact(path: string, content: string, mode: number): void {
+  writeFileSync(path, content, { mode });
+  chmodSync(path, mode);
+}
+
 function seedInitialState(dir: string): void {
   writeFileSync(join(dir, ".env-orbit"), "APP_URL=https://parity.invalid\n", { mode: 0o600 });
   const secretsDir = join(dir, ".orbit-secrets");
@@ -122,7 +131,7 @@ describe("install-transaction parity against install.sh's staging functions (gol
     // characterized in install-transaction.test.ts.
     const golden = readGolden<TransactionGolden>(FLOW, "symlinked parent refuses restore");
     mkdirSync(join(target, "config"));
-    writeFileSync(join(target, "config", "tika-config.json"), "{}", { mode: 0o644 });
+    writeFileExact(join(target, "config", "tika-config.json"), "{}", 0o644);
 
     const tx = InstallTransaction.begin(target, golden.managedPaths);
     expect(snapshotTree(tx.originalDir)).toEqual(golden.bash.originalSnapshot);
@@ -147,13 +156,13 @@ describe("install-transaction parity against install.sh's staging functions (gol
   // when present and put back on rollback; absent, it is removed as new.
   it("backs up .orbit-files into rollback/original when present and restores it on rollback (#1496)", () => {
     seedInitialState(target);
-    writeFileSync(join(target, DEPLOYMENT_FILE_LIST), "# previous list\nold-file\n", { mode: 0o644 });
+    writeFileExact(join(target, DEPLOYMENT_FILE_LIST), "# previous list\nold-file\n", 0o644);
 
     const tx = InstallTransaction.begin(target, buildManagedPaths(DEPLOYMENT_ASSETS));
     const original = snapshotTree(tx.originalDir);
     expect(original[DEPLOYMENT_FILE_LIST]).toEqual({ mode: 0o644, type: "file", content: "# previous list\nold-file\n" });
 
-    writeFileSync(join(target, DEPLOYMENT_FILE_LIST), "# new list\n", { mode: 0o644 });
+    writeFileExact(join(target, DEPLOYMENT_FILE_LIST), "# new list\n", 0o644);
     expect(tx.rollback().ok).toBe(true);
     expect(snapshotTree(target)[DEPLOYMENT_FILE_LIST]).toEqual({ mode: 0o644, type: "file", content: "# previous list\nold-file\n" });
   });
@@ -163,7 +172,7 @@ describe("install-transaction parity against install.sh's staging functions (gol
     const tx = InstallTransaction.begin(target, buildManagedPaths(DEPLOYMENT_ASSETS));
     expect(snapshotTree(tx.originalDir)[DEPLOYMENT_FILE_LIST]).toBeUndefined();
 
-    writeFileSync(join(target, DEPLOYMENT_FILE_LIST), "# new list\n", { mode: 0o644 });
+    writeFileExact(join(target, DEPLOYMENT_FILE_LIST), "# new list\n", 0o644);
     expect(tx.rollback().ok).toBe(true);
     expect(snapshotTree(target)[DEPLOYMENT_FILE_LIST]).toBeUndefined();
   });
