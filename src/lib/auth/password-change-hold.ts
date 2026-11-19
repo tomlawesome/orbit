@@ -48,8 +48,12 @@ export async function issuePasswordChangeHold(
   cookies: CookieSink,
   refusal: PasswordChangeRequiredError,
   config: AuthConfig,
+  /* A re-issue keeps the first hold's lapse (#1901): never later than ten
+     minutes from now, so it can only shorten. */
+  lapsesAt?: Date,
 ): Promise<{ refusedAt: string; expiresAt: string }> {
-  const expiresAt = new Date(Date.now() + PASSWORD_CHANGE_HOLD_TTL_MS);
+  const fullTerm = Date.now() + PASSWORD_CHANGE_HOLD_TTL_MS;
+  const expiresAt = new Date(lapsesAt ? Math.min(lapsesAt.getTime(), fullTerm) : fullTerm);
   const ttlSeconds = Math.max(1, Math.floor((expiresAt.getTime() - Date.now()) / 1000));
   const sealed = await sealProof(
     /* The lapse is carried to the millisecond and checked strictly on open:

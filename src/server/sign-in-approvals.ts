@@ -45,6 +45,7 @@ import { userAddressLockKey } from "@/lib/auth/authority-locks";
 import { describeDevice } from "@/lib/auth/device";
 import { AuthError, PasswordChangeRequiredError } from "@/lib/auth/errors";
 import { log } from "@/lib/logger";
+import { PASSWORD_CHANGE_HOLD_TTL_MS } from "@/lib/auth/password-change-hold";
 import { recordLocalCredentialFailure } from "@/server/local-credentials";
 import { absoluteAppLink, sendBoundedMail, type InvitationMailer, type InvitationSendError } from "@/server/invitations/send";
 import { sendingConfigured } from "@/server/mail-in/sending-settings";
@@ -700,7 +701,9 @@ export type PendingSignInState =
   | { state: "approved"; userId: string; session?: MintedApprovalSession }
   /* Approved, but the account's password is marked (#1881): the approval is
      spent and the caller issues the change-password hold, never a session. */
-  | { state: "password_change_required"; refusal: PasswordChangeRequiredError }
+  /* `lapsesAt` is set only on a re-issue from a spent approval (#1901): the
+     hold then lapses when the first one did, never later. */
+  | { state: "password_change_required"; refusal: PasswordChangeRequiredError; lapsesAt?: Date }
   | { state: "denied" }
   | { state: "unknown" };
 
@@ -743,7 +746,10 @@ export async function collectSignInApproval(
 
   if (!row) return { state: "unknown" };
   if (row.outcome === "denied") return { state: "denied" };
-  if (row.consumedAt) return { state: "unknown" };
+  if (row.consumedAt) {
+    if (row.outcome === "approved") return reissueFromReceipt(row.userId, row.consumedAt);
+    return { state: "unknown" };
+  }
   if (row.expiresAt.getTime() <= Date.now()) return { state: "unknown" };
   if (row.outcome !== "approved") return { state: "waiting" };
 
@@ -799,6 +805,42 @@ export async function collectSignInApproval(
       .where(and(eq(signInApprovals.id, row.id), eq(signInApprovals.consumedAt, spentAt)));
     throw error;
   }
+}
+
+/**
+ * A spent approval as a receipt (#1901 ruling 2, W-R2): the tab whose answer
+ * was lost polls again with the same claim and is handed the same
+ * change-password hold, not `unknown`. Only while all of these hold, else
+ * `unknown` as before:
+ *
+ *  - the account is still marked, and by a refusal no later than the spend:
+ *    a mark made after it is not the one this approval was answered with,
+ *    and an approval that minted a session must never turn into a hold;
+ *  - the account is not disabled;
+ *  - the spend is under the hold's own ten minutes old.
+ *
+ * The hold lapses at `consumedAt + TTL`, so asking again never extends it
+ * (ADR-0027). Nothing is written: a failed seal is a failed poll, which the
+ * next poll repairs.
+ */
+async function reissueFromReceipt(userId: string, consumedAt: Date): Promise<PendingSignInState> {
+  const lapsesAt = new Date(consumedAt.getTime() + PASSWORD_CHANGE_HOLD_TTL_MS);
+  if (Date.now() >= lapsesAt.getTime()) return { state: "unknown" };
+  const db = getDb();
+  const [credential] = await db
+    .select({ requiredAt: localCredentials.passwordChangeRequiredAt })
+    .from(localCredentials)
+    .where(eq(localCredentials.userId, userId))
+    .limit(1);
+  const requiredAt = credential?.requiredAt;
+  if (!requiredAt || requiredAt.getTime() > consumedAt.getTime()) return { state: "unknown" };
+  const [user] = await db
+    .select({ disabledAt: users.disabledAt })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+  if (!user || user.disabledAt) return { state: "unknown" };
+  return { state: "password_change_required", refusal: new PasswordChangeRequiredError(userId, requiredAt), lapsesAt };
 }
 
 /** What a resend did, in the words the waiting card has for each. */
