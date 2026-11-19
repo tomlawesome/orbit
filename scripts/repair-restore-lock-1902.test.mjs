@@ -58,10 +58,12 @@ describe("#1902 L1: a lock lost mid-restore fails the restore loudly", () => {
   /** An owner-side shim for `tool` that, on the scratch file, kills the owner-lock holder (before or after the real tool). */
   function killHolder(tool, when) {
     const dir = scratchDir("orbit-1902-kill-");
-    const kill = `pkill -KILL -f owner-lock; sleep 1`;
+    // Only this run's holder: it is started as `bash -c <script> owner-lock <scratch file>`, so match on that file.
+    const kill = `pkill -KILL -f -- "owner-lock $f\$"; sleep 1`;
     writeFileSync(join(dir, tool), [
       "#!/usr/bin/env bash",
       `if [[ "\${ORBIT_TEST_PRIVDROP:-0}" == 1 && "$*" == *.repair.* ]]; then`,
+      `  f=""; for a in "$@"; do [[ "$a" == *.docker-compose.yml.repair.* ]] && f="$a"; done`,
       when === "before" ? `  ${kill}` : `  '${realTool(tool)}' "$@"; rc=$?; ${kill}; exit $rc`,
       "fi",
       `exec '${realTool(tool)}' "$@"`,

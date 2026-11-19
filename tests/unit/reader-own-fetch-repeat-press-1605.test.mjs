@@ -38,7 +38,7 @@ const quiet = async () => {
   else await settle();
 };
 
-/** @param {(n: number) => Response} plan */
+/** @param {(n: number) => Response | Promise<Response>} plan */
 async function mountReader(plan) {
   const asked = /** @type {number[]} */ ([]);
   vi.stubGlobal("fetch", vi.fn(async (/** @type {string} */ href) => { const n = pageOf(String(href)); asked.push(n); return plan(n); }));
@@ -72,7 +72,10 @@ describe("a page whose own fetch failed is fetched again from the page itself (#
 
   it("page two (the last) fails: its try again fetches page two again, and never leaves the old page under the failed number", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    const { target, flushSync, asked } = await mountReader((n) => (n === 1 ? ok() : new Response("no", { status: 500 })));
+    // Page two fails once; its try again is left unanswered, so the check below sees the stage while the retry
+    // is still in flight, when only the old page (page one's image) could be standing in for page two.
+    let twos = 0;
+    const { target, flushSync, asked } = await mountReader((n) => (n === 1 ? ok() : (twos += 1) === 1 ? new Response("no", { status: 500 }) : new Promise(() => {})));
     /** @type {HTMLButtonElement} */ (target.ownerDocument.querySelector('[aria-label="Next page"]')).click();
     flushSync();
     await quiet();
@@ -81,8 +84,6 @@ describe("a page whose own fetch failed is fetched again from the page itself (#
 
     await tryAgain(2, flushSync);
     expect(asked, "the press fetched page two again").toEqual([1, 2, 2]);
-    const shown = document.body.textContent ?? "";
-    const img = document.querySelector(".rd-stage img");
-    expect(shown.includes(UNDRAWN) || img === null, "the old page is not shown as page two").toBe(true);
+    expect(document.querySelector(".rd-stage img"), "the old page is not shown as page two while it is asked for again").toBeNull();
   });
 });
