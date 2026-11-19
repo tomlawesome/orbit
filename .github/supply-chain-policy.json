@@ -449,6 +449,16 @@
     {
       "kind": "vulnerability",
       "scope": "image",
+      "id": "CVE-2026-114938",
+      "package": "openjdk-25-jre-headless",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-11-26",
+      "trackingIssue": 1918,
+      "rationale": "Java runtime in apache/tika:4.2.0-full; Tika runs on it to parse uploaded documents, so reachability has not been ruled out. Fixed in the 25.0.5 update 1 build (Debian revision 2-1~26.04.1); installedVersion is left out because the scanner's four-part Java version reads as a network address to the private-details check. No published Tika image ships it yet (checked 2026-11-19 on 4.2.0-full, 4.2.1-SNAPSHOT-full and the 4.3.0-SNAPSHOT-full nightly). Owner granted 7 days and a re-check, 2026-11-19 (#1918, 69a)."
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
       "id": "CVE-2026-109518",
       "package": "apt",
       "owner": "Orbit maintainers",
