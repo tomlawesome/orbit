@@ -2344,6 +2344,11 @@ flake_check:
 # scripts/ci/job-inputs.json: the shard (`rig_webkit 2/3`) is the unit of
 # reuse evidence. Each shard also writes a blob report that `browser_report`
 # merges.
+# Two slots cap the nightly at two rig jobs at once (#1921): `rig-slot-webkit`
+# (`rig_webkit`, `film_webkit`) and `rig-slot-chromium` (`rig_chromium`,
+# `rig_firefox`, `screens_chromium`, `pocket_measure`), each a `resource_group`.
+# Shards of one job share its slot, so they run one after another. Two because
+# 2 rig jobs plus 2 smoke jobs are 28 of the host's 32 CPUs; three went over.
 # The full tap-floor measurement is not here: it is `pocket_measure`, nightly
 # only (#1616).
 #
@@ -2355,6 +2360,7 @@ flake_check:
 rig_chromium:
   stage: acceptance
   tags: [light]
+  resource_group: rig-slot-chromium
   image:
     name: $PLAYWRIGHT_IMAGE
     pull_policy: if-not-present
@@ -2425,6 +2431,7 @@ rig_chromium:
 rig_firefox:
   stage: acceptance
   tags: [light]
+  resource_group: rig-slot-chromium
   image:
     name: $PLAYWRIGHT_IMAGE
     pull_policy: if-not-present
@@ -2477,6 +2484,7 @@ rig_firefox:
 rig_webkit:
   stage: acceptance
   tags: [light]
+  resource_group: rig-slot-webkit
   image:
     name: $PLAYWRIGHT_IMAGE
     pull_policy: if-not-present
@@ -2529,6 +2537,7 @@ rig_webkit:
 film_webkit:
   stage: acceptance
   tags: [light]
+  resource_group: rig-slot-webkit
   image:
     name: $PLAYWRIGHT_IMAGE
     pull_policy: if-not-present
@@ -2581,6 +2590,7 @@ film_webkit:
 screens_chromium:
   stage: acceptance
   tags: [light]
+  resource_group: rig-slot-chromium
   image:
     name: $PLAYWRIGHT_IMAGE
     pull_policy: if-not-present
@@ -2704,6 +2714,7 @@ browser_report:
 pocket_measure:
   stage: acceptance
   tags: [light]
+  resource_group: rig-slot-chromium
   image:
     name: $PLAYWRIGHT_IMAGE
     pull_policy: if-not-present
@@ -3372,7 +3383,8 @@ smoke:
         echo "skipped: no change to the v19 front end or the browser suite; no reuse evidence recorded"
         exit 0
       fi
-    - bash scripts/test-frontend.sh
+    - |
+      timeout -k 30s 35m bash scripts/test-frontend.sh || { rc=$?; if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then echo "smoke: suite exceeded 35m; the runner is starved (#1921)"; fi; exit "$rc"; }
     # Quarantined tests (agent-infra#30): run and reported, never failing the job.
     - |
       timeout -k 30s 8m bash scripts/test-frontend.sh --quarantine || { echo "smoke: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"; touch .quarantine-failed; }
@@ -3504,7 +3516,8 @@ smoke_webkit:
         echo "skipped: no change to the v19 front end or the browser suite; no reuse evidence recorded"
         exit 0
       fi
-    - bash scripts/test-frontend.sh
+    - |
+      timeout -k 30s 40m bash scripts/test-frontend.sh || { rc=$?; if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then echo "smoke_webkit: suite exceeded 40m; the runner is starved (#1921)"; fi; exit "$rc"; }
     # Quarantined tests (agent-infra#30): run and reported, never failing the job.
     - |
       timeout -k 30s 8m bash scripts/test-frontend.sh --quarantine || { echo "smoke_webkit: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"; touch .quarantine-failed; }
@@ -3602,7 +3615,8 @@ smoke_webkit_mobile:
         echo "skipped: no change to the v19 front end or the browser suite; no reuse evidence recorded"
         exit 0
       fi
-    - bash scripts/test-frontend.sh
+    - |
+      timeout -k 30s 25m bash scripts/test-frontend.sh || { rc=$?; if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then echo "smoke_webkit_mobile: suite exceeded 25m; the runner is starved (#1921)"; fi; exit "$rc"; }
     # Quarantined tests (agent-infra#30): run and reported, never failing the job.
     - |
       timeout -k 30s 8m bash scripts/test-frontend.sh --quarantine || { echo "smoke_webkit_mobile: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"; touch .quarantine-failed; }
@@ -3718,7 +3732,7 @@ smoke_local_only:
       echo "local-only profile specs: $specs"
       # Word splitting is the point: $specs is a list of paths.
       # shellcheck disable=SC2086
-      node node_modules/@playwright/test/cli.js test --config tests/e2e/playwright.config.ts $specs
+      timeout -k 30s 25m node node_modules/@playwright/test/cli.js test --config tests/e2e/playwright.config.ts $specs || { rc=$?; if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then echo "smoke_local_only: suite exceeded 25m; the runner is starved (#1921)"; fi; exit "$rc"; }
     - *reuse_evidence
   after_script:
     # No diagnostics here: this shell has no daemon to ask (#1100), so the
