@@ -3499,4 +3499,30 @@ describe("nightly browser slots and starved-run messages (#1921)", () => {
     expect(script).toMatch(/docker info/u);
     expect(script).toContain("Docker daemon lost during the job (#1921)");
   });
+
+  it("bounds the daemon check, so a wedged daemon cannot hang show-stack-diagnostics.sh (#1921)", () => {
+    const script = readFileSync(new URL("./ci/show-stack-diagnostics.sh", import.meta.url), "utf8");
+    const bound = script.match(/^[^#\n]*\btimeout (?:-k \d+s? )?(\d+)s? docker info\b/mu);
+    expect(bound, "docker info runs under timeout <N>").not.toBeNull();
+    expect(Number(bound[1]), "N seconds").toBeLessThanOrEqual(30);
+  });
+
+  it.each(STACK_JOBS)("%s keeps the suite's exit code through the wrap and says starved only for 124 or 137 (#1921)", (name) => {
+    const block = allBlocks.get(name);
+    const call = "timeout -k 30s";
+    const line = block
+      .split("\n")
+      .find((l) => !/^\s*#/u.test(l) && l.includes(call) && (name === "smoke_local_only" ? l.includes("playwright") : /test-frontend\.sh(?! --quarantine)/u.test(l)));
+    expect(line, `${name}: wrapped suite call`).toBeDefined();
+    const handler = line.slice(line.indexOf("||"));
+    expect(line, `${name}: no || true on the suite call`).not.toMatch(/\|\|\s*(true|:)\b/u);
+    expect(handler, `${name}: has a failure handler`).toMatch(/^\|\| \{/u);
+    expect(handler, `${name}: handler passes the status on`).toMatch(/exit "\$rc"; ?\}\s*$/u);
+    const starved = handler.indexOf("starved");
+    expect(starved, `${name}: names starved`).toBeGreaterThan(-1);
+    const guard = handler.match(/if \[ "\$rc" = 124 \] \|\| \[ "\$rc" = 137 \]; then/u);
+    expect(guard, `${name}: starved only for 124 or 137`).not.toBeNull();
+    expect(guard.index, `${name}: guard before the message`).toBeLessThan(starved);
+    expect(handler.indexOf("fi;", starved), `${name}: message inside the if`).toBeGreaterThan(-1);
+  });
 });
