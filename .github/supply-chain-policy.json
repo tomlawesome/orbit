@@ -510,6 +510,28 @@
       "trackingIssue": 1759,
       "installedVersion": "v0.61.0",
       "rationale": "x/net html parser slows on crafted input, in /usr/bin/ollama in ollama/ollama:0.40.15. Fixed in x/net 0.62.0, but the newest release, 0.40.15, still ships v0.61.0, so no image carries the fix. Orbit runs Ollama only under the optional ai profile, with no internet access and no published port (ADR-0025). Owner decision 2026-11-07, question 137: 14 days. Checked 2026-11-09 on 0.40.15. Extended 2026-11-18 to 2027-01-04: Ollama 0.40.16, the newest release, still has golang.org/x/net v0.61.0 (#1759); owner 24a, 2026-11-18."
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-97054",
+      "package": "stdlib",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-12-03",
+      "trackingIssue": 1922,
+      "installedVersion": "v1.24.6",
+      "rationale": "CVE-2026-97054 is a Go net/http flaw: an HTTP/1 server that uses MaxBytesReader can panic if its handler reads the body while writing the response header. It is in the Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine. gosu only drops privileges and then runs postgres; it serves no HTTP, so the flaw is not reachable. Fixed in Go 1.26.11 and 1.27.4, but no postgres image ships gosu built on either yet. Owner 47a, 2026-11-19: 14 days."
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-97054",
+      "package": "stdlib",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-12-03",
+      "trackingIssue": 1922,
+      "installedVersion": "v1.26.10",
+      "rationale": "CVE-2026-97054 is a Go net/http flaw: an HTTP/1 server that uses MaxBytesReader can panic if its handler reads the body while writing the response header. It is in the Go standard library compiled into /usr/bin/ollama in ollama/ollama:0.40.16. Orbit runs Ollama only under the optional ai profile, on the internal network, with no published port (ADR-0025), so only Orbit's app can reach it and the worst case is a crash and restart. Fixed in Go 1.26.11 and 1.27.4, but no Ollama image ships a build on either yet. Owner 47a, 2026-11-19: 14 days."
     }
   ],
   "containerImages": [
@@ -684,7 +706,7 @@
       "reason": "CI image for the weekly dependency-update job; ships nothing to operators. Pinned under an `image:`/`services:` key in .gitlab-ci.yml, which Renovate's gitlabci manager proposes updates for; not watched by sidecar-pins."
     },
     {
-      "reference": "greenmail/standalone:2.1.13@sha256:3df66b7edd01c8a301343ca5e3601d8674760d4708655573560c24745e624fb2",
+      "reference": "greenmail/standalone:2.1.15@sha256:309ba544ea482e5d4265d09921cdab07c8dad2cc4481d715c9b8ff5d3f0a149f",
       "locations": [
         "compose/docker-compose.acceptance.yml"
       ],
