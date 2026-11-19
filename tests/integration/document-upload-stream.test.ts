@@ -615,12 +615,12 @@ describe("one upload in a warmed process raises its peak memory by less than the
     expect(downloaded.bytes.subarray(0, progressive40Mpx().length).equals(progressive40Mpx())).toBe(true);
   }, 600_000);
 
-  // Reported, not pinned: a 0.23 MiB file is cheap to hold, so the figures say
-  // how much the decode itself costs the server. Sanity rule: if either
-  // exceeds the padded case's warm figure, pixels are still decoded in the
-  // server (the padded warm figure is the file's copies, not a decode).
-  it("reports the unpadded progressive 40 Mpx JPEG's first and warm growth, and neither exceeds the padded case's warm growth", async () => {
-    const { measured: padded } = await measurePaddedProgressive();
+  // The figures are reported, and each is held under the same bound the padded
+  // case pins, ceil(size / 3) * 4 bytes with size the upload limit (#1920). A
+  // decode in the server's process costs 153 MiB warm and 294 MiB cold, more
+  // than that bound, so a growth under it says the pixels are decoded in the
+  // sandbox child. (The padded warm figure is no yardstick: it is about zero.)
+  it("holds the unpadded progressive 40 Mpx JPEG's first and warm growth under ceil(size / 3) * 4 bytes, the padded case's bound, and reports both", async () => {
     const file = join(scratch, "unpadded-progressive.jpg");
     await copyFile(fileURLToPath(new URL("../fixtures/images/progressive-40mpx.jpg", import.meta.url)), file);
     const fixture = await createIntegrationFixture("doc-upload-stream-memory-image-small");
@@ -628,11 +628,11 @@ describe("one upload in a warmed process raises its peak memory by less than the
     const measured = await measure(fixture, file);
 
     expect(measured.result).toMatchObject({ lifecycle: "available", sizeBytes: (await stat(file)).size });
-    const paddedWarmKiB = padded.afterKiB - padded.beforeKiB;
+    const boundKiB = (Math.ceil(getDocumentConfig().maxBytes / 3) * 4) / 1024;
     const warmKiB = measured.afterKiB - measured.beforeKiB;
     const firstKiB = measured.first.afterKiB - measured.first.beforeKiB;
-    console.info(`#1572 unpadded progressive JPEG upload memory: first ${(firstKiB / 1024).toFixed(1)} MiB, warm ${(warmKiB / 1024).toFixed(1)} MiB (padded case warm ${(paddedWarmKiB / 1024).toFixed(1)} MiB)`);
-    expect(firstKiB, `unpadded first upload grew ${(firstKiB / 1024).toFixed(0)} MiB, more than the padded case's warm ${(paddedWarmKiB / 1024).toFixed(0)} MiB: pixels are still in the server`).toBeLessThanOrEqual(paddedWarmKiB);
-    expect(warmKiB, `unpadded warm upload grew ${(warmKiB / 1024).toFixed(0)} MiB, more than the padded case's warm ${(paddedWarmKiB / 1024).toFixed(0)} MiB: pixels are still in the server`).toBeLessThanOrEqual(paddedWarmKiB);
+    console.info(`#1572 unpadded progressive JPEG upload memory: first ${(firstKiB / 1024).toFixed(1)} MiB, warm ${(warmKiB / 1024).toFixed(1)} MiB (bound ${(boundKiB / 1024).toFixed(1)} MiB)`);
+    expect(firstKiB, `unpadded first upload grew ${(firstKiB / 1024).toFixed(0)} MiB, more than the bound ${(boundKiB / 1024).toFixed(1)} MiB: pixels are still in the server`).toBeLessThan(boundKiB);
+    expect(warmKiB, `unpadded warm upload grew ${(warmKiB / 1024).toFixed(0)} MiB, more than the bound ${(boundKiB / 1024).toFixed(1)} MiB: pixels are still in the server`).toBeLessThan(boundKiB);
   }, 600_000);
 });
