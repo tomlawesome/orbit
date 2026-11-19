@@ -67,6 +67,9 @@ async function until(check: () => boolean, what: string): Promise<void> {
 }
 const started = (name: string) => until(() => existsSync(ran(name)), `job ${name} started`);
 
+/** How many page jobs have started and not yet been let go: the peak a pool lets run at once while their gates are shut. */
+const runningPages = () => readdirSync(directory).filter((name) => /^ran-\d+$/u.test(name) && !existsSync(gate(name.slice(4)))).length;
+
 /** Whether a promise has settled, without waiting for it. */
 async function settled(promise: Promise<unknown>): Promise<boolean> {
   let done = false;
@@ -201,15 +204,22 @@ describe("a view acquire with no fallback (#1446)", () => {
 });
 
 describe("the check and background pools keep unbounded waits (#1446 decision 1)", () => {
-  it("background: one job runs, ten wait past any bound, none refused, all drawn in turn", async () => {
+  it("background: one job runs, ten wait past any bound, none refused, all drawn in turn, never two at once", async () => {
     const first = draw(1, "background");
     await started("1");
     const waiters = Array.from({ length: 10 }, (_, index) => draw(10 + index, "background"));
     await vi.advanceTimersByTimeAsync(10 * VIEW_SLOT_WAIT_MS);
     for (const waiter of waiters) expect(await settled(waiter)).toBe(false);
+    expect(runningPages(), "the background pool's limit is one").toBe(1);
+    for (let page = 10; page < 20; page += 1) expect(existsSync(ran(String(page))), `page ${page} waits`).toBe(false);
 
+    // Release one at a time: each hands over to exactly one successor, so the peak stays at one.
     open("1");
-    for (let page = 10; page < 20; page += 1) open(String(page));
+    for (let page = 10; page < 20; page += 1) {
+      await started(String(page));
+      expect(runningPages(), `only page ${page} runs`).toBe(1);
+      open(String(page));
+    }
     expect((await first).outcome).toBe("drawn");
     for (const waiter of waiters) expect((await waiter).outcome).toBe("drawn");
   });
@@ -223,6 +233,8 @@ describe("the check and background pools keep unbounded waits (#1446 decision 1)
     });
     await vi.advanceTimersByTimeAsync(10 * VIEW_SLOT_WAIT_MS);
     for (const job of jobs.slice(2)) expect(await settled(job)).toBe(false);
+    const infoStarts = () => readdirSync(directory).filter((name) => name.startsWith("ran-a-")).length;
+    expect(infoStarts(), "the check pool's limit is two: exactly two children running, the other ten waiting").toBe(2);
 
     open("a");
     for (const job of jobs) expect(await job).toEqual({ outcome: "counted", pageCount: 1 });
