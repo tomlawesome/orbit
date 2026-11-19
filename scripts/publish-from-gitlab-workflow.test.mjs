@@ -426,6 +426,7 @@ describe("publish-from-gitlab copy step verifies each referrer before copying (#
   const SPDX_TYPE = "https://spdx.dev/Document";
   const BUNDLE = "application/vnd.dev.sigstore.bundle.v0.3+json";
   const IMAGE_DIGEST = `sha256:${"1".repeat(64)}`;
+  const EMPTY_DIGEST = "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a";
   const COMMIT = "c".repeat(40);
   const stepStart = workflow.indexOf("- name: Copy the exact tested digest");
   const stepText = workflow.slice(stepStart, workflow.indexOf("\n      - name:", stepStart + 1));
@@ -550,8 +551,11 @@ printf '{"payloadType":"application/vnd.in-toto+json","payload":"%s","signatures
         JSON.stringify({
           schemaVersion: 2,
           mediaType: "application/vnd.oci.image.manifest.v1+json",
-          artifactType: BUNDLE,
-          config: { mediaType: "application/vnd.oci.empty.v1+json", digest: r.digest, size: 2 },
+          artifactType: r.manifestArtifactType ?? BUNDLE,
+          // What cosign 3.x attaches: the OCI empty descriptor as the config, and the
+          // predicate type (with the bundle content kind) as manifest annotations.
+          config: r.config ?? { mediaType: "application/vnd.oci.empty.v1+json", digest: EMPTY_DIGEST, size: 2 },
+          annotations: { "dev.sigstore.bundle.content": "dsse-envelope", "dev.sigstore.bundle.predicateType": r.manifestPredicateType ?? r.label },
           layers: [{ mediaType: BUNDLE, digest: r.digest, size: r.layerSize ?? 1 }],
           subject: { mediaType: "application/vnd.oci.image.manifest.v1+json", digest: r.manifestSubject ?? IMAGE_DIGEST, size: 1 },
         }),
@@ -669,6 +673,36 @@ printf '{"payloadType":"application/vnd.in-toto+json","payload":"%s","signatures
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain(wrong.digest);
     expect(copies).toEqual([]);
+  });
+
+  it("refuses a referrer whose config is a non-empty blob, and copies nothing (#1848 D-S2)", () => {
+    const wrong = { digest: d("4"), label: VALIDATION_TYPE, config: { mediaType: "application/vnd.example.payload+json", digest: d("9"), size: 4096 } };
+    const { result, copies } = runCopy([ok, wrong]);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(wrong.digest);
+    expect(copies).toEqual([]);
+  });
+
+  it("refuses a referrer whose manifest artifactType is not the sigstore bundle type, and copies nothing (#1848 D-S2)", () => {
+    const wrong = { digest: d("3"), label: SPDX_TYPE, manifestArtifactType: "application/vnd.example.other" };
+    const { result, copies } = runCopy([ok, wrong]);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(wrong.digest);
+    expect(copies).toEqual([]);
+  });
+
+  it("refuses a referrer whose manifest predicateType annotation differs from its label, and copies nothing (#1848 D-S2)", () => {
+    const wrong = { digest: d("2"), label: VALIDATION_TYPE, manifestPredicateType: "https://slsa.dev/provenance/v1" };
+    const { result, copies } = runCopy([ok, wrong]);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(wrong.digest);
+    expect(copies).toEqual([]);
+  });
+
+  it("still copies a normal cosign 3.x referrer: empty config, bundle artifactType, matching annotation (#1848 D-S2)", () => {
+    const { result, copies } = runCopy([ok, okSbom]);
+    expect(result.status).toBe(0);
+    expect(copies.length).toBe(3);
   });
 
   it("refuses a referrer whose bundle blob cannot be fetched, and copies nothing", () => {
