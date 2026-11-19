@@ -615,6 +615,9 @@ async function checkQuarantinedStructure(
   try {
     if (head.length < sizeBytes && !declaredImageDimensions(head, mediaType)) {
       releaseBuffer(head);
+      // A detached buffer cannot be released again: if the read throws, the
+      // finally below must not mask its error (#1920 review).
+      bytes = Buffer.alloc(0);
       bytes = await storage.readQuarantine(received.quarantinePath, maxBytes);
     }
     return await classifyDocumentStructure(bytes, mediaType, file, { maxPages });
