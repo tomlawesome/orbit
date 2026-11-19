@@ -126,14 +126,16 @@ describe("#1893 K2: after TERM, INT or HUP the lock is held while the step's chi
       // The child ends; the run then exits without starting another step.
       process.kill(childPid, "SIGKILL");
       await until(() => !alive(childPid), "the docker child to end");
-      await exited;
+      const end = await exited;
+      expect(dockerCalls(), "a repair step ran after the stop").toBe(before);
+      expect(end.signal, "the run should end by the signal it was sent").toBe(signal);
+      expect(end.code, "a run ended by a signal has no exit code").toBeNull();
       const folder = realpathSync(targetDir);
       expect(holdersOf(folder), "a leftover process still holds the folder lock").toEqual([]);
       const second = secondRun(targetDir);
       expect(second.stdout).not.toContain(REFUSED);
       expect(second.stderr).not.toMatch(/another Repair run is working on this folder/iu);
       expect(second.status).not.toBe(6);
-      expect(dockerCalls().startsWith(before), "docker log changed unexpectedly").toBe(true);
     });
   }
 
