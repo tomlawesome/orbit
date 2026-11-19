@@ -71,8 +71,8 @@ describe("loadStagedPage", () => {
       expect(await loadStagedPage("href")).toEqual({ kind: "busy", retryAfterSeconds: 7 });
     });
 
-    it("clamps Retry-After to 1-10 and defaults to 5 when absent or not whole seconds", async () => {
-      for (const [header, expected] of [["0", 1], ["1", 1], ["10", 10], ["11", 10], ["300", 10], ["-3", 5], ["soon", 5], ["", 5], ["2.5", 5]]) {
+    it("clamps Retry-After to 1-30 (#1915 W-F3) and defaults to 5 when absent or not whole seconds", async () => {
+      for (const [header, expected] of [["0", 1], ["1", 1], ["10", 10], ["11", 11], ["30", 30], ["31", 30], ["99", 30], ["300", 30], ["-3", 5], ["soon", 5], ["", 5], ["2.5", 5]]) {
         fetched.mockResolvedValueOnce(busyResponse({ "retry-after": header }));
         expect(await loadStagedPage("href"), `Retry-After "${header}"`).toEqual({ kind: "busy", retryAfterSeconds: expected });
       }

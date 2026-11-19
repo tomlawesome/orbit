@@ -188,3 +188,42 @@ describe("#1848 smtp_write_copy: the undo copy of .env-orbit goes through a fres
     expect(copyLeftovers(targetDir)).toEqual([]);
   });
 });
+
+// #1901 O-R3: a killed retirement leaves its .env-orbit.retire-smtp.<6> temporary file; the next retirement sweeps it.
+describe("#1901 O-R3 retire_smtp_steps sweeps stale .env-orbit.retire-smtp.* files", () => {
+  it("removes leftovers beside .env-orbit at the start, and leaves the live .env-orbit and unrelated files alone", () => {
+    const targetDir = folderWithSmtp();
+    const stale = [".env-orbit.retire-smtp.Ab12Cd", ".env-orbit.retire-smtp.Zz9Yx8"];
+    for (const name of stale) writeFileSync(join(targetDir, name), "SMTP_PASSWORD=stale-copy\n", { mode: 0o600 });
+    writeFileSync(join(targetDir, ".env-orbit.keep-me"), "mine\n");
+    const result = update(targetDir, { extraEnv: NONE_AFTER });
+    expect(result.status).toBe(0);
+    for (const name of stale) expect(existsSync(join(targetDir, name)), name).toBe(false);
+    expect(readdirSync(targetDir).filter((name) => name.startsWith(".env-orbit.retire-smtp."))).toEqual([]);
+    expect(readFileSync(join(targetDir, ".env-orbit.keep-me"), "utf8")).toBe("mine\n");
+    expect(existsSync(join(targetDir, ".env-orbit"))).toBe(true);
+    expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).not.toContain("SMTP_HOST=");
+  });
+
+  it("removes only a regular file named .env-orbit.retire-smtp.<6 alphanumerics>: a link, a folder and near-miss names survive", () => {
+    const targetDir = folderWithSmtp();
+    const victim = victimIn();
+    const real = ".env-orbit.retire-smtp.Qw3Er4";
+    writeFileSync(join(targetDir, real), "SMTP_PASSWORD=stale-copy\n", { mode: 0o600 });
+    const link = ".env-orbit.retire-smtp.ABC123";
+    symlinkSync(victim, join(targetDir, link));
+    const folder = ".env-orbit.retire-smtp.Dir123";
+    mkdirSync(join(targetDir, folder));
+    writeFileSync(join(targetDir, folder, "inside"), "inside\n");
+    const nearMisses = [".env-orbit.retire-smtp.Ab12C", ".env-orbit.retire-smtp.Ab12Cde", ".env-orbit.retire-smtp.Ab-2Cd"];
+    for (const name of nearMisses) writeFileSync(join(targetDir, name), "mine\n");
+    const result = update(targetDir, { extraEnv: NONE_AFTER });
+    expect(result.status).toBe(0);
+    expect(existsSync(join(targetDir, real)), "the real leftover goes").toBe(false);
+    expect(lstatSync(join(targetDir, link)).isSymbolicLink(), "the link stays a link").toBe(true);
+    expect(readlinkSync(join(targetDir, link))).toBe(victim);
+    expect(readFileSync(victim, "utf8")).toBe(VICTIM_TEXT);
+    expect(readFileSync(join(targetDir, folder, "inside"), "utf8")).toBe("inside\n");
+    for (const name of nearMisses) expect(readFileSync(join(targetDir, name), "utf8"), name).toBe("mine\n");
+  });
+});

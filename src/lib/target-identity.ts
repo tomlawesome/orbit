@@ -83,9 +83,16 @@ function ignorableBackupDirectory(targetDir: string, entry: string): boolean {
   return entry === INSTALL_BACKUPS_DIRECTORY && isRealNonSymlinkDirectory(join(targetDir, entry));
 }
 
-/** Every entry of the target but an ignorable orbit-install-backups directory. */
+/**
+ * #1901 O-R1: the rename-aside a rollback's restore_original_aside leaves
+ * only if it was interrupted (".<name>.orbit-restore.<pid>.aside"), which
+ * install.sh's snapshot_fresh_target ignores as the installer's own.
+ */
+const ROLLBACK_ASIDE = /^\.\.(?:env-orbit|orbit-secrets)\.orbit-restore\.\d+\.aside$/u;
+
+/** Every entry of the target but an ignorable orbit-install-backups directory or rollback aside. */
 function targetEntries(targetDir: string): string[] {
-  return readdirSync(targetDir).filter((entry) => !ignorableBackupDirectory(targetDir, entry));
+  return readdirSync(targetDir).filter((entry) => !ignorableBackupDirectory(targetDir, entry) && !ROLLBACK_ASIDE.test(entry));
 }
 
 // target_is_empty (install.sh:270-276): `shopt -s nullglob dotglob; entries=(*)`

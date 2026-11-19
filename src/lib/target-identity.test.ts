@@ -655,6 +655,21 @@ describe("validateTarget and isPreprovisionedInput: orbit-install-backups (redes
     expect(refusalOf(() => validateTarget(targetDir)).message).toContain("orbit-install-backups");
   });
 
+  // #1901 O-R1: a rollback's rename-aside (".<name>.orbit-restore.<pid>.aside") is install.sh's own entry, left only
+  // if a restore was interrupted; it must not make the engine refuse an otherwise fresh or pre-provisioned folder.
+  it.each([["..env-orbit.orbit-restore.4242.aside"], ["..orbit-secrets.orbit-restore.4242.aside"]])(
+    "a leftover %s is ignored like the installer's backups folder",
+    (aside) => {
+      writeFileSync(join(targetDir, aside), "left by an interrupted restore\n");
+      expect(validateTarget(targetDir)).toEqual({ targetWasEmpty: true });
+      rmSync(join(targetDir, aside));
+      seedPreprovisioned();
+      writeFileSync(join(targetDir, aside), "left by an interrupted restore\n");
+      expect(isPreprovisionedInput(targetDir)).toBe(true);
+      expect(validateTarget(targetDir)).toEqual({ targetWasEmpty: true });
+    },
+  );
+
   it("a recognised deployment with a real orbit-install-backups directory is still a deployment", () => {
     writeFileSync(join(targetDir, ".env-orbit"), "APP_URL=https://example.invalid\n", { mode: 0o600 });
     writeFileSync(join(targetDir, "docker-compose.yml"), "services: {}\n");

@@ -1047,7 +1047,7 @@ restart the exact deployed image:
 2. Restore the key file from your copy of the secrets directory, with
    owner-only permissions:
    ```sh
-   install -m 0400 /path/to/your/copy/document-kek .orbit-secrets/document-kek
+   install -m 0600 /path/to/your/copy/document-kek .orbit-secrets/document-kek
    ```
 3. Restart the deployment:
    ```sh
@@ -1104,7 +1104,7 @@ rotation is undone).
    with owner-only permissions:
    ```sh
    openssl rand -hex 32 > .orbit-secrets/document-kek-next
-   chmod 0400 .orbit-secrets/document-kek-next
+   chmod 0600 .orbit-secrets/document-kek-next
    ```
 2. Give the running application the next key *before* rewrapping anything,
    using the `docker-compose.kek-rotation.yml` overlay:

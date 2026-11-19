@@ -1407,11 +1407,14 @@ acting:
   running right now": `backup.sh`, `restore.sh` and a recovery-bundle export
   all hold it). A lock file nobody holds does not block; one that is not a
   regular, non-symlink, readable file is refused without being opened ("the
-  lock at <path> can't be read"); one that `flock` cannot test (for example
-  on an NFSv4 mount, where an exclusive lock on a read-only descriptor is
-  refused) is refused with flock's own words ("the lock at <path> can't be
-  tested on that filesystem (flock said: ...)", with how to start Orbit by
-  hand). Once past these checks, both actions take that lock themselves and
+  lock at <path> can't be read"); one that cannot be opened for writing by
+  the user running repair (repair opens it read-write, so the open can never
+  wait) is refused ("the lock at <path> could not be opened for writing by the
+  user running repair", with how to fix it: run repair as root or as the
+  owner of the backups folder, or make the lock file writable); one that
+  `flock` cannot test is refused with flock's own words ("the lock at <path>
+  can't be tested on that filesystem (flock said: ...)", with how to start
+  Orbit by hand). Once past these checks, both actions take that lock themselves and
   hold it for the whole Compose call (#1823), so a backup or restore starting
   meanwhile finds it held and is never reported as a running backup. When
   the lock file does not exist and the backups folder or the lock file

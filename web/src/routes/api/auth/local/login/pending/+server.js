@@ -36,7 +36,9 @@ import { api } from "$lib/server/api.js";
  *   `password_change_required` — approved, but a refused sign-in has marked
  *     this password (#1881). No session: the tab gets the change-password
  *     hold, which lapses with this approval, and the moment of the newest
- *     refusal for the card's one sentence.
+ *     refusal for the card's one sentence. A poll whose answer was lost
+ *     gets the same hold again from the spent approval, lapsing when the
+ *     first one did (#1901).
  *   `waiting`  — nobody has pressed anything. The tab asks again.
  *   `denied`   — somebody pressed "This wasn't me". The tab says so and stops.
  *   `unknown`  — no pending sign-in, or it has lapsed or been spent. One word
@@ -78,7 +80,7 @@ export const POST = api(
 
     if (pending.state === "password_change_required") {
       clearPendingSignInCookie(event.cookies, config);
-      const hold = await issuePasswordChangeHold(event.cookies, pending.refusal, config);
+      const hold = await issuePasswordChangeHold(event.cookies, pending.refusal, config, pending.lapsesAt);
       return answer({ state: "password_change_required", refusedAt: hold.refusedAt });
     }
 

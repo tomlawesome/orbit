@@ -641,6 +641,10 @@ const coveredElsewhere: Record<string, { file: string; why: string }> = {
     file: "tests/integration/forced-reset-after-refusal-1881.test.ts",
     why: "the forced new-password step's hold has to lapse, which that suite drives with its own clock",
   },
+  password_change_saved: {
+    file: "tests/integration/sign-in-hold-1901.test.ts",
+    why: "the forced new-password step has to be saved first, then its hold used again",
+  },
   password_recovery_required: {
     file: "tests/integration/forced-reset-after-refusal-1881.test.ts",
     why: "the account has to be marked with no way to reach the step, which only that suite builds",

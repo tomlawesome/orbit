@@ -45,6 +45,7 @@ import { userAddressLockKey } from "@/lib/auth/authority-locks";
 import { describeDevice } from "@/lib/auth/device";
 import { AuthError, PasswordChangeRequiredError } from "@/lib/auth/errors";
 import { log } from "@/lib/logger";
+import { PASSWORD_CHANGE_HOLD_TTL_MS } from "@/lib/auth/password-change-hold";
 import { recordLocalCredentialFailure } from "@/server/local-credentials";
 import { absoluteAppLink, sendBoundedMail, type InvitationMailer, type InvitationSendError } from "@/server/invitations/send";
 import { sendingConfigured } from "@/server/mail-in/sending-settings";
@@ -303,32 +304,50 @@ async function sendsInWindow(
  * per-user advisory lock, which the caller's `transaction` must already hold
  * (#1882). Requests arriving together queue on the lock, so each one counts
  * the reservations committed before it and no sixth mail is ever reserved.
- * False when the hour's allowance is spent; true once the reservation is
- * written, which the caller commits before the mail goes. It is kept whether or not the mail
- * goes: the limit counts attempts, not successes (#1879 ruling, note 64435),
- * because a "failed" send can still have reached the provider and the inbox
- * -- the same fact that keeps a maybe-delivered resend's link alive (#1891,
- * #1896).
+ * Null when the hour's allowance is spent; otherwise the reservation's id
+ * once it is written, which the caller commits before the mail goes. It is
+ * kept whether or not the mail goes: the limit counts attempts, not
+ * successes (#1879 ruling, note 64435), because a "failed" send can still
+ * have reached the provider and the inbox -- the same fact that keeps a
+ * maybe-delivered resend's link alive (#1891, #1896). The one exception is
+ * an attempt that never handed a mail to the mailer at all (#1915 A-F1):
+ * nothing can have arrived, so `releaseSend` gives its slot back.
  */
 async function reserveSend(
   transaction: Transaction,
   approvalId: string,
   userId: string,
   now: Date,
-): Promise<boolean> {
-  if (await sendsInWindow(userId, now, transaction) >= APPROVAL_SENDS_PER_HOUR) return false;
-  await transaction.insert(signInApprovalSends).values({ approvalId, userId, sentAt: now });
-  return true;
+): Promise<string | null> {
+  if (await sendsInWindow(userId, now, transaction) >= APPROVAL_SENDS_PER_HOUR) return null;
+  const [reservation] = await transaction.insert(signInApprovalSends)
+    .values({ approvalId, userId, sentAt: now })
+    .returning({ id: signInApprovalSends.id });
+  return reservation.id;
+}
+
+/**
+ * Gives back a reservation whose attempt never handed a mail to the mailer
+ * (#1915 A-F1): no address to send to, or no link that could be built. Only
+ * then -- a mail the mailer was given, whatever it answered, keeps its row
+ * (#1879), so the hour never undercounts. Under the per-user lock the
+ * reservation was taken under, which the caller's `transaction` must hold.
+ */
+async function releaseSend(transaction: Transaction, reservationId: string): Promise<void> {
+  await transaction.delete(signInApprovalSends).where(eq(signInApprovalSends.id, reservationId));
 }
 
 /**
  * Undoes a resend whose mail provably never left (#1891, #1896): its staged
  * link is cleared, and its send time put back so the minute runs from the
- * last mail that actually went. The hour's count row stays (#1879). The
- * staged link only while it is still this resend's, and the time only while
- * the row still carries this resend's own stamp, so a later resend that
- * committed meanwhile is never undone. Under the same lock as the stamp. A
- * maybe-delivered send never comes here: its link and its minute stand.
+ * last mail that actually went. The hour's count row stays (#1879), unless
+ * `releaseReservation` names it because no mail was ever handed to the
+ * mailer (#1915 A-F1); then it is released in this same locked transaction.
+ * The staged link only while it is still this resend's, and the time only
+ * while the row still carries this resend's own stamp, so a later resend
+ * that committed meanwhile is never undone. Under the same lock as the
+ * stamp. A maybe-delivered send never comes here: its link and its minute
+ * stand. True when the earlier send time was put back.
  */
 async function restoreSendTime(
   userId: string,
@@ -336,15 +355,19 @@ async function restoreSendTime(
   stagedDigest: string,
   stampedAt: Date,
   previousLastSentAt: Date | null,
-): Promise<void> {
-  await getDb().transaction(async (transaction) => {
+  releaseReservation: string | null,
+): Promise<boolean> {
+  return getDb().transaction(async (transaction) => {
     await lockUser(transaction, userId);
+    if (releaseReservation) await releaseSend(transaction, releaseReservation);
     await transaction.update(signInApprovals)
       .set({ stagedTokenHash: null })
       .where(and(eq(signInApprovals.id, approvalId), eq(signInApprovals.stagedTokenHash, stagedDigest)));
-    await transaction.update(signInApprovals)
+    const restored = await transaction.update(signInApprovals)
       .set({ lastSentAt: previousLastSentAt })
-      .where(and(eq(signInApprovals.id, approvalId), eq(signInApprovals.lastSentAt, stampedAt)));
+      .where(and(eq(signInApprovals.id, approvalId), eq(signInApprovals.lastSentAt, stampedAt)))
+      .returning({ id: signInApprovals.id });
+    return restored.length > 0;
   });
 }
 
@@ -378,11 +401,13 @@ async function sweepExpiredApprovals(now: Date): Promise<void> {
 /**
  * What one approval mail did: the bounded failure, and whether the mail may
  * have arrived anyway (#1896). Nothing was sent when no address or link
- * existed, so those are never maybe delivered.
+ * existed, so those are never maybe delivered, and `handedOver` is false:
+ * no mail reached the mailer, so its hourly slot is given back (#1915 A-F1).
  */
 interface ApprovalMailOutcome {
   sendError: ApprovalSendError | null;
   maybeDelivered: boolean;
+  handedOver: boolean;
 }
 
 /** Puts one approval mail on the wire. Never throws for a provider failure. */
@@ -398,7 +423,7 @@ async function mailApproval(
     /* No readable address means no way to ask (#969). The door stays shut and
        the administration screen's setup link is the way through, exactly as
        ADR-0027 §7 intends for an undeliverable mailbox. */
-    return { sendError: "unknown", maybeDelivered: false };
+    return { sendError: "unknown", maybeDelivered: false, handedOver: false };
   }
   let mail;
   try {
@@ -417,7 +442,7 @@ async function mailApproval(
        it is reported, not thrown. Throwing here would turn a misconfigured
        instance's sign-in into a 502 and tell the reader their password was
        the problem. */
-    return { sendError: "unknown", maybeDelivered: false };
+    return { sendError: "unknown", maybeDelivered: false, handedOver: false };
   }
   const outcome = await sendBoundedMail(
     recipient.email,
@@ -439,7 +464,7 @@ async function mailApproval(
       impact: "sign_in_blocked",
     });
   }
-  return { sendError: outcome.sendError, maybeDelivered: outcome.maybeDelivered };
+  return { sendError: outcome.sendError, maybeDelivered: outcome.maybeDelivered, handedOver: true };
 }
 
 /**
@@ -455,11 +480,13 @@ async function mailApproval(
  * by looking up an existing row. Writing the row first means that same
  * crash instead leaves an unsent, harmless row that simply expires -- the
  * waiting tab never got a response either, so it retries and gets a new one.
- * A pending sign-in that could not be posted is still written. Every
- * attempted mail counts toward the hourly limit: its count row is reserved
- * before the send (#1879 A-R2) and kept when the send fails (#1879 ruling,
- * note 64435), so five failed sends in an hour answer `limited`. Only a mail
- * that went sets the approval's own count and send time.
+ * A pending sign-in that could not be posted is still written. Every mail
+ * handed to the mailer counts toward the hourly limit: its count row is
+ * reserved before the send (#1879 A-R2) and kept when the send fails (#1879
+ * ruling, note 64435), so five failed sends in an hour answer `limited`. A
+ * mail that never reached the mailer (no readable address, or a link that
+ * could not be built) gives its slot back (#1915 A-F1). Only a mail that went
+ * sets the approval's own count and send time.
  */
 export async function startSignInApproval(
   userId: string,
@@ -481,7 +508,7 @@ export async function startSignInApproval(
      goes to the address the account still has. The hour's mail is reserved
      under the same lock (#1882) and the transaction commits before the mail
      goes: nothing is held open across the network send. */
-  const { recipient, row, limited } = await db.transaction(async (transaction) => {
+  const { recipient, row, limited, reservation } = await db.transaction(async (transaction) => {
     await lockUser(transaction, userId);
     const recipient = await readRecipient(userId, transaction);
     const [row] = await transaction.insert(signInApprovals).values({
@@ -494,17 +521,30 @@ export async function startSignInApproval(
       sendCount: 0,
       lastSentAt: null,
     }).returning({ id: signInApprovals.id });
+    const reservation = recipient ? await reserveSend(transaction, row.id, userId, now) : null;
     const limited = recipient
-      ? !(await reserveSend(transaction, row.id, userId, now))
+      ? reservation === null
       : await sendsInWindow(userId, now, transaction) >= APPROVAL_SENDS_PER_HOUR;
-    return { recipient, row, limited };
+    return { recipient, row, limited, reservation };
   });
 
-  const sendError: ApprovalSendError | null = limited
-    ? null
-    : recipient
-      ? (await mailApproval(recipient, token, facts, now, expiresAt, options)).sendError
-      : "unknown";
+  let sendError: ApprovalSendError | null = null;
+  if (!limited) {
+    if (recipient && reservation) {
+      const mailed = await mailApproval(recipient, token, facts, now, expiresAt, options);
+      sendError = mailed.sendError;
+      if (!mailed.handedOver) {
+        /* No mail reached the mailer, so nothing can arrive: the slot goes
+           back, under the lock it was reserved under (#1915 A-F1). */
+        await db.transaction(async (transaction) => {
+          await lockUser(transaction, userId);
+          await releaseSend(transaction, reservation);
+        });
+      }
+    } else {
+      sendError = "unknown";
+    }
+  }
 
   if (!limited && sendError === null) {
     await db.update(signInApprovals)
@@ -700,7 +740,9 @@ export type PendingSignInState =
   | { state: "approved"; userId: string; session?: MintedApprovalSession }
   /* Approved, but the account's password is marked (#1881): the approval is
      spent and the caller issues the change-password hold, never a session. */
-  | { state: "password_change_required"; refusal: PasswordChangeRequiredError }
+  /* `lapsesAt` is set only on a re-issue from a spent approval (#1901): the
+     hold then lapses when the first one did, never later. */
+  | { state: "password_change_required"; refusal: PasswordChangeRequiredError; lapsesAt?: Date }
   | { state: "denied" }
   | { state: "unknown" };
 
@@ -743,7 +785,10 @@ export async function collectSignInApproval(
 
   if (!row) return { state: "unknown" };
   if (row.outcome === "denied") return { state: "denied" };
-  if (row.consumedAt) return { state: "unknown" };
+  if (row.consumedAt) {
+    if (row.outcome === "approved") return reissueFromReceipt(row.userId, row.consumedAt);
+    return { state: "unknown" };
+  }
   if (row.expiresAt.getTime() <= Date.now()) return { state: "unknown" };
   if (row.outcome !== "approved") return { state: "waiting" };
 
@@ -799,6 +844,42 @@ export async function collectSignInApproval(
       .where(and(eq(signInApprovals.id, row.id), eq(signInApprovals.consumedAt, spentAt)));
     throw error;
   }
+}
+
+/**
+ * A spent approval as a receipt (#1901 ruling 2, W-R2): the tab whose answer
+ * was lost polls again with the same claim and is handed the same
+ * change-password hold, not `unknown`. Only while all of these hold, else
+ * `unknown` as before:
+ *
+ *  - the account is still marked, and by a refusal no later than the spend:
+ *    a mark made after it is not the one this approval was answered with,
+ *    and an approval that minted a session must never turn into a hold;
+ *  - the account is not disabled;
+ *  - the spend is under the hold's own ten minutes old.
+ *
+ * The hold lapses at `consumedAt + TTL`, so asking again never extends it
+ * (ADR-0027). Nothing is written: a failed seal is a failed poll, which the
+ * next poll repairs.
+ */
+async function reissueFromReceipt(userId: string, consumedAt: Date): Promise<PendingSignInState> {
+  const lapsesAt = new Date(consumedAt.getTime() + PASSWORD_CHANGE_HOLD_TTL_MS);
+  if (Date.now() >= lapsesAt.getTime()) return { state: "unknown" };
+  const db = getDb();
+  const [credential] = await db
+    .select({ requiredAt: localCredentials.passwordChangeRequiredAt })
+    .from(localCredentials)
+    .where(eq(localCredentials.userId, userId))
+    .limit(1);
+  const requiredAt = credential?.requiredAt;
+  if (!requiredAt || requiredAt.getTime() > consumedAt.getTime()) return { state: "unknown" };
+  const [user] = await db
+    .select({ disabledAt: users.disabledAt })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+  if (!user || user.disabledAt) return { state: "unknown" };
+  return { state: "password_change_required", refusal: new PasswordChangeRequiredError(userId, requiredAt), lapsesAt };
 }
 
 /** What a resend did, in the words the waiting card has for each. */
@@ -882,17 +963,18 @@ export async function resendSignInApproval(
     if (await sendsInWindow(row.userId, now, transaction) >= APPROVAL_SENDS_PER_HOUR) return "limited" as const;
     const recipient = await readRecipient(row.userId, transaction);
     if (!recipient) return "unknown" as const;
-    if (!(await reserveSend(transaction, row.id, row.userId, now))) return "limited" as const;
+    const reservation = await reserveSend(transaction, row.id, row.userId, now);
+    if (reservation === null) return "limited" as const;
     await transaction
       .update(signInApprovals)
       .set({ lastSentAt: now, stagedTokenHash: tokenHash })
       .where(eq(signInApprovals.id, row.id));
-    return { state: "reserved", row, recipient } as const;
+    return { state: "reserved", row, recipient, reservation } as const;
   });
   if (reserved === "limited") return { state: "limited" };
   if (reserved === "unknown") return { state: "unknown" };
   if (reserved.state === "too_soon") return reserved;
-  const { row, recipient } = reserved;
+  const { row, recipient, reservation } = reserved;
 
   let mailed: ApprovalMailOutcome;
   try {
@@ -910,7 +992,9 @@ export async function resendSignInApproval(
     });
     throw error;
   }
-  const { sendError, maybeDelivered } = mailed;
+  const { sendError, maybeDelivered, handedOver } = mailed;
+  /* The minute runs from this send unless its time is put back below. */
+  let sentAt = now;
   if (sendError === null) {
     /* The mail is in the post: promote its link to current and drop the old
        one. Only while the row still carries the digest read under the lock
@@ -927,8 +1011,14 @@ export async function resendSignInApproval(
   } else if (!maybeDelivered) {
     /* The provider refused it or was never reached: the new link never
        arrived and the old one was never replaced, so the staged link is
-       cleared and the send time goes back. The count row stays (#1879). */
-    await restoreSendTime(row.userId, row.id, tokenHash, now, row.lastSentAt);
+       cleared and the send time goes back. The count row stays (#1879)
+       unless no mail was ever handed to the mailer (#1915 A-F1). Once the
+       earlier time is back, the next resend runs from it (#1915 A-F2); a
+       row with no earlier send may be resent at once. */
+    const restored = await restoreSendTime(
+      row.userId, row.id, tokenHash, now, row.lastSentAt, handedOver ? null : reservation,
+    );
+    if (restored) sentAt = row.lastSentAt ?? new Date(now.getTime() - APPROVAL_RESEND_INTERVAL_MS);
   }
   /* Otherwise maybe delivered (#1896): a mail may be arriving with the new
      link, so both links stay until the next resend or a decision, and the
@@ -936,7 +1026,7 @@ export async function resendSignInApproval(
 
   return {
     state: "sent",
-    canResendAt: new Date(now.getTime() + APPROVAL_RESEND_INTERVAL_MS),
+    canResendAt: new Date(sentAt.getTime() + APPROVAL_RESEND_INTERVAL_MS),
     sendError,
   };
 }
