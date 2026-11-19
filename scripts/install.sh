@@ -608,8 +608,28 @@ cleanup() {
     printf 'Orbit installer: could not remove a temporary directory: %s.\n' "$release_manifest_work_dir" >&2 || true
     exit_status=1
   fi
-  [[ -z "${saved_stty:-}" ]] || { stty "$saved_stty" </dev/tty 2>/dev/null; stty echo </dev/tty 2>/dev/null; } || true
+  # #1915 O-R1: stty on the terminal from a background job stops it
+  # (SIGTTOU), so only the terminal's foreground group restores it; TTOU is
+  # ignored for a group that could not be told or that moves mid-restore.
+  if [[ -n "${saved_stty:-}" ]] && ! terminal_background_job; then
+    trap '' TTOU
+    { stty "$saved_stty" </dev/tty 2>/dev/null; stty echo </dev/tty 2>/dev/null; } || true
+  fi
   exit "$exit_status"
+}
+
+# terminal_background_job: true when this process's group is known not to be
+# the terminal's foreground group (/proc, else ps); false when it is, or when
+# that cannot be told.
+terminal_background_job() {
+  local stat fields pgid="" tpgid=""
+  if { read -r stat </proc/$$/stat; } 2>/dev/null; then
+    read -r -a fields <<<"${stat##*) }"
+    pgid="${fields[2]:-}" tpgid="${fields[5]:-}"
+  else
+    read -r pgid tpgid < <(ps -o pgid= -o tpgid= -p "$$" 2>/dev/null) || true
+  fi
+  [[ "$pgid" =~ ^[0-9]+$ && "$tpgid" =~ ^-?[0-9]+$ && "$tpgid" -gt 0 && "$pgid" != "$tpgid" ]]
 }
 
 original_stdout_fd="" original_stderr_fd="" saved_stty=""
