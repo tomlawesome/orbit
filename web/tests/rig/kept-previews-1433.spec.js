@@ -10,6 +10,8 @@ import { APP, onPhone } from "./a11y-support.js";
  * #1433, design note §2.6 line 21 (e2e, the preview spec's desk and phone
  * viewports): "A 3-page document opens with "1 of 3" and both arrows visible
  * at once (count from the summary), and a page turn completes within 1 s."
+ * The 1 s budget is not measured here: a timed check in CI is not wanted
+ * (#1910), so a page turn is checked for showing the right page.
  *
  * Shape and helpers copied from v19-document-preview.spec.js (the paper is
  * pressed in its item's home drawer, the open row on a phone). "At once" is
@@ -18,14 +20,15 @@ import { APP, onPhone } from "./a11y-support.js";
  * `pageCount` (#1436 D8), not from the preview's X-Orbit-Page-Count, so the
  * fixture app's THREE_PAGE_PAPER summary must carry `pageCount: 3`.
  *
- * "Within 1 s" is each turn's own expectation timeout, from the press to the
- * label, the pager and the drawn picture all showing the new page.
+ * Each turn ends with the label, the picture's name and the drawn picture all
+ * showing the new page, within PAGE_TURN_TIMEOUT_MS, a hang guard.
  */
 test.use({ baseURL: APP, reducedMotion: "reduce" });
 
 const THREE_PAGE_PAPER = { item: "i-svc", itemTitle: "Car full service", file: "three-page-proving.pdf" };
+// Only stops a hung page turn; not a performance check (owner, answers 21: "I don't actually think running a timed check in CI at all is a good idea." and "It will still need a timeout, per page."). Copied from LOAD_TIMEOUT_MS in web/src/lib/reading/PreviewCard.svelte (not exported): the app's own page-load failure timeout.
+const PAGE_TURN_TIMEOUT_MS = 15_000;
 const ESCAPED_FILE = THREE_PAGE_PAPER.file.replace(/[.]/g, "\\.");
-const TURN_MS = 1_000;
 
 /** @typedef {{ item: string, itemTitle: string, file: string }} Paper */
 
@@ -104,7 +107,7 @@ test("a 3-page document opens with \"1 of 3\" and a Next arrow, no Previous arro
   await expect.poll(() => shownText(card.locator(".pager .pgn"))).toBe("1 of 3");
 });
 
-test("each page turn in the reader of a kept 3-page document completes within 1 s", async ({ page }, testInfo) => {
+test("each page turn in the reader of a kept 3-page document shows the right page", async ({ page }, testInfo) => {
   const drawer = await openDrawer(page, THREE_PAGE_PAPER.item, testInfo);
   const pressed = drawer.getByRole("button", { name: `Open ${THREE_PAGE_PAPER.file}` });
   await expect(pressed).toBeVisible({ timeout: SETTLE });
@@ -127,10 +130,8 @@ test("each page turn in the reader of a kept 3-page document completes within 1 
 
   /** @param {number} to @param {() => Promise<void>} press */
   const turn = async (to, press) => {
-    const started = Date.now();
     await press();
-    await shown(to, TURN_MS);
-    expect(Date.now() - started, `turning to page ${to}`).toBeLessThanOrEqual(TURN_MS);
+    await shown(to, PAGE_TURN_TIMEOUT_MS);
   };
   await turn(2, () => reader.getByRole("button", { name: "Next page" }).click());
   await turn(3, () => reader.getByRole("button", { name: "Next page" }).click());
