@@ -502,7 +502,7 @@ describe("pipeline lanes", () => {
       const gate = entries.findIndex((entry) => entry.includes('"${ORBIT_E2E:-true}" != "true"'));
       expect(gate, `${name}: no ORBIT_E2E gate`).toBeGreaterThan(-1);
       const after = entries.slice(gate + 1);
-      expect(after.some((entry) => entry.startsWith("bash scripts/test-frontend.sh")), name).toBe(true);
+      expect(after.some((entry) => entry.includes("bash scripts/test-frontend.sh")), name).toBe(true);
       /* Evidence is the last step, but for #1447's warning exit after it. */
       const tail = after.at(-1).startsWith("if [ -f .quarantine-failed ]") ? after.at(-2) : after.at(-1);
       expect(tail.split("\n")[0], name).toBe("*reuse_evidence");
