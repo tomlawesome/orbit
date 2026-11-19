@@ -438,7 +438,7 @@ async function pillSettled(page) {
     const pill = document.getElementById("orbit-tour-transport");
     if (!pill) return true;
     return pill.style.opacity !== "0"
-      && !pill.getAnimations().some((a) => a instanceof CSSTransition && a.transitionProperty === "opacity" && (a.playState === "running" || a.playState === "pending"));
+      && !pill.getAnimations().some((a) => a instanceof CSSTransition && a.transitionProperty === "opacity" && (a.playState === "running" || a.pending));
   }, null, { timeout: 20_000, pace: 20 }).catch(() => {});
   await settled(page);
 }
@@ -493,7 +493,7 @@ function sampleTransport() {
      old place, in at the new) is moving, not faint — unless it stays that
      way, which the caller times. */
   const moving = pill.style.opacity === "0"
-    || pill.getAnimations().some((a) => a instanceof CSSTransition && a.transitionProperty === "opacity" && (a.playState === "running" || a.playState === "pending"));
+    || pill.getAnimations().some((a) => a instanceof CSSTransition && a.transitionProperty === "opacity" && (a.playState === "running" || a.pending));
   if (opacity < 0.95) faults.push(`pill ${moving ? "moving between places" : "faint"} (opacity ${opacity.toFixed(2)}, ${state})`);
   /* In front: whatever answers a hit test on the pill must be the pill. */
   /** @type {[number, number, string][]} */
