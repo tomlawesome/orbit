@@ -126,16 +126,46 @@ describe("local document storage", () => {
     }
   });
 
-  // #1605 SEC-D2/1: the read loop had no deadline, so a client that sent a few bytes and then
-  // went quiet held the upload (and its quarantine file) open for ever. Fake time stands in for
-  // the wait; the test names no limit, only that a day of silence ends the upload and cleans up.
-  it("#1605 SEC-D2/1: ends an upload whose sender goes silent, and removes its partial quarantine file", async () => {
+  // #1605 SEC-D2/1 (revised, note 63063): the web server shim's minimum body rate destroys a
+  // stalled upload's socket, so the body stream errors. That path must clean up.
+  it("#1605: an upload whose body stream errors mid-way (socket destroyed) rejects, removes the partial quarantine file and closes the handle", async () => {
     const { root, storage } = await createStorage();
     const documentId = randomUUID();
+    const actual = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
+    let closeSpy: ReturnType<typeof vi.spyOn> | undefined;
+    vi.mocked(open).mockImplementationOnce(async (...args) => {
+      const real = await actual.open(...(args as Parameters<typeof actual.open>));
+      closeSpy = vi.spyOn(real, "close");
+      return real;
+    });
+    let sentFirst = false;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (!sentFirst) {
+          sentFirst = true;
+          controller.enqueue(Buffer.from("%PDF-1.7\n"));
+          return undefined;
+        }
+        controller.error(new Error("socket destroyed"));
+        return undefined;
+      },
+    }, { highWaterMark: 0 });
+
+    await expect(storage.receive(body, documentId, 1_024)).rejects.toThrow();
+    expect(await readdir(join(root, "quarantine"))).toEqual([]);
+    expect(closeSpy).toHaveBeenCalledTimes(1);
+  });
+
+  // #1605 SEC-D2/1 (revised): storage keeps no idle timer; the socket layer owns stalls
+  // (scripts/web-server.mjs MinRate). A silent sender is not ended by storage itself.
+  it("#1605: storage has no idle timer of its own: a sender silent for a day is still pending, not ended with document_upload_timeout", async () => {
+    const { storage } = await createStorage();
     let askedForMore!: () => void;
     const stalled = new Promise<void>((resolve) => { askedForMore = resolve; });
     let sentFirst = false;
+    let streamController!: ReadableStreamDefaultController<Uint8Array>;
     const body = new ReadableStream<Uint8Array>({
+      start(controller) { streamController = controller; },
       pull(controller) {
         if (!sentFirst) {
           sentFirst = true;
@@ -145,65 +175,27 @@ describe("local document storage", () => {
         askedForMore();
         return new Promise<void>(() => undefined); // the sender went quiet
       },
-    });
-    vi.useFakeTimers();
-    try {
-      let outcome: "pending" | "rejected" | "resolved" = "pending";
-      const received = storage.receive(body, documentId, 1_024).then(() => { outcome = "resolved"; }, () => { outcome = "rejected"; });
-      await stalled;
-      await vi.advanceTimersByTimeAsync(24 * 60 * 60 * 1_000);
-      vi.useRealTimers();
-      // Real time only bounds the wait for the file handle to close; the verdict is the outcome.
-      await Promise.race([received, new Promise((resolve) => setTimeout(resolve, 3_000))]);
-      expect(outcome).toBe("rejected");
-      expect(await readdir(join(root, "quarantine"))).toEqual([]);
-    } finally {
-      vi.useRealTimers();
-      await body.cancel().catch(() => undefined);
-    }
-  }, 20_000);
-
-  // #1605 SEC-D2/1 review: the idle timeout measures the sender's silence only. A disk that
-  // takes minutes to write one chunk is the server's wait, not the sender's, and must not end
-  // a live upload.
-  it("#1605 SEC-D2/1: a write slower than the idle timeout does not end the upload", async () => {
-    const { storage } = await createStorage();
-    const documentId = randomUUID();
-    const actual = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
-    let writing!: () => void;
-    const writeStarted = new Promise<void>((resolve) => { writing = resolve; });
-    vi.mocked(open).mockImplementationOnce(async (...args) => {
-      const real = await actual.open(...(args as Parameters<typeof actual.open>));
-      const write = real.write.bind(real) as (...a: unknown[]) => Promise<unknown>;
-      vi.spyOn(real, "write").mockImplementationOnce((async (...a: unknown[]) => {
-        writing();
-        await new Promise((resolve) => setTimeout(resolve, 10 * 60 * 1_000)); // a ten-minute write
-        return write(...a);
-      }) as never);
-      return real;
-    });
-    // A live sender: each chunk is handed over only when asked for, a moment later.
-    const chunks = [Buffer.from("%PDF-1.7\n"), Buffer.from("%%EOF\n")];
-    const body = new ReadableStream<Uint8Array>({
-      async pull(controller) {
-        await Promise.resolve();
-        const next = chunks.shift();
-        if (next) controller.enqueue(next);
-        else controller.close();
-      },
     }, { highWaterMark: 0 });
     vi.useFakeTimers();
+    let outcome: "pending" | "rejected" | "resolved" = "pending";
+    let failure: unknown;
+    let received!: Promise<void>;
     try {
-      let outcome: "pending" | "rejected" | "resolved" = "pending";
-      const received = storage.receive(body, documentId, 1_024).then(() => { outcome = "resolved"; }, () => { outcome = "rejected"; });
-      await writeStarted;
-      await vi.advanceTimersByTimeAsync(11 * 60 * 1_000);
-      vi.useRealTimers();
-      await Promise.race([received, new Promise((resolve) => setTimeout(resolve, 3_000))]);
-      expect(outcome).toBe("resolved");
+      received = storage.receive(body, randomUUID(), 1_024).then(() => { outcome = "resolved"; }, (error: unknown) => { outcome = "rejected"; failure = error; });
+      await stalled;
+      await vi.advanceTimersByTimeAsync(24 * 60 * 60 * 1_000);
     } finally {
       vi.useRealTimers();
     }
+    // Real time lets any timer-driven cleanup (file removal, handle close) finish before the verdict.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const seen = outcome;
+    const seenFailure = failure;
+    // What the socket layer does: the body errors. Storage then cleans up.
+    streamController.error(new Error("socket destroyed"));
+    await received;
+    expect(seenFailure).toBeUndefined();
+    expect(seen).toBe("pending");
   }, 20_000);
 
   it("removes partial quarantine content when the size limit is exceeded", async () => {
