@@ -196,7 +196,14 @@
         return;
       }
       if (result.kind === "busy" && !again) {
-        busyTimer = setTimeout(() => { if (mine === token) loadPage(paper, n, mine, turned, true); }, result.retryAfterSeconds * 1000);
+        // The wait is the server's own, so the stall timer must not run through it;
+        // the retry arms a fresh one for the load itself.
+        clearTimeout(loadTimer);
+        busyTimer = setTimeout(() => {
+          if (mine !== token) return;
+          if (!src && !turned) loadTimer = setTimeout(() => { if (mine === token) failed(); }, LOAD_TIMEOUT_MS);
+          loadPage(paper, n, mine, turned, true);
+        }, result.retryAfterSeconds * 1000);
         return;
       }
       if (result.kind === "page") {
