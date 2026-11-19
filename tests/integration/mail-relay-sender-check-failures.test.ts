@@ -236,11 +236,18 @@ describe("finding 1, by order: the 202 does not wait for the mailer", () => {
       expect(response.status).toBe(202);
 
       /* The 202 came first: the mailer was never released, so it cannot have been waited for. */
-      expect(mail.stalled).toHaveLength(1);
       expect(mail.sent).toEqual([]);
       expect(senderWarns(warn)).toEqual([]);
 
+      /* The send reaches the mailer after the 202; wait for it rather than read it at once. */
+      await vi.waitFor(() => expect(mail.stalled).toHaveLength(1), { timeout: 5 * SECOND });
+      expect(senderWarns(warn)).toEqual([]);
+
+      /* Released, the held send completes: the attempt stays counted and nothing is logged as a failure. */
       for (const release of mail.stalled.splice(0)) release();
+      mail.mode = "ok";
+      await vi.waitFor(async () => expect((await rowsOf(fixture.users.member.id)).flatMap((row) => row.checkSentAt)).toHaveLength(1), { timeout: 5 * SECOND });
+      expect(senderWarns(warn)).toEqual([]);
     } finally {
       warn.mockRestore();
     }
