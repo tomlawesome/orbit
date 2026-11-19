@@ -479,10 +479,6 @@ timeout on this one case rather than a global raise.
 - 2026-11-05 · 34e87dae (chore/batch-a-intake-1, !1174) · pipeline 3609 / `rig_firefox` job 46352 · in the editing walk, links #9 to #14 (the dial's last body link and the manifest rows, by a local probe of the same state) read an empty accessible name, until the 30 s test timeout. Local rig-firefox on the same commit passed 16 of 16 at eight workers, and every one of those links is named there. Same run, rig-webkit-desktop timed out at `locator.count()` in the same walk. First sighting.
 - 2026-11-05 · dbc2e3ba (chore/batch-a-intake-1, !1174) · pipeline 3615 / `rig_webkit` job 46466 (rig-webkit-desktop; the spec is at :180 now) · `locator.count()` in `assertEveryControlIsNamed` ran to the 30 s test timeout in the same walk. host load; code unchanged since 3614. Second sighting.
 
-## web/tests/rig/sign-out-descent.spec.js:134 "sign out from home's menu reaches the dusk (phone-narrow, as the browser is)" — rig-webkit-desktop (#1716, fixed by 97cf5f82)
-
-- 2026-11-05 · dbc2e3ba (chore/batch-a-intake-1, !1174) · pipeline 3615 / `rig_webkit` job 46466 · "#1262: the descent was not seen to start and end" (`expect(took).not.toBeNull()` at :176, Received: null). Before the fix: 97cf5f82 corrects both causes of this test's failures (#1716), the unread `withdrawing` state among them. host load; code unchanged since 3614. Heading goes when a pipeline on 97cf5f82 shows the fix held.
-
 ## web/tests/rig/v19-document-preview.spec.js:278 "each page turn in the reader asks the server for that page's picture once"
 
 - 2026-11-05 · dbc2e3ba (chore/batch-a-intake-1, !1174) · pipeline 3615 / `rig_webkit` job 46466 (rig-webkit-desktop) · `toHaveAccessibleName` at :286: Expected "Page 2 of three-page-proving.pdf", Received "" until the 30 s test timeout. host load; code unchanged since 3614. First sighting.
