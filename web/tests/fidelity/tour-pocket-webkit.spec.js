@@ -320,10 +320,10 @@ async function spreadOf(page, clip) {
 }
 
 /** @param {import("@playwright/test").Page} page */
-async function openFilm(page, { fakeClock = false } = {}) {
+async function openFilm(page, { fakeClock = true } = {}) {
   /** @type {string[]} */
   const errors = [];
-  if (fakeClock) await page.clock.install();
+  if (fakeClock) { await page.clock.install(); CLOCKED.add(page); }
   page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
   page.on("pageerror", (error) => errors.push(error.message));
   await installFilmEnded(page);
@@ -355,43 +355,71 @@ async function openFilm(page, { fakeClock = false } = {}) {
  * @param {import("@playwright/test").Page} page
  */
 async function settled(page) {
-  await finiteMotionSettled(page);
+  if (!CLOCKED.has(page)) { await finiteMotionSettled(page); return; }
+  /* its frames are the faked clock's: step it along until the wait ends */
+  let done = false;
+  const wait = finiteMotionSettled(page).finally(() => { done = true; });
+  for (let i = 0; i < 400 && !done; i++) {
+    await page.clock.fastForward(50);
+    /* CSS animations and transitions run on the real document timeline, which
+       the faked clock does not move: a few real ms between steps lets them
+       finish without the film running far ahead of what the sampler sees */
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  await wait;
 }
 
 /**
- * The film runs on the page's faked clock (#1914): `page.clock.install()` goes
- * before the page loads, and the film is moved on in 250 ms steps of faked
- * time. No wall-clock wait: a step that never gets there ends at the virtual
- * cap and the caller reports it; the test's own setTimeout is the hang guard.
- * `fastForward` would not do, as the film caps a frame at 120 ms.
- * @param {import("@playwright/test").Page} page
- * @param {() => Promise<boolean>} reached
- * @param {number} [cap] the most faked milliseconds to run
+ * THE FILM RUNS ON THE PAGE'S FAKED CLOCK (#1914). `openFilm` installs
+ * `page.clock` before the page loads, and every wait for the film is the
+ * clock stepped on in 250 ms pieces until the state is there: no wall-clock
+ * wait, no timed check. A step that never gets there ends at its cap in
+ * FAKED milliseconds and the caller names what never came; each test's own
+ * setTimeout is only the hang guard. The steps are `fastForward(120)`: one
+ * frame each, and the film takes at most 120 ms from a frame (clock.js
+ * frameDelta), so it plays at full pace without `runFor`'s seven frames.
  */
-async function runClockUntil(page, reached, cap = 400_000) {
-  for (let spent = 0; spent < cap; spent += 250) {
-    if (await reached()) return true;
-    await page.clock.runFor(250);
+const CLOCKED = new WeakSet();
+
+/** The page's own (faked) time, in ms.
+ *  @param {import("@playwright/test").Page} page */
+const vnow = (page) => page.evaluate(() => Date.now());
+
+/**
+ * Waits for `fn` to be truthy in the page. On a page with the faked clock the
+ * clock is run on between looks; `timeout` is then faked milliseconds, and a
+ * miss throws as `waitForFunction` does.
+ * @param {import("@playwright/test").Page} page
+ * `pace` is real ms between steps, for a wait on something on the real
+ * document timeline (a CSS transition), which the faked clock does not move.
+ * @param {(arg: any) => any} fn @param {any} [arg] @param {{ timeout?: number, pace?: number }} [options]
+ */
+async function waitFor(page, fn, arg, { timeout = 30_000, pace = 0 } = {}) {
+  if (!CLOCKED.has(page)) { await page.waitForFunction(fn, arg, { timeout }); return; }
+  /* 120 ms a step, one frame each: the film takes at most 120 ms from a frame
+     (clock.js frameDelta), so this is its full pace with a seventh of the
+     frames `runFor` would fire */
+  for (let spent = 0; ; spent += 120) {
+    if (await page.evaluate(fn, arg)) return;
+    if (spent >= timeout) throw new Error(`not reached in ${timeout} ms of the film's own time`);
+    await page.clock.fastForward(120);
+    if (pace) await new Promise((r) => setTimeout(r, pace));
   }
-  return reached();
+}
+
+/** Lets `ms` of the film's own time pass, a frame per 120 ms (see `waitFor`).
+ *  @param {import("@playwright/test").Page} page @param {number} ms */
+async function playFor(page, ms) {
+  for (let spent = 0; spent < ms; spent += 120) await page.clock.fastForward(120);
 }
 
 /** Runs the faked clock until the film holds `mark`.
  *  @param {import("@playwright/test").Page} page @param {string} mark @param {number} [cap] */
-function runClockToHold(page, mark, cap) {
-  return runClockUntil(page, () => page.evaluate((m) => /** @type {any} */ (window).__held === m, mark), cap);
-}
-
-/** `settled`, with the faked clock stepped along (its frames are faked ones).
- *  @param {import("@playwright/test").Page} page */
-async function settledOnClock(page) {
-  let done = false;
-  const wait = settled(page).finally(() => { done = true; });
-  for (let i = 0; i < 400 && !done; i++) {
-    await page.clock.runFor(50);
-    await new Promise((r) => setImmediate(r));
-  }
-  await wait;
+async function runClockToHold(page, mark, cap = 400_000) {
+  try {
+    await waitFor(page, (m) => /** @type {any} */ (window).__held === m, mark, { timeout: cap });
+    return true;
+  } catch { return false; }
 }
 
 /** The pill at rest: not between places (20s at most for a move that never
@@ -399,12 +427,12 @@ async function settledOnClock(page) {
  *  page settled.
  *  @param {import("@playwright/test").Page} page */
 async function pillSettled(page) {
-  await page.waitForFunction(() => {
+  await waitFor(page, () => {
     const pill = document.getElementById("orbit-tour-transport");
     if (!pill) return true;
     return pill.style.opacity !== "0"
-      && !pill.getAnimations().some((a) => a instanceof CSSTransition && a.transitionProperty === "opacity" && a.playState === "running");
-  }, null, { timeout: 20_000 }).catch(() => {});
+      && !pill.getAnimations().some((a) => a instanceof CSSTransition && a.transitionProperty === "opacity" && (a.playState === "running" || a.playState === "pending"));
+  }, null, { timeout: 20_000, pace: 20 }).catch(() => {});
   await settled(page);
 }
 
@@ -458,7 +486,7 @@ function sampleTransport() {
      old place, in at the new) is moving, not faint — unless it stays that
      way, which the caller times. */
   const moving = pill.style.opacity === "0"
-    || pill.getAnimations().some((a) => a instanceof CSSTransition && a.transitionProperty === "opacity" && a.playState === "running");
+    || pill.getAnimations().some((a) => a instanceof CSSTransition && a.transitionProperty === "opacity" && (a.playState === "running" || a.playState === "pending"));
   if (opacity < 0.95) faults.push(`pill ${moving ? "moving between places" : "faint"} (opacity ${opacity.toFixed(2)}, ${state})`);
   /* In front: whatever answers a hit test on the pill must be the pill. */
   /** @type {[number, number, string][]} */
@@ -637,7 +665,6 @@ const PHONES = [
  *  the checks that follow the loop, so the two cannot cross and leave a bare
  *  "Test timeout" where the named failure should be (T-Q21). */
 const FILM_BOUND = { yours: 840_000, lands: 380_000 };
-const FILM_TAIL = 60_000;
 
 test.describe("the pocket film in WebKit (#1174)", () => {
   test.use({ reducedMotion: "reduce" });
@@ -650,7 +677,7 @@ test.describe("the pocket film in WebKit (#1174)", () => {
        clocks are the generous bounds that end a film that never finishes.
        Speed is logged, not asserted. */
     test(`plays ${phone.through === "yours" ? "end to end" : "through chapter 3"} at ${phone.width}x${phone.height} under normal motion: the clock keeps moving through a reader's tap, the pill stays in front and readable, nothing flashes, and every mark is where it belongs`, async ({ browser }) => {
-      test.setTimeout(FILM_BOUND[phone.through] + FILM_TAIL);
+      test.setTimeout(600_000); // hang guard only; the film runs on the faked clock (#1914)
       const size = { width: phone.width, height: phone.height };
       const context = await browser.newContext({
         viewport: size, isMobile: true, hasTouch: true, deviceScaleFactor: 2,
@@ -693,11 +720,11 @@ test.describe("the pocket film in WebKit (#1174)", () => {
       let barSeen = false;
       /** Where the clock last moved, for the log: the only use of the wall clock
        *  besides the bound, which ends a film that never finishes (T-Q13). */
-      let lastMove = { at: Date.now(), cursor: -1, total: 0, url: "", chapter: -1 };
-      const started = Date.now();
+      let lastMove = { at: 0, cursor: -1, total: 0, url: "", chapter: -1 };
+      const started = await vnow(page);
       /* A bound on a film that never ends; the test's own limit is derived above it. */
       const bound = FILM_BOUND[phone.through];
-      while (!done && Date.now() - started < bound) {
+      while (!done && (await vnow(page)) - started < bound) {
         const [s, first] = await Promise.all([page.evaluate(sampleTransport), page.evaluate(sample)]);
         /* A callout or ring fault is judged once the page has come to rest:
            a callout is fading, a ring is catching up with a control that
@@ -719,7 +746,7 @@ test.describe("the pocket film in WebKit (#1174)", () => {
         if (s) {
           samples++;
           barSeen = true;
-          if (s.cursor !== lastMove.cursor) lastMove = { at: Date.now(), cursor: s.cursor, total: s.total, url: s.url, chapter: s.chapter };
+          if (s.cursor !== lastMove.cursor) lastMove = { at: await vnow(page), cursor: s.cursor, total: s.total, url: s.url, chapter: s.chapter };
           /* The pill's own move between places is a fade out and in
              (owner's call, round 8); a faint pill is judged once it has
              arrived and the page is at rest, and is a fault then; so is a
@@ -739,7 +766,10 @@ test.describe("the pocket film in WebKit (#1174)", () => {
               await pillSettled(page);
               const rested = await page.evaluate(sampleTransport);
               pillFaults = rested && !rested.ended ? rested.faults.filter((f) => !isOver(f)) : [];
-              if (!pillFaults.some((f) => f.startsWith("pill moving"))) break;
+              /* a faint pill is looked at again too (#1914): its fade is a real-timeline
+                 transition and a look can land between two of the clock's steps; one
+                 still faint after three rests is a fault */
+              if (!pillFaults.some((f) => f.startsWith("pill moving") || f.startsWith("pill faint"))) break;
             }
           }
           pillFaults = [...over, ...pillFaults];
@@ -782,7 +812,8 @@ test.describe("the pocket film in WebKit (#1174)", () => {
               tapped = true;
               await chip.tap({ force: true });
               await settled(page);
-              tapTook = await chip.evaluate((el) => el.getAttribute("aria-pressed") === "true");
+              /* read, not waited for: the film may have walked off the form by now */
+              tapTook = await page.evaluate(() => document.querySelector('#pocket-entry .pc-chip[data-imp="low"]')?.getAttribute("aria-pressed") === "true");
             }
           }
           done = s.ended || s.chapter > last;
@@ -793,10 +824,9 @@ test.describe("the pocket film in WebKit (#1174)", () => {
            finished, then two painted frames), not a length of time. */
         await settled(page);
       }
-      const stoppedAt = Date.now();
+      const stoppedAt = await vnow(page);
       const elapsed = (stoppedAt - started) / 1000;
-      const frames = await page.evaluate(() => /** @type {any} */ (window).__frames);
-      console.log(`${phone.width}x${phone.height}: ${samples} samples, ${elapsed.toFixed(0)}s to ${done ? "the end" : "the bound"}, the page painted ${(frames / elapsed).toFixed(1)} frames a second`);
+      console.log(`${phone.width}x${phone.height}: ${samples} samples, ${elapsed.toFixed(0)}s of the film's own time to ${done ? "the end" : "the bound"}`);
       const waitedOut = await page.evaluate(waitsRunOut);
       await context.close();
       /* A film the bound ended names where its clock stood and for how long,
@@ -820,7 +850,7 @@ test.describe("the pocket film in WebKit (#1174)", () => {
   }
 
   test("reaches every mark at 360x780, each drawn on the screen and what it lights lit", async ({ page }) => {
-    test.setTimeout(420_000);
+    test.setTimeout(300_000); // hang guard only (#1914)
     await page.setViewportSize({ width: 360, height: 780 });
     const errors = await openFilm(page);
     /** @type {string[]} */
@@ -837,7 +867,7 @@ test.describe("the pocket film in WebKit (#1174)", () => {
         if (mark === marks[0]) await page.evaluate((k) => /** @type {any} */ (window).__jump(k), index);
         else await page.evaluate(() => /** @type {any} */ (window).__play());
         try {
-          await page.waitForFunction((m) => /** @type {any} */ (window).__held === m, mark, { timeout: 45_000 });
+          await waitFor(page, (m) => /** @type {any} */ (window).__held === m, mark, { timeout: 45_000 });
         } catch {
           wrong.push(`${mark}: never reached`);
           continue;
@@ -897,14 +927,14 @@ test.describe("chapter 4 takes the page down to the manifest (#1174 round 4)", (
         reducedMotion: "no-preference",
       });
       const page = await context.newPage();
-      const errors = await openFilm(page, { fakeClock: true });
+      const errors = await openFilm(page);
       /** @type {string[]} */
       const wrong = [];
       const mark = "manifest-today";
       await page.evaluate((m) => { const hooks = /** @type {any} */ (window); hooks.__held = null; hooks.__hold = m; }, mark);
       const reached = await runClockToHold(page, mark);
       if (!reached) wrong.push(`${mark}: never reached`);
-      else await settledOnClock(page);
+      else await settled(page);
       for (const [what, sel] of reached ? [["the header", ".pocket .pk-below h2.p-caps"], ["the first row", ".pocket .pk-below .p-row"]] : []) {
         const seen = await page.evaluate((s) => {
           const el = document.querySelector(s);
@@ -1075,7 +1105,7 @@ test.describe("suggested values give way to real text (#1174 round 4)", () => {
         if (mark === "add-typing") await page.evaluate((k) => /** @type {any} */ (window).__jump(k), index);
         else await page.evaluate(() => /** @type {any} */ (window).__play());
         try {
-          await page.waitForFunction((m) => /** @type {any} */ (window).__held === m, mark, { timeout: 60_000 });
+          await waitFor(page, (m) => /** @type {any} */ (window).__held === m, mark, { timeout: 60_000 });
         } catch {
           wrong.push(`${mark}: never reached`);
           continue;
@@ -1205,7 +1235,7 @@ test.describe("chapter 4's manifest holds rows to point at on a new household (#
         await page.evaluate((m) => { const hooks = /** @type {any} */ (window); hooks.__held = null; hooks.__hold = m; }, mark);
         await page.evaluate((k) => /** @type {any} */ (window).__jump(k), index);
         try {
-          await page.waitForFunction((m) => /** @type {any} */ (window).__held === m, mark, { timeout: 60_000 });
+          await waitFor(page, (m) => /** @type {any} */ (window).__held === m, mark, { timeout: 60_000 });
         } catch {
           wrong.push(`${mark}: never reached`);
           continue;
@@ -1246,7 +1276,7 @@ test.describe("chapter 4's manifest holds rows to point at on a new household (#
       /* chapter 5: nothing the film staged in chapter 4 is left */
       await page.evaluate(() => { const hooks = /** @type {any} */ (window); hooks.__held = null; hooks.__hold = "time-warmed"; hooks.__play(); });
       try {
-        await page.waitForFunction(() => /** @type {any} */ (window).__held === "time-warmed", null, { timeout: 60_000 });
+        await waitFor(page, () => /** @type {any} */ (window).__held === "time-warmed", null, { timeout: 60_000 });
         const left = await page.evaluate(() => document.querySelectorAll(".pocket .pk-below :is([data-tourfilm-staged], .tourfilm-example-row)").length);
         if (left) wrong.push(`time-warmed: ${left} of chapter 4's staged nodes left in the manifest`);
       } catch {
@@ -1255,11 +1285,11 @@ test.describe("chapter 4's manifest holds rows to point at on a new household (#
       /* and a stop on chapter 4's line leaves nothing either */
       await page.evaluate((k) => { const hooks = /** @type {any} */ (window); hooks.__held = null; hooks.__hold = "manifest-today"; hooks.__jump(k); }, index);
       try {
-        await page.waitForFunction(() => /** @type {any} */ (window).__held === "manifest-today", null, { timeout: 60_000 });
+        await waitFor(page, () => /** @type {any} */ (window).__held === "manifest-today", null, { timeout: 60_000 });
         await page.evaluate(() => /** @type {any} */ (window).__stop());
         /* nothing staged is left: waited for as an end state (20s at most;
            what is still there then is counted below) */
-        await page.waitForFunction((sel) => document.querySelectorAll(sel).length === 0, STAGED, { timeout: 20_000 }).catch(() => {});
+        await waitFor(page, (sel) => document.querySelectorAll(sel).length === 0, STAGED, { timeout: 20_000, pace: 20 }).catch(() => {});
         const left = await page.evaluate((s) => document.querySelectorAll(s).length, STAGED);
         if (left) wrong.push(`stopped at manifest-today: ${left} staged nodes left on the page`);
       } catch {
@@ -1350,14 +1380,14 @@ test.describe("the danger-zone ring pulses red while chapter 5 shows it (#1174 r
         reducedMotion: one.reduced ? "reduce" : "no-preference",
       });
       const page = await context.newPage();
-      const errors = await openFilm(page, { fakeClock: true });
+      const errors = await openFilm(page);
       const index = await page.evaluate(() => /** @type {any} */ (window).__chapters.findIndex((/** @type {any} */ c) => c.id === "time"));
       /** @type {string[]} */
       const wrong = [];
       await page.evaluate((k) => { const hooks = /** @type {any} */ (window); hooks.__held = null; hooks.__hold = "time-warmed"; hooks.__jump(k); }, index);
       try {
         if (!(await runClockToHold(page, "time-warmed"))) throw new Error("not held");
-        await settledOnClock(page);
+        await settled(page);
         const held = await page.evaluate(dangerRing, THEME_PACKS);
         if (!held) wrong.push("time-warmed: no danger ring drawn");
         else {
@@ -1459,7 +1489,7 @@ test.describe("chapter 8 plays through on a new household (#1174 round 6)", () =
   ];
   for (const { phone, household } of CASES) {
     test(`at ${phone.width}x${phone.height} on ${household === "empty" ? "a household with nothing in it" : "a household whose items carry no papers"}, chapters 7 to 9 play on without the clock standing still and without the film stopping itself`, async ({ browser }) => {
-      test.setTimeout(480_000);
+      test.setTimeout(300_000); // hang guard only (#1914)
       const context = await browser.newContext({
         viewport: { width: phone.width, height: phone.height }, isMobile: true, hasTouch: true, deviceScaleFactor: 2,
         reducedMotion: "no-preference",
@@ -1501,7 +1531,7 @@ test.describe("chapter 8 plays through on a new household (#1174 round 6)", () =
         };
         tick();
       }, until);
-      await page.waitForFunction((stop) => {
+      await waitFor(page, (stop) => {
         const w = /** @type {any} */ (window);
         return w.__barGone || (w.__chapterLog.at(-1) ?? -1) >= stop;
       }, until, { timeout: 420_000 }).catch(() => {});
@@ -1552,8 +1582,8 @@ test.describe("chapters 8 and 9 stay on the sky when the household has nothing i
     /** @type {Map<string, number>} */
     let streak = new Map();
     let reached = false;
-    const started = Date.now();
-    while (Date.now() - started < 120_000) {
+    const started = await vnow(page);
+    while ((await vnow(page)) - started < 120_000) {
       const m = await page.evaluate(sample);
       const s = await page.evaluate(sampleTransport);
       if (!s || !m) break;
@@ -1613,7 +1643,7 @@ async function holdAndRead(page, mark, jumpTo, selectors) {
   }, mark);
   if (jumpTo !== null) await page.evaluate((k) => /** @type {any} */ (window).__jump(k), jumpTo);
   else await page.evaluate(() => /** @type {any} */ (window).__play());
-  await page.waitForFunction((m) => /** @type {any} */ (window).__held === m, mark, { timeout: 45_000 });
+  await waitFor(page, (m) => /** @type {any} */ (window).__held === m, mark, { timeout: 45_000 });
   await settled(page);
   return page.evaluate((sels) => {
     const el = [...document.querySelectorAll(".tourfilm-callout")]
@@ -1755,7 +1785,7 @@ async function recordSides(page) {
 
 test.describe("every phone callout but the two sheet lines stays outside its anchor, and none changes side (#1895 normal motion)", () => {
   test("#1895 normal motion at 430, 390 and 360: sheet lines inside, every other line outside, one side per hold and per width", async ({ browser }) => {
-    test.setTimeout(2_400_000);
+    test.setTimeout(900_000); // hang guard only (#1914)
     /** @type {string[]} */
     const wrong = [];
     /** @type {Map<string, Map<number, { side: string, box: any, anchor: any, vh: number }>>} */
@@ -1785,7 +1815,7 @@ test.describe("every phone callout but the two sheet lines stays outside its anc
           return el ? /** @type {any} */ (window).__sideSeen.get(el) ?? [] : [];
         });
         /* the sheet's late growth (900ms) and the line's own follow-on */
-        await page.waitForTimeout(1500);
+        await playFor(page, 1500);
         await settled(page);
         const later = await page.evaluate(() => {
           const el = [...document.querySelectorAll(".tourfilm-callout")].find((c) => /** @type {HTMLElement} */ (c).style.opacity !== "0");
