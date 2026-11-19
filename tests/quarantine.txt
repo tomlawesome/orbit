@@ -5,4 +5,3 @@
 # any tag this list does not account for.
 #
 # <path> <tag count> <issue refs> [note]. docs/flakes.md has the sightings.
-web/tests/fidelity/pocket-measure.spec.js 1 #1376

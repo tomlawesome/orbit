@@ -50,13 +50,19 @@ export async function settle(page) {
  * @param {Locator} row
  */
 export async function openRow(page, row) {
-  await row.evaluate((el) => el.scrollIntoView({ block: "center" }));
+  /* #1376: home sets `html{scroll-behavior:smooth}`, so a plain scrollIntoView
+     glides. Playwright's tap works out its point once the row has held still
+     for two frames, and a starved frame loop can show the glide standing still
+     for that long and then jump: the touch lands below the face, on the row's
+     own box, where nothing opens it. Jump instead, so the row is where it will
+     stay before the tap looks. */
+  await row.evaluate((el) => el.scrollIntoView({ block: "center", behavior: "instant" }));
   const face = row.locator("[data-row-face]").first();
   await face.tap();
-  /* #1376: about once in 500 runs the panel never shows after the tap, and
-     the wait used to run to the 60 s test timeout saying nothing. It fails
-     at 10 s now with what the page held, never retrying the tap: a lost tap
-     may be the app's fault, and a retry would hide it. */
+  /* #1376: a panel that never showed used to run to the 60 s test timeout
+     saying nothing. It fails at 10 s now with what the page held, never
+     retrying the tap: a lost tap may be the app's fault, and a retry would
+     hide it. */
   try {
     await row.locator("[data-row-panel]:not([hidden])").first().waitFor({ timeout: 10_000 });
   } catch (error) {
