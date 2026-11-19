@@ -208,8 +208,8 @@ workflow:
 # and a merge request into `dev` no longer starts any of them: the nine browser jobs
 # (`smoke`, `smoke_webkit`, `smoke_webkit_mobile`, `smoke_local_only`, and the
 # rig's `rig_chromium`, `rig_firefox`, `rig_webkit`, `film_webkit`, `screens_chromium`;
-# ADR-0039, #1615, #1692, #1546; the four rig jobs run as `parallel:` shards)
-# run here, every night on `dev`, and all but the four rig jobs also at
+# ADR-0039, #1615, #1692, #1546; the four rig jobs other than `screens_chromium` run as `parallel:` shards)
+# run here, every night on `dev`, and all but those four sharded rig jobs also at
 # promotion (the `preview` push; owner answer 125, #1763). The
 # nightly alone also runs `pocket_measure`, the full tap-floor measurement,
 # which never fails the pipeline (#1616).
@@ -267,7 +267,7 @@ workflow:
 # `smoke_local_only`, and `acceptance` and `repair_journeys` (`smoke`,
 # `smoke_webkit`, `smoke_webkit_mobile`, `rig_chromium`, `rig_firefox`,
 # `rig_webkit`, `film_webkit`, `screens_chromium`, `acceptance`, `repair_journeys`); `record_image` needs
-# them as optional, the four nightly-only rig jobs aside (#1763). One variable is set per event, so the two tests never
+# them as optional, the four nightly-only sharded rig jobs aside (#1763). One variable is set per event, so the two tests never
 # both match, and neither matches a schedule or a push elsewhere.
 .not_on_hotfix: &not_on_hotfix
   if: $CI_COMMIT_BRANCH =~ /^hotfix\// || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME =~ /^hotfix\//
@@ -403,7 +403,7 @@ variables:
   # 34555 (cosign v3.1.3, docker 29.9.0 CLI), 2026-10-10.
   # Current: pipeline 2867, job publish_signing 38298 (cosign v3.1.4,
   # docker 29.9.2 CLI), 2026-10-22.
-  ORBIT_SIGNING_IMAGE: registry.tomlawson.io/ai/orbit-base-image/signing@sha256:21dad4f1976d1118e1a142b82bebc7b7eaf76f242f39edb14790543c3c2661f3
+  ORBIT_SIGNING_IMAGE: registry.tomlawson.io/ai/orbit-base-image/signing@sha256:53e95636ca3d43654b432bbc962198f4bfe61d005a8c42d8e890db15835941ec
   # Where `build_image` pulls Orbit's base image from (#1101): this GitLab's own
   # registry, ai/orbit-base-image, instead of GHCR, so a GHCR outage cannot fail
   # the build. Passed as the Dockerfile's BASE_IMAGE_REGISTRY build arg, whose
@@ -423,7 +423,7 @@ variables:
   # mean the same thing.
   TRIVY_IMAGE: aquasec/trivy@sha256:2e6c00d711ab4ae41d8a30c2c1fd3bd3b62704c177bb120f95012e939edfb3df
   # The digest scripts/test-integration.mjs pins for its disposable database.
-  POSTGRES_IMAGE: postgres:18-alpine@sha256:300ebd02c6d4de9ee27ad7f6855d5d21b4d3a4a5117767c1197d284c635d9736
+  POSTGRES_IMAGE: postgres:18-alpine@sha256:fa1b61f5a4844f4d4b73c9b15716cfc75fe70c931f2d32723630f3b900056366
   # scripts/ci/start-installer-registry.sh's disposable loopback registry
   # (acceptance, repair_journeys via its own copy below, and
   # launcher_install_compat all start it). A plain Docker Hub name, which the
@@ -1175,7 +1175,7 @@ variables:
 # was never ready (v0.3.9 lost two days to checks that only ran at the end).
 # The same script runs locally before the promotion is opened
 # (docs/releasing.md). On no other pipeline: its rule list ends in `never`,
-# and the `needs:` on it are optional, so those pipelines are unchanged.
+# and no other job lists it under `needs:`, so those pipelines are unchanged.
 #
 # It reads earlier pipelines for the slow-gates check with the read-only
 # ORBIT_REUSE_TOKEN alone, as the reuse lookup does (#898), so it declares the
@@ -1405,12 +1405,12 @@ classify:
     # the file above so they reach the pipeline in the same dotenv report. The
     # tags are fetched because the checkout carries none. With no tags every
     # slot is empty and every cell would SKIP, so on the pipelines that run the
-    # cells (the merge request into preview, owner 59a, and a push to
-    # hotfix/*) a failed fetch fails this job rather than letting the gate pass
-    # untested; elsewhere it is best effort.
+    # cells (the merge requests into preview, owner 59a, and into dev, #1752,
+    # and a push to hotfix/*) a failed fetch fails this job rather than letting
+    # the gate pass untested; elsewhere it is best effort.
     - |
       set -eu
-      if { [ "${CI_PIPELINE_SOURCE:-}" = "merge_request_event" ] && [ "${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-}" = "preview" ]; } \
+      if { [ "${CI_PIPELINE_SOURCE:-}" = "merge_request_event" ] && case "${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-}" in preview | dev) true ;; *) false ;; esac; } \
         || { [ "${CI_PIPELINE_SOURCE:-}" = "push" ] && case "${CI_COMMIT_BRANCH:-}" in hotfix/*) true ;; *) false ;; esac; }; then
         git fetch --quiet --tags origin || git fetch --quiet --tags origin
       else
@@ -1422,14 +1422,21 @@ classify:
     # on the merge request into preview, after a passed run, only a change to
     # what updates depend on runs them again. The gate never fails this job and
     # answers `run` on any doubt; a gate that fails or writes nothing counts as
-    # `run` too. Its file is kept as an artefact: the next pipeline on the same
-    # merge request reads it to find the commit a chain of skips relies on.
+    # `run` too. Its file is kept as an artefact: later pipelines into preview,
+    # on this merge request or another (#1767), read it to find the commit a
+    # chain of skips relies on and the slot tags the run had. The gate reads
+    # this pipeline's slot tags from its environment, so they are exported from
+    # classify.env first; only its UPGRADE_CELLS lines are appended back, since
+    # the slot lines are in classify.env already and dotenv is capped at twenty.
     - |
       set -u
       mkdir -p .orbit-upgrade
       rm -f .orbit-upgrade/gate.env
+      while IFS= read -r line; do
+        case "$line" in ORBIT_UPGRADE_SLOT_*=*) export "$line" ;; esac
+      done < classify.env
       if node scripts/ci/upgrade-cells-gate.mjs .orbit-upgrade/gate.env && [ -s .orbit-upgrade/gate.env ]; then
-        cat .orbit-upgrade/gate.env >> classify.env
+        sed -n '/^UPGRADE_CELLS/p' .orbit-upgrade/gate.env >> classify.env
       else
         echo "upgrade cells gate: no answer, so the cells run"
         printf 'UPGRADE_CELLS=run\n' > .orbit-upgrade/gate.env
@@ -2337,6 +2344,11 @@ flake_check:
 # scripts/ci/job-inputs.json: the shard (`rig_webkit 2/3`) is the unit of
 # reuse evidence. Each shard also writes a blob report that `browser_report`
 # merges.
+# Two slots cap the nightly at two rig jobs at once (#1921): `rig-slot-webkit`
+# (`rig_webkit`, `film_webkit`) and `rig-slot-chromium` (`rig_chromium`,
+# `rig_firefox`, `screens_chromium`, `pocket_measure`), each a `resource_group`.
+# Shards of one job share its slot, so they run one after another. Two because
+# 2 rig jobs plus 2 smoke jobs are 28 of the host's 32 CPUs; three went over.
 # The full tap-floor measurement is not here: it is `pocket_measure`, nightly
 # only (#1616).
 #
@@ -2348,6 +2360,7 @@ flake_check:
 rig_chromium:
   stage: acceptance
   tags: [light]
+  resource_group: rig-slot-chromium
   image:
     name: $PLAYWRIGHT_IMAGE
     pull_policy: if-not-present
@@ -2418,6 +2431,7 @@ rig_chromium:
 rig_firefox:
   stage: acceptance
   tags: [light]
+  resource_group: rig-slot-chromium
   image:
     name: $PLAYWRIGHT_IMAGE
     pull_policy: if-not-present
@@ -2470,6 +2484,7 @@ rig_firefox:
 rig_webkit:
   stage: acceptance
   tags: [light]
+  resource_group: rig-slot-webkit
   image:
     name: $PLAYWRIGHT_IMAGE
     pull_policy: if-not-present
@@ -2522,6 +2537,7 @@ rig_webkit:
 film_webkit:
   stage: acceptance
   tags: [light]
+  resource_group: rig-slot-webkit
   image:
     name: $PLAYWRIGHT_IMAGE
     pull_policy: if-not-present
@@ -2574,6 +2590,7 @@ film_webkit:
 screens_chromium:
   stage: acceptance
   tags: [light]
+  resource_group: rig-slot-chromium
   image:
     name: $PLAYWRIGHT_IMAGE
     pull_policy: if-not-present
@@ -2697,6 +2714,7 @@ browser_report:
 pocket_measure:
   stage: acceptance
   tags: [light]
+  resource_group: rig-slot-chromium
   image:
     name: $PLAYWRIGHT_IMAGE
     pull_policy: if-not-present
@@ -3365,7 +3383,8 @@ smoke:
         echo "skipped: no change to the v19 front end or the browser suite; no reuse evidence recorded"
         exit 0
       fi
-    - bash scripts/test-frontend.sh
+    - |
+      timeout -k 30s 35m bash scripts/test-frontend.sh || { rc=$?; if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then echo "smoke: suite exceeded 35m; the runner is starved (#1921)"; fi; exit "$rc"; }
     # Quarantined tests (agent-infra#30): run and reported, never failing the job.
     - |
       timeout -k 30s 8m bash scripts/test-frontend.sh --quarantine || { echo "smoke: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"; touch .quarantine-failed; }
@@ -3497,7 +3516,8 @@ smoke_webkit:
         echo "skipped: no change to the v19 front end or the browser suite; no reuse evidence recorded"
         exit 0
       fi
-    - bash scripts/test-frontend.sh
+    - |
+      timeout -k 30s 40m bash scripts/test-frontend.sh || { rc=$?; if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then echo "smoke_webkit: suite exceeded 40m; the runner is starved (#1921)"; fi; exit "$rc"; }
     # Quarantined tests (agent-infra#30): run and reported, never failing the job.
     - |
       timeout -k 30s 8m bash scripts/test-frontend.sh --quarantine || { echo "smoke_webkit: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"; touch .quarantine-failed; }
@@ -3595,7 +3615,8 @@ smoke_webkit_mobile:
         echo "skipped: no change to the v19 front end or the browser suite; no reuse evidence recorded"
         exit 0
       fi
-    - bash scripts/test-frontend.sh
+    - |
+      timeout -k 30s 25m bash scripts/test-frontend.sh || { rc=$?; if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then echo "smoke_webkit_mobile: suite exceeded 25m; the runner is starved (#1921)"; fi; exit "$rc"; }
     # Quarantined tests (agent-infra#30): run and reported, never failing the job.
     - |
       timeout -k 30s 8m bash scripts/test-frontend.sh --quarantine || { echo "smoke_webkit_mobile: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"; touch .quarantine-failed; }
@@ -3711,7 +3732,7 @@ smoke_local_only:
       echo "local-only profile specs: $specs"
       # Word splitting is the point: $specs is a list of paths.
       # shellcheck disable=SC2086
-      node node_modules/@playwright/test/cli.js test --config tests/e2e/playwright.config.ts $specs
+      timeout -k 30s 25m node node_modules/@playwright/test/cli.js test --config tests/e2e/playwright.config.ts $specs || { rc=$?; if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then echo "smoke_local_only: suite exceeded 25m; the runner is starved (#1921)"; fi; exit "$rc"; }
     - *reuse_evidence
   after_script:
     # No diagnostics here: this shell has no daemon to ask (#1100), so the
@@ -4385,12 +4406,16 @@ launcher_install_compat:
     - job: fast_docker
       artifacts: false
       optional: true
-    # Exactly one of the two runs on any ref this job runs on (#1608).
+    # Exactly one of the two runs on any ref this job runs on (#1608). Ordering
+    # only: their archive is not downloaded by `needs:`, because GitLab fails a
+    # job whose needed artifacts have expired before its script runs, and
+    # build_launcher_branch's expire after 3 days. The script fetches the
+    # archive, or rebuilds it when it is gone (#1738 D-S2/D-S4).
     - job: build_launcher
-      artifacts: true
+      artifacts: false
       optional: true
     - job: build_launcher_branch
-      artifacts: true
+      artifacts: false
       optional: true
   variables:
     GITHUB_OUTPUT: $CI_PROJECT_DIR/.orbit-step-outputs
@@ -4489,9 +4514,13 @@ launcher_install_compat:
       bash scripts/ci/ensure-go-toolchain.sh .orbit-launcher-src/go.mod
     - export PATH="/usr/local/go/bin:$PATH"
     - go version
-    # The candidate binary is build_launcher's own artifact (ADR-0031 #3):
-    # the exact bytes record_image folds into the signed release manifest,
-    # not a fresh build from this job's own checkout of the launcher source.
+    # The candidate binary is the archive this pipeline's build job made
+    # (ADR-0031 #3): the exact bytes record_image folds into the signed release
+    # manifest. When that archive has expired (a late retry, #1738 D-S2/D-S4) it
+    # is rebuilt from the pinned source, and the rebuild must hash the same as
+    # the manifest's entry when the pipeline has a manifest; otherwise the job
+    # fails (scripts/ci/provide-launcher-archive.mjs).
+    - node scripts/ci/provide-launcher-archive.mjs "$CI_PROJECT_DIR/.orbit-launcher-artifacts"
     - |
       set -eu
       mkdir -p "$CI_PROJECT_DIR/.orbit-launcher-bin"

@@ -79,7 +79,8 @@ Requirement identifiers are stable. GitHub issues and tests should cite them.
   ingests bounded, authenticated messages and attachments idempotently into
   the same private review flow used for direct uploads. A message belongs to the
   member who listed and verified its sending address, and only when the
-  sending domain's DKIM signature verifies and aligns; the alias must agree, and
+  sending domain's DKIM signature verifies and aligns; the alias only corroborates (a missing, expired or malformed alias changes
+  nothing; only one naming a different member unattributes mail), and
   an unsigned or unaligned `From` line never attributes mail (ADR-0017
   decision 3). The user selects the
   household, can correct every suggested field, and must explicitly approve

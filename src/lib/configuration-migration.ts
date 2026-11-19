@@ -8,6 +8,7 @@ import {
   lstatSync,
   openSync,
   readFileSync,
+  readSync,
   renameSync,
   rmSync,
   writeFileSync,
@@ -98,6 +99,11 @@ function readConfiguration(file: string): ParseOutcome {
   } finally {
     closeSync(descriptor);
   }
+  return parseConfigurationBytes(raw);
+}
+
+/** parse_file on bytes already read: the strict UTF-8 decode, the shared grammar and the secret-pair refusal. */
+function parseConfigurationBytes(raw: Buffer): ParseOutcome {
   // Never decode lossily: the file is rebuilt from this string, so a replaced
   // byte would silently change a value on disk.
   const content = decodeUtf8Strict(raw);
@@ -183,6 +189,115 @@ function readLines(content: string): string[] {
   return lines;
 }
 
+type ManagedValues = Record<(typeof MANAGED_ORDER)[number], string>;
+
+/**
+ * The migrated text for a parsed file and its five managed values: each
+ * managed key written once, at its first line (#1847), the rest appended in
+ * MANAGED_ORDER, every other line kept byte for byte. Pure, so a migration can
+ * be replayed to prove where a leftover copy came from (#1877).
+ */
+function buildMigratedContent(parsed: ParsedConfiguration, managed: ManagedValues): string {
+  const newline = parsed.content.includes("\r") ? "\r\n" : "\n";
+  const written = new Set<string>();
+  let output = "";
+  for (const line of readLines(parsed.content)) {
+    const withoutCr = line.endsWith("\r") ? line.slice(0, -1) : line;
+    const key = MANAGED_ORDER.find((candidate) => withoutCr.startsWith(`${candidate}=`) || withoutCr === `# ${candidate}=`);
+    if (key) {
+      if (written.has(key)) continue;
+      output += `${key}=${managed[key]}${newline}`;
+      written.add(key);
+    } else {
+      output += `${line}\n`;
+    }
+  }
+  for (const key of MANAGED_ORDER) {
+    if (!written.has(key)) output += `${key}=${managed[key]}${newline}`;
+  }
+  return output;
+}
+
+/** A leftover copy larger than this is never read whole, replayed or deleted by the replay rule (#1877). */
+const LEFTOVER_COPY_REPLAY_LIMIT = 1024 * 1024;
+
+/** The device and inode a leftover copy was checked on, so only that same file is ever removed. */
+interface LeftoverIdentity {
+  dev: number;
+  ino: number;
+}
+
+/**
+ * #1877 roll-forward recovery after the commit point: true only when the
+ * copy's bytes pass the same strict parse as the file, and replaying the
+ * migration on them with the current file's five managed values gives the
+ * current file byte for byte. Such a copy is the pre-migration file of a run
+ * that got past its rename. A parse error is not proof.
+ */
+function leftoverCopyIsFinishedMigration(raw: Buffer, current: ParsedConfiguration): boolean {
+  const managed = {} as ManagedValues;
+  for (const key of MANAGED_ORDER) {
+    const value = current.values[key];
+    if (value === undefined) return false;
+    managed[key] = value;
+  }
+  const outcome = parseConfigurationBytes(raw);
+  if (!outcome.ok) return false;
+  return Buffer.from(buildMigratedContent(outcome.parsed, managed), "utf8").equals(current.raw);
+}
+
+/**
+ * Whether a leftover copy may be removed, and the file it was checked on.
+ * Read through one O_NOFOLLOW descriptor, it must be a regular file (never a
+ * symlink) and either byte-identical to the current file (#1151 O1-R5) or
+ * proven by the #1877 replay. The read is bounded: a copy no larger than the
+ * current file can be compared as identical, and only a copy of at most
+ * 1 MiB is replayed. Any read error, or a larger copy, is not proof.
+ */
+function provenLeftoverCopy(copy: string, current: ParsedConfiguration): LeftoverIdentity | undefined {
+  let descriptor: number;
+  try {
+    descriptor = openSync(copy, constants.O_RDONLY | constants.O_NOFOLLOW);
+  } catch {
+    return undefined;
+  }
+  let raw: Buffer;
+  let identity: LeftoverIdentity;
+  try {
+    const stat = fstatSync(descriptor);
+    if (!stat.isFile()) return undefined;
+    if (stat.size > Math.max(LEFTOVER_COPY_REPLAY_LIMIT, current.raw.length)) return undefined;
+    identity = { dev: stat.dev, ino: stat.ino };
+    raw = Buffer.alloc(stat.size);
+    let length = 0;
+    while (length < raw.length) {
+      const count = readSync(descriptor, raw, length, raw.length - length, null);
+      if (count === 0) break;
+      length += count;
+    }
+    raw = raw.subarray(0, length);
+  } catch {
+    return undefined;
+  } finally {
+    closeSync(descriptor);
+  }
+  if (raw.equals(current.raw)) return identity;
+  if (raw.length > LEFTOVER_COPY_REPLAY_LIMIT) return undefined;
+  return leftoverCopyIsFinishedMigration(raw, current) ? identity : undefined;
+}
+
+/**
+ * Removes a proven leftover copy only if the path is still the regular file
+ * that was checked (same device and inode); otherwise it is left alone and
+ * treated as not proven. Throws if the removal itself fails.
+ */
+function removeProvenLeftoverCopy(copy: string, identity: LeftoverIdentity): boolean {
+  const now = lstatSync(copy, { throwIfNoEntry: false });
+  if (!now || !now.isFile() || now.dev !== identity.dev || now.ino !== identity.ino) return false;
+  rmSync(copy, { force: true });
+  return true;
+}
+
 /**
  * migrate_file: stamps the schema, the applied image/version/digest and the
  * Compose project name into the file, preserving every other byte of every
@@ -190,8 +305,11 @@ function readLines(content: string): string[] {
  * already-current file is reported and left untouched. Outside an install
  * transaction the pre-migration file is first copied to
  * `<file>.orbit-config.rollback` (mode 600); a leftover copy byte-identical
- * to the file is an interrupted earlier run and is replaced, any other
- * leftover refuses (#1151 O1-R5). Once the new file is written it is read
+ * to the file is an interrupted earlier run and is replaced (#1151 O1-R5).
+ * A differing leftover is finished off by roll-forward recovery (#1877): the
+ * rename is the commit point, so a regular-file copy whose replayed migration,
+ * with the current file's managed values, equals the file byte for byte is
+ * removed and the run carries on; any other leftover refuses. Once the new file is written it is read
  * again under the same strict parse and must carry this run's applied
  * version, digest and Compose project; then the copy is removed. If not, the
  * file is restored from the copy, which is kept, and the run fails with
@@ -276,28 +394,26 @@ function migrateLocked(file: string, options: MigrateEnvironmentFileOptions, rel
     // #1834: a run killed after its rename, or one whose removal failed,
     // leaves a copy nothing points at. A symlink or a copy not at mode 600
     // refuses. A regular copy byte-identical to the file (which has just
-    // passed the strict parse) is dropped; one that differs may be the only
-    // good copy Repair's configuration-migration-interrupted class needs, so
-    // it is kept and named.
+    // passed the strict parse) is dropped, and so is one #1877's replay
+    // proves is the pre-migration file of a finished migration. Any other
+    // differing copy may be the only good copy Repair's
+    // configuration-migration-interrupted class needs, so it is kept and named.
     let stderr = "";
     if (!options.transaction) {
       const leftoverCopy = `${file}${CONFIGURATION_ROLLBACK_SUFFIX}`;
       const stray = lstatSync(leftoverCopy, { throwIfNoEntry: false });
       if (stray) {
         if (!stray.isFile() || (stray.mode & 0o777) !== 0o600) return failure("configuration_migration");
-        let identical = false;
-        try {
-          identical = readFileSync(leftoverCopy).equals(parsed.raw);
-        } catch {
-          identical = false;
-        }
-        if (identical) {
+        const identity = provenLeftoverCopy(leftoverCopy, parsed);
+        let removed = false;
+        if (identity) {
           try {
-            rmSync(leftoverCopy, { force: true });
+            removed = removeProvenLeftoverCopy(leftoverCopy, identity);
           } catch {
             return failure("configuration_migration");
           }
-        } else {
+        }
+        if (!removed) {
           stderr = `Orbit configuration: kept ${leftoverCopy}: it differs from the current file and may be the only copy of the earlier one; remove it once Orbit is working, or run Repair (scripts/repair.sh --check) if it is not.\n`;
         }
       }
@@ -313,7 +429,7 @@ function migrateLocked(file: string, options: MigrateEnvironmentFileOptions, rel
   // A first install's file carries no applied stamp yet.
   const priorVersion = appliedVersionPresent ? currentVersion : "none";
   const priorDigest = appliedDigestPresent ? currentDigest : "none";
-  const managed: Record<(typeof MANAGED_ORDER)[number], string> = {
+  const managed: ManagedValues = {
     ORBIT_IMAGE: desiredImage,
     ORBIT_CONFIG_SCHEMA_VERSION: String(ENV_ORBIT_SCHEMA_VERSION),
     ORBIT_CONFIG_APPLIED_VERSION: desiredVersion,
@@ -325,20 +441,19 @@ function migrateLocked(file: string, options: MigrateEnvironmentFileOptions, rel
   if (!options.transaction) {
     const leftover = lstatSync(backup, { throwIfNoEntry: false });
     if (leftover) {
-      let identical = false;
-      if (!leftover.isSymbolicLink()) {
-        try {
-          identical = readFileSync(backup).equals(parsed.raw);
-        } catch {
-          identical = false;
-        }
-      }
-      if (!identical) return failure("configuration_migration");
+      // #1877: a copy is removed only when it is byte-identical or replaying
+      // the migration proves it is the pre-migration file of a run that got
+      // past its rename, and only if the path is still that same file;
+      // anything else still refuses.
+      const identity = provenLeftoverCopy(backup, parsed);
+      if (!identity) return failure("configuration_migration");
+      let removed: boolean;
       try {
-        rmSync(backup, { force: true });
+        removed = removeProvenLeftoverCopy(backup, identity);
       } catch {
         return failure("configuration_migration");
       }
+      if (!removed) return failure("configuration_migration");
     }
     try {
       copyFileSync(file, backup, constants.COPYFILE_EXCL);
@@ -354,24 +469,7 @@ function migrateLocked(file: string, options: MigrateEnvironmentFileOptions, rel
     }
   }
 
-  const newline = parsed.content.includes("\r") ? "\r\n" : "\n";
-  const written = new Set<string>();
-  let output = "";
-  for (const line of readLines(parsed.content)) {
-    const withoutCr = line.endsWith("\r") ? line.slice(0, -1) : line;
-    const key = MANAGED_ORDER.find((candidate) => withoutCr.startsWith(`${candidate}=`) || withoutCr === `# ${candidate}=`);
-    if (key) {
-      // #1847: write each managed key once, at its first line; drop repeats.
-      if (written.has(key)) continue;
-      output += `${key}=${managed[key]}${newline}`;
-      written.add(key);
-    } else {
-      output += `${line}\n`;
-    }
-  }
-  for (const key of MANAGED_ORDER) {
-    if (!written.has(key)) output += `${key}=${managed[key]}${newline}`;
-  }
+  const output = buildMigratedContent(parsed, managed);
 
   // The `.env-orbit.migrating.*` scratch name is also matched by install.sh rollback_files.
   const scratch = join(dirname(file), `${basename(file)}.migrating.${randomBytes(6).toString("hex")}`);
@@ -417,7 +515,7 @@ function migrateLocked(file: string, options: MigrateEnvironmentFileOptions, rel
     try {
       rmSync(backup, { force: true });
     } catch {
-      /* a copy left behind is refused or replaced by the next run, never trusted */
+      /* a copy left behind is replaced, finished off (#1877) or refused by the next run, never trusted */
     }
   }
 
@@ -567,7 +665,7 @@ export function isNotUtf8Failure(result: ConfigurationCommandResult): boolean {
 // Names the offending line where the parser knows it: without the key an
 // operator whose file carries an unknown setting is rolled back with
 // nothing to say which line to fix, and stays blocked.
-function preflightFailureMessage(result: ConfigurationCommandResult): string {
+export function preflightFailureMessage(result: ConfigurationCommandResult): string {
   if (isNotUtf8Failure(result)) return NOT_UTF8_FAILURE_MESSAGE;
   const { key } = result;
   if (key !== undefined) {

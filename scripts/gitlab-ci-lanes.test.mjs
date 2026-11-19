@@ -502,7 +502,7 @@ describe("pipeline lanes", () => {
       const gate = entries.findIndex((entry) => entry.includes('"${ORBIT_E2E:-true}" != "true"'));
       expect(gate, `${name}: no ORBIT_E2E gate`).toBeGreaterThan(-1);
       const after = entries.slice(gate + 1);
-      expect(after.some((entry) => entry.startsWith("bash scripts/test-frontend.sh")), name).toBe(true);
+      expect(after.some((entry) => entry.includes("bash scripts/test-frontend.sh")), name).toBe(true);
       /* Evidence is the last step, but for #1447's warning exit after it. */
       const tail = after.at(-1).startsWith("if [ -f .quarantine-failed ]") ? after.at(-2) : after.at(-1);
       expect(tail.split("\n")[0], name).toBe("*reuse_evidence");
@@ -1578,6 +1578,7 @@ describe("merge requests run changed-reachable tests, the dev push runs everythi
         mkdirSync(join(repo, "web"), { recursive: true });
         mkdirSync(stubs);
         copyFileSync(SCRIPT, join(repo, "scripts", "test-backend.sh"));
+        copyFileSync(join(dirname(SCRIPT), "test-load-warning.sh"), join(repo, "scripts", "test-load-warning.sh"));
         writeFileSync(join(repo, "pnpm-lock.yaml"), "");
         const git = (...args) => execFileSync("git", args, { cwd: repo, stdio: "pipe" });
         git("init", "-q");
@@ -1900,7 +1901,7 @@ describe("rig jobs by runner (#1615, ADR-0039)", () => {
       const needs = jobNeeds(name);
       for (const need of gated) expect(needs, `${name}: keeps need ${need.job}`).toContainEqual(need);
       expect(needs.find((need) => need.job === "fast_checks"), `${name}: fast_checks with artifacts (#1831)`).toMatchObject({ artifacts: true });
-      expect(block, `${name}: no Docker`).not.toMatch(/^ {2}(extends|services|resource_group):/mu);
+      expect(block, `${name}: no Docker`).not.toMatch(/^ {2}(extends|services):/mu);
       expect(commandsOf(name), `${name}: no Docker`).not.toMatch(/docker/u);
       // Workers are set, not taken from the host's CPU count: os.cpus() in a
       // job container sees the whole host, not the per-job cap (ADR-0039 section 5).
@@ -2220,7 +2221,7 @@ exit 0
     expect(block).toMatch(/^ {2}needs: \*needs_rig$/mu);
     expect(commandsOf("screens_chromium")).toMatch(/orbit_lane_admits screens_chromium \|\| exit 0/u);
     expect(commandsOf("screens_chromium")).toMatch(/^\s+- \*reuse_gate$/mu);
-    expect(block, "no Docker").not.toMatch(/^ {2}(extends|services|resource_group):/mu);
+    expect(block, "no Docker").not.toMatch(/^ {2}(extends|services):/mu);
     expect(block).toMatch(/\n {2}allow_failure:\n {4}exit_codes:\n {6}- 3\n/u);
     expect(commandsOf("screens_chromium")).toMatch(/^\s+- \*reuse_evidence$/mu);
     expect(commandsOf("screens_chromium")).toMatch(/- if \[ -f \.quarantine-failed \]; then exit 3; fi/u);
@@ -2720,7 +2721,7 @@ describe("upgrade matrix wiring (#1665)", () => {
       "a push to main": [allEvents.mainPush, false],
       "a push to dev": [allEvents.devPush, false],
       "a schedule": [allEvents.nightly, false],
-      "a merge request into dev": [allEvents.devMergeRequest, false],
+      "a merge request into dev": [allEvents.devMergeRequest, true],
       "a merge request into hotfix/*": [allEvents.hotfixMergeRequest, false],
     };
 
@@ -2939,7 +2940,7 @@ describe("upgrade cells on merge requests into dev (#1752)", () => {
     "scripts/ci/write-test-manifest.sh",
     "scripts/ci/checkout-launcher-source.sh",
   ];
-  // The cell's own files named by the spec, which the gate's list need not hold.
+  // The cell's own files named by the spec; the gate must watch them too (D-F3).
   const CELL_OWN_SAMPLES = [
     "scripts/ci/upgrade-cell.sh",
     "scripts/ci/upgrade-cell-launcher.sh",
@@ -2966,6 +2967,9 @@ describe("upgrade cells on merge requests into dev (#1752)", () => {
     }
     for (const sample of CELL_OWN_SAMPLES) {
       if (!globMatches(globs, sample)) problems.push(`script path not in YAML list: ${sample}`);
+      // D-F3: the gate answers skip on a promotion for anything it does not list,
+      // so a path that starts the cells on a dev merge request must be in it too.
+      if (!updateRelevant(sample)) problems.push(`sample ${sample} is in the YAML list but not update-relevant per the gate`);
     }
     for (const glob of globs) {
       const sample = sampleOf(glob);
@@ -2997,6 +3001,14 @@ describe("upgrade cells on merge requests into dev (#1752)", () => {
     const noPin = globs.filter((glob) => !globToRegExp(glob).test("launcher/pin.json"));
     expect(noPin.length, "some glob covers launcher/pin.json").toBeLessThan(globs.length);
     expect(driftOf(noPin, scripts)).toContain("script path not in YAML list: launcher/pin.json");
+  });
+
+  it("drift check, gate side: a YAML path the gate does not watch (tests/oidc) is reported (D-F3)", async () => {
+    const scripts = await loadScripts();
+    const blind = (path) => !path.startsWith("tests/oidc/") && scripts.updateRelevant(path);
+    expect(driftOf(anchorGlobs(), { ...scripts, updateRelevant: blind })).toContain(
+      "sample tests/oidc/a.ts is in the YAML list but not update-relevant per the gate",
+    );
   });
 
   it("drift check, YAML side: an extra glob no script list covers is reported", async () => {
@@ -3421,5 +3433,96 @@ describe("integration builds a missing web artefact (#1853)", () => {
     const comment = allBlocks.get("fast_checks").match(/((?:[ \t]*#.*\n)+)[ \t]*- web\/build\//u);
     expect(comment, "no comment above the web/build artefact").not.toBeNull();
     expect(comment[1]).toMatch(/integration/u);
+  });
+});
+
+// #1921: the nightly's rig jobs run through two resource_group slots, and the
+// stack jobs say so when the runner starves them or the daemon goes away.
+describe("nightly browser slots and starved-run messages (#1921)", () => {
+  const SLOT_OF = {
+    rig_webkit: "rig-slot-webkit",
+    film_webkit: "rig-slot-webkit",
+    rig_chromium: "rig-slot-chromium",
+    rig_firefox: "rig-slot-chromium",
+    screens_chromium: "rig-slot-chromium",
+    pocket_measure: "rig-slot-chromium",
+  };
+  const STACK_JOBS = ["smoke", "smoke_webkit", "smoke_webkit_mobile", "smoke_local_only"];
+  const groupOf = (name) => allBlocks.get(name)?.match(/^ {2}resource_group: *(\S+)/mu)?.[1];
+
+  it.each(Object.entries(SLOT_OF))("%s has resource_group %s", (name, slot) => {
+    expect(allBlocks.get(name), `${name} is not defined`).toBeDefined();
+    expect(groupOf(name)).toBe(slot);
+  });
+
+  it("has exactly two distinct rig-slot-* names in the file", () => {
+    const names = new Set(gitlabCi.match(/rig-slot-[A-Za-z0-9_-]+/gu) ?? []);
+    expect([...names].sort()).toEqual(["rig-slot-chromium", "rig-slot-webkit"]);
+  });
+
+  it("shares one slot between rig_webkit and film_webkit and the other between the other four", () => {
+    expect(groupOf("rig_webkit")).toBeDefined();
+    expect(groupOf("film_webkit")).toBe(groupOf("rig_webkit"));
+    const other = ["rig_chromium", "rig_firefox", "screens_chromium", "pocket_measure"].map(groupOf);
+    expect(new Set(other).size).toBe(1);
+    expect(other[0]).toBeDefined();
+    expect(other[0]).not.toBe(groupOf("rig_webkit"));
+  });
+
+  it("gives no other job a rig-slot-* group", () => {
+    for (const [name, block] of jobs) {
+      if (name in SLOT_OF) continue;
+      expect(block, `${name}: no rig slot`).not.toMatch(/^ {2}resource_group: *rig-slot-/mu);
+    }
+  });
+
+  it.each(STACK_JOBS)("%s keeps resource_group heavy-%s", (name) => {
+    expect(groupOf(name)).toBe(`heavy-${name}`);
+  });
+
+  it.each(STACK_JOBS)("%s caps the suite under its own timeout and names #1921", (name) => {
+    const block = allBlocks.get(name);
+    const jobMinutes = Number(block.match(/^ {2}timeout: (\d+)m$/mu)?.[1]);
+    expect(jobMinutes, `${name}: timeout`).toBeGreaterThan(0);
+    // smoke_local_only runs Playwright directly, not test-frontend.sh.
+    const call = name === "smoke_local_only"
+      ? String.raw`node node_modules\/@playwright\/test\/cli\.js test --config tests\/e2e\/playwright\.config\.ts`
+      : String.raw`bash scripts\/test-frontend\.sh(?! --quarantine)(?=\s|$|\))`;
+    const wrapped = block.match(new RegExp(String.raw`timeout -k 30s (\d+)m ${call}`, "mu"));
+    expect(wrapped, `${name}: the suite call is wrapped in timeout -k 30s Nm`).not.toBeNull();
+    expect(Number(wrapped[1]), `${name}: N at least 5 below the job timeout`).toBeLessThanOrEqual(jobMinutes - 5);
+    expect(block, `${name}: failure message`).toMatch(/#1921[^\n]*starved|starved[^\n]*#1921/u);
+  });
+
+  it("makes show-stack-diagnostics.sh check the Docker daemon and say so (#1921)", () => {
+    const script = readFileSync(new URL("./ci/show-stack-diagnostics.sh", import.meta.url), "utf8");
+    expect(script).toMatch(/docker info/u);
+    expect(script).toContain("Docker daemon lost during the job (#1921)");
+  });
+
+  it("bounds the daemon check, so a wedged daemon cannot hang show-stack-diagnostics.sh (#1921)", () => {
+    const script = readFileSync(new URL("./ci/show-stack-diagnostics.sh", import.meta.url), "utf8");
+    const bound = script.match(/^[^#\n]*\btimeout (?:-k \d+s? )?(\d+)s? docker info\b/mu);
+    expect(bound, "docker info runs under timeout <N>").not.toBeNull();
+    expect(Number(bound[1]), "N seconds").toBeLessThanOrEqual(30);
+  });
+
+  it.each(STACK_JOBS)("%s keeps the suite's exit code through the wrap and says starved only for 124 or 137 (#1921)", (name) => {
+    const block = allBlocks.get(name);
+    const call = "timeout -k 30s";
+    const line = block
+      .split("\n")
+      .find((l) => !/^\s*#/u.test(l) && l.includes(call) && (name === "smoke_local_only" ? l.includes("playwright") : /test-frontend\.sh(?! --quarantine)/u.test(l)));
+    expect(line, `${name}: wrapped suite call`).toBeDefined();
+    const handler = line.slice(line.indexOf("||"));
+    expect(line, `${name}: no || true on the suite call`).not.toMatch(/\|\|\s*(true|:)\b/u);
+    expect(handler, `${name}: has a failure handler`).toMatch(/^\|\| \{/u);
+    expect(handler, `${name}: handler passes the status on`).toMatch(/exit "\$rc"; ?\}\s*$/u);
+    const starved = handler.indexOf("starved");
+    expect(starved, `${name}: names starved`).toBeGreaterThan(-1);
+    const guard = handler.match(/if \[ "\$rc" = 124 \] \|\| \[ "\$rc" = 137 \]; then/u);
+    expect(guard, `${name}: starved only for 124 or 137`).not.toBeNull();
+    expect(guard.index, `${name}: guard before the message`).toBeLessThan(starved);
+    expect(handler.indexOf("fi;", starved), `${name}: message inside the if`).toBeGreaterThan(-1);
   });
 });

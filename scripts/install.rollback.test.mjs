@@ -324,6 +324,19 @@ describe("install.sh: a failed fresh install leaves its folder as it found it (#
 
 });
 
+describe("install.sh: a database that died is not called an authentication failure (audit Low O-F9)", () => {
+  it("a fresh install whose database container exited reports a neutral reason, not database-auth-migration", () => {
+    const { targetDir, environment } = recoveryFixture();
+    const result = runInstall(targetDir, {
+      ...environment,
+      FAKE_PROBE_FAIL: "orbit-db",
+      FAKE_CONTAINERS: JSON.stringify({ "orbit-db": { status: "exited", exitCode: 1 } }),
+    });
+    expect(result.status).toBe(1);
+    expect(terminalFailure(result.stdout)).not.toContain("reason=database-auth-migration");
+  });
+});
+
 describe("install.sh: an interrupt rolls a fresh install back (#1456)", () => {
   it.each([
     ["SIGTERM", "SIGTERM", { FAKE_HANG_PROBE: "orbit-db" }, "hung-probe", true],

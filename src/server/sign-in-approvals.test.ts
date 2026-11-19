@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AuthError } from "@/lib/auth/errors";
+import { AuthError, PasswordChangeRequiredError } from "@/lib/auth/errors";
 import { MetadataCipher } from "@/server/metadata/fields";
 
 /**
@@ -57,6 +57,22 @@ vi.mock("@/server/mail-in/sending-settings", async (importOriginal) => {
   return { ...original, sendingConfigured: sending.sendingConfigured };
 });
 
+/* #1896: the send, passed straight through unless a case asks it to throw
+   after the mail has gone -- the one way the approval's own mailing step can
+   throw rather than report, since the provider's failures are caught inside. */
+const sendHook = vi.hoisted(() => ({ throwAfterSend: null as Error | null }));
+vi.mock("@/server/invitations/send", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/server/invitations/send")>();
+  return {
+    ...original,
+    sendBoundedMail: async (...args: Parameters<typeof original.sendBoundedMail>) => {
+      const outcome = await original.sendBoundedMail(...args);
+      if (sendHook.throwAfterSend) throw sendHook.throwAfterSend;
+      return outcome;
+    },
+  };
+});
+
 vi.mock("@/server/metadata/fields", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/server/metadata/fields")>();
   return {
@@ -101,7 +117,8 @@ vi.mock("@/db", async () => {
     if (shape === "StringChunk") {
       for (const piece of (node as { value: string[] }).value) {
         const word = piece.trim();
-        if (word && word !== "(" && word !== ")") out.push({ op: word });
+        if (word === "(" || word === ")") out.push({ paren: word });
+        else if (word) out.push({ op: word });
       }
       return out;
     }
@@ -114,24 +131,56 @@ vi.mock("@/db", async () => {
     return out;
   }
 
+  /* #1896: a link is found by its current OR its staged digest, so the fake
+     reads `and` and `or` with their brackets, `and` binding tighter, as SQL
+     does. Still only the comparisons below and nothing else. */
   function matches(row: Row, condition: unknown, keys: Map<string, string>): boolean {
-    const stream = tokens(condition) as Array<{ op?: string; value?: unknown; column?: string }>;
-    let verdict = true;
-    for (let at = 0; at < stream.length; at += 1) {
-      const column = stream[at].column;
-      if (column === undefined) continue;
+    const stream = tokens(condition) as Array<{ op?: string; value?: unknown; column?: string; paren?: string }>;
+    if (stream.length === 0) return true;
+    let at = 0;
+    const comparison = (): boolean => {
+      const column = stream[at]?.column;
+      if (column === undefined) throw new Error("the fake database cannot read this condition");
       const held = row[keys.get(column) ?? column];
       const operator = stream[at + 1]?.op ?? "";
-      if (operator === "is null") verdict &&= held === null || held === undefined;
-      else if (operator === "is not null") verdict &&= held !== null && held !== undefined;
-      else if (operator === "=") verdict &&= String(held) === String(stream[at + 2]?.value);
-      else if (operator === ">") verdict &&= held instanceof Date
-        && held.getTime() > new Date(stream[at + 2]?.value as string).getTime();
-      else if (operator === "<") verdict &&= held instanceof Date
-        && held.getTime() < new Date(stream[at + 2]?.value as string).getTime();
-      else throw new Error(`the fake database does not implement "${operator}"`);
-    }
-    return verdict;
+      if (operator === "is null") { at += 2; return held === null || held === undefined; }
+      if (operator === "is not null") { at += 2; return held !== null && held !== undefined; }
+      const value = stream[at + 2]?.value;
+      at += 3;
+      if (operator === "=") return String(held) === String(value);
+      if (operator === ">") return held instanceof Date && held.getTime() > new Date(value as string).getTime();
+      if (operator === "<") return held instanceof Date && held.getTime() < new Date(value as string).getTime();
+      if (operator === "<=") return held instanceof Date && held.getTime() <= new Date(value as string).getTime();
+      throw new Error(`the fake database does not implement "${operator}"`);
+    };
+    const term = (): boolean => {
+      if (stream[at]?.paren === "(") {
+        at += 1;
+        const verdict = disjunction();
+        at += 1;
+        return verdict;
+      }
+      return comparison();
+    };
+    const conjunction = (): boolean => {
+      let verdict = term();
+      while (stream[at]?.op === "and") {
+        at += 1;
+        const next = term();
+        verdict = verdict && next;
+      }
+      return verdict;
+    };
+    const disjunction = (): boolean => {
+      let verdict = conjunction();
+      while (stream[at]?.op === "or") {
+        at += 1;
+        const next = conjunction();
+        verdict = verdict || next;
+      }
+      return verdict;
+    };
+    return disjunction();
   }
 
   /** `select({ alias: column })` -> the row, narrowed to those columns. */
@@ -186,9 +235,10 @@ vi.mock("@/db", async () => {
           consumedAt: null,
           outcome: null,
           decidedAt: null,
-          noticeShownAt: null,
           sendCount: 0,
           lastSentAt: null,
+          /* The column's default (#1896): no resend has staged a link yet. */
+          stagedTokenHash: null,
           ...value,
         };
         rowsFor(table).push(row);
@@ -273,9 +323,12 @@ vi.mock("@/db", async () => {
     update,
     delete: remove,
     /* One process, one store: a transaction here is the rules running in
-       order, which is what these tests are about. Rollback is PostgreSQL's
-       to prove, and the integration suite's to check. */
+       order. Rollback is PostgreSQL's to prove, and the integration suite's
+       to check. */
     transaction: (body: (executor: unknown) => unknown) => Promise.resolve(body(db)),
+    /* The only raw statement the module runs is the per-user address lock
+       (#1869); one process has nobody to wait for. */
+    execute: () => Promise.resolve([]),
   };
   return { getDb: () => db };
 });
@@ -294,8 +347,9 @@ const {
   resendSignInApproval,
   secondFactorConfigured,
   startSignInApproval,
-  takeDeniedSignInNotice,
+  readDeniedSignInNotice,
 } = await import("@/server/sign-in-approvals");
+const { sendBoundedMail } = await import("@/server/invitations/send");
 
 const USER = "22222222-2222-4222-8222-222222222222";
 const CHROME = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0 Safari/537.36";
@@ -337,13 +391,16 @@ beforeEach(() => {
   store.users.length = 0;
   store.audit.length = 0;
   posted = [];
+  sendHook.throwAfterSend = null;
   process.env.APP_URL = APP_URL;
   store.users.push({
     id: USER,
     emailEnc: new MetadataCipher(testKey).encryptText("users.email", USER, "priya@example.invalid"),
     displayName: "Priya Shah",
   });
-  store.credentials.push({ userId: USER, failedAttemptCount: 0, lockedUntil: null });
+  /* password_changed_at is NOT NULL in the schema: a password set long before
+     any approval here, so a refusal marks it (#1881). */
+  store.credentials.push({ userId: USER, failedAttemptCount: 0, lockedUntil: null, passwordChangedAt: new Date(0) });
 });
 
 afterEach(() => {
@@ -485,6 +542,15 @@ describe("a pending sign-in, from the password to the session (ADR-0027 §4-§6)
     expect(store.approvals[0].lastSentAt).not.toBeNull();
   });
 
+  it("reports a mail that cannot go as one bounded word, never the provider's message, and still opens the approval", async () => {
+    const failing = { async sendEmail() { throw new Error("relay mail.invalid said: bad password for ada"); } };
+    const pending = await startSignInApproval(USER, { userAgent: CHROME, clientAddress: "203.0.113.9" }, { mailer: failing });
+    expect(["smtp_unconfigured", "smtp_unavailable", "smtp_rejected", "unknown"]).toContain(pending.sendError);
+    expect(JSON.stringify(pending)).not.toContain("mail.invalid");
+    // The row exists, so the waiting tab can still be answered and a resend can follow.
+    expect(await collectSignInApproval(pending.claim)).toEqual({ state: "waiting" });
+  });
+
   it("holds the tab until somebody presses Approve, then hands it one session", async () => {
     const pending = await startSignInApproval(USER, { userAgent: CHROME, clientAddress: "203.0.113.9" }, { mailer });
     const token = tokenFromLatestMail();
@@ -517,6 +583,27 @@ describe("a pending sign-in, from the password to the session (ADR-0027 §4-§6)
       .resolves.toEqual({ state: "approved", userId: USER, session: minted });
     // Spent for good this time: a third attempt gets nothing.
     expect(await collectSignInApproval(pending.claim)).toEqual({ state: "unknown" });
+  });
+
+  it("hands the tab the change-password refusal for a marked password, leaving the approval spent (#1881)", async () => {
+    const pending = await startSignInApproval(USER, { userAgent: CHROME, clientAddress: "203.0.113.9" }, { mailer });
+    await decideSignInApproval(tokenFromLatestMail(), "approved");
+
+    const marked = new PasswordChangeRequiredError(USER, new Date(NINE.getTime() - 60_000));
+    const answer = await collectSignInApproval(pending.claim, async () => { throw marked; });
+    expect(answer).toEqual({ state: "password_change_required", refusal: marked });
+    /* Spent, not un-spent: the email factor is passed, so a second poll gets
+       nothing and the change-password hold is the only thing issued. */
+    expect(store.approvals[0].consumedAt).not.toBeNull();
+    expect(await collectSignInApproval(pending.claim)).toEqual({ state: "unknown" });
+  });
+
+  it("names the instance's host on the approval card, and none when APP_URL is missing or unreadable", async () => {
+    await startSignInApproval(USER, { userAgent: CHROME, clientAddress: "203.0.113.9" }, { mailer });
+    const token = tokenFromLatestMail();
+    expect((await readSignInApproval(token, { APP_URL: "https://orbit.example/path" }))?.instance).toBe("orbit.example");
+    expect((await readSignInApproval(token, { APP_URL: "not a url" }))?.instance).toBe("");
+    expect((await readSignInApproval(token, {}))?.instance).toBe("");
   });
 
   it("answers an account disabled mid-collection as unknown, not as a human denial, and leaves the same trail a refusal does (#1151 F12, S2)", async () => {
@@ -632,20 +719,165 @@ describe("a refusal (ADR-0027 §8 and consequences)", () => {
     expect((lockedUntil as Date).getTime()).toBeGreaterThan(now.getTime());
   });
 
-  it("tells the account holder once, on their next successful sign-in", async () => {
+  it("marks the password, and showing the mark does not spend it (#1881)", async () => {
     await startSignInApproval(USER, { userAgent: CHROME, clientAddress: null }, { mailer });
     await decideSignInApproval(tokenFromLatestMail(), "denied");
 
-    const notice = await takeDeniedSignInNotice(USER);
+    const notice = await readDeniedSignInNotice(USER);
     expect(notice).not.toBeNull();
-    /* Taken, not read: the second sign-in is not told again. */
-    expect(await takeDeniedSignInNotice(USER)).toBeNull();
+    expect(store.credentials[0].passwordChangeRequiredAt).toEqual(notice?.deniedAt);
+    /* Security state, not a notice: only a saved password clears it. */
+    expect(await readDeniedSignInNotice(USER)).toEqual(notice);
   });
 
   it("says nothing when nobody has refused anything", async () => {
     await startSignInApproval(USER, { userAgent: CHROME, clientAddress: null }, { mailer });
     await decideSignInApproval(tokenFromLatestMail(), "approved");
-    expect(await takeDeniedSignInNotice(USER)).toBeNull();
+    expect(await readDeniedSignInNotice(USER)).toBeNull();
+  });
+});
+
+describe("a send is reserved before it is mailed (#1879 A-R2)", () => {
+  /** A mailer that notes how many send rows existed at the moment it was called. */
+  function watchingMailer(fail = false) {
+    const seen: number[] = [];
+    return {
+      seen,
+      async sendEmail(notification: { to: string; subject: string; text: string }) {
+        seen.push(store.sends.length);
+        /* A refusal the server numbered: the mail provably never left, which
+           is the failure these #1879 cases were written about (#1896). */
+        if (fail) throw Object.assign(new Error("smtp down"), { code: "EENVELOPE", responseCode: 550 });
+        posted.push({ to: notification.to, subject: notification.subject, text: notification.text });
+      },
+    };
+  }
+
+  it("opening: the send row exists before the mailer is called", async () => {
+    const watcher = watchingMailer();
+    await startSignInApproval(USER, { userAgent: CHROME, clientAddress: null }, { mailer: watcher, now: NINE });
+    expect(watcher.seen).toEqual([1]);
+    expect(store.sends).toHaveLength(1);
+  });
+
+  it("resending: the new send row exists before the mailer is called", async () => {
+    const pending = await startSignInApproval(USER, { userAgent: CHROME, clientAddress: null }, { mailer, now: NINE });
+    const watcher = watchingMailer();
+    await resendSignInApproval(pending.claim, { mailer: watcher, now: at(NINE, APPROVAL_RESEND_INTERVAL_MS) });
+    expect(watcher.seen).toEqual([2]);
+    expect(store.sends).toHaveLength(2);
+  });
+
+  it("opening: a mail that fails still leaves its count row, and the approval's count, time and link stay unset", async () => {
+    const result = await startSignInApproval(USER, { userAgent: CHROME, clientAddress: null }, { mailer: watchingMailer(true), now: NINE });
+    expect(result.sendError).not.toBeNull();
+    expect(store.sends).toHaveLength(1);
+    expect(store.approvals[0].sendCount).toBe(0);
+    expect(store.approvals[0].lastSentAt).toBeNull();
+  });
+
+  it("resending: a mail that fails still leaves its count row; the count, time and old link stay as they were", async () => {
+    const pending = await startSignInApproval(USER, { userAgent: CHROME, clientAddress: null }, { mailer, now: NINE });
+    const oldToken = tokenFromLatestMail();
+    const before = { ...store.approvals[0] };
+
+    const outcome = await resendSignInApproval(pending.claim, {
+      mailer: watchingMailer(true),
+      now: at(NINE, APPROVAL_RESEND_INTERVAL_MS),
+    });
+    expect(outcome).toMatchObject({ state: "sent" });
+    expect((outcome as { sendError: unknown }).sendError).not.toBeNull();
+    expect(store.sends).toHaveLength(2);
+    expect(store.approvals[0].sendCount).toBe(before.sendCount);
+    expect(store.approvals[0].lastSentAt).toEqual(before.lastSentAt);
+    expect(store.approvals[0].tokenHash).toBe(before.tokenHash);
+    expect((await readSignInApproval(oldToken))?.state).toBe("open");
+  });
+
+  it("a retry adds one row per attempt", async () => {
+    const pending = await startSignInApproval(USER, { userAgent: CHROME, clientAddress: null }, { mailer: watchingMailer(true), now: NINE });
+    expect(store.sends).toHaveLength(1);
+    await resendSignInApproval(pending.claim, { mailer: watchingMailer(true), now: at(NINE, APPROVAL_RESEND_INTERVAL_MS) });
+    expect(store.sends).toHaveLength(2);
+    await resendSignInApproval(pending.claim, { mailer, now: at(NINE, 2 * APPROVAL_RESEND_INTERVAL_MS) });
+    expect(store.sends).toHaveLength(3);
+  });
+
+  /* Ruling on #1879 (note 64435), point 2: stage then switch. The send time
+     is written under the lock, the new link only once the mail is accepted. */
+  it("resending: the send time is stamped and the old link still reads open while the mailer runs", async () => {
+    const pending = await startSignInApproval(USER, { userAgent: CHROME, clientAddress: null }, { mailer, now: NINE });
+    const oldToken = tokenFromLatestMail();
+    const oldDigest = store.approvals[0].tokenHash;
+    const now = at(NINE, APPROVAL_RESEND_INTERVAL_MS);
+    /* Noted, not asserted, inside the mailer: a throw there would read as a
+       failed send rather than a failed test. */
+    const during: { lastSentAt?: unknown; tokenHash?: unknown; oldLink?: string | null } = {};
+    const watcher = {
+      async sendEmail(notification: { to: string; subject: string; text: string }) {
+        during.lastSentAt = store.approvals[0].lastSentAt;
+        during.tokenHash = store.approvals[0].tokenHash;
+        during.oldLink = (await readSignInApproval(oldToken))?.state ?? null;
+        posted.push({ to: notification.to, subject: notification.subject, text: notification.text });
+      },
+    };
+
+    const outcome = await resendSignInApproval(pending.claim, { mailer: watcher, now });
+
+    expect(outcome).toMatchObject({ state: "sent", sendError: null });
+    expect(during.lastSentAt).toEqual(now);
+    expect(during.tokenHash).toBe(oldDigest);
+    expect(during.oldLink).toBe("open");
+    /* Once the mail is in the post the link switches. */
+    expect(await readSignInApproval(oldToken)).toBeNull();
+    expect((await readSignInApproval(tokenFromLatestMail()))?.state).toBe("open");
+  });
+
+  it("a resend asked for while another is in the post answers too_soon", async () => {
+    const pending = await startSignInApproval(USER, { userAgent: CHROME, clientAddress: null }, { mailer, now: NINE });
+    const now = at(NINE, APPROVAL_RESEND_INTERVAL_MS);
+    let inner: unknown;
+    const watcher = {
+      async sendEmail(notification: { to: string; subject: string; text: string }) {
+        inner = await resendSignInApproval(pending.claim, { mailer, now });
+        posted.push({ to: notification.to, subject: notification.subject, text: notification.text });
+      },
+    };
+
+    const outcome = await resendSignInApproval(pending.claim, { mailer: watcher, now });
+
+    expect(outcome).toMatchObject({ state: "sent", sendError: null });
+    expect(inner).toMatchObject({ state: "too_soon" });
+    /* The opening mail and one resend: the inner request sent nothing. */
+    expect(posted).toHaveLength(2);
+  });
+
+  /* Ruling on #1879 (note 64435), point 1: the limit counts attempts. */
+  it("five failed sends in an hour answer limited", async () => {
+    const failing = watchingMailer(true);
+    const pending = await startSignInApproval(USER, { userAgent: CHROME, clientAddress: null }, { mailer: failing, now: NINE });
+    expect(pending.sendError).not.toBeNull();
+    for (let attempt = 1; attempt < APPROVAL_SENDS_PER_HOUR; attempt += 1) {
+      const outcome = await resendSignInApproval(pending.claim, {
+        mailer: failing,
+        now: at(NINE, attempt * APPROVAL_RESEND_INTERVAL_MS),
+      });
+      expect(outcome.state, `attempt ${attempt + 1}`).toBe("sent");
+    }
+    expect(failing.seen).toHaveLength(APPROVAL_SENDS_PER_HOUR);
+
+    const sixth = await resendSignInApproval(pending.claim, {
+      mailer,
+      now: at(NINE, APPROVAL_SENDS_PER_HOUR * APPROVAL_RESEND_INTERVAL_MS),
+    });
+    expect(sixth).toEqual({ state: "limited" });
+    const opened = await startSignInApproval(
+      USER,
+      { userAgent: CHROME, clientAddress: null },
+      { mailer, now: at(NINE, (APPROVAL_SENDS_PER_HOUR + 1) * APPROVAL_RESEND_INTERVAL_MS) },
+    );
+    expect(opened.limited).toBe(true);
+    expect(posted).toHaveLength(0);
   });
 });
 
@@ -747,5 +979,337 @@ describe("send limits (ADR-0027 §8)", () => {
       now: at(start, APPROVAL_RESEND_INTERVAL_MS),
     });
     expect(outcome).toEqual({ state: "unknown" });
+  });
+});
+
+/*
+ * Ruling on #1896 (note 65074): a resend stages its link, and the row honours
+ * the current link and the staged one until the outcome is known. A confirmed
+ * send promotes staged to current; a failure the mailer can prove never left
+ * clears staged and puts the send time back; anything else is maybe
+ * delivered, and both links keep working.
+ */
+describe("a maybe-delivered resend keeps both links (#1896)", () => {
+  /** nodemailer's shape for a failure: an Error carrying `code` and/or `responseCode`. */
+  function smtpFailure(fields: { code?: string; responseCode?: number }): Error {
+    return Object.assign(new Error("provider failure"), fields);
+  }
+
+  /** The approval token in one mail's text. */
+  function linkIn(text: string): string {
+    const link = /\/approve\/([^\s)]+)/u.exec(text);
+    if (!link) throw new Error("the approval mail carried no link");
+    return decodeURIComponent(link[1]);
+  }
+
+  /** How each link reads now: its state, or null for a link nothing resolves. */
+  async function reads(...tokens: string[]): Promise<Array<string | null>> {
+    const states: Array<string | null> = [];
+    for (const token of tokens) states.push((await readSignInApproval(token))?.state ?? null);
+    return states;
+  }
+
+  /**
+   * A mailer that settles as told, noting the link it was handed and how the
+   * links read while it ran. Noted, not asserted, inside the mailer: a throw
+   * there would read as a failed send rather than a failed test.
+   */
+  function outcomeMailer(settle: "delivered" | Error, watch: string[] = []) {
+    const seen = { tokens: [] as string[], during: [] as Array<Array<string | null>> };
+    return {
+      seen,
+      async sendEmail(notification: { to: string; subject: string; text: string }) {
+        const token = linkIn(notification.text);
+        seen.tokens.push(token);
+        seen.during.push(await reads(...watch, token));
+        if (settle !== "delivered") throw settle;
+        posted.push({ to: notification.to, subject: notification.subject, text: notification.text });
+      },
+    };
+  }
+
+  /** An opened sign-in and a resend a minute on whose mail timed out: two links. */
+  async function timedOutResend() {
+    const pending = await startSignInApproval(USER, { userAgent: CHROME, clientAddress: null }, { mailer, now: NINE });
+    const first = tokenFromLatestMail();
+    const resentAt = at(NINE, APPROVAL_RESEND_INTERVAL_MS);
+    const timeout = outcomeMailer(smtpFailure({ code: "ETIMEDOUT" }), [first]);
+    const outcome = await resendSignInApproval(pending.claim, { mailer: timeout, now: resentAt });
+    return { pending, first, second: timeout.seen.tokens[0], resentAt, outcome, timeout };
+  }
+
+  it("1. confirmed: both links resolve in flight; after, the new link approves, the old is unknown, nothing is staged, the count rose", async () => {
+    const pending = await startSignInApproval(USER, { userAgent: CHROME, clientAddress: null }, { mailer, now: NINE });
+    const oldToken = tokenFromLatestMail();
+    const countBefore = store.approvals[0].sendCount as number;
+    const delivering = outcomeMailer("delivered", [oldToken]);
+
+    const outcome = await resendSignInApproval(pending.claim, { mailer: delivering, now: at(NINE, APPROVAL_RESEND_INTERVAL_MS) });
+    const newToken = delivering.seen.tokens[0];
+
+    expect(outcome).toMatchObject({ state: "sent", sendError: null });
+    /* Staged under the lock before the mail went (ruling point 3). */
+    expect(delivering.seen.during[0]).toEqual(["open", "open"]);
+    expect(await readSignInApproval(oldToken)).toBeNull();
+    expect(store.approvals[0].stagedTokenHash).toBeNull();
+    expect(store.approvals[0].sendCount).toBe(countBefore + 1);
+    expect(await decideSignInApproval(newToken, "approved")).toEqual({ recorded: true });
+    expect(store.approvals[0].outcome).toBe("approved");
+  });
+
+  it.each([
+    ["EENVELOPE", { code: "EENVELOPE" }],
+    ["responseCode 550", { responseCode: 550 }],
+  ])("2. refused (%s): the old link still works, the new one is unknown, nothing staged, send time restored, count row kept", async (_label, fields) => {
+    const pending = await startSignInApproval(USER, { userAgent: CHROME, clientAddress: null }, { mailer, now: NINE });
+    const oldToken = tokenFromLatestMail();
+    const lastSentBefore = store.approvals[0].lastSentAt;
+    const refusing = outcomeMailer(smtpFailure(fields), [oldToken]);
+
+    const outcome = await resendSignInApproval(pending.claim, { mailer: refusing, now: at(NINE, APPROVAL_RESEND_INTERVAL_MS) });
+    const newToken = refusing.seen.tokens[0];
+
+    expect(outcome).toMatchObject({ state: "sent" });
+    expect((outcome as { sendError: unknown }).sendError).not.toBeNull();
+    expect(refusing.seen.during[0]).toEqual(["open", "open"]);
+    expect(await reads(oldToken, newToken)).toEqual(["open", null]);
+    expect(store.approvals[0].stagedTokenHash).toBeNull();
+    expect(store.approvals[0].lastSentAt).toEqual(lastSentBefore);
+    expect(store.sends).toHaveLength(2);
+  });
+
+  it("3. timed out: both links read the same pending sign-in, the send time is the resend's, and the count row stays", async () => {
+    const { pending, first, second, resentAt, outcome, timeout } = await timedOutResend();
+
+    expect(outcome).toMatchObject({ state: "sent" });
+    expect((outcome as { sendError: unknown }).sendError).not.toBeNull();
+    expect(timeout.seen.during[0]).toEqual(["open", "open"]);
+    expect(await reads(first, second)).toEqual(["open", "open"]);
+    expect(await readSignInApproval(second)).toEqual(await readSignInApproval(first));
+    expect(store.approvals).toHaveLength(1);
+    expect(store.approvals[0].lastSentAt).toEqual(resentAt);
+    expect(store.sends).toHaveLength(2);
+    /* A mail may be arriving, so the minute runs from this resend. */
+    expect(await resendSignInApproval(pending.claim, { mailer, now: resentAt })).toMatchObject({ state: "too_soon" });
+  });
+
+  it("4a. timed out, then approved through the new link: the old link reads decided and approves nothing", async () => {
+    const { first, second } = await timedOutResend();
+
+    expect(await decideSignInApproval(second, "approved")).toEqual({ recorded: true });
+    expect(store.approvals[0].outcome).toBe("approved");
+    expect(await reads(first)).toEqual(["approved"]);
+    expect(await decideSignInApproval(first, "approved")).toEqual({ recorded: false });
+  });
+
+  it("4b. timed out, then approved through the old link: the new link reads decided and approves nothing", async () => {
+    const { first, second } = await timedOutResend();
+
+    expect(await decideSignInApproval(first, "approved")).toEqual({ recorded: true });
+    expect(await reads(second)).toEqual(["approved"]);
+    expect(await decideSignInApproval(second, "approved")).toEqual({ recorded: false });
+  });
+
+  it.each(["new", "old"] as const)("5. timed out, then refused through the %s link: the row is spent and the other link is refused", async (which) => {
+    const { first, second } = await timedOutResend();
+    const [used, other] = which === "new" ? [second, first] : [first, second];
+
+    expect(await decideSignInApproval(used, "denied")).toEqual({ recorded: true });
+    expect(store.approvals[0].consumedAt).not.toBeNull();
+    expect(await reads(other)).toEqual(["denied"]);
+    expect(await decideSignInApproval(other, "approved")).toEqual({ recorded: false });
+    expect(store.approvals[0].outcome).toBe("denied");
+  });
+
+  it("6. timed out, then a confirmed resend a minute on: only the third link works, and never more than two resolve", async () => {
+    const { pending, first, second, resentAt } = await timedOutResend();
+    const resolving = async (tokens: string[]) => (await reads(...tokens)).filter((state) => state !== null).length;
+    expect(await resolving([first, second])).toBe(2);
+    const delivering = outcomeMailer("delivered", [first, second]);
+
+    const outcome = await resendSignInApproval(pending.claim, { mailer: delivering, now: at(resentAt, APPROVAL_RESEND_INTERVAL_MS) });
+    const third = delivering.seen.tokens[0];
+
+    expect(outcome).toMatchObject({ state: "sent", sendError: null });
+    /* In flight: the current link and the newest staged one; the older staged one is replaced. */
+    expect(delivering.seen.during[0]).toEqual(["open", null, "open"]);
+    expect(delivering.seen.during[0].filter((state) => state !== null).length).toBeLessThanOrEqual(2);
+    expect(await reads(first, second, third)).toEqual([null, null, "open"]);
+    expect(store.approvals[0].stagedTokenHash).toBeNull();
+  });
+
+  it("7. timed out twice a minute apart: the first (current) and third (staged) links work, the second does not", async () => {
+    const { pending, first, second, resentAt } = await timedOutResend();
+    const again = outcomeMailer(smtpFailure({ code: "ETIMEDOUT" }));
+
+    await resendSignInApproval(pending.claim, { mailer: again, now: at(resentAt, APPROVAL_RESEND_INTERVAL_MS) });
+    const third = again.seen.tokens[0];
+
+    expect(await reads(first, second, third)).toEqual(["open", null, "open"]);
+  });
+
+  it("8. the mailing step throws: both links work, the send time is not put back, and the error propagates", async () => {
+    const pending = await startSignInApproval(USER, { userAgent: CHROME, clientAddress: null }, { mailer, now: NINE });
+    const first = tokenFromLatestMail();
+    const resentAt = at(NINE, APPROVAL_RESEND_INTERVAL_MS);
+    sendHook.throwAfterSend = new Error("after the send");
+
+    await expect(resendSignInApproval(pending.claim, { mailer, now: resentAt })).rejects.toThrow("after the send");
+    const second = tokenFromLatestMail();
+
+    expect(second).not.toBe(first);
+    expect(await reads(first, second)).toEqual(["open", "open"]);
+    expect(store.approvals[0].lastSentAt).toEqual(resentAt);
+  });
+
+  it("9. expired with a staged digest: neither link is open or decides, and the sweep removes the row", async () => {
+    const { first, second } = await timedOutResend();
+    const expiresAt = store.approvals[0].expiresAt as Date;
+    at(expiresAt, 1);
+
+    expect(await reads(first, second)).toEqual(["lapsed", "lapsed"]);
+    expect(await decideSignInApproval(first, "approved")).toEqual({ recorded: false });
+    expect(await decideSignInApproval(second, "approved")).toEqual({ recorded: false });
+
+    /* The sweep runs as a step of opening a sign-in, past the retention. */
+    const swept = at(expiresAt, 91 * 24 * 60 * 60 * 1000);
+    await startSignInApproval(USER, { userAgent: CHROME, clientAddress: null }, { mailer, now: swept });
+    expect(store.approvals).toHaveLength(1);
+    expect(await reads(first, second)).toEqual([null, null]);
+  });
+
+  describe("10. sendBoundedMail says whether the mail may have been delivered", () => {
+    const mail = { subject: "A subject", text: "A body" };
+    const failingWith = (error: unknown) => ({ async sendEmail() { throw error; } });
+
+    it("smtp_unconfigured: no provider was reached", async () => {
+      const outcome = await sendBoundedMail("priya@example.invalid", mail, null, NINE);
+      expect(outcome.sendError).toBe("smtp_unconfigured");
+      expect(outcome).toMatchObject({ maybeDelivered: false });
+    });
+
+    it.each([
+      ["EAUTH", { code: "EAUTH" }],
+      ["EENVELOPE", { code: "EENVELOPE" }],
+      ["EMESSAGE", { code: "EMESSAGE" }],
+      ["responseCode 421", { responseCode: 421 }],
+      ["responseCode 450", { responseCode: 450 }],
+      ["responseCode 550", { responseCode: 550 }],
+      ["ECONNREFUSED", { code: "ECONNREFUSED" }],
+      ["ENOTFOUND", { code: "ENOTFOUND" }],
+      ["ENETUNREACH", { code: "ENETUNREACH" }],
+      ["EHOSTUNREACH", { code: "EHOSTUNREACH" }],
+    ])("%s: the provider answered, or was never reached -- not delivered", async (_label, fields) => {
+      const outcome = await sendBoundedMail("priya@example.invalid", mail, failingWith(smtpFailure(fields)), NINE);
+      expect(outcome.sendError).not.toBeNull();
+      expect(outcome).toMatchObject({ maybeDelivered: false });
+    });
+
+    /* nodemailer 10 moves the system code to originalCode and sets code to ESOCKET or ECONNECTION (smtp-connection _formatError). */
+    const nodemailerFailure = (code: "ESOCKET" | "ECONNECTION", originalCode: string, command: string): Error =>
+      Object.assign(new Error(`connect ${originalCode}`), { code, originalCode, command });
+
+    it.each(
+      (["ECONNREFUSED", "ENOTFOUND", "ENETUNREACH", "EHOSTUNREACH"] as const).flatMap((original) =>
+        (["ECONNECTION", "ESOCKET"] as const).map((code) => [`${code} carrying ${original}`, code, original] as const),
+      ),
+    )("%s, as nodemailer shapes it: the connection never opened -- not delivered", async (_label, code, original) => {
+      const outcome = await sendBoundedMail("priya@example.invalid", mail, failingWith(nodemailerFailure(code, original, "CONN")), NINE);
+      expect(outcome.sendError).not.toBeNull();
+      expect(outcome).toMatchObject({ maybeDelivered: false });
+    });
+
+    it.each([
+      ["ESOCKET carrying ECONNRESET", nodemailerFailure("ESOCKET", "ECONNRESET", "CONN")],
+      ["ESOCKET carrying ETIMEDOUT", nodemailerFailure("ESOCKET", "ETIMEDOUT", "CONN")],
+      ["ETIMEDOUT during DATA", Object.assign(new Error("Socket timed out"), { code: "ETIMEDOUT", command: "DATA" })],
+      ["ESOCKET carrying ETIMEDOUT during DATA", nodemailerFailure("ESOCKET", "ETIMEDOUT", "DATA")],
+    ])("%s: the connection had opened -- maybe delivered", async (_label, error) => {
+      const outcome = await sendBoundedMail("priya@example.invalid", mail, failingWith(error), NINE);
+      expect(outcome.sendError).not.toBeNull();
+      expect(outcome).toMatchObject({ maybeDelivered: true });
+    });
+
+    it("nodemailer itself refused by a closed local port: not delivered", async () => {
+      vi.useRealTimers(); /* a real socket needs the real event loop; afterEach restores */
+      const { createServer } = await import("node:net");
+      const port = await new Promise<number>((resolve) => {
+        const probe = createServer().listen(0, "127.0.0.1", () => {
+          const { port: chosen } = probe.address() as { port: number };
+          probe.close(() => resolve(chosen));
+        });
+      });
+      const nodemailer = (await import("nodemailer")).default;
+      const transporter = nodemailer.createTransport({ host: "127.0.0.1", port, connectionTimeout: 5000 });
+      const refusing = {
+        async sendEmail(n: { to: string; subject: string; text: string }) {
+          try { await transporter.sendMail({ from: "orbit@example.invalid", ...n }); } finally { transporter.close(); }
+        },
+      };
+      const outcome = await sendBoundedMail("priya@example.invalid", mail, refusing, NINE);
+      expect(outcome.sendError).not.toBeNull();
+      expect(outcome).toMatchObject({ maybeDelivered: false });
+    });
+
+    it.each([
+      ["ETIMEDOUT", smtpFailure({ code: "ETIMEDOUT" })],
+      ["ECONNRESET", smtpFailure({ code: "ECONNRESET" })],
+      ["ECONNECTION", smtpFailure({ code: "ECONNECTION" })],
+      ["ESOCKET", smtpFailure({ code: "ESOCKET" })],
+      ["a bare Error", new Error("something")],
+    ])("%s: silence is not a refusal -- maybe delivered", async (_label, error) => {
+      const outcome = await sendBoundedMail("priya@example.invalid", mail, failingWith(error), NINE);
+      expect(outcome.sendError).not.toBeNull();
+      expect(outcome).toMatchObject({ maybeDelivered: true });
+    });
+
+    it("a resolved send: maybe delivered", async () => {
+      const outcome = await sendBoundedMail("priya@example.invalid", mail, { async sendEmail() {} }, NINE);
+      expect(outcome).toMatchObject({ sendError: null, maybeDelivered: true });
+    });
+  });
+
+  it("11. #1898 guard: a row whose current digest changed between the lock and the switch is left alone by the success update", async () => {
+    const pending = await startSignInApproval(USER, { userAgent: CHROME, clientAddress: null }, { mailer, now: NINE });
+    const countBefore = store.approvals[0].sendCount;
+    const noted: { staged?: unknown } = {};
+    const rewriting = {
+      async sendEmail(notification: { to: string; subject: string; text: string }) {
+        noted.staged = store.approvals[0].stagedTokenHash;
+        store.approvals[0].tokenHash = "rewritten-meanwhile";
+        posted.push({ to: notification.to, subject: notification.subject, text: notification.text });
+      },
+    };
+
+    await resendSignInApproval(pending.claim, { mailer: rewriting, now: at(NINE, APPROVAL_RESEND_INTERVAL_MS) });
+
+    expect(typeof noted.staged).toBe("string");
+    expect(store.approvals[0].tokenHash).toBe("rewritten-meanwhile");
+    expect(store.approvals[0].stagedTokenHash).toBe(noted.staged);
+    expect(store.approvals[0].sendCount).toBe(countBefore);
+  });
+
+  it("12. a resend asked for while another is in the post sends one mail and leaves exactly one staged digest", async () => {
+    const pending = await startSignInApproval(USER, { userAgent: CHROME, clientAddress: null }, { mailer, now: NINE });
+    const first = tokenFromLatestMail();
+    const now = at(NINE, APPROVAL_RESEND_INTERVAL_MS);
+    let inner: unknown;
+    let mailed = "";
+    const timingOut = {
+      async sendEmail(notification: { to: string; subject: string; text: string }) {
+        mailed = linkIn(notification.text);
+        inner = await resendSignInApproval(pending.claim, { mailer, now });
+        throw smtpFailure({ code: "ETIMEDOUT" });
+      },
+    };
+
+    await resendSignInApproval(pending.claim, { mailer: timingOut, now });
+
+    expect(inner).toMatchObject({ state: "too_soon" });
+    /* The opening mail only: the inner request sent nothing, the outer one timed out. */
+    expect(posted).toHaveLength(1);
+    expect(store.sends).toHaveLength(2);
+    expect(typeof store.approvals[0].stagedTokenHash).toBe("string");
+    expect(await reads(first, mailed)).toEqual(["open", "open"]);
   });
 });

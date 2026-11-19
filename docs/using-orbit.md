@@ -128,8 +128,10 @@ the item and the chain-link button copies a link to it.
 3. Press **save**.
 
 In **reminders**, press the chips for the days before the due date you want
-to be reminded: 7, 14, 30, 60 or 90. Several can be on at once. A saved day
-that is not one of these chips shows as an extra chip; press it to remove it.
+to be reminded: 1, 3, 7, 14, 30, 60 or 90. Several can be on at once. To use
+another number, type it in the **other** field (a whole number of days, 1 to
+365) and press Enter or **add**. A typed or saved day that is not one of
+the chips shows as an extra chip with a cross; press it to remove it.
 
 Press **cancel** to stop. If you have changed something, the button first
 asks **discard changes?**; press it again to throw the changes away.

@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -62,7 +63,7 @@ function run(extraEnv, { baseUrl = true } = {}) {
         return;
       }
       child.stdin.destroy();
-      resolve({ status, stdout, stderr, called: existsSync(calls) });
+      resolve({ status, stdout, stderr, called: existsSync(calls), calls: existsSync(calls) ? readFileSync(calls, "utf8") : "" });
     });
   });
 }
@@ -93,5 +94,57 @@ describe("get-orbit-preview.sh pinned digest", () => {
     const r = await run({ ORBIT_PREVIEW_DIGEST: `sha256:${"a".repeat(64)}` }, { baseUrl: false });
     expect(r.status).toBe(1);
     expect(r.stderr).toContain("ORBIT_PREVIEW_BASE_URL");
+  });
+});
+
+describe("get-orbit-preview.sh downloads (audit Low: 300 s cap, no retry)", () => {
+  it("retries a failed download instead of giving up on the first error", async () => {
+    const r = await run({ ORBIT_PREVIEW_DIGEST: `sha256:${"a".repeat(64)}` });
+    expect(r.calls).toContain("--retry");
+  });
+});
+
+describe("get-orbit-preview.sh signed manifest with a missing field (audit Low)", () => {
+  // The script embeds Orbit's public key, so a test copy carries a throwaway
+  // key and the manifest is signed with the matching private key.
+  function runWithManifest(manifestText) {
+    const dir = mkdtempSync(join(tmpdir(), "orbit-preview-manifest-"));
+    scratchDirs.push(dir);
+    const keyPem = join(dir, "key.pem");
+    const pubPem = join(dir, "pub.pem");
+    expect(spawnSync("openssl", ["ecparam", "-name", "prime256v1", "-genkey", "-noout", "-out", keyPem]).status).toBe(0);
+    expect(spawnSync("openssl", ["ec", "-in", keyPem, "-pubout", "-out", pubPem], { stdio: "ignore" }).status).toBe(0);
+    const pub = readFileSync(pubPem, "utf8").trim();
+    const original = readFileSync(script, "utf8");
+    const patched = original.replace(/embedded_public_key='[^']*'/, `embedded_public_key='${pub}'`);
+    expect(patched).not.toBe(original);
+    const scriptCopy = join(dir, "get-orbit-preview.sh");
+    writeFileSync(scriptCopy, patched);
+    const files = join(dir, "files");
+    mkdirSync(files);
+    writeFileSync(join(files, "orbit-release-manifest.json"), manifestText);
+    const der = join(dir, "sig.der");
+    expect(spawnSync("openssl", ["dgst", "-sha256", "-sign", keyPem, "-out", der, join(files, "orbit-release-manifest.json")]).status).toBe(0);
+    const b64 = spawnSync("base64", [der], { encoding: "utf8" }).stdout;
+    writeFileSync(join(files, "orbit-release-manifest.json.sig"), b64);
+    const digest = `sha256:${"b".repeat(64)}`;
+    return spawnSync("bash", [scriptCopy], {
+      env: { PATH: "/usr/bin:/bin", HOME: dir, TMPDIR: dir, ORBIT_PREVIEW_BASE_URL: files, ORBIT_PREVIEW_DIGEST: digest },
+      encoding: "utf8",
+      timeout: SHORT_DEADLINE_MS,
+    });
+  }
+  const digest = `sha256:${"b".repeat(64)}`;
+
+  it("says what is wrong when the signed manifest has no commit field", () => {
+    const r = runWithManifest(`{\n"version": "v1.2.3",\n"channel": "preview",\n"digest": "${digest}"\n}\n`);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/get-orbit-preview: .*commit/);
+  });
+
+  it("says what is wrong when the signed manifest has no version field", () => {
+    const r = runWithManifest(`{\n"channel": "preview",\n"digest": "${digest}"\n}\n`);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/get-orbit-preview: .*version/);
   });
 });

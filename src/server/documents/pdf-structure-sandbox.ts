@@ -166,14 +166,14 @@ const FILE_PATH_IN_CHILD = `/dev/fd/${FILE_FD}`;
  * An `unavailable` job says nothing about the file, so it is never remembered
  * as a refusal (#1433 D20).
  */
-type StopKind = "timeout" | "memory" | "crash" | "unavailable";
+type StopKind = "timeout" | "memory" | "crash" | "unavailable" | "queue_full";
 type Job = "structure" | "render" | "image";
 
 let limits: PdfStructureSandboxLimits = { ...PDF_STRUCTURE_SANDBOX_LIMITS };
 let testDataLimitHeadroom: "unlimited" | number | undefined;
 let lastChildPid: number | undefined;
 let inFlight = 0;
-const pools: Record<SandboxPool, { running: number; waiting: Array<() => void> }> = {
+const pools: Record<SandboxPool, { running: number; waiting: Array<(granted: boolean) => void> }> = {
   check: { running: 0, waiting: [] },
   view: { running: 0, waiting: [] },
   background: { running: 0, waiting: [] },
@@ -193,25 +193,64 @@ export type ImageRender =
   | { outcome: "refused"; reason: "unsupported_structure" }
   | { outcome: "failed"; stop?: StopKind };
 
-/** A first-come, first-served slot in `pool`: a finished job hands its slot straight to the next in line. */
-async function acquire(pool: SandboxPool): Promise<void> {
+/** How long a view draw waits for a slot before it is refused (#1446: load shedding, answered 503 with Retry-After). */
+export const VIEW_SLOT_WAIT_MS = 4_000;
+/** How many view draws may wait for a slot; one more is refused at once (#1446). */
+export const VIEW_WAITING_LIMIT = 8;
+
+function logQueueFull(reason: "waiting_limit" | "wait_deadline"): void {
+  log.info({
+    event: "document.preview",
+    state: "blocked",
+    reason: "processing_interrupted",
+    action: "none",
+    impact: "none",
+    detail: operationalDetail`View render queue refused a draw: ${reason}`,
+  });
+}
+
+/**
+ * A first-come, first-served slot in `pool`: a finished job hands its slot
+ * straight to the next in line. Only the view pool is bounded (#1446): it
+ * holds at most VIEW_WAITING_LIMIT waiters, each for at most VIEW_SLOT_WAIT_MS.
+ * False means refused: no slot was taken and the waiter's place is given up.
+ */
+async function acquire(pool: SandboxPool): Promise<boolean> {
   const state = pools[pool];
   if (state.running < limits.concurrency[pool]) {
     state.running += 1;
-    return;
+    return true;
   }
-  await new Promise<void>((resolve) => state.waiting.push(resolve));
+  if (pool !== "view") return new Promise<boolean>((resolve) => state.waiting.push(resolve));
+  if (state.waiting.length >= VIEW_WAITING_LIMIT) {
+    logQueueFull("waiting_limit");
+    return false;
+  }
+  return new Promise<boolean>((resolve) => {
+    const turn = (granted: boolean): void => {
+      clearTimeout(timer);
+      resolve(granted);
+    };
+    const timer = setTimeout(() => {
+      const index = state.waiting.indexOf(turn);
+      if (index >= 0) state.waiting.splice(index, 1);
+      logQueueFull("wait_deadline");
+      resolve(false);
+    }, VIEW_SLOT_WAIT_MS);
+    state.waiting.push(turn);
+  });
 }
 
 function release(pool: SandboxPool): void {
   const state = pools[pool];
   const next = state.waiting.shift();
-  if (next) next();
+  if (next) next(true);
   else state.running -= 1;
 }
 
-async function inPool<T>(pool: SandboxPool, run: () => Promise<T>): Promise<T> {
-  await acquire(pool);
+/** Runs `run` in a slot of `pool`, or answers `refused()` without running it when the bounded view queue turns the draw away. */
+async function inPool<T>(pool: SandboxPool, run: () => Promise<T>, refused: () => T): Promise<T> {
+  if (!(await acquire(pool))) return refused();
   try {
     return await run();
   } finally {
@@ -578,7 +617,7 @@ export async function inspectPdfStructureInSandbox(input: PdfInput, options: { m
   return inPool("check", async () => {
     const verdict = await withPdfDescriptor(input, async (handle) => verdictOf(await runPdfinfo(handle, false), options.maxPages));
     return verdict ?? { reason: "structure_check_unavailable" };
-  });
+  }, () => ({ reason: "structure_check_unavailable" }));
 }
 
 /** What `pdfinfo` says a file's page count is, whatever the cap; or why it said nothing. */
@@ -602,7 +641,7 @@ export async function readPdfPageCountInSandbox(input: PdfInput, pool: SandboxPo
       return { outcome: "refused" };
     });
     return answer ?? { outcome: "failed", stop: "unavailable" };
-  });
+  }, () => ({ outcome: "failed", stop: "queue_full" }));
 }
 
 /** A drawn page's edge: a whole number of pixels, at least one and at most the asked-for long edge. */
@@ -630,7 +669,7 @@ export async function renderPdfPageInSandbox(
     const answer = await withPdfDescriptor(input, (handle) => drawPage(handle, request));
     // The file could not be handed over (a full quarantine, a vanished file): ours.
     return answer ?? { outcome: "failed", stop: "unavailable" };
-  });
+  }, () => ({ outcome: "failed", stop: "queue_full" }));
 }
 
 async function drawPage(
@@ -996,7 +1035,7 @@ export async function inspectImageInSandbox(
   const outcome = await inPool("check", () => runImageChild(file ? { file } : { bytes }, {
     message: { mediaType, width: declared.width, height: declared.height },
     wallMs: limits.wallMs,
-  }));
+  }), (): ChildOutcome => ({ stop: "queue_full" }));
   if ("stop" in outcome) return "structure_check_unavailable";
   const message = outcome.message;
   return isAnswer(message) && message.outcome === "opened" ? "supported_structure" : "unsupported_structure";
@@ -1029,7 +1068,7 @@ export async function renderImageInSandbox(
     },
     wallMs: request.wallMs,
     nice: pool === "background",
-  }));
+  }), (): ChildOutcome => ({ stop: "queue_full" }));
   if ("stop" in outcome) return { outcome: "failed", stop: outcome.stop };
   const answer = outcome.message;
   if (!isAnswer(answer)) return { outcome: "failed" };

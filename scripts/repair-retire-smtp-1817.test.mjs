@@ -594,6 +594,9 @@ function rootShims({ chown = "pass", root = true, plant = null, failWhen = null,
   const log = join(dir, "chown.log");
   const setprivLog = join(dir, "setpriv.log");
   const order = join(dir, "chown-order.log");
+  const setprivOrder = join(dir, "setpriv-order.log");
+  // The number of `compose up` calls the docker shim has logged when each setpriv call starts (#1878 L-S1).
+  const upsBefore = `state="$(sed -n "2s/^S='\\(.*\\)'\$/\\1/p" "$(command -v docker)" 2>/dev/null)"\nups=unknown\nif [[ -n "$state" ]]; then ups="$(grep -cE '\\bcompose\\b.*\\bup\\b' "$state/argv.log" 2>/dev/null)"; ups="\${ups:-0}"; fi\n`;
   const datedRegex = join(dir, "dated.re");
   writeFileSync(datedRegex, bashRegex(DATED));
   const contents = join(dir, "chown-contents.log");
@@ -617,7 +620,7 @@ function rootShims({ chown = "pass", root = true, plant = null, failWhen = null,
     // setprivFail glob, and otherwise runs the command after `--` as the test user.
     writeFileSync(
       join(dir, "setpriv"),
-      `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >> '${setprivLog}'\ncase "$*" in ${setprivFail ?? "__never__"}) exit 1;; esac\nwhile [[ $# -gt 0 && "$1" != -- ]]; do shift; done\nshift\n${setprivPlanting || 'exec "$@"\n'}`,
+      `#!/usr/bin/env bash\ncase " $* " in *" --reuid"*|*" --regid"*|*" --init-groups "*|*" --clear-groups "*) ;; *" --pdeathsig"*) while [[ $# -gt 0 && "$1" != -- ]]; do shift; done; shift; exec "$@";; esac\nprintf '%s\\n' "$*" >> '${setprivLog}'\n${upsBefore}printf '%s ups=%s\\n' "$*" "$ups" >> '${setprivOrder}'\ncase "$*" in ${setprivFail ?? "__never__"}) exit 1;; esac\nwhile [[ $# -gt 0 && "$1" != -- ]]; do shift; done\nshift\n${setprivPlanting || 'exec "$@"\n'}`,
     );
     chmodSync(join(dir, "setpriv"), 0o755);
   }
@@ -653,6 +656,8 @@ ${planting}${outcome}
     env: { ORBIT_REPAIR_PROMPTS: "machine", PATH: `${dir}:${process.env.PATH}` },
     calls: () => read(log),
     setprivCalls: () => read(setprivLog),
+    /** Each setpriv call with the number of `compose up` calls made before it: { call, ups }. */
+    setprivOrder: () => read(setprivOrder).map((line) => /^(.*) ups=(\S+)$/u.exec(line)).map((found) => ({ call: found[1], ups: found[2] })),
     /** Each chown of a directory, in order: { path, entries: ["<relative path>:<find %y type>", ...] }. */
     contents: () => read(contents).map((line) => /^([^|]*)\|(.*)$/u.exec(line)).map((found) => ({ path: found[1], entries: found[2].split(" ").filter(Boolean) })),
     order: () => read(order).map((line) => /^(.*) ups=(\S+)$/u.exec(line)).map((found) => ({ path: found[1].replace(/^\.\//u, ""), ups: found[2] })),
@@ -720,8 +725,12 @@ describe("O-S5 (#1844): a root run of retire-smtp-lines leaves nothing owned by 
     ]) {
       expect(calls.some((call) => test.test(call)), `no setpriv call for ${label}:\n${log}`).toBe(true);
     }
-    // The rewritten copy is written before the stack is started on it.
+    // The rewritten copy is renamed into place before the stack is started on it: no `compose up` had run
+    // when the setpriv mv over .env-orbit did, and the stack was started afterwards.
     expect(composeUpCalls(result).length).toBeGreaterThan(0);
+    const renames = shims.setprivOrder().filter(({ call }) => / mv -f -- \.\/\.env-orbit\.retire-smtp\.[A-Za-z0-9]{6} \.env-orbit$/u.test(call));
+    expect(renames.length, "no setpriv rename over .env-orbit").toBeGreaterThan(0);
+    for (const { call, ups } of renames) expect(ups, `compose up ran before: ${call}`).toBe("0");
     // The record is removed at the end, and no mktemp name is left behind.
     expect(existsSync(join(targetDir, ".orbit-smtp-retirement"))).toBe(false);
     expect(tempLeftovers(targetDir)).toEqual([]);

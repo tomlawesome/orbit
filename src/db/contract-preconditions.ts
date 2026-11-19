@@ -1,3 +1,4 @@
+import { CONTENT_INDEX_BACKFILL_BATCH_SIZE, DOCUMENT_WORKER_POLL_MS } from "../server/document-maintenance/backfill-rate";
 import { readExpectedMigrationHashes } from "./migration-integrity";
 
 // Contract migrations and what must be true before each may run (#1779,
@@ -26,18 +27,29 @@ export interface ContractPrecondition {
   remedy: string[];
 }
 
+/*
+ * Worked out from the defaults: the batch and the tick are fixed settings, but
+ * a cycle that has other work to do, or a restart, can make the real rate
+ * lower, so the text says "about".
+ */
+const BACKFILL_DOCUMENTS_PER_MINUTE = Math.round(CONTENT_INDEX_BACKFILL_BATCH_SIZE * (60_000 / DOCUMENT_WORKER_POLL_MS));
+
 export const CONTRACT_PRECONDITIONS: readonly ContractPrecondition[] = [
   {
     // The drop ships later (note 58520 decision 3, build note C). Until then
     // its tag is in no journal, so this runs against today's column and
-    // passes once the backfill has sealed every row. The drop migration must
-    // be generated under exactly this tag.
+    // passes once the backfill has sealed every row. The number 0017 is
+    // already taken (0017_imap_attachment_hash_sealed), so this tag must be
+    // changed to the next free number when the drop is written, and the drop
+    // must be generated under whatever tag this entry holds at that time. A
+    // gate whose tag matches no migration is skipped silently; the guard test
+    // in contract-preconditions.test.ts enforces the match.
     migrationTag: "0017_drop_document_content_sha256",
     column: "documents.content_sha256",
     description: "documents whose content hash is still stored in plain form, not yet sealed under the household key",
     pendingSql: "SELECT count(*) FROM documents WHERE content_sha256 IS NOT NULL",
     remedy: [
-      "Orbit is still moving documents under the household key. The running version finishes this in the background, about 200 documents a minute.",
+      `Orbit is still moving documents under the household key. The running version finishes this in the background, about ${BACKFILL_DOCUMENTS_PER_MINUTE} documents a minute.`,
       "Leave Orbit running and run the update again later.",
       "If Orbit is locked because its household key is missing, restore the key and let Orbit run before updating.",
     ],
@@ -76,8 +88,11 @@ export async function runUpdatePreflight(options: {
   const applied = new Set((await options.query(MIGRATION_JOURNAL_SQL)).map((row) => row[0]));
   const lines: string[] = [];
   for (const precondition of preconditions) {
+    // A precondition gates only the release that ships its contract migration
+    // (expand/contract): when this image carries no such migration, an older
+    // install's pending rows cannot block it (#1854 A-R1).
     const hash = expected.get(precondition.migrationTag);
-    if (hash !== undefined && applied.has(hash)) continue;
+    if (hash === undefined || applied.has(hash)) continue;
     const rows = pendingCount(await options.query(precondition.pendingSql));
     if (rows > 0) lines.push(`update-preflight: blocked ${precondition.column} rows=${rows}`, ...precondition.remedy);
   }

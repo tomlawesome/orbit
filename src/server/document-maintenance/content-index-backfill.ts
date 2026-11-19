@@ -37,6 +37,9 @@ import { CONTENT_HASH_COLUMN, openContentHash, sealContentHash } from "@/server/
 import { noteMetadataDamage } from "@/server/metadata/damage-sightings";
 import { openMetadataWriter, type MetadataCipher } from "@/server/metadata/fields";
 import { MetadataKeyLockedError } from "@/server/metadata/keys";
+import { CONTENT_INDEX_BACKFILL_BATCH_SIZE } from "@/server/document-maintenance/backfill-rate";
+
+export { CONTENT_INDEX_BACKFILL_BATCH_SIZE };
 
 const SHA256_HEX = /^[0-9a-f]{64}$/u;
 
@@ -123,7 +126,7 @@ async function fixRow(metadata: MetadataCipher, row: WorkRow): Promise<number> {
  * the others; its rows wait for a cycle where the key opens. One warning per
  * cycle, however many households were passed over.
  */
-export async function backfillDocumentContentIndexes(limit = 200): Promise<number> {
+export async function backfillDocumentContentIndexes(limit = CONTENT_INDEX_BACKFILL_BATCH_SIZE): Promise<number> {
   const ciphers = new Map<string, MetadataCipher>();
   const skipped: string[] = [];
   let fixed = 0;

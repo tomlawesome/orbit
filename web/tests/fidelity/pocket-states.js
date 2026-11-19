@@ -1222,7 +1222,7 @@ export const DOOR_STATES = [
   } },
   { name: "500 (Orbit stumbled)", slug: "500", state: "rest", reach: async (page) => {
     await throughRouter(page, "/approve/pocket-measure-placeholder-token",
-      { type: "error", error: { message: "Internal Error" }, status: 500 });
+      { type: "error", error: { message: "Internal Error", status: 500 } });
     await page.waitForSelector(".stumble .line-b .again");
   } },
   { name: "/maintenance", slug: "maintenance", state: "rest", reach: async (page) => {

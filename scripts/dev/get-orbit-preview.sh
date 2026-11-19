@@ -63,7 +63,8 @@ trap 'rm -rf "$work_dir"' EXIT
 
 fetch() {
   if [[ "$base" =~ ^https?:// ]]; then
-    curl --silent --show-error --fail --location --connect-timeout 10 --max-time 300 -o "$2" "${base}/$1" ||
+    # A dropped connection or a busy server is tried again before giving up.
+    curl --silent --show-error --fail --location --connect-timeout 10 --max-time 300 --retry 3 --retry-delay 2 -o "$2" "${base}/$1" ||
       fail "could not download ${base}/$1."
   else
     [[ -f "${base}/$1" ]] || fail "${base}/$1 is not there."
@@ -88,7 +89,8 @@ openssl dgst -sha256 -verify "$key_file" -signature "$der_file" "$manifest_json"
 printf 'get-orbit-preview: the release manifest is signed by Orbit'"'"'s key.\n' >&2
 
 # Same literal-key extraction as get-orbit.sh (one field per line).
-manifest_value() { grep -F "\"$2\":" "$1" | sed -n 's/.*: *"\([^"]*\)".*/\1/p' | head -n1; }
+# A missing field is an empty value (grep finds nothing), checked below, not a silent exit under pipefail.
+manifest_value() { { grep -F "\"$2\":" "$1" || true; } | sed -n 's/.*: *"\([^"]*\)".*/\1/p' | head -n1; }
 version="$(manifest_value "$manifest_json" version)"
 [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "the manifest has no valid version."
 channel="$(manifest_value "$manifest_json" channel)"
@@ -99,6 +101,7 @@ if [[ "$digest" != "$expected_digest" ]]; then
   fail "asked for ${expected_digest} but the signed manifest names ${digest}; refusing."
 fi
 commit="$(manifest_value "$manifest_json" commit)"
+[[ -n "$commit" ]] || fail "the manifest names no commit."
 
 archive_name="orbit-launcher_linux_${arch}.tar.gz"
 archive_sha="$(manifest_value "$manifest_json" "$archive_name")"

@@ -1793,7 +1793,7 @@ async function stageAndSwitch(
       // The item.upsert bind rule (workspace-repository.ts): sealed to the
       // item, bound to none, and not refused or on its way out.
       if (record.createdItemIds.length > 0) {
-        await transaction.update(documents).set({ itemId: sql`${documents.sealedItemId}`, deleteAfter: null, updatedAt: new Date() })
+        await transaction.update(documents).set({ itemId: sql`${documents.sealedItemId}`, deleteAfter: null, boundAt: new Date(), updatedAt: new Date() })
           .where(and(
             eq(documents.householdId, input.householdId),
             inArray(documents.sealedItemId, record.createdItemIds),

@@ -64,7 +64,7 @@
   /** #1151 W1-R10, as the belt: a hung page request reads as "could not
       draw" after this long, never as a reticle spinning for ever. */
   const LOAD_TIMEOUT_MS = 15_000;
-  const UNDRAWN_PAGE = "this page could not be drawn — try again";
+  const UNDRAWN_PAGE = "this page could not be drawn";
 
   /* The paper on show — kept through the bottom sheet's slide down after
      the host has let it go. */
@@ -88,6 +88,12 @@
   /* #1501: the page last turned to could not be loaded (the reader shows
      that in place of its picture). */
   let turnLost = $state(false);
+  /* #1870: "try again" was pressed and the answer is awaited (the line stays,
+     the button is disabled); `lostRuns` counts failures so each one is
+     announced afresh; `retryFocus` marks focus that was on the button. */
+  let retrying = $state(false);
+  let lostRuns = $state(0);
+  let retryFocus = false;
   let readerOpen = $state(false);
   /** @type {HTMLElement | undefined} */
   let card = $state();
@@ -122,9 +128,13 @@
     if (src.startsWith("blob:")) URL.revokeObjectURL(src);
   }
 
+  /** #1446: the quiet retry of a busy page, waiting out Retry-After. @type {ReturnType<typeof setTimeout> | undefined} */
+  let busyTimer;
+
   function stopLoading() {
     clearTimeout(beatTimer);
     clearTimeout(loadTimer);
+    clearTimeout(busyTimer);
     abort?.abort();
     abort = null;
   }
@@ -144,6 +154,8 @@
     restoring = false;
     problem = null;
     turnLost = false;
+    retrying = false;
+    retryFocus = false;
     src = "";
     pageNo = 1;
     shownPage = 1;
@@ -170,9 +182,12 @@
       A failure of a page turned to is that turn's own (missed), never the
       whole paper's, even before page one has arrived (#1803); only the
       first page's own load can fail the paper.
-      @param {PreviewDoc} paper @param {number} n @param {number} mine @param {boolean} [turned] */
-  function loadPage(paper, n, mine, turned = false) {
+      A busy answer (#1446 decision 3) is asked for once more after its
+      Retry-After, as the Reader does; it alone never reads as could-not-draw.
+      @param {PreviewDoc} paper @param {number} n @param {number} mine @param {boolean} [turned] @param {boolean} [again] */
+  function loadPage(paper, n, mine, turned = false, again = false) {
     abort?.abort();
+    clearTimeout(busyTimer);
     const controller = new AbortController();
     abort = controller;
     loadStagedPage(previewPageHref(paper.previewHref, n), controller.signal).then((result) => {
@@ -180,15 +195,23 @@
         if (result.kind === "page") URL.revokeObjectURL(result.url);
         return;
       }
+      if (result.kind === "busy" && !again) {
+        busyTimer = setTimeout(() => { if (mine === token) loadPage(paper, n, mine, turned, true); }, result.retryAfterSeconds * 1000);
+        return;
+      }
       if (result.kind === "page") {
         revoke();
         src = result.url;
         shownPage = n;
         turnLost = false;
+        retrying = false;
+        if (retryFocus) { retryFocus = false; tick().then(() => card?.focus({ preventScroll: true })); }
         if (result.pageCount !== null) pageCount = result.pageCount;
       } else if (result.kind === "gone" && paper.staged) {
         clearTimeout(loadTimer);
         gone = true;
+        retrying = false;
+        retryFocus = false;
       } else if (src || turned) missed();
       else failed();
     }).catch((error) => {
@@ -201,14 +224,28 @@
   function missed() {
     problem = UNDRAWN_PAGE;
     turnLost = true;
+    retrying = false;
+    lostRuns++;
+  }
+
+  /** The reader's "try again" (#1870): `undrawn` says the page arrived but the
+      reader could not draw it, so it is asked for afresh like a lost turn.
+      @param {number} n @param {boolean} undrawn */
+  function again(n, undrawn) {
+    if (retrying) return;
+    if (undrawn && n === pageNo) turnLost = true;
+    turn(n);
   }
 
   /** The pager's arrows, the keys, and the reader's turns all land here. @param {number} n */
   function turn(n) {
-    if (!shown || n === pageNo) return;
+    const isRetry = n === pageNo && turnLost;
+    if (!shown || (n === pageNo && !isRetry)) return;
     pageNo = n;
     problem = null;
     turnLost = false;
+    retrying = isRetry;
+    if (!isRetry) retryFocus = false;
     /* From here the turn's own answer decides; the first load's deadline no longer applies. */
     clearTimeout(loadTimer);
     loadPage(shown, n, token, true);
@@ -444,12 +481,22 @@
         </div>
       {/if}
 
-      {#if st === "available" && turnLost}
+      {#if st === "available" && (turnLost || retrying)}
         <!-- #1559: a turn whose page could not be loaded says so in place of
              the picture, as the reader does (#1501) — never the new number
              over the old page. -->
         <div class="focus">
-          <div class="focusline" role="alert">{UNDRAWN_PAGE}</div>
+          {#key lostRuns}<div class="focusline" role="alert">{UNDRAWN_PAGE}</div>{/key}
+          <button type="button" class="quiet" aria-disabled={retrying ? "true" : undefined} aria-label="Try page {pageNo} again"
+                  onclick={(event) => {
+                    if (retrying) return;
+                    /* focus stays on the button (aria-disabled, not disabled); it moves to the
+                       card on success only if it was there, or nowhere (Safari never focuses a
+                       clicked button) */
+                    const at = document.activeElement;
+                    retryFocus = at === event.currentTarget || at === document.body || !at;
+                    turn(pageNo);
+                  }}>try again</button>
         </div>
       {:else if st === "available"}
         <div class="topsheet">
@@ -466,7 +513,7 @@
 
     {#if paged}
       <Pager page={pageNo} count={pageCount} onturn={turn} />
-      {#if problem && !turnLost}<div class="problem" role="alert">{problem}</div>{/if}
+      {#if problem && !turnLost && !retrying}<div class="problem" role="alert">{problem}</div>{/if}
       {#if shown.staged}<div class="rcfoot"><span class="rcnote">not yet in orbit · attached on acceptance</span></div>{/if}
     {:else if st === "available" && shown.staged}
       <!-- #1155: nothing can be done with a staged paper here; the foot says why -->
@@ -498,7 +545,7 @@
        calls turn() here, the one fetch. -->
   <Reader bind:open={readerOpen} doc={shown} {itemTitle} onremove={remove}
           staged={Boolean(shown.staged)}
-          picture={{ src, page: shownPage, count: pageCount, failed: turnLost }}
+          picture={{ src, page: shownPage, count: pageCount, failed: turnLost || retrying, retrying, runs: lostRuns, again }}
           bind:pageNo={() => pageNo, turn} />
 {/if}
 
@@ -605,7 +652,7 @@
     background:none;border:0;cursor:pointer;padding:0 8px;height:44px;text-decoration:none;letter-spacing:.02em}
   .quiet:hover{color:var(--ink)}
   .quiet:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;border-radius:999px}
-  .quiet:disabled{opacity:.4;cursor:default}
+  .quiet:disabled,.quiet[aria-disabled="true"]{opacity:.4;cursor:default}
   .problem{font:0.8125rem var(--mono);color:var(--overdue-text);text-align:center;padding:0 8px 8px;line-height:1.6}
 
   /* UNDER 1200px there is no room beside the drawer: the card is the phone's

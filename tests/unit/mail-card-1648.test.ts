@@ -21,7 +21,7 @@
 import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderApprovalMail } from "@/server/sign-in-approvals/mail";
-import { renderSetupMail } from "@/server/local-credentials/mail";
+import { renderAddressChangedMail, renderSetupMail } from "@/server/local-credentials/mail";
 import { renderInvitationMail, renderMail } from "@/server/invitations/mail";
 import * as mailModule from "@/server/invitations/mail";
 import { buildImapNotification } from "@/server/mail-in/imap-receipt-worker";
@@ -210,6 +210,7 @@ const setupContext = {
 };
 const setup = renderSetupMail({ ...setupContext, purpose: "setup" });
 const recovery = renderSetupMail({ ...setupContext, purpose: "recovery" });
+const addressChanged = renderAddressChangedMail({ displayName: "Ned Harlow", appUrl: `https://${HOST}` });
 const review = buildImapNotification("review_ready", INBOX_LINK);
 
 describe("a link with no usable host leaves no empty host in the footer (#1648)", () => {
@@ -222,6 +223,7 @@ describe("a link with no usable host leaves no empty host in the footer (#1648)"
     }),
     "set password": renderSetupMail({ ...setupContext, link: NOWHERE, purpose: "setup" }),
     "reset password": renderSetupMail({ ...setupContext, link: NOWHERE, purpose: "recovery" }),
+    "address changed": renderAddressChangedMail({ displayName: "Ned Harlow", appUrl: NOWHERE }),
   } as Record<string, { html?: string }>;
 
   it.each(Object.keys(mails))("%s falls back to the host-less household line", (name) => {
@@ -284,6 +286,19 @@ const samples: Sample[] = [
     ],
   },
   {
+    name: "address changed",
+    mail: addressChanged,
+    subject: "Your Orbit email address was changed",
+    headline: "Your Orbit email address was changed",
+    shown: [
+      "Hello Ned,",
+      `An administrator has changed the email address on your Orbit account at ${HOST}.`,
+      "This address will no longer be used for the account.",
+      "Not expecting this? Tell your administrator.",
+      `Orbit at ${HOST}, run by a household, not a company.`,
+    ],
+  },
+  {
     name: "review available",
     mail: review,
     subject: "Orbit review available",
@@ -312,8 +327,13 @@ describe("each sender's mail carries the ratified card (#1648 items 2 and 3)", (
     it("holds the ratified headline, the button label and its link", () => {
       const seen = visibleText(html());
       expect(seen).toContain(sample.headline);
-      expect(seen).toContain(sample.button!.label);
-      expect(html()).toContain(`href="${sample.button!.href}"`);
+      if (!sample.button) {
+        // A notice with nothing to open carries no link at all.
+        expect(html().match(/<a\s/giu)).toBeNull();
+        return;
+      }
+      expect(seen).toContain(sample.button.label);
+      expect(html()).toContain(`href="${sample.button.href}"`);
       expect(html().match(/<a\s/giu)).toHaveLength(1);
     });
 

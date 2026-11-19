@@ -133,6 +133,66 @@ async function senderForSuppliedMailer(): Promise<{ from: string; security: Noti
 export interface InvitationSendOutcome {
   sentAt: Date | null;
   sendError: InvitationSendError | null;
+  /**
+   * Whether the mail may have reached the recipient (#1896). False only when
+   * no provider was reached or the provider answered: a numbered SMTP reply
+   * is the server's word that it did not take the message, and a refused or
+   * unroutable connection never opened one. True for a send that resolved
+   * and for every other failure, because silence after DATA (a timeout, a
+   * reset) cannot be told apart from a lost acknowledgement.
+   */
+  maybeDelivered: boolean;
+}
+
+/** nodemailer codes for a failure the mail provably did not survive: the server answered or refused it (#1896). */
+const NOT_DELIVERED_CODES: ReadonlySet<string> = new Set(["EAUTH", "EENVELOPE", "EMESSAGE"]);
+
+/** System codes of a connection that never opened: refused, or no route or address to try (#1896). */
+const NEVER_CONNECTED_CODES: ReadonlySet<string> = new Set(["ECONNREFUSED", "ENOTFOUND", "ENETUNREACH", "EHOSTUNREACH"]);
+
+/**
+ * The codes nodemailer's smtp-connection (10.x `_formatError`) puts over a
+ * system error, keeping the system code in `originalCode`: ESOCKET for a
+ * socket error, ECONNECTION for a failed connect() call, EDNS for its own
+ * hostname lookup.
+ */
+const NODEMAILER_WRAPPER_CODES: ReadonlySet<string> = new Set(["ESOCKET", "ECONNECTION", "EDNS"]);
+
+/**
+ * Node's `syscall` on a system error that failed before a socket opened. One
+ * on an open socket says "read" or "write", and an established connection can
+ * still end in EHOSTUNREACH once an ICMP error outlives the retransmissions.
+ */
+const PRE_CONNECTION_SYSCALLS: ReadonlySet<string> = new Set(["connect", "getaddrinfo"]);
+
+/**
+ * Whether `error` shows a connection that never opened, bare (a Node system
+ * error) or as nodemailer shapes it. nodemailer labels every socket error
+ * `command: "CONN"`, before and after the greeting alike, so `syscall` is the
+ * field that tells them apart; any other command means a session was open.
+ */
+function neverConnected(error: { code?: unknown; originalCode?: unknown; command?: unknown; syscall?: unknown }): boolean {
+  const { code, originalCode, command, syscall } = error;
+  if (command !== undefined && command !== "CONN") return false;
+  if (syscall !== undefined && !(typeof syscall === "string" && PRE_CONNECTION_SYSCALLS.has(syscall))) return false;
+  if (typeof code !== "string") return false;
+  if (NEVER_CONNECTED_CODES.has(code)) return true;
+  return NODEMAILER_WRAPPER_CODES.has(code) && typeof originalCode === "string" && NEVER_CONNECTED_CODES.has(originalCode);
+}
+
+/**
+ * Reads a provider failure as "maybe delivered" unless it carries a numbered
+ * reply, one of the codes above, or shows a connection that never opened
+ * (#1896 ruling, note 65074). nodemailer labels a socket timeout the same way
+ * whichever command was in flight, so anything unproven counts as possibly
+ * arrived.
+ */
+function failureMaybeDelivered(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return true;
+  const fields = error as { code?: unknown; responseCode?: unknown; originalCode?: unknown; command?: unknown; syscall?: unknown };
+  if (typeof fields.responseCode === "number" && Number.isFinite(fields.responseCode)) return false;
+  if (typeof fields.code === "string" && NOT_DELIVERED_CODES.has(fields.code)) return false;
+  return !neverConnected(fields);
 }
 
 /**
@@ -158,8 +218,8 @@ export async function sendBoundedMail(
   try {
     if (viaRow) {
       const resolved = await defaultMailer();
-      if (resolved.state === "locked") return { sentAt: null, sendError: "smtp_unavailable" };
-      if (resolved.state !== "ready") return { sentAt: null, sendError: "smtp_unconfigured" };
+      if (resolved.state === "locked") return { sentAt: null, sendError: "smtp_unavailable", maybeDelivered: false };
+      if (resolved.state !== "ready") return { sentAt: null, sendError: "smtp_unconfigured", maybeDelivered: false };
       ({ mailer: provider, from, security } = resolved);
     } else {
       provider = mailer;
@@ -168,10 +228,11 @@ export async function sendBoundedMail(
   } catch {
     /* A sending row this instance cannot even read is the same fact to an
        owner as no sending set up at all. */
-    return { sentAt: null, sendError: "smtp_unconfigured" };
+    return { sentAt: null, sendError: "smtp_unconfigured", maybeDelivered: false };
   }
-  if (!provider) return { sentAt: null, sendError: "smtp_unconfigured" };
+  if (!provider) return { sentAt: null, sendError: "smtp_unconfigured", maybeDelivered: false };
 
+  let sent = false;
   try {
     await provider.sendEmail({
       from,
@@ -181,8 +242,9 @@ export async function sendBoundedMail(
       ...(mail.html ? { html: mail.html } : {}),
       tlsMode: security,
     });
+    sent = true;
     if (viaRow) await noteMailSent(mail.what ?? "a message", now);
-    return { sentAt: now, sendError: null };
+    return { sentAt: now, sendError: null, maybeDelivered: true };
   } catch (error) {
     const category = categorizeProviderError("email", error);
     const sendError: InvitationSendError = category === "smtp_rejected"
@@ -190,7 +252,8 @@ export async function sendBoundedMail(
       : category === "smtp_unavailable"
         ? "smtp_unavailable"
         : "unknown";
-    return { sentAt: null, sendError };
+    /* A send that resolved went, whatever noting it afterwards did. */
+    return { sentAt: null, sendError, maybeDelivered: sent || failureMaybeDelivered(error) };
   }
 }
 

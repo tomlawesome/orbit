@@ -45,10 +45,6 @@ test's own name, which does not move with the shard.
 
 - 2026-11-13 · !1302 6028593c · pipeline 4068 / fast (job 50111, a retry) · the first test timed out at 5 s on its first `await route()`, the cold import of the route, on a loaded runner; the next test then got 200 for 403, as the timed-out test's still-running call took its one-shot mock. The same commit's first run passed the file (job 50081). First sighting.
 
-## web/tests/rig/kept-previews-1433.spec.js "each page turn in the reader of a kept 3-page document completes within 1 s" (:106)
-
-- 2026-11-12 · dev nightly · pipeline 3998 / rig_chromium 1/2 (rig-desktop) · "turning to page 2" (back from page 3) took 1,372 ms against the 1,000 ms limit; rig-phone passed in 2/2. Locally on batch-b fb5afbb3, 6 of 6 passed (`--repeat-each=3`, desk and phone). First sighting.
-
 ## scripts/ci/upgrade-cell.test.mjs "upgrade-cell.sh: oidc stand-in provider (#1750)" (two tests of the block, the same 5s timeout)
 
 - 2026-11-09 · fix/1535-repair-start e227e22b · local `scripts/test-backend.sh` (395s), shared host under load · "starts the tests/oidc sidecar with the stand-in issuer before step 4" timed out at the 5s default; the file alone passed on the rerun. First sighting.
@@ -514,6 +510,7 @@ timeout on this one case rather than a global raise.
 ## src/server/documents/pdf-structure-sandbox-poppler.test.ts "line 14: with check 1 / view 1, a render holding the view slot does not delay a structure check" (after-test check, :108)
 
 - 2026-11-12 · chore/v039-batch-b-ci d92e92b6 (Dockerfile pin and JSON policy only, nowhere near the PDF sandbox) · pipeline 4032 / fast (job 49856) · "§1.5 line 16: a child still in flight after the test: expected 1 to be +0"; the retried job 49859 passed. First sighting.
+- 2026-11-18 · !1371 batch-a 5a2828af (the batch-a dev gate fix: an exceptions file and coverage floors, nowhere near the PDF sandbox) · pipeline 4550 / fast (job 54979) · the timing check: "expected 87.98 to be less than or equal to 86.68" (ms, the 2x-solo bound); the retried job 55050 passed. Second sighting.
 
 ## github-await-handoff.sh, a flaky GitHub › counts a successful read as a reset (scripts/ci/github-await-handoff.test.mjs)
 
@@ -526,3 +523,11 @@ timeout on this one case rather than a global raise.
 ## scripts/install.rollback.test.mjs "install.sh: an interrupt rolls a fresh install back (#1456) > emits one well-formed terminal `failed` event after the rollback events, even though the exit was not a planned failure"
 
 - 2026-11-15 · fix/1834-undo-copies 605f583e (a one-line change in install.sh's SMTP undo copy, not on the interrupt path) · pipeline 4220 / fast (job 51469) · failed in the same loaded job that hit the 20-minute limit; it passed in pipeline 4212 / fast (job 51358) on cb70f4e1, and passed twice locally on 605f583e. First sighting.
+
+## src/server/documents/image-sandbox.test.ts "accepts a 1x1 JPEG/PNG padded to the size limit ..." (:185)
+
+- 2026-11-18 · !1371 batch-a 5866edd4 (the batch-a dev gate: pins and exceptions only, nowhere near the image sandbox) · pipeline 4563 / fast (job 55116) · "expected 'structure_check_unavailable' to be 'supported_structure'" in a 1320 s job on a loaded runner: the child decode did not answer in time. The image-sandbox files are unchanged since, and the fast job passed on !1371's next pipeline and on !1395. First sighting.
+
+## tour-pocket-webkit.spec.js:685 "the pocket film in WebKit (#1174) › plays end to end at 430x932 under normal motion" — pocket-webkit
+
+- 2026-11-19 · bed6d036 (batch-b) · local run in the Playwright image, no pipeline · `locator.tap` on `#pocket-entry .pc-chip[data-imp="low"]` (line 818) retried "element was detached from the DOM" until the 600 s test timeout. 27 others passed. Rerun of the same case on unchanged code: passed (3.4m). First sighting.

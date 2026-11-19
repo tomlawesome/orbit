@@ -118,6 +118,7 @@ describe("the beats, against a recorder", () => {
         unlight: (c) => log.push(["unlight", c.sel]),
         callout: async (text, anchor) => log.push(["callout", text, anchor.sel]),
         dropCallout: () => log.push(["dropCallout"]),
+        waitForReal: async (sel) => { log.push(["waitForReal", sel]); },
       },
     };
   }

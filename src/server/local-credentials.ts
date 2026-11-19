@@ -39,10 +39,16 @@ import {
   instanceAuthority,
   localCredentials,
   sessions,
+  signInApprovals,
   userPreferences,
   users,
 } from "@/db/schema";
-import { ACCOUNT_LIFECYCLE_LOCK_KEY, ADMINISTRATOR_LOCK_KEY, INSTANCE_BOOTSTRAP_LOCK_KEY } from "@/lib/auth/authority-locks";
+import {
+  ACCOUNT_LIFECYCLE_LOCK_KEY,
+  ADMINISTRATOR_LOCK_KEY,
+  INSTANCE_BOOTSTRAP_LOCK_KEY,
+  userAddressLockKey,
+} from "@/lib/auth/authority-locks";
 import { AuthError } from "@/lib/auth/errors";
 import type { VerifiedIdentity } from "@/lib/auth/oidc";
 import { hashPassword, verifyAgainstDecoy, verifyPassword } from "@/lib/auth/password";
@@ -143,7 +149,8 @@ function isUniqueViolation(error: unknown): boolean {
   return false;
 }
 
-const emailSchema = z.email().max(MAX_EMAIL_LENGTH);
+/** The one check an address passes, for creation and for an administrator setting it (#1869). */
+export const emailSchema = z.email().max(MAX_EMAIL_LENGTH);
 
 /**
  * Creates a local user, and — when this is the claim — the whole first-run
@@ -617,17 +624,35 @@ export function mintSetupToken(
  * click on "resend", or two administrators issuing at once. The advisory
  * lock serializes them, same as `acquireActiveHouseholdLock` does for a
  * household.
+ *
+ * `sentToAddressIndex`, when given, is the blind index of the address the
+ * link was mailed to, read before the send. The link is written only if the
+ * account still holds that index under the lock (optimistic concurrency,
+ * #1869): an administrator who set a new address meanwhile has already
+ * retired the account's links under this same lock, and a link written now
+ * would be live in the OLD mailbox. The index, not the ciphertext: a
+ * provider sign-in re-encrypts an unchanged address, which is no change. That refuses 409
+ * `address_changed` and writes nothing; the mail that went carries a link
+ * that never works.
  */
 export async function persistSetupToken(
   userId: string,
   minted: MintedSetupToken,
   createdByUserId: string | null,
-  options: { onlyIfNoLiveLink?: boolean } = {},
+  options: { onlyIfNoLiveLink?: boolean; sentToAddressIndex?: string | null } = {},
 ): Promise<boolean> {
   return await getDb().transaction(async (transaction) => {
-    await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`orbit:setup-token:${userId}`}, 0))`);
-    const [target] = await transaction.select({ id: users.id }).from(users).where(eq(users.id, userId)).limit(1);
+    await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${userAddressLockKey(userId)}, 0))`);
+    const [target] = await transaction.select({ id: users.id, emailIndex: users.emailIndex })
+      .from(users).where(eq(users.id, userId)).limit(1);
     if (!target) throw new AppError("user_not_found", "That registered Orbit user is no longer available", 404);
+    if (options.sentToAddressIndex !== undefined && target.emailIndex !== options.sentToAddressIndex) {
+      throw new AppError(
+        "address_changed",
+        "This account's address changed while the link was being sent, so that link will not work; send a new one",
+        409,
+      );
+    }
 
     const supersededAt = new Date();
     // Decided under the same lock as the supersede below, not read first
@@ -713,6 +738,10 @@ async function writePasswordHash(
         failedAttemptCount: 0,
         lockedUntil: null,
         passwordChangedAt: new Date(),
+        /* A saved password is the only thing that clears the mark a refused
+           sign-in left (#1881), and it does so in this same statement: setup
+           and recovery links, a signed-in change and the forced step alike. */
+        passwordChangeRequiredAt: null,
         updatedAt: new Date(),
       })
       .where(eq(localCredentials.userId, userId));
@@ -751,6 +780,20 @@ async function applyPasswordChange(
   if (replaced) {
     const removed = await executor.delete(sessions).where(eq(sessions.userId, userId)).returning({ id: sessions.id });
     sessionsRevoked = removed.length;
+    /* #1898: sign-in approvals still waiting (or approved but not yet
+       collected) were asked for the OLD password; expire them in this same
+       transaction, the way an approval lapses by time, so a late Approve is
+       the existing "expired" answer and the waiting tab polls "unknown".
+       Rows are kept, as expired ones already are, until the retention sweep. */
+    const now = new Date();
+    await executor
+      .update(signInApprovals)
+      .set({ expiresAt: now })
+      .where(and(
+        eq(signInApprovals.userId, userId),
+        isNull(signInApprovals.consumedAt),
+        gt(signInApprovals.expiresAt, now),
+      ));
   }
   await executor.insert(auditLog).values({
     householdId: null,
@@ -797,6 +840,106 @@ export async function hasAnyLocalCredential(): Promise<boolean> {
     .from(localCredentials)
     .limit(1);
   return Boolean(existing);
+}
+
+/**
+ * When a refused sign-in marked `userId`'s password (#1881), or null when it
+ * is not marked or there is no password. A pure read.
+ */
+export async function passwordChangeRequiredAt(userId: string): Promise<Date | null> {
+  const [row] = await getDb()
+    .select({ requiredAt: localCredentials.passwordChangeRequiredAt })
+    .from(localCredentials)
+    .where(eq(localCredentials.userId, userId))
+    .limit(1);
+  return row?.requiredAt ?? null;
+}
+
+/**
+ * Refuses a new password that IS the one a refused sign-in showed somebody
+ * else knew (#1881: "the new password must differ from the old one"). Only a
+ * marked password is compared -- an unmarked account changing to the same
+ * password is ADR-0023's business, not this rule's -- so the derivation it
+ * costs is spent only on the few accounts that carry the mark. Run before any
+ * transaction is opened, so a 64 MiB derivation never holds a row lock.
+ *
+ * No backoff applies, and none is needed (#1881 fix review): through a setup
+ * or recovery link, any guess that is NOT the refused password is saved as
+ * the new one and spends the link, so the link answers one question at most.
+ * And the sign-in backoff must not apply either, or anybody who knows the
+ * address could lock the owner out of their recovery link with wrong
+ * passwords at the door.
+ */
+export async function assertNotRefusedPassword(userId: string, password: string): Promise<void> {
+  const [row] = await getDb()
+    .select({ passwordHash: localCredentials.passwordHash, requiredAt: localCredentials.passwordChangeRequiredAt })
+    .from(localCredentials)
+    .where(eq(localCredentials.userId, userId))
+    .limit(1);
+  if (!row?.requiredAt) return;
+  let verified: boolean;
+  try {
+    ({ verified } = await verifyPassword(row.passwordHash, password));
+  } catch (error) {
+    if (error instanceof VerificationGateRefusedError) {
+      throw new AuthError("too_many_attempts", "Too many attempts at once; try again shortly", 429);
+    }
+    throw error;
+  }
+  if (verified) {
+    throw new AuthError("password_unchanged", "Choose a password different from the one that was refused", 400);
+  }
+}
+
+/**
+ * Whose account an open setup or recovery token names, or null for a token
+ * that is unknown, spent or expired. A pure read, so the setup route can hold
+ * a new password to the refused-password rule before it spends anything;
+ * `consumeSetupToken` still decides the token under its own row lock.
+ */
+export async function setupTokenOwner(token: string): Promise<string | null> {
+  if (token.length === 0) return null;
+  const [row] = await getDb()
+    .select({ userId: credentialSetupTokens.userId, expiresAt: credentialSetupTokens.expiresAt, consumedAt: credentialSetupTokens.consumedAt })
+    .from(credentialSetupTokens)
+    .where(eq(credentialSetupTokens.tokenHash, setupTokenDigest(token)))
+    .limit(1);
+  if (!row || row.consumedAt || row.expiresAt.getTime() <= Date.now()) return null;
+  return row.userId;
+}
+
+/**
+ * Saves the new password a change-password hold was issued for (#1881).
+ *
+ * The hold is bound to the exact mark it was issued against, and the mark is
+ * read under the credential's row lock in the same transaction that writes
+ * the new hash and clears it: a hold whose mark has since been cleared (the
+ * password already saved, by this hold or a recovery link) or replaced (a
+ * later refusal) is `password_change_lapsed`, so a hold spends once and a
+ * stale one buys nothing. The change is ADR-0023 §7's like any other: every
+ * session the account held is revoked and `password_changed` recorded.
+ */
+export async function completePasswordRenewal(
+  userId: string,
+  requiredAt: Date,
+  passwordHash: string,
+): Promise<PasswordChangeOutcome> {
+  return getDb().transaction(async (transaction) => {
+    const [row] = await transaction
+      .select({ requiredAt: localCredentials.passwordChangeRequiredAt, disabledAt: users.disabledAt })
+      .from(localCredentials)
+      .innerJoin(users, eq(users.id, localCredentials.userId))
+      .where(eq(localCredentials.userId, userId))
+      .for("update", { of: localCredentials })
+      .limit(1);
+    /* A disabled account's hold changes nothing (#1881 review): disabling
+       is an administrator's decision and outranks the reader's renewal. It
+       answers as lapsed, the one word every dead hold gets. */
+    if (!row || row.disabledAt || !row.requiredAt || row.requiredAt.getTime() !== requiredAt.getTime()) {
+      throw new AuthError("password_change_lapsed", "This sign-in has lapsed; sign in again", 400);
+    }
+    return applyPasswordChange(transaction, userId, passwordHash, userId);
+  });
 }
 
 export interface ConsumedSetupToken extends PasswordChangeOutcome {

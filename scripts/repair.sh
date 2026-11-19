@@ -210,8 +210,9 @@ set -Eeuo pipefail
 #                                   is disabled and the overlay is missing
 #                                   (an idle scanner still runs). Scanner off
 #                                   with both in step is healthy, not a
-#                                   finding. Plans as manual: configure.sh
-#                                   --set-scanner writes both.
+#                                   finding. The fail case plans as manual
+#                                   (configure.sh --set-scanner writes both);
+#                                   the info case is reported, never planned.
 #   managed-file-permissions     — .env-orbit exists but is not mode 600.
 #   secrets-directory-invalid    — .orbit-secrets missing, symlinked, the
 #                                   wrong type, or not mode 700 (any one
@@ -997,7 +998,7 @@ set -Eeuo pipefail
 #   execute action=<action-class> resolves=<reason-class> result=<done|failed|skipped>
 # one line per planned finding (in the same fixed `class_order` the plan
 # uses), followed by a terminal line:
-#   execution result=<empty|complete|unactionable|declined|failed> done=<n> failed=<n>
+#   execution result=<empty|complete|unactionable|declined|failed|refused> done=<n> failed=<n> [reason=<deployment-version-unsupported|repair-running>]
 # and then the full post-execution re-diagnosis, in exactly `--check`'s own
 # format (`finding class=... target=... severity=...` lines followed by
 # `diagnosis result=... checked=... skipped=...`). `done`/`failed` count
@@ -1204,7 +1205,9 @@ set -Eeuo pipefail
 # bind-mount-and-decrypt pattern: `--volume
 # "$repo_dir/$bundle_path:/recovery/postgres-password.enc:ro" --entrypoint
 # node orbit-app .../recovery-crypto.mjs decrypt
-# /recovery/postgres-password.enc`) using the same passphrase, and compares
+# /recovery/postgres-password.enc`; as root, the mount's source is a
+# private copy outside the folder instead, #1875 W4) using the same
+# passphrase, and compares
 # the recovered value byte-for-byte against the original secret content
 # (never printed either side of the comparison). Only if that round-trip
 # succeeds is the checkpoint considered established. If the bundle cannot be
@@ -1221,7 +1224,8 @@ set -Eeuo pipefail
 # Checkpoint storage — local-only, owner-only, removed after a clean re-check
 # --------------------------------------------------------------------------
 # The bundle is written into a freshly created, mode-0700 directory
-# (`.orbit-repair-checkpoint.XXXXXX`, a sibling naming convention to the
+# (`.orbit-repair-checkpoint.XXXXXX`, six random characters, made by the deployment
+# folder's owner as root, #1872 V3; a sibling naming convention to the
 # existing `.orbit-repair-recovery.*`/`.orbit-install-staging.XXXXXX`
 # prefixes, distinct so it is never mistaken for either by a later
 # diagnosis) as a mode-0600 file. Unlike the stage-one private recovery
@@ -1319,12 +1323,14 @@ set -Eeuo pipefail
 # target's own step re-proves the secrets directory is still real,
 # non-symlink, mode 700, and that the target itself is still genuinely
 # missing (the same TOCTOU re-check `fix-permissions` performs), then
-# writes the new secret exactly like `configure.sh`'s own
-# `ensure_secret_file` (scripts/configure.sh:777-802): `mktemp`ped under
-# the secrets directory (mode 600 from creation, before any content lands
-# in it), content written, mode 600 set again defensively, then an atomic
-# same-directory `mv` onto the live secret path — never a different
-# discipline invented here. When this run's dangerous batch ALSO contains
+# writes the new secret with the discipline of `configure.sh`'s own
+# `ensure_secret_file` (scripts/configure.sh:777-802): a name repair
+# chooses under the secrets directory, created exclusively by the
+# deployment folder's owner (`dd conv=excl` under umask 077, so mode 600
+# from creation, before any content lands in it; #1873 X1), content
+# written, mode 600 set again defensively, then an atomic same-directory
+# `mv` onto the live secret path — never a different discipline invented
+# here. When this run's dangerous batch ALSO contains
 # rotate-database-credential, regenerate-secret's targets run AFTER the
 # rotate sequence completes successfully (see execute_dangerous_batch),
 # never before and never if rotation itself failed.
@@ -1345,8 +1351,8 @@ set -Eeuo pipefail
 # recovered by hand; if the failure is at or after rotate step 3 (i.e. step
 # 2 already staged a new credential), the staged file's fixed path is ALSO
 # named, since the database may already be expecting that value. A
-# regenerate-secret step failure needs no such guidance — `mktemp` + `mv` is
-# all-or-nothing, so a failed target has written nothing recoverable or
+# regenerate-secret step failure needs no such guidance — exclusive create +
+# `mv` is all-or-nothing, so a failed target has written nothing recoverable or
 # stale to point at. EVERY dangerous-class plan entry deferred to this run
 # — including a regenerate-secret target never reached because rotation
 # failed first, or vice versa — is then reported
@@ -1393,7 +1399,7 @@ set -Eeuo pipefail
 # after the safe batch's own `execution result=...` line when both batches
 # ran:
 #
-#   dangerous result=<empty|complete|refused|failed> done=<n> failed=<n> reason=<none|non-interactive|refused-by-operator|checkpoint-failed|step-failed>
+#   dangerous result=<empty|complete|refused|failed> done=<n> failed=<n> reason=<none|non-interactive|refused-by-operator|checkpoint-failed|step-failed|repair-running>
 #
 # `result=empty` (reason=none) — `--dangerous` was given but the plan
 # contained no dangerous-class entry of either kind; no prompt is shown.
@@ -1474,14 +1480,16 @@ set -Eeuo pipefail
 # with no controlling terminal and no `ORBIT_REPAIR_PROMPTS=machine` opt-in
 # declines — fail-closed — rather than guessing at consent. Declining (by
 # either channel, or by reaching this fail-closed default) writes nothing at
-# all: no `mktemp` call is ever made before confirmation succeeds, so a
-# decline leaves no temporary file behind either.
+# all: no file is created before confirmation succeeds, so a decline
+# leaves no temporary file behind either.
 #
 # The write mirrors the discipline already in this script (see the checkpoint
-# bundle and the config-rollback restore above): `mktemp` under the
-# installation directory (mode 600 from creation), the full content written,
-# mode 600 set again defensively, then an atomic same-directory rename onto a
-# second, equally random `mktemp`-derived final name — so a reader can never
+# bundle and the config-rollback restore above): a name repair chooses under
+# the installation directory (`.orbit-repair-diagnostics.` and six random
+# characters), created exclusively by the deployment folder's owner (mode 600
+# from creation; #1873 X1), the full content written, mode 600 set again
+# defensively, then an atomic same-directory rename onto that name plus
+# `.txt`, as unpredictable as the first — so a reader can never
 # observe a partially-written file at the path this run ultimately reports.
 # That path is reported on stderr only, exactly like the checkpoint bundle
 # path above — never on stdout. No encryption: these are public values under
@@ -1495,8 +1503,8 @@ set -Eeuo pipefail
 #      confirmation channel was available at all (see above); zero mutation
 #      either way.
 #   2  usage error.
-#   4  failed — the file could not be created/written (e.g. `mktemp`/`mv`
-#      failure); zero mutation.
+#   4  failed — the file could not be created/written (e.g. the exclusive
+#      create or `mv` failed); zero mutation.
 #   5  not-an-orbit-installation — identical trigger/meaning to every other
 #      mode; the check/plan content is still printed (matching `--check`/
 #      `--plan`'s own early-exit behavior), but no identity line, preview,
@@ -1514,6 +1522,14 @@ usage() {
   printf 'Orbit repair: --export-diagnostics previews, then requires explicit confirmation for,\n' >&2
   printf 'Orbit repair: writing the exact --check/--plan stream plus one identity line to a file.\n' >&2
 }
+
+# #1893: set only by the lock holder (hold_lock_and_run_worker), to its own
+# pid, on the --execute worker it starts, which already runs under the
+# holder's folder lock. The worker honours it only when it names its parent
+# (execute_repair); any other value is ignored and the lock taken as usual.
+# Unset at once, so nothing the worker starts sees it.
+repair_run_lock_held="${ORBIT_REPAIR_RUN_LOCK_HELD:-}"
+unset ORBIT_REPAIR_RUN_LOCK_HELD
 
 plain_mode=0
 safe_only=0
@@ -1558,6 +1574,19 @@ fi
 # installer-simulation.sh; output is unconditionally plain regardless of it.
 : "$plain_mode"
 
+# #1858 T1: the one wall-clock limit on every step run as the deployment
+# folder's owner (as_folder_owner) and on root's reads of what that owner
+# controls: 60 s, or ORBIT_REPAIR_OWNER_STEP_TIMEOUT in whole seconds from 1
+# to 600. At the limit the step gets TERM, and KILL $owner_step_grace s
+# later. Any other value refuses here, before anything runs.
+owner_step_timeout="${ORBIT_REPAIR_OWNER_STEP_TIMEOUT:-60}"
+if ! [[ "$owner_step_timeout" =~ ^[1-9][0-9]{0,2}$ ]] || ((owner_step_timeout > 600)); then
+  printf 'Orbit repair: ORBIT_REPAIR_OWNER_STEP_TIMEOUT must be a whole number of seconds from 1 to 600; nothing was done.\n' >&2
+  exit 2
+fi
+readonly owner_step_timeout
+readonly owner_step_grace=5
+
 # docs/engine-events.md "Machine prompts (v0)", extended with a
 # repair-specific field/kind — see "Machine prompts (repair --execute)"
 # above. Opt-in only, checked ahead of TTY-ness, exactly like
@@ -1579,6 +1608,9 @@ fi
 # Force cwd to this script's own containing installation directory, exactly
 # like configure.sh, so `bash scripts/repair.sh --check`/`--plan`/`--execute`
 # is safe regardless of the caller's working directory.
+# #1893: this script's absolute path, saved before the cd for the lock
+# holder's re-exec of the run as its worker (hold_lock_and_run_worker).
+repair_script_path="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/$(basename -- "${BASH_SOURCE[0]}")"
 repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_dir"
 
@@ -1608,12 +1640,15 @@ cleanup() {
   local exit_status=$?
 
   [[ -z "${compose_image_tmp:-}" ]] || rm -f -- "$compose_image_tmp" 2>/dev/null || true
-  # #1848 FR-S1b: retire-smtp-lines's mktemp names, held while they exist,
+  [[ -z "${compose_live_tmp:-}" ]] || rm -f -- "$compose_live_tmp" 2>/dev/null || true
+  [[ -z "${checkpoint_bundle_copy:-}" ]] || rm -f -- "$checkpoint_bundle_copy" 2>/dev/null || true
+  # #1848 FR-S1b: the owner's temporary names (#1873 X1: root chose them),
+  # held while they exist,
   # removed as the folder's owner (#1848 FIX-S1).
   [[ -z "${smtp_rewrite_tmp:-}" ]] || as_folder_owner rm -f -- "$smtp_rewrite_tmp" 2>/dev/null || true
   [[ -z "${smtp_step_tmp:-}" ]] || as_folder_owner rm -f -- "$smtp_step_tmp" 2>/dev/null || true
 
-  if [[ -n "${recovery_dir:-}" ]]; then
+  if [[ -n "${recovery_dir:-}" || -n "${owner_recovery_dir:-}" ]]; then
     printf 'Orbit repair: interrupted before completion; this run left a private recovery copy in place, now removed. Re-run "repair.sh --plan" to see current state, then "--execute" again if repairs are still needed.\n' >&2
     cleanup_recovery_dir
   fi
@@ -2230,13 +2265,20 @@ pinned_orbit_image() {
 # file, or the copy is empty. The image is never pulled: the label read needs
 # it local, and `--pull never` refuses to fetch it.
 read_image_deployment_asset() {
-  local image="$1" asset="$2" destination="$3" assets_root
-  assets_root="$(timeout "$docker_probe_timeout" docker image inspect \
+  local destination="$3"
+  image_deployment_asset_bytes "$1" "$2" >"$destination" || return 1
+  [[ -f "$destination" && ! -L "$destination" && -s "$destination" ]]
+}
+
+# image_deployment_asset_bytes <image> <asset-name>: the same read, to stdout
+# (restore-compose-file streams it to the folder's owner, #1857 S3).
+image_deployment_asset_bytes() {
+  local image="$1" asset="$2" assets_root
+  assets_root="$(timeout -k "$owner_step_grace" "$docker_probe_timeout" docker image inspect \
     --format '{{index .Config.Labels "io.orbit.deployment-assets"}}' "$image" 2>/dev/null)" || return 1
   [[ "$assets_root" == "$deployment_assets_root" ]] || return 1
-  timeout "$docker_image_read_timeout" docker run --rm --pull never --network none --entrypoint cat \
-    "$image" "${deployment_assets_root}/${asset}" >"$destination" 2>/dev/null || return 1
-  [[ -f "$destination" && ! -L "$destination" && -s "$destination" ]]
+  timeout -k "$owner_step_grace" "$docker_image_read_timeout" docker run --rm --pull never --network none --entrypoint cat \
+    "$image" "${deployment_assets_root}/${asset}" 2>/dev/null
 }
 
 # compose_image_tmp is the one temporary file this feature owns at a time;
@@ -2260,6 +2302,27 @@ fetch_image_compose() {
 discard_image_compose() {
   [[ -z "$compose_image_tmp" ]] || rm -f -- "$compose_image_tmp"
   compose_image_tmp=""
+  [[ -z "$compose_live_tmp" ]] || rm -f -- "$compose_live_tmp"
+  compose_live_tmp=""
+}
+
+# #1875 W3: what the compare and the drift detail read for the folder's
+# docker-compose.yml ($compose_compared). As root, a copy in a temporary
+# file root owns ($compose_live_tmp), made through the bounded read; returns
+# 1 (and leaves no temporary file) when that read fails. Otherwise the file
+# itself, as before.
+compose_live_tmp=""
+compose_compared=""
+fetch_live_compose() {
+  compose_compared="$compose_file"
+  [[ "$(id -u)" == 0 ]] || return 0
+  compose_live_tmp="$(mktemp "${TMPDIR:-/tmp}/orbit-repair-compose-live.XXXXXX")" || { compose_live_tmp=""; return 1; }
+  compose_compared="$compose_live_tmp"
+  if ! smtp_read_file "$compose_file" > "$compose_live_tmp"; then
+    rm -f -- "$compose_live_tmp"
+    compose_live_tmp=""
+    return 1
+  fi
 }
 
 # Removes the managed-file-missing finding for the Compose file; the caller
@@ -2275,7 +2338,7 @@ drop_compose_missing_finding() {
 }
 
 # Sets $compose_drift_detail to the differing lines between the folder's
-# docker-compose.yml and the image's copy in $compose_image_tmp: at most 20,
+# docker-compose.yml ($compose_compared, fetch_live_compose) and the image's copy in $compose_image_tmp: at most 20,
 # each cut to 200 bytes, '<' for the folder's file and '>' for the image's.
 # Deny by default (#1607): this text reaches a terminal or log, and an
 # operator may have put a credential inline under any name, so a keyword list
@@ -2295,7 +2358,7 @@ describe_compose_drift() {
   # an allow-listed line such as 'restart:' could otherwise carry escape
   # sequences or a carriage return to the operator's terminal. tr's octal
   # set is every C0 control except tab (\011) and newline (\012), plus DEL.
-  all="$(diff -- "$compose_file" "$compose_image_tmp" 2>/dev/null | LC_ALL=C tr -d '\000-\010\013-\037\177' |
+  all="$(diff -- "$compose_compared" "$compose_image_tmp" 2>/dev/null | LC_ALL=C tr -d '\000-\010\013-\037\177' |
     grep -E '^[<>] ' | cut -c1-200 |
     sed -E -e 's/^([<>] [[:space:]]*)#.*/\1# (comment hidden)/' -e t \
       -e '/^[<>] [[:space:]]*(image|restart|mem_limit|container_name|pull_policy|read_only|init|user|cpus|name|profiles|stop_grace_period):/ b' \
@@ -2831,43 +2894,85 @@ print_entries_preview() {
 
 ensure_recovery_dir() {
   [[ -n "$recovery_dir" ]] && return 0
-  # The name is assigned BEFORE the directory exists, never after. The old
-  # shape — recovery_dir="$(mktemp -d ...)" — had a window #655 caught on CI:
-  # a fatal signal landing while the command substitution is in flight kills
-  # this shell after mktemp has created the directory but before the
-  # assignment completes, so the EXIT trap finds $recovery_dir empty and the
-  # mode-700 copy of live secrets is orphaned. With the name assigned first,
-  # every interruption point leaves the trap knowing exactly what to remove:
-  # before mkdir there is nothing to remove and `rm -rf` of a missing path is
-  # a no-op; from mkdir onwards the directory is removable by name. mkdir
-  # itself refuses an existing path (symlinks included), so a predictable
-  # name cannot be redirected the way a reused one could; a collision just
-  # burns one attempt.
-  local attempt
+  # On failure a name is left only for a folder still there (#1872 V10),
+  # which cleanup_recovery_dir removes.
+  owner_private_dir recovery_dir ./.orbit-repair-recovery.
+}
+
+# owner_private_dir <variable> <prefix>: a new mode-700 folder named
+# <prefix> and six unpredictable characters (owner_temp_suffix, as for
+# root-chosen temporary names, #1873 X1; never the guessable pid and
+# $RANDOM), made by the deployment folder's owner
+# (as_folder_owner; #1857 S4, #1872 V2/V3), its name left in <variable>.
+# The name is assigned BEFORE the folder exists, never after. The old
+# shape — recovery_dir="$(mktemp -d ...)" — had a window #655 caught on CI:
+# a fatal signal landing while the command substitution is in flight kills
+# this shell after mktemp has created the directory but before the
+# assignment completes, so the EXIT trap finds the name empty and the
+# mode-700 copy of live secrets is orphaned. With the name assigned first,
+# every interruption point leaves the trap knowing exactly what to remove:
+# before mkdir there is nothing to remove and `rm -rf` of a missing path is
+# a no-op; from mkdir onwards the directory is removable by name. mkdir
+# itself refuses an existing path (symlinks included), so a predictable
+# name cannot be redirected the way a reused one could; a collision just
+# burns one attempt, and any other failure (nothing at the name) stops.
+# As root the owner step's own "Orbit repair:" line (a time-out, what the
+# child said) is shown; otherwise mkdir's words are not, as before.
+# #1872 V10: an owner step that timed out may still have made the folder,
+# so it is never retried under a new name: the folder is removed as the
+# owner, and if it is still there its name is kept in <variable> (the
+# caller's cleanup removes or names it). Returns 1 either way.
+owner_private_dir() {
+  local attempt suffix
   for attempt in 1 2 3; do
-    recovery_dir="./.orbit-repair-recovery.$$.${RANDOM}${RANDOM}"
-    mkdir -m 700 -- "$recovery_dir" 2>/dev/null && return 0
+    suffix="$(owner_temp_suffix)" || break
+    printf -v "$1" '%s%s' "$2" "$suffix"
+    if [[ "$(id -u)" == 0 ]]; then
+      as_folder_owner mkdir -m 700 -- "${!1}" && return 0
+      if [[ "$owner_step_problem" == "timed out" ]]; then
+        [[ ! -e "${!1}" && ! -L "${!1}" ]] || as_folder_owner rm -rf -- "${!1}" || true
+        [[ -e "${!1}" || -L "${!1}" ]] || printf -v "$1" '%s' ""
+        return 1
+      fi
+    else
+      mkdir -m 700 -- "${!1}" 2>/dev/null && return 0
+    fi
+    [[ -e "${!1}" || -L "${!1}" ]] || break
   done
-  recovery_dir=""
+  printf -v "$1" '%s' ""
   return 1
 }
 
+# #1857 S4: the .env-orbit configuration-rollback restore's own recovery
+# folder, made (and removed by cleanup_recovery_dir) the same way, as the
+# deployment folder's owner. Separate from restore-transaction's, so neither
+# action ever writes in the other's.
+owner_recovery_dir=""
+ensure_owner_recovery_dir() {
+  [[ -n "$owner_recovery_dir" ]] && return 0
+  owner_private_dir owner_recovery_dir ./.orbit-repair-recovery.
+}
+
 cleanup_recovery_dir() {
+  if [[ -n "${owner_recovery_dir:-}" ]]; then
+    as_folder_owner rm -rf -- "$owner_recovery_dir" || true
+    owner_recovery_dir=""
+  fi
   [[ -n "$recovery_dir" ]] || return 0
-  rm -rf -- "$recovery_dir"
+  as_folder_owner rm -rf -- "$recovery_dir" || true
   recovery_dir=""
 }
 
 # Removes a target path regardless of type, mirroring install.sh's own
-# remove_target_path.
+# remove_target_path; as the deployment folder's owner (#1872 V2).
 remove_repair_path() {
   local path="$1"
   if [[ -L "$path" || -f "$path" ]]; then
-    rm -f -- "$path"
+    as_folder_owner rm -f -- "$path"
   elif [[ -d "$path" ]]; then
-    rm -rf -- "$path"
+    as_folder_owner rm -rf -- "$path"
   elif [[ -e "$path" ]]; then
-    rm -f -- "$path"
+    as_folder_owner rm -f -- "$path"
   fi
 }
 
@@ -2999,8 +3104,11 @@ run_diagnosis() {
         add_finding compose-file-restorable compose-file fail
       fi
     elif [[ "$compose_status" == ok ]]; then
-      if fetch_image_compose; then
-        if ! cmp -s -- "$compose_file" "$compose_image_tmp"; then
+      # #1875 W3: the folder's file is compared through the bounded read
+      # (a copy root owns); one that can't be read is not checked, and the
+      # read says why on an "Orbit repair:" line.
+      if fetch_image_compose && fetch_live_compose; then
+        if ! cmp -s -- "$compose_compared" "$compose_image_tmp"; then
           describe_compose_drift
           add_finding compose-file-drift compose-file info
         fi
@@ -3549,42 +3657,73 @@ restore_journal_named() {
   printf '%s' "${named:-$restore_journal_path}"
 }
 
-# #1804 point 1, execution only: the backup/restore lock, held by backup.sh,
-# restore.sh and a recovery-bundle export (their engine). Prints `held`,
-# `unreadable`, `untestable <flock's words>` or nothing (an acquire can also
-# leave `uncreatable`: the backups folder or lock file could not be made). A
-# lock that is anything but a regular, non-symlink, readable file is
-# `unreadable` and never
-# opened (a FIFO would block; review 5). A regular file is opened read-only,
-# so a lock file that vanishes is never created; one that then cannot be
-# opened is `unreadable` too. A non-blocking lock has three outcomes (audit
-# v0.3.9-b O-R1): taken (prints nothing); held by another process, which
-# flock reports only as a silent exit 1 (`held`); or not takeable at all,
-# e.g. NFSv4 refusing an exclusive lock on a read-only descriptor, which
-# flock reports with a sysexits code and its words (`untestable`, never
-# `held`). Without flock on PATH the lock is not checked (the journal still
-# is).
-backup_restore_lock_state() {
-  probe_backup_restore_lock
-  printf '%s' "$lock_probe_state"
-}
-
 # #1823 O-R2: acquire, act, release. With `keep`, a taken lock is kept on
 # $held_lock_fd (no subshell, so the descriptor survives) until
 # release_backup_restore_lock; the caller holds it across its compose call.
 # The outcome is left in $lock_probe_state (empty when taken or not checked).
-# With $lock_made_as_owner set to 1 (retire-smtp-lines only, #1848 FIX-S1
-# addendum), root makes a missing backups folder or lock file as the
+# With $lock_made_as_owner set to 1 (acquire_backup_restore_lock_as_owner:
+# retire-smtp-lines, #1848 FIX-S1 addendum; start-services and
+# recreate-services, #1857 S2), root makes a missing backups folder or lock file as the
 # deployment folder's owner (as_folder_owner), never itself; root then only
-# opens the lock read-only, as before.
+# opens the lock (read-write only, #1873 X3, #1890).
 held_lock_fd=""
 lock_probe_state=""
 lock_made_as_owner=0
 # shellcheck disable=SC2016 # expanded by the child bash
 readonly lock_make_script='umask 077 && mkdir -p -- "$1" && : >>"$2"'
+# #1899 (note 64000): bash's `<>` creates a lock that vanished between the
+# stat and the open. That file is kept (a lock file is never deleted: that
+# would split later holders across two inodes) and made the owner's lock:
+# when the descriptor is a regular empty file with one link that is still at
+# <path>, it is made 0600 and, as root, chowned to the deployment folder's
+# owner, as lock_make_script makes one. The caller still refuses. A failed
+# chmod or chown, or a chown with no group (no user-database entry), leaves
+# its words in $lock_own_problem for the refusal line.
+lock_own_problem=""
+own_created_lock() {
+  local fd="$1" path="$2" got now owner
+  lock_own_problem=""
+  got="$(stat -L -c '%d:%i %F %h' -- "/dev/fd/$fd" 2>/dev/null)" || return 0
+  now="$(stat -c '%d:%i' -- "$path" 2>/dev/null)" || return 0
+  [[ "$got" == "$now regular empty file 1" ]] || return 0
+  chmod 600 -- "/dev/fd/$fd" 2>/dev/null || lock_own_problem="; repair's open created that lock and could not make it mode 0600"
+  [[ "$(id -u)" == 0 ]] || return 0
+  [[ -n "$smtp_folder_uid" ]] || smtp_owner_init || true
+  owner="${smtp_folder_uid:-}"
+  [[ "$owner" != 0 ]] || return 0
+  if [[ -z "$owner" ]] || ! chown -- "$owner${smtp_owner_gid:+:$smtp_owner_gid}" "/dev/fd/$fd" 2>/dev/null; then
+    lock_own_problem="; repair's open created that lock as root and could not chown it to the deployment folder's owner ${smtp_owner_name:-uid ${owner:-unknown}}, so remove it or chown it to that user"
+  elif [[ -z "$smtp_owner_gid" ]]; then
+    # No user-database entry (getent passwd): the uid only, never the
+    # folder's group (#1848 addendum 2 item 3), and said.
+    lock_own_problem="; repair's open created that lock as root and gave it to uid $owner, but could not look up that user's group (getent passwd), so its group is still root's; chgrp it to that user's group"
+  fi
+}
+# #1804 point 1, execution only: the backup/restore lock, held by backup.sh,
+# restore.sh and a recovery-bundle export (their engine). Leaves `held`,
+# `unreadable`, `unwritable`, `untestable <flock's words>` or nothing in
+# $lock_probe_state (an
+# acquire can also leave `uncreatable`: the backups folder or lock file
+# could not be made). A lock that is anything but a regular, non-symlink,
+# readable file is `unreadable` and never opened (review 5). A regular file
+# is opened read-write only, never read-only, whoever runs repair (#1890):
+# a read-write open of a FIFO swapped in meanwhile returns at once (POSIX),
+# where a read-only one would wait for a writer. The descriptor must still
+# be the file checked (#1873 X3), else it is `unreadable`; a lock that will
+# not open read-write is `unwritable` (never reopened read-only). The open
+# writes and truncates nothing; one that created the lock (removed after the
+# check) makes it 0600 and, as root, the deployment folder's owner's, and
+# changes nothing else (#1899, own_created_lock). A non-blocking lock has three
+# outcomes (audit v0.3.9-b O-R1): taken (prints nothing); held by another
+# process, which flock reports only as a silent exit 1 (`held`); or not
+# takeable at all, e.g. a filesystem refusing an exclusive lock, which
+# flock reports with a sysexits code and its words (`untestable`, never
+# `held`). Without flock on PATH the lock is not checked (the journal still
+# is).
 probe_backup_restore_lock() {
-  local fd status=0 words
+  local fd="" status=0 words before opened
   lock_probe_state=""
+  lock_own_problem=""
   command -v flock >/dev/null 2>&1 || return 0
   if [[ ! -e "$backup_restore_lock_path" && ! -L "$backup_restore_lock_path" ]]; then
     # A probe needs no file: nobody holds a lock that does not exist. An
@@ -3607,7 +3746,32 @@ probe_backup_restore_lock() {
     lock_probe_state=unreadable
     return 0
   fi
-  if ! { exec {fd}<"$backup_restore_lock_path"; } 2>/dev/null; then
+  # #1873 X3, lstat-open-fstat-compare: the open must never block and never
+  # take a swapped-in file. The lock is opened read-write only (#1890),
+  # which on a FIFO swapped in after the checks above returns at once
+  # instead of waiting for a writer; then the descriptor must be the very
+  # regular file lstat saw (same device, inode and change time), so a link
+  # or a FIFO swapped in is closed and refused as `unreadable`, with no wait.
+  before="$(stat -c '%d:%i %F %.9Z' -- "$backup_restore_lock_path" 2>/dev/null)" || before=""
+  case "${before#* }" in
+    "regular file "* | "regular empty file "*) ;;
+    *)
+      lock_probe_state=unreadable
+      return 0
+      ;;
+  esac
+  # No read-only open or fallback, whoever runs repair: a refused
+  # read-write open (a lock the user may only read, NFS root_squash, a mode
+  # changed meanwhile) fails closed and is named as such (`unwritable`).
+  { exec {fd}<>"$backup_restore_lock_path"; } 2>/dev/null || fd=""
+  if [[ -z "$fd" ]]; then
+    lock_probe_state=unwritable
+    return 0
+  fi
+  opened="$(stat -L -c '%d:%i %F %.9Z' -- "/dev/fd/$fd" 2>/dev/null)" || opened=""
+  if [[ "$opened" != "$before" ]]; then
+    own_created_lock "$fd" "$backup_restore_lock_path"
+    exec {fd}<&-
     lock_probe_state=unreadable
     return 0
   fi
@@ -3638,7 +3802,11 @@ release_backup_restore_lock() {
 lock_state_refusal() {
   local lock_state="$1"
   if [[ "$lock_state" == unreadable ]]; then
-    printf "repair can't check whether a backup, restore or export is running: the lock at %s can't be read" \
+    printf "repair can't check whether a backup, restore or export is running: the lock at %s can't be read%s" \
+      "$backup_restore_lock_path" "$lock_own_problem"
+  elif [[ "$lock_state" == unwritable ]]; then
+    # #1873 X3, #1890: the read-write open (the only one) was refused.
+    printf "repair can't check whether a backup, restore or export is running: the lock at %s could not be opened for writing by the user running repair (repair opens it read-write so that the open can never wait); run repair as root or as the owner of the backups folder (the deployment folder's owner, who owns a lock repair makes as root), or make the lock file writable for the user running repair" \
       "$backup_restore_lock_path"
   elif [[ "$lock_state" == uncreatable ]]; then
     if [[ "$lock_made_as_owner" == 1 && "$(id -u)" == 0 && "${smtp_folder_uid:-0}" != 0 ]]; then
@@ -3646,6 +3814,12 @@ lock_state_refusal() {
       # folder's owner, so that user, not root, must be able to create it.
       local owner="${smtp_owner_name:-uid ${smtp_folder_uid}}" pointed=""
       [[ -z "${ORBIT_BACKUP_DIR:-}" ]] || pointed=" (ORBIT_BACKUP_DIR points at it)"
+      if [[ "$owner_step_problem" == "timed out" ]]; then
+        # #1858 T5: the owner's step that makes them ran out of time.
+        printf "the step make-lock, which creates the backups folder %s and its lock file as the deployment folder's owner %s, timed out after %s s and was stopped; re-run repair" \
+          "$backup_directory" "$owner" "$owner_step_timeout"
+        return 0
+      fi
       printf "the deployment folder's owner %s can't create the backups folder %s%s or write its lock file there: run as root, repair makes the lock as the deployment folder's owner %s, so that user must be able to create it; run backup.sh once, or make the folder writable by %s, then re-run repair" \
         "$owner" "$backup_directory" "$pointed" "$owner" "$owner"
     elif [[ -n "${ORBIT_BACKUP_DIR:-}" ]]; then
@@ -3675,6 +3849,15 @@ acquire_backup_restore_lock() {
   lock_refusal="$(lock_state_refusal "$lock_probe_state")"
 }
 
+# The same, with a missing backups folder or lock file made as the
+# deployment folder's owner (#1848 FIX-S1 addendum, #1857 S2): the actions
+# that take the lock run check_folder_owner first.
+acquire_backup_restore_lock_as_owner() {
+  lock_made_as_owner=1
+  acquire_backup_restore_lock
+  lock_made_as_owner=0
+}
+
 # flock's words as one bounded, control-free line for a refusal: escape
 # sequences removed, line breaks and tabs made spaces, other control bytes
 # dropped, runs of spaces squeezed, and at most 200 bytes kept.
@@ -3691,7 +3874,6 @@ lock_words_excerpt() {
 # Prints why start-services / recreate-services must not run right now
 # because of a restore, backup or export (#1804), or nothing.
 restore_guard_refusal() {
-  local lock_state
   if backup_directory_unsearchable; then
     printf "repair can't check whether a backup, restore or export is running: %s can't be searched" \
       "$backup_directory"
@@ -3699,8 +3881,9 @@ restore_guard_refusal() {
     printf 'a restore has not been finished (journal at %s); run bash scripts/restore.sh --finish and follow what it says (it says when Orbit may be started), or --recover to roll it back' \
       "$(restore_journal_named)"
   else
-    lock_state="$(backup_restore_lock_state)"
-    lock_state_refusal "$lock_state"
+    # #1899: in this shell, so $lock_own_problem reaches the refusal.
+    probe_backup_restore_lock
+    lock_state_refusal "$lock_probe_state"
   fi
 }
 
@@ -4203,8 +4386,14 @@ check_image_identity() {
 # Re-validates the target's current type immediately before acting (see
 # "Action implementations" above). Returns 0 (chmod applied) or 1 (nothing
 # was safe to mutate; the caller reports this as `failed`).
+#
+# #1872 V6: as root in a folder another user owns, the chmod is that
+# owner's (as_folder_owner), never root's by path; a target the owner does
+# not own is left alone, named, and reported `failed`.
 do_fix_permissions() {
-  local resolves="$1" target="$2" path mode
+  local resolves="$1" target="$2" path mode owner_uid
+
+  refuse_unless_owner_writes fix-permissions || return 1
 
   case "$resolves" in
     managed-file-permissions)
@@ -4227,37 +4416,268 @@ do_fix_permissions() {
       ;;
   esac
 
-  chmod "$mode" -- "$path"
+  if [[ "$(id -u)" == 0 && "$smtp_folder_uid" != 0 ]]; then
+    owner_uid="$(stat -c %u -- "$path" 2>/dev/null)" || owner_uid=""
+    if [[ "$owner_uid" != "$smtp_folder_uid" ]]; then
+      printf "Orbit repair: fix-permissions: %s is not owned by the deployment folder's owner (%s), so its mode was not changed; give it to that user, then re-run repair.\n" \
+        "$path" "${smtp_owner_name:-uid $smtp_folder_uid}" >&2
+      return 1
+    fi
+  fi
+  as_folder_owner chmod "$mode" -- "$path"
 }
 
 # --- restore-compose-file (#1484) -------------------------------------------
 #
-# Puts back a MISSING docker-compose.yml from the pinned image. Re-checks
-# immediately before acting that nothing exists at the path (a file, a
-# symlink, anything): a present file is never replaced. The image's bytes go
-# to a temporary file in the deployment folder (streamed, no shell text
-# handling, so trailing blank lines, trailing spaces and non-ASCII survive),
-# then take the installer's mode 0644 and the folder's owner, then an atomic
-# rename that refuses to overwrite. Returns 1 with nothing left behind when
-# any step fails; the caller reports `failed`.
+# Puts back a MISSING docker-compose.yml from the pinned image. A present
+# file (a file, a symlink, anything) is never replaced. In order (#1857 S3):
+# the owner sweeps a killed run's scratch file (b1 O-S2, #1603); the
+# deployment folder's owner makes a same-folder temporary file with the
+# installer's mode 0644 (smtp_owner_write) and an owner child holds a flock
+# on it (hold_compose_restore_lock), which root checks is still held before
+# and after the rename (#1902 L1); root re-checks that nothing
+# exists at the name, so a file that appeared since the diagnosis stops it
+# before the image is read again (#1558); root reads the image's bytes
+# (streamed, no shell text handling, so trailing blank lines, trailing
+# spaces and non-ASCII survive) and the owner writes them into that file
+# and flushes it (sync, best effort, b1 O-R4);
+# the owner renames it onto the name with mv -nT, which refuses to overwrite
+# a file that appeared meanwhile and, with -T, never moves the file into a
+# folder that took the name (#1873 X2); the rename counts only when the
+# temporary file is gone and docker-compose.yml is a regular file, also
+# when the owner's mv step timed out after the rename landed, and the owner
+# then flushes the folder (best effort, b1 O-R4). The
+# image's bytes are capped at 1 MiB ($owner_read_cap) while they stream: the
+# owner keeps at most one byte more, and a file over the cap fails the
+# restore with a line saying it is too large (#1873 X4). Root writes,
+# renames and chowns nothing in the folder; as root in a folder another
+# user owns, check_folder_owner refuses first. Returns 1 with nothing left
+# behind when any step fails (except a lock lost while the rename ran: the
+# renamed file stays and the line says so); the caller reports `failed`.
+# shellcheck disable=SC2016 # expanded by the child bash
+readonly owner_fill_script='head -c "$2" > "$1" || exit 1; size="$(wc -c < "$1")" || exit 1; '\
+'((size > 0)) || exit 1; ((size < $2)) || exit 4'
+# b1 O-S2 (#1603), in the owner-writes flow: a run killed hard (no EXIT
+# trap) leaves its scratch file. Each run holds a flock on its own scratch
+# file while it exists, and the next restore sweeps only names of exactly
+# the scratch shape (six characters of [A-Za-z0-9]) that it can lock: the
+# kernel drops a dead run's lock, even after kill -9, while a running
+# repair's scratch file stays locked. The owner's own files, such as
+# .docker-compose.yml.repair.bak, never match. Without flock there is no
+# sweep: a live run's file can't be told apart. Root only lists the folder;
+# the opens, the flocks and the removals are the owner's (as_folder_owner),
+# so root never deletes in a folder another user owns, and rm removes a link
+# itself, never what it points at (a link is skipped anyway). Best effort:
+# a sweep that fails or times out does not stop the restore.
+# #1902 L3: root's listing is one `find -P` (never follows a link: the name
+# test comes first and -type f checks the entry itself) under the owner-step
+# limit, and passes at most $compose_restore_sweep_cap names to the owner;
+# past that cap an "Orbit repair:" line says so and the rest stay.
+readonly compose_restore_sweep_cap=64
+# shellcheck disable=SC2016 # expanded by the child bash
+readonly owner_sweep_script='for f in "$@"; do [[ -f "$f" && ! -L "$f" ]] || continue; '\
+'{ exec {fd}<"$f"; } 2>/dev/null || continue; '\
+'if flock -n "$fd" 2>/dev/null; then rm -f -- "$f" || true; fi; exec {fd}<&-; done'
+sweep_compose_restore_scratch() {
+  local leftover more=0
+  local scratch_prefix="./.${compose_file}.repair."
+  local -a candidates=()
+  command -v flock >/dev/null 2>&1 || return 0
+  while IFS= read -r -d '' leftover; do
+    [[ "${leftover#"$scratch_prefix"}" =~ ^[A-Za-z0-9]{6}$ ]] || continue
+    if ((${#candidates[@]} >= compose_restore_sweep_cap)); then
+      more=1
+      break
+    fi
+    candidates+=("$leftover")
+  done < <(LC_ALL=C timeout -k "$owner_step_grace" "$owner_step_timeout" \
+    find -P . -mindepth 1 -maxdepth 1 -name "${scratch_prefix#./}*" -type f -print0 2>/dev/null)
+  if ((more)); then
+    printf 'Orbit repair: restore-compose-file: more than %s leftover scratch files (%s*) were found; this sweep takes the first %s and leaves the rest in place.\n' \
+      "$compose_restore_sweep_cap" "${scratch_prefix#./}" "$compose_restore_sweep_cap" >&2
+  fi
+  ((${#candidates[@]} > 0)) || return 0
+  as_folder_owner bash -c "$owner_sweep_script" owner-sweep "${candidates[@]}" || true
+}
+
+# The lock holder of the restore's own scratch file (b1 O-S2): an owner
+# child (as_folder_owner) that opens the file without creating it, takes a
+# non-blocking flock and keeps it until root closes its stdin, or root dies
+# (the pipe's write end is root's alone: bash keeps coproc descriptors out of
+# the programs it runs). As root it is an owner step with its own limit,
+# $compose_restore_lock_limit s, which covers the restore's bounded steps
+# after it (#1858: still time-limited; #1902 L1: one step's limit, as
+# before, ran out mid-restore); not root (or root in a folder root owns),
+# it runs as the caller with no limit and ends only on that EOF. Either
+# way, before the rename the restore checks that the holder still runs and,
+# when it has a limit, that the limit outlasts the rename step's worst
+# case, and after the rename that it still runs (compose_restore_lock_lost);
+# otherwise the restore fails with a line saying the lock was lost, never
+# silently. Exit 75 only when another run holds the lock (a sweep that won
+# the race and is removing the file): give up. Any other flock failure,
+# such as a filesystem without locks (ENOLCK), or no flock at all, means no
+# lock: the restore goes ahead unlocked, and every sweep there keeps the
+# file because it can't lock it.
+# shellcheck disable=SC2016 # expanded by the child bash
+readonly owner_lock_script='exec 3<"$1" || exit 1; s=0; '\
+'if command -v flock >/dev/null 2>&1; then flock -n -E 75 3 2>/dev/null || s=$?; fi; '\
+'((s != 75)) || exit 75; [[ -f "$1" && ! -L "$1" ]] || exit 1; printf "locked\n"; read -r _ || true'
+compose_restore_lock_pid=""
+compose_restore_lock_since=0
+# The holder's limit, which starts as root starts waiting for its word: that
+# wait (one owner step with its grace), the image's probe and read (5 s and
+# 30 s, each with the grace) and, alongside the read, the fill, then the
+# sync and the rename (each an owner step with its grace). The fill ends with
+# the read or within its own limit, so the larger of the two counts; both
+# are counted here, the simpler and safe bound.
+readonly compose_restore_lock_limit=$((35 + 2 * owner_step_grace + 4 * (owner_step_timeout + owner_step_grace)))
+# Slack at the limit for the margin check (compose_restore_lock_lost).
+readonly compose_restore_lock_slack=3
+# monotonic_seconds: whole seconds since boot (/proc/uptime), which a clock
+# step does not move, as timeout(1) counts; SECONDS where it can't be read.
+monotonic_seconds() {
+  local up=""
+  { read -r up _ </proc/uptime; } 2>/dev/null || up=""
+  up="${up%%.*}"
+  if [[ "$up" =~ ^[0-9]+$ ]]; then
+    printf '%s' "$up"
+  else
+    printf '%s' "$SECONDS"
+  fi
+}
+# hold_compose_restore_lock <scratch-file>: 0 once the holder says it holds
+# the lock (or goes ahead without one), 1 otherwise (it is stopped first).
+# Root's wait for that word is bounded like any owner step.
+hold_compose_restore_lock() {
+  local line=""
+  compose_restore_lock_since="$(monotonic_seconds)"
+  # The holder's own shell closes every descriptor above 2 it inherited
+  # from root (the held locks' included) before the owner step starts.
+  coproc compose_restore_lock {
+    for fd in /proc/"$BASHPID"/fd/*; do
+      fd="${fd##*/}"
+      [[ "$fd" =~ ^[0-9]+$ ]] && ((fd > 2)) && [[ -e /proc/"$BASHPID"/fd/"$fd" ]] && eval "exec $fd>&-"
+    done
+    as_folder_owner --pipe --limit "$compose_restore_lock_limit" bash -c "$owner_lock_script" owner-lock "$1" 2>/dev/null
+  }
+  # shellcheck disable=SC2154 # set by coproc
+  compose_restore_lock_pid="$compose_restore_lock_PID"
+  if [[ -n "${compose_restore_lock[0]:-}" ]]; then
+    read -r -t "$((owner_step_timeout + owner_step_grace + 1))" line <&"${compose_restore_lock[0]}" || true
+  fi
+  [[ "$line" == locked ]] && return 0
+  release_compose_restore_lock
+  return 1
+}
+
+# compose_restore_lock_lost [<seconds>]: 0 when the holder has ended, so the
+# scratch file's lock is gone, or, with <seconds> given and a holder that
+# has a limit (root in a folder another user owns), when that limit could
+# run out within that many seconds, plus $compose_restore_lock_slack s; 1
+# otherwise. The start was read (monotonic_seconds) before the holder
+# started, so the margin errs early. Bash unsets the coproc's
+# descriptors once it has reaped it; before that, the holder's stdout says
+# nothing after its one word, so anything readable on it (end of file
+# included) means every process holding it has ended.
+compose_restore_lock_lost() {
+  local fd="${compose_restore_lock[0]:-}" _
+  [[ -n "$compose_restore_lock_pid" && -n "$fd" ]] || return 0
+  kill -0 "$compose_restore_lock_pid" 2>/dev/null || return 0
+  if [[ -n "${1:-}" && "$(id -u)" == 0 && "$smtp_folder_uid" != 0 ]] &&
+    (($(monotonic_seconds) - compose_restore_lock_since + $1 + 1 + compose_restore_lock_slack >= compose_restore_lock_limit)); then
+    return 0
+  fi
+  read -r -t 0 -u "$fd" _
+}
+
+# compose_restore_lock_lost_line <scratch-file> <landed>: the #1902 L1 line.
+compose_restore_lock_lost_line() {
+  local landed=""
+  [[ "$2" != 1 ]] || landed="; ${compose_file} was already in place, so check it before relying on it"
+  printf "Orbit repair: restore-compose-file: the lock on its scratch file %s was lost before the restore finished (the holder, run as the deployment folder's owner, ended, or as root its %s s limit could run out before the rename finished), so the restore failed%s.\n" \
+    "$1" "$compose_restore_lock_limit" "$landed" >&2
+}
+
+# Ends the holder: closes its stdin and waits for it. Bash closes and unsets
+# a coproc's descriptors itself once it has ended, so only those still set
+# are closed here.
+release_compose_restore_lock() {
+  local fd
+  [[ -n "$compose_restore_lock_pid" ]] || return 0
+  fd="${compose_restore_lock[1]:-}"
+  [[ -z "$fd" ]] || exec {fd}>&-
+  fd="${compose_restore_lock[0]:-}"
+  [[ -z "$fd" ]] || exec {fd}<&-
+  wait "$compose_restore_lock_pid" 2>/dev/null || true
+  compose_restore_lock_pid=""
+}
+
 do_restore_compose_file() {
-  local image
-  [[ ! -e "$compose_file" && ! -L "$compose_file" ]] || return 1
+  local image tmp status=0 landed
+  if [[ "$(id -u)" == 0 ]] && ! check_folder_owner; then
+    printf 'Orbit repair: restore-compose-file refused, nothing was changed: %s.\n' "$owner_refusal" >&2
+    return 1
+  fi
   image="$(pinned_orbit_image)" || return 1
-  compose_image_tmp="$(mktemp "./.${compose_file}.repair.XXXXXX")" || { compose_image_tmp=""; return 1; }
-  if ! read_image_deployment_asset "$image" "$compose_file" "$compose_image_tmp" ||
-    ! chmod 0644 -- "$compose_image_tmp" ||
-    ! own_as_folder "$compose_image_tmp"; then
-    discard_image_compose
+  # b1 O-S2 (#1603): a run killed hard (no EXIT trap) leaves its scratch
+  # file, and the next restore sweeps it (sweep_compose_restore_scratch).
+  sweep_compose_restore_scratch
+  smtp_owner_write . ".${compose_file}.repair.XXXXXX" 644 "" true || return 1
+  tmp="$smtp_step_tmp"
+  if ! hold_compose_restore_lock "$tmp"; then
+    status=1
+  elif [[ -e "$compose_file" || -L "$compose_file" ]]; then
+    status=1
+  else
+    image_deployment_asset_bytes "$image" "$compose_file" |
+      as_folder_owner --pipe bash -c "$owner_fill_script" owner-fill "$tmp" "$((owner_read_cap + 1))" >/dev/null || status=$?
+    if [[ "$status" == 4 ]]; then
+      printf "Orbit repair: restore-compose-file: the pinned image's %s is too large (over 1 MiB), so it was not restored.\n" "$compose_file" >&2
+    elif [[ "$status" == 0 ]]; then
+      # b1 O-R4 (#1603): the bytes reach the disk before the rename can make
+      # them the live file, flushed as the owner. Best effort: a sync that
+      # fails must not throw away a restore that is otherwise complete.
+      as_folder_owner sync -- "$tmp" 2>/dev/null || true
+      # mv -nT leaves the source in place when the target appeared in the
+      # meantime (and, in newer coreutils, says so with exit 1).
+      # #1902 L1: no rename once the lock is gone or could lapse during it,
+      # and a lock lost while the rename ran fails the restore too.
+      if compose_restore_lock_lost "$((owner_step_timeout + owner_step_grace))"; then
+        compose_restore_lock_lost_line "$tmp" 0
+        status=1
+      else
+        as_folder_owner mv -nT -- "$tmp" "$compose_file" || true
+        if compose_restore_lock_lost; then
+          landed=0
+          [[ -e "$tmp" || -L "$tmp" ]] || ! is_regular_non_symlink_file "$compose_file" || landed=1
+          compose_restore_lock_lost_line "$tmp" "$landed"
+          status=1
+        elif [[ "$owner_step_problem" == "timed out" ]]; then
+          # #1873 X2: a rename is atomic, so a step stopped after it landed
+          # leaves the temporary name gone and docker-compose.yml a regular
+          # file (mv -nT never replaces one that appeared): that restore is
+          # done. Anything else stays failed.
+          if [[ -e "$tmp" || -L "$tmp" ]] || ! is_regular_non_symlink_file "$compose_file"; then
+            status=1
+          fi
+        elif [[ -e "$tmp" || -L "$tmp" ]] || ! is_regular_non_symlink_file "$compose_file"; then
+          printf 'Orbit repair: restore-compose-file: %s appeared while it was being restored (a file, a link or a folder), so the restored copy was not moved onto it.\n' "$compose_file" >&2
+          status=1
+        fi
+      fi
+    fi
+  fi
+  if [[ "$status" != 0 ]]; then
+    as_folder_owner rm -f -- "$tmp" || true
+    smtp_step_tmp=""
+    release_compose_restore_lock
     return 1
   fi
-  mv -n -- "$compose_image_tmp" "$compose_file" || { discard_image_compose; return 1; }
-  # mv -n leaves the source in place when the target appeared in the meantime.
-  if [[ -e "$compose_image_tmp" ]]; then
-    discard_image_compose
-    return 1
-  fi
-  compose_image_tmp=""
+  smtp_step_tmp=""
+  release_compose_restore_lock
+  # b1 O-R4: and the rename survives a power cut. Best effort, as the owner:
+  # the file is already in place.
+  as_folder_owner sync -- . 2>/dev/null || true
 }
 
 # --- restore-transaction ----------------------------------------------------
@@ -4267,17 +4687,47 @@ do_restore_compose_file() {
 # directory is left in place for a future retry. On success, the staging
 # directory is removed entirely and 0 is returned. See "Action
 # implementations" above for the full rationale.
+#
+# #1872 V9: $touched holds only paths this call changed (see
+# restore_transaction_fail), so an original that was never moved or removed
+# is never removed here. When a path cannot be put back, the recovery folder
+# is kept past exit (cleanup no longer knows it) and an "Orbit repair:" line
+# names where the original is.
 restore_transaction_self_restore() {
   local -a touched=("$@")
-  local index path live_backup_path
+  local index path live_backup_path lost=0
   for ((index = ${#touched[@]} - 1; index >= 0; index--)); do
     path="${touched[index]}"
     live_backup_path="$recovery_dir/live/$path"
-    remove_repair_path "$path"
     if [[ -e "$live_backup_path" || -L "$live_backup_path" ]]; then
-      cp -a -- "$live_backup_path" "$path" 2>/dev/null || true
+      if ! remove_repair_path "$path" ||
+        ! as_folder_owner cp -a -- "$live_backup_path" "$path" 2>/dev/null; then
+        printf 'Orbit repair: restore-transaction: %s could not be put back; its original is kept in %s.\n' \
+          "$path" "$live_backup_path" >&2
+        lost=1
+      fi
+    else
+      remove_repair_path "$path" || true
     fi
   done
+  if [[ "$lost" == 1 ]]; then
+    printf 'Orbit repair: restore-transaction: the recovery folder %s was kept; copy what you need back from it, then remove it.\n' \
+      "$recovery_dir" >&2
+    recovery_dir=""
+  fi
+}
+
+# restore_transaction_fail <path> <changed> [<touched>...] (#1872 V9): the
+# self-restore after a failed step on <path>, which counts as changed only
+# when <changed> is 1.
+restore_transaction_fail() {
+  local path="$1" changed="$2"
+  shift 2
+  if [[ "$changed" == 1 ]]; then
+    restore_transaction_self_restore "$@" "$path"
+  else
+    restore_transaction_self_restore "$@"
+  fi
 }
 
 # #1834 slice 4: true only when no engine transaction may be live: there is
@@ -4286,18 +4736,39 @@ restore_transaction_self_restore() {
 # engine takes that lock with an exclusive create (O_EXCL) and reclaims it by
 # age; it never uses flock, so the age rule is the real protection and the
 # flock probe below adds none: it only notices some other process that
-# happens to hold flock on the file. The lock file is opened read-only, so it
-# is never created.
+# happens to hold flock on the file. #1897: the lock is opened read-write
+# only, never read-only, whoever runs repair, as the backup/restore lock is
+# (#1890): a FIFO swapped in after the checks opens at once instead of
+# waiting for a writer; stat must see a regular file just before the open,
+# and the descriptor must be that file (same device, inode and change time).
+# A lock that will not open read-write, or that is not that file, leaves
+# $engine_lock_problem `unwritable`, and the caller refuses the action.
 readonly engine_lock_path=".orbit-engine.lock"
 readonly engine_lock_stale_seconds=600
+engine_lock_problem=""
 engine_lock_idle() {
-  local fd mtime now status=0
+  local fd="" mtime now status=0 before opened
+  engine_lock_problem=""
+  lock_own_problem=""
   [[ -e "$engine_lock_path" || -L "$engine_lock_path" ]] || return 0
   [[ ! -L "$engine_lock_path" && -f "$engine_lock_path" && -r "$engine_lock_path" ]] || return 1
   mtime="$(stat -c %Y -- "$engine_lock_path" 2>/dev/null)" && now="$(date +%s)" || return 1
   ((now - mtime > engine_lock_stale_seconds)) || return 1
   if command -v flock >/dev/null 2>&1; then
-    { exec {fd}<"$engine_lock_path"; } 2>/dev/null || return 1
+    before="$(stat -c '%d:%i %F %.9Z' -- "$engine_lock_path" 2>/dev/null)" || before=""
+    { exec {fd}<>"$engine_lock_path"; } 2>/dev/null || fd=""
+    case "${before#* }" in
+      "regular file "* | "regular empty file "*) ;;
+      *) before="" ;;
+    esac
+    opened=""
+    [[ -z "$fd" ]] || opened="$(stat -L -c '%d:%i %F %.9Z' -- "/dev/fd/$fd" 2>/dev/null)" || opened=""
+    if [[ -z "$fd" || -z "$before" || "$opened" != "$before" ]]; then
+      [[ -z "$fd" || "$opened" == "$before" ]] || own_created_lock "$fd" "$engine_lock_path"
+      [[ -z "$fd" ]] || exec {fd}<&-
+      engine_lock_problem=unwritable
+      return 1
+    fi
     flock -n "$fd" >/dev/null 2>&1 || status=$?
     exec {fd}<&-
     [[ "$status" == 0 ]] || return 1
@@ -4306,9 +4777,29 @@ engine_lock_idle() {
 }
 
 # #1834 slice 4: the modes and types of a tree's entries, one line each,
-# sorted, for comparing a saved folder with its live one.
+# sorted, for comparing a saved folder with its live one. The pipeline fails
+# when any part of it does (pipefail, #1897). With `live`, as root, the
+# listing runs as the folder's owner (as_folder_owner: the owner-step
+# timeout), and root reads at most $owner_read_cap bytes of it under the
+# same limit plus the grace; more is refused (#1897 T1).
+# shellcheck disable=SC2016 # expanded by the child bash
+readonly tree_modes_script='set -o pipefail; cd -- "$1" && find . -mindepth 1 -printf "%P %y %m\n" | LC_ALL=C sort'
 restore_transaction_tree_modes() {
-  (cd -- "$1" && find . -mindepth 1 -printf '%P %y %m\n' | LC_ALL=C sort)
+  local out status=0
+  if [[ "${2:-}" != live || "$(id -u)" != 0 ]]; then
+    (set -o pipefail && cd -- "$1" && find . -mindepth 1 -printf '%P %y %m\n' | LC_ALL=C sort)
+    return
+  fi
+  out="$(set -o pipefail
+    as_folder_owner --pipe bash -c "$tree_modes_script" tree-modes "$1" </dev/null |
+      LC_ALL=C timeout -k 1 "$((owner_step_timeout + owner_step_grace))" head -c "$((owner_read_cap + 1))")" || status=$?
+  # The size first: a flood also fails the pipeline, and the line says why.
+  if (("$(LC_ALL=C; printf '%s' "${#out}")" > owner_read_cap)); then
+    printf "Orbit repair: %s: what the step tree-modes printed as the deployment folder's owner is too large (over 1 MiB), so it was not used.\n" "$owner_action" >&2 || true
+    return 1
+  fi
+  [[ "$status" == 0 ]] || return 1
+  printf '%s\n' "$out"
 }
 
 # #1834 slice 4: true only when a restore would change nothing: the staging
@@ -4318,7 +4809,7 @@ restore_transaction_tree_modes() {
 # was created by the transaction, so it is not a match. Symlinks on either
 # side, or a symlinked parent, never match.
 restore_transaction_originals_match_live() {
-  local staging_root="$1" path backup_path saved=0 had_backup have_live
+  local staging_root="$1" path backup_path saved=0 had_backup have_live backup_sum live_sum backup_modes live_modes
   for path in "${restore_transaction_paths[@]}"; do
     backup_path="$staging_root/rollback/original/$path"
     had_backup=0
@@ -4331,10 +4822,33 @@ restore_transaction_originals_match_live() {
     [[ ! -L "$backup_path" && ! -L "$path" && ! -L "$(dirname -- "$path")" ]] || return 1
     [[ "$(stat -c %a -- "$backup_path")" == "$(stat -c %a -- "$path")" ]] || return 1
     if [[ -f "$backup_path" ]]; then
-      [[ -f "$path" ]] && cmp -s -- "$backup_path" "$path" || return 1
+      # #1875 W3: as root, both sides through the bounded read and a
+      # SHA-256 compare (never CRC32, which the folder's owner can forge);
+      # a failed read is never "the same". Not root, an exact cmp.
+      [[ -f "$path" ]] || return 1
+      if [[ "$(id -u)" == 0 ]]; then
+        backup_sum="$(folder_file_checksum "$backup_path")" || return 1
+        live_sum="$(folder_file_checksum "$path")" || return 1
+        [[ -n "$backup_sum" && "$backup_sum" == "$live_sum" ]] || return 1
+      else
+        cmp -s -- "$backup_path" "$path" || return 1
+      fi
     elif [[ -d "$backup_path" ]]; then
-      [[ -d "$path" ]] && diff -r --no-dereference -q -- "$backup_path" "$path" >/dev/null 2>&1 || return 1
-      [[ "$(restore_transaction_tree_modes "$backup_path")" == "$(restore_transaction_tree_modes "$path")" ]] || return 1
+      [[ -d "$path" ]] || return 1
+      # #1887 R1: as root, `diff -r` runs as the folder's owner
+      # (as_folder_owner: the owner-step timeout, its stderr capped and
+      # shown), never as root over the owner's tree; a time-out, a stop,
+      # an unreadable entry or any error is "cannot check", never "same".
+      # Not root, as it was.
+      if [[ "$(id -u)" == 0 ]]; then
+        as_folder_owner diff -r --no-dereference -q -- "$backup_path" "$path" || return 1
+      else
+        diff -r --no-dereference -q -- "$backup_path" "$path" >/dev/null 2>&1 || return 1
+      fi
+      # #1897 T1: a listing that fails is "cannot check", never "same".
+      backup_modes="$(restore_transaction_tree_modes "$backup_path")" || return 1
+      live_modes="$(restore_transaction_tree_modes "$path" live)" || return 1
+      [[ "$backup_modes" == "$live_modes" ]] || return 1
     else
       return 1
     fi
@@ -4342,11 +4856,39 @@ restore_transaction_originals_match_live() {
   [[ "$saved" == 1 ]]
 }
 
+# #1876 O-R3: rename to a tombstone, then delete. Renames the staging folder
+# $1, in place, to `.orbit-repair-discard.<same suffix>` (one atomic step, so
+# a kill part way through the removal never leaves a half-emptied folder that
+# the next run reads as an interrupted install), then removes that name. The
+# rename refuses to replace anything already there; if it fails nothing is
+# deleted. Both steps are the folder owner's (#1872). Nothing else in this
+# script reads a `.orbit-repair-discard.*`; remove_leftover_discards clears
+# one a killed run left behind.
+discard_staging_root() {
+  local staging_root="$1" discard
+  discard=".orbit-repair-discard.${staging_root#.orbit-install-staging.}"
+  if [[ -e "$discard" || -L "$discard" ]]; then
+    printf 'Orbit repair: %s could not be removed: %s is in the way of setting it aside; once Orbit is working, remove %s, then run Repair again.\n' "$staging_root" "$discard" "$discard" >&2
+    return 1
+  fi
+  as_folder_owner mv -n -T -- "$staging_root" "$discard" || return 1
+  [[ ! -e "$staging_root" && ! -L "$staging_root" ]] || return 1
+  is_real_non_symlink_directory "$discard" || return 1
+  as_folder_owner rm -rf -- "$discard"
+}
+
 do_restore_transaction() {
   local -a staging_matches=()
   local -a touched=()
   local staging_root path parent backup_path live_backup_path had_backup have_live
-  local live_secret_path live_secret_backup_path dated_backup_path
+  local live_secret_path live_secret_backup_path dated_backup_path changed
+
+  # #1872 V1/V2: as root in a folder another user owns, every folder, copy,
+  # move and removal below is the owner's (as_folder_owner): the recovery
+  # folder and its copies, the dated backup, the restore copies and the
+  # staging folder's rename and removal (discard_staging_root). Root only
+  # reads and compares.
+  refuse_unless_owner_writes restore-transaction || return 1
 
   shopt -s nullglob dotglob
   staging_matches=(.orbit-install-staging.*)
@@ -4364,9 +4906,14 @@ do_restore_transaction() {
   # restore would change nothing (committed or not) is removed rather than
   # refused; anything else falls through to the refusals and the restore.
   if engine_lock_idle && restore_transaction_originals_match_live "$staging_root"; then
-    rm -rf -- "$staging_root" || return 1
+    discard_staging_root "$staging_root" || return 1
     printf 'Orbit repair: removed %s; no install is running and restoring from it would change nothing (every saved file matches the live one).\n' "$staging_root" >&2
     return 0
+  fi
+  if [[ "$engine_lock_problem" == unwritable ]]; then
+    printf "Orbit repair: refusing restore-transaction; repair can't check whether an install is running: the engine lock at %s could not be opened for writing by the user running repair (repair opens it read-write so that the open can never wait, and only as the regular file it checked); make sure no install or update is running, then run repair as root or as the deployment folder's owner, or make the lock file writable for the user running repair%s.\n" \
+      "$engine_lock_path" "$lock_own_problem" >&2
+    return 1
   fi
 
   # install.sh writes $staging_root/committed the moment its own transaction
@@ -4441,17 +4988,19 @@ do_restore_transaction() {
 
     if [[ "$have_live" == 1 ]]; then
       live_backup_path="$recovery_dir/live/$path"
-      mkdir -p -- "$(dirname -- "$live_backup_path")" || {
+      as_folder_owner mkdir -p -- "$(dirname -- "$live_backup_path")" || {
         restore_transaction_self_restore "${touched[@]}"
         return 1
       }
-      cp -a -- "$path" "$live_backup_path" || {
+      as_folder_owner cp -a -- "$path" "$live_backup_path" || {
         restore_transaction_self_restore "${touched[@]}"
         return 1
       }
     fi
-    touched+=("$path")
 
+    # #1872 V9: $path joins $touched once it is changed; a failed or
+    # timed-out step that left it as it was keeps it out, so the
+    # self-restore never removes an unchanged original.
     if [[ "$have_live" == 1 ]]; then
       if [[ "$path" == .env-orbit || "$path" == .orbit-secrets ]]; then
         # O2-S1: never delete the live copy of a secret — move it to a
@@ -4465,22 +5014,30 @@ do_restore_transaction() {
           restore_transaction_self_restore "${touched[@]}"
           return 1
         fi
-        mv -- "$path" "$dated_backup_path" || {
-          restore_transaction_self_restore "${touched[@]}"
+        # A rename either happened or did not: changed only if the dated
+        # name now exists.
+        as_folder_owner mv -- "$path" "$dated_backup_path" || {
+          changed=0
+          [[ ! -e "$dated_backup_path" && ! -L "$dated_backup_path" ]] || changed=1
+          restore_transaction_fail "$path" "$changed" "${touched[@]}"
           return 1
         }
       else
+        # rm -f of a file or link is all or nothing; a folder may be half gone.
         remove_repair_path "$path" || {
-          restore_transaction_self_restore "${touched[@]}"
+          changed=1
+          [[ ! -L "$path" && ( ! -e "$path" || -d "$path" ) ]] || changed=0
+          restore_transaction_fail "$path" "$changed" "${touched[@]}"
           return 1
         }
       fi
     fi
+    touched+=("$path")
 
     if [[ "$had_backup" == 1 ]]; then
       # cp, not mv: the staged backup stays intact in case a later path in
       # this same action fails and the whole action must self-restore.
-      cp -a -- "$backup_path" "$path" || {
+      as_folder_owner cp -a -- "$backup_path" "$path" || {
         restore_transaction_self_restore "${touched[@]}"
         return 1
       }
@@ -4491,7 +5048,7 @@ do_restore_transaction() {
     # removal loop.
   done
 
-  rm -rf -- "$staging_root" || return 1
+  discard_staging_root "$staging_root" || return 1
   return 0
 }
 
@@ -4510,7 +5067,7 @@ do_restore_transaction() {
 # immediately before touching anything; refuse a symlinked parent directory
 # on either side and a symlinked rollback file; back up the current live
 # .env-orbit into this run's private recovery directory before it is
-# touched; on any failure report failed, leaving both .env-orbit and the
+# touched (its own one, owner_recovery_dir, #1857 S4); on any failure report failed, leaving both .env-orbit and the
 # rollback copy exactly as they were for a future retry; on full success,
 # remove the rollback copy (mirroring do_restore_transaction's own
 # staging-directory removal) and report done.
@@ -4520,6 +5077,13 @@ do_restore_transaction() {
 # renames it onto .env-orbit — an atomic same-filesystem rename, matching
 # configuration.sh's own migrate_file() write pattern, so .env-orbit is
 # never observably absent or partially written.
+#
+# #1857 S4: as root in a folder another user owns, every file and folder
+# this action makes or replaces there is made by that owner (as_folder_owner,
+# smtp_owner_write): the recovery folder and its evidence copy, the staged
+# file and its rename, and the removal of the rollback copy. Root only reads
+# the rollback copy (smtp_read_file, never through a link), after the owner
+# checks of check_folder_owner.
 do_restore_configuration_rollback() {
   local rollback_path="${environment_file}${configuration_rollback_suffix}"
   local parent staged
@@ -4532,11 +5096,16 @@ do_restore_configuration_rollback() {
   parent="$(dirname -- "$rollback_path")"
   [[ "$parent" == "." || ! -L "$parent" ]] || return 1
 
-  ensure_recovery_dir || return 1
+  if [[ "$(id -u)" == 0 ]] && ! check_folder_owner; then
+    printf 'Orbit repair: restore-transaction refused, nothing was changed: %s.\n' "$owner_refusal" >&2
+    return 1
+  fi
+
+  ensure_owner_recovery_dir || return 1
 
   if [[ -e "$environment_file" || -L "$environment_file" ]]; then
-    mkdir -p -- "$(dirname -- "$recovery_dir/live/$environment_file")" || return 1
-    cp -a -- "$environment_file" "$recovery_dir/live/$environment_file" || return 1
+    as_folder_owner mkdir -p -- "$(dirname -- "$owner_recovery_dir/live/$environment_file")" || return 1
+    as_folder_owner cp -a -- "$environment_file" "$owner_recovery_dir/live/$environment_file" || return 1
   fi
 
   # No branch below calls restore_transaction_self_restore, deliberately.
@@ -4549,18 +5118,20 @@ do_restore_configuration_rollback() {
   # action never modified. The backup above is still taken: it is the
   # operator's evidence in the one case that does end with .env-orbit
   # changed and the action reporting failed, the rollback-copy removal below.
-  staged="$(mktemp "${environment_file}.repair-restore.XXXXXX" 2>/dev/null)" || return 1
-  if ! cp -- "$rollback_path" "$staged" 2>/dev/null || ! chmod 600 -- "$staged" 2>/dev/null ||
-    ! own_as_folder "$staged" 2>/dev/null; then
-    rm -f -- "$staged"
+  smtp_owner_write . "${environment_file}.repair-restore.XXXXXX" 600 "" smtp_read_file "$rollback_path" || return 1
+  staged="$smtp_step_tmp"
+  # b1 O-R4 (#1603): flushed before the rename, and the folder after it, both
+  # as the owner. Both best effort: a failing sync must not stop the rollback.
+  as_folder_owner sync -- "$staged" 2>/dev/null || true
+  if ! as_folder_owner mv -fT -- "$staged" "$environment_file"; then
+    as_folder_owner rm -f -- "$staged" || true
+    smtp_step_tmp=""
     return 1
   fi
-  if ! mv -f -- "$staged" "$environment_file" 2>/dev/null; then
-    rm -f -- "$staged"
-    return 1
-  fi
+  smtp_step_tmp=""
+  as_folder_owner sync -- . 2>/dev/null || true
 
-  rm -f -- "$rollback_path" || return 1
+  as_folder_owner rm -f -- "$rollback_path" || return 1
   return 0
 }
 
@@ -4643,14 +5214,16 @@ restart_compose_service() {
 # stderr to a 4 KiB pipe root prints on failure, a cleared environment, and
 # every other descriptor closed, the held lock's included. That includes the backup/restore lock: a missing
 # backups folder or lock file is made as the owner (wherever ORBIT_BACKUP_DIR
-# points), and root only opens the lock read-only and takes flock on it. Root
+# points), and root only opens the existing lock (read-write only, never
+# read-only, #1873 X3, #1890) and takes flock on it. Root
 # reads, decides and runs docker; it creates, writes, chmods, renames and
 # removes nothing under the folder, so never through a symlink. In a
 # root-owned folder root writes directly. Either way a .orbit-secrets or its
 # secret file, an orbit-install-backups, an undo folder to adopt or the one
 # the step record names that belongs to anyone but the user whose files the
 # run makes is refused, named, before anything is written. Every file goes to
-# a name mktemp chooses and is renamed into place. Root in a folder it does
+# a name root chooses, which the owner creates exclusively (dd conv=excl,
+# #1873 X1), and is renamed into place. Root in a folder it does
 # not own refuses, nothing changed, without setpriv or setsid, or when the
 # owner has no user-database entry.
 readonly smtp_retirement_record=".orbit-smtp-retirement"
@@ -4740,16 +5313,6 @@ mail_sending_gate_holds() {
 smtp_copy_dir=""
 smtp_record_step=""
 
-# As root, give a path the deployment folder's owner (restore-compose-file's
-# rule): the folder's user must still be able to read what this run leaves
-# behind. As any other user, a no-op. Never through a symlink: a link swapped
-# in at the name is re-owned itself, its target untouched (FIX-S1). Used by
-# restore-compose-file and the .env-orbit restore; retire-smtp-lines writes
-# as the owner instead (#1848 FIX-S1).
-own_as_folder() {
-  [[ "$(id -u)" != 0 ]] || chown --no-dereference --reference=. -- "$@"
-}
-
 # #1848 FIX-S1: the deployment folder's owner, read once per run by
 # smtp_owner_init; $smtp_writer_uid is the uid whose files this run makes
 # (the folder's owner as root, else the running user). As root in a folder
@@ -4778,6 +5341,62 @@ smtp_owner_init() {
   smtp_owner_home="${BASH_REMATCH[4]:-/}"
 }
 
+# #1857 S1: the one owner check of every action that writes in the
+# deployment folder (retire-smtp-lines, start-services, recreate-services,
+# restore-compose-file, the .env-orbit configuration-rollback restore). Reads
+# the folder's owner (smtp_owner_init); as root in a folder another user
+# owns, the owner's steps need setpriv, a setsid with --wait and the owner's
+# user-database entry. Leaves the refusal in $owner_refusal and returns 1,
+# or returns 0 with it empty. Run in the caller's shell: it sets the
+# smtp_owner_* globals as_folder_owner reads.
+owner_refusal=""
+check_folder_owner() {
+  owner_refusal=""
+  if ! smtp_owner_init; then
+    owner_refusal="the deployment folder's owner could not be read"
+  elif [[ "$(id -u)" != 0 || "$smtp_folder_uid" == 0 ]]; then
+    :
+  elif ! command -v setpriv >/dev/null 2>&1; then
+    # #1848 FIX-S1: as root it writes only as the folder's owner.
+    owner_refusal="run as root, it writes as the deployment folder's owner through setpriv (util-linux), which is not on PATH"
+  elif ! setsid --wait true </dev/null >/dev/null 2>&1; then
+    # #1848 FIX-S1 addendum 2 item 2: that child runs in a new session, and
+    # root waits for it (addendum 3 item 4: --wait is util-linux 2.31+).
+    owner_refusal="run as root, it runs the deployment folder's owner's commands in a new session through setsid --wait (util-linux 2.31 or later), which is not on PATH or does not support --wait"
+  elif [[ -z "$smtp_owner_gid" ]]; then
+    # #1848 FIX-S1 addendum 2 item 3: the owner's own group, from the user
+    # database; addendum 3 item 3: no entry, no getent or a failed lookup.
+    owner_refusal="run as root, it could not look up the deployment folder's owner (uid $smtp_folder_uid) in the user database (getent passwd)"
+  fi
+  [[ -z "$owner_refusal" ]]
+}
+
+# refuse_unless_owner_writes <action> [<path>...] (#1872 V1, V4): the owner
+# check of an action that, as root, writes in the deployment folder only as
+# its owner. Not root, it checks nothing and returns 0. As root it runs
+# check_folder_owner and, in a folder another user owns, also refuses when
+# a <path> that is a real folder or file belongs to anyone but that owner
+# (foreign_owner_refusal; .orbit-secrets, guarantee 17), since the owner's
+# steps could not write there. A refusal prints the usual
+# "<action> refused, nothing was changed:" line and returns 1.
+refuse_unless_owner_writes() {
+  local action="$1" path refusal=""
+  shift
+  [[ "$(id -u)" == 0 ]] || return 0
+  if ! check_folder_owner; then
+    refusal="$owner_refusal"
+  elif [[ "$smtp_folder_uid" != 0 ]]; then
+    for path in "$@"; do
+      [[ ! -L "$path" && ( -d "$path" || -f "$path" ) ]] || continue
+      refusal="$(foreign_owner_refusal "$path")" && break
+      refusal=""
+    done
+  fi
+  [[ -n "$refusal" ]] || return 0
+  printf 'Orbit repair: %s refused, nothing was changed: %s.\n' "$action" "$refusal" >&2
+  return 1
+}
+
 # clean_terminal_text: stdin to stdout, made safe for root's terminal the way
 # docker_output_excerpt cleans Compose's output: escape sequences, invalid
 # UTF-8, C1 controls, bidi overrides and C0 controls other than tab and
@@ -4788,6 +5407,14 @@ clean_terminal_text() {
     { if command -v iconv >/dev/null 2>&1; then iconv -c -f UTF-8 -t UTF-8 2>/dev/null || true; else LC_ALL=C tr -d '\200-\377'; fi; } |
     LC_ALL=C sed $'s/\xc2[\x80-\x9f]//g; s/\xe2\x80[\xaa-\xae]//g; s/\xe2\x81[\xa6-\xa9]//g' |
     LC_ALL=C tr -d '\000-\010\013-\037\177'
+}
+
+# owner_step_timed_out <step> [<limit>]: the #1858 T5 line for a step run as the
+# deployment folder's owner, or a read of what it controls, that ran out of
+# time and was stopped.
+owner_step_timed_out() {
+  printf "Orbit repair: %s: the step %s, run as the deployment folder's owner (%s), timed out after %s s and was stopped.\n" \
+    "$owner_action" "$1" "${smtp_owner_name:-uid ${smtp_folder_uid:-unknown}}" "${2:-$owner_step_timeout}" >&2 || true
 }
 
 # as_folder_owner [--pipe] <cmd...> (#1848 FIX-S1): logrotate's `su`,
@@ -4809,13 +5436,29 @@ clean_terminal_text() {
 # clean_terminal_text (addendum 4 item 1); the caller prints the
 # line naming the step and path. With --pipe, stdin and stdout stay the
 # caller's pipes (smtp_owner_write reads and checks what comes back).
+# With --limit <s> (after --pipe), the step's limit is <s> instead: only the
+# compose-restore lock holder, whose limit covers the restore (#1902 L1).
+# #1858 T1/T2: the child runs under `timeout`, $owner_step_timeout s, then
+# TERM (with CONT, so a stopped child ends too) and KILL $owner_step_grace s
+# later; root's read of its stderr is bounded by the same limit plus the
+# grace, so a grandchild that keeps the pipe open can't hold root either. A
+# time-out (status 124 or 137) prints one "Orbit repair:" line naming the
+# action and the step, and sets $owner_step_problem for a caller that
+# silences stderr.
 # Otherwise runs <cmd> as it is. Root without setpriv or setsid, or with no
 # user-database entry for the owner: returns 1.
+owner_step_problem=""
+owner_action="repair"
 as_folder_owner() {
-  local pipe=0 said="" status=0
+  local pipe=0 said="" status=0 step limit="$owner_step_timeout"
+  owner_step_problem=""
   if [[ "${1:-}" == --pipe ]]; then
     pipe=1
     shift
+  fi
+  if [[ "${1:-}" == --limit ]]; then
+    limit="$2"
+    shift 2
   fi
   if [[ "$(id -u)" != 0 || "$smtp_folder_uid" == 0 ]]; then
     "$@"
@@ -4839,9 +5482,18 @@ as_folder_owner() {
           [[ ! -e /proc/"$BASHPID"/fd/"$fd" ]] || eval "exec $fd<&-"
         done
         exec env -i PATH="$PATH" LC_ALL=C HOME="$smtp_owner_home" USER="$smtp_owner_name" LOGNAME="$smtp_owner_name" \
+          timeout -k "$owner_step_grace" "$limit" \
           setsid --wait setpriv --reuid="$smtp_folder_uid" --regid="$smtp_owner_gid" --init-groups --no-new-privs -- "$@"
-      ) | LC_ALL=C head -c 4096 3>&- | clean_terminal_text 3>&-)" || status=$?
+      ) | LC_ALL=C timeout -k 1 "$((limit + owner_step_grace))" head -c 4096 3>&- | clean_terminal_text 3>&-)" || status=$?
   } 3>&1
+  if ((status == 124 || status == 137)); then
+    # The step's name: a `bash -c <script> <name>` child's own, else the command's.
+    step="${1##*/}"
+    [[ "$step" != bash || "${2:-}" != -c ]] || step="${4:-bash}"
+    owner_step_problem="timed out"
+    owner_step_timed_out "$step" "$limit"
+    return "$status"
+  fi
   if [[ "$status" != 0 ]]; then
     said="${said//[$'\t\n']/ }"
     [[ -z "${said// /}" ]] ||
@@ -4850,49 +5502,165 @@ as_folder_owner() {
   return "$status"
 }
 
-# The owner-side script of smtp_owner_write: $1 folder, $2 mktemp template,
-# $3 mode. Stdin goes to a new mktemp file, chmod $3, and its name is
-# printed. One line, so logs of the setpriv call stay one line each. Its own EXIT trap removes the file until the name is handed over,
-# so a parent killed meanwhile (the printf then fails on the closed pipe)
-# leaves none (#1848 FR-S1b).
+# The owner-side script of smtp_owner_write (#1873 X1): $1 the full temp
+# name root chose, $2 the folder, $3 the template it was made from, $4 the
+# mode. The owner checks that $1 is the template's shape in that folder,
+# creates exactly $1, refusing anything already there, a link or a FIFO
+# included (dd conv=excl: O_CREAT|O_EXCL), writes stdin into it, sets mode
+# $4 and prints the name. One line, so logs
+# of the setpriv call stay one line each. The caller chose the name, so the
+# caller removes it on any failure; once the owner has made the file, its
+# own EXIT trap also removes it until the name is handed over, so a parent
+# killed meanwhile leaves none (#1848 FR-S1b). Nothing it did not make is
+# ever removed by that trap.
 # shellcheck disable=SC2016 # expanded by the child bash
-readonly smtp_owner_write_script='tmp=""; trap "[[ -z \$tmp ]] || rm -f -- \"\$tmp\"" EXIT; trap "exit 1" HUP INT PIPE TERM; '\
-'tmp="$(mktemp "$1/$2")" || exit 1; cat > "$tmp" && chmod "$3" -- "$tmp" && printf "%s\n" "$tmp" || exit 1; tmp=""'
+readonly smtp_owner_write_script='umask 077; trap "exit 1" HUP INT PIPE TERM; [[ "$1" == "$2/${3%XXXXXX}"?????? ]] || exit 1; '\
+'dd if=/dev/null of="$1" conv=excl status=none || exit 1; '\
+'trap "rm -f -- \"\$1\"" EXIT; cat > "$1" && chmod "$4" -- "$1" && printf "%s\n" "$1" || exit 1; trap - EXIT'
+
+# owner_temp_suffix: six characters of [A-Za-z0-9] from /dev/urandom, the
+# shape and strength of a mktemp suffix (#1873 X1: root picks the name).
+readonly owner_temp_alphabet='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
+owner_temp_suffix() {
+  local bytes byte suffix=""
+  bytes="$(od -An -N32 -tu1 /dev/urandom 2>/dev/null)" || return 1
+  for byte in $bytes; do
+    # 248 = 4 * 62: no modulo bias.
+    ((byte < 248)) || continue
+    suffix+="${owner_temp_alphabet:byte % 62:1}"
+    ((${#suffix} < 6)) || break
+  done
+  [[ "${#suffix}" == 6 ]] || return 1
+  printf '%s' "$suffix"
+}
 
 # smtp_owner_write <folder> <template> <mode> <target> <producer...>: the one
 # write primitive of retire-smtp-lines (#1848 FIX-S1). Root makes the bytes
-# (<producer>'s stdout); the folder's owner writes them to a mktemp name in
+# (<producer>'s stdout); the folder's owner writes them to a new file in
 # <folder> with <mode> and, once the producer succeeded, renames it over
 # <target> (mv -fT, same folder). An empty <target> leaves the name in
-# $smtp_step_tmp for the caller. On failure nothing is left. The pipeline's
-# status is left in $smtp_write_status: with pipefail it is the rightmost
-# failure, so it is <producer>'s own (smtp_env_rewrite's 3) only when the
-# owner's side succeeded; the owner's side exits 0 or 1 (setpriv 1 or 127).
+# $smtp_step_tmp for the caller. The pipeline's status is left in
+# $smtp_write_status: with pipefail it is the rightmost failure, so it is
+# <producer>'s own (smtp_env_rewrite's 3) only when the owner's side
+# succeeded; the owner's side exits 0 or 1 (setpriv 1 or 127).
+#
+# #1873 X1, the standard pattern "the caller owns the name": root picks the
+# full name, <template> with its XXXXXX replaced by an unpredictable suffix
+# (owner_temp_suffix), and the owner creates exactly that name,
+# create-exclusive. Because root knows the name before the owner starts, it
+# is in $smtp_step_tmp for the EXIT trap from then on, and on any failure,
+# a time-out included (a stopped, stalled, TERM-proof or flooding owner
+# step), root removes it as the owner. Nothing is left behind.
+#
+# #1858: root's reads are bounded. <producer> feeds the owner through a
+# `cat` bounded by $owner_step_timeout plus the grace, so an owner that stops
+# reading can't hold it; what the owner prints back is read through
+# `head -c 4097` under the same bound, refused over 4096 bytes, and must be
+# exactly the chosen name. The reader's own status follows it as a last line
+# only root writes.
 smtp_write_status=0
 smtp_owner_write() {
-  local folder="$1" template="$2" mode="$3" target="$4" name="" status=0 prefix
+  local folder="$1" template="$2" mode="$3" target="$4" name suffix said="" status=0 out reader bound problem
   shift 4
-  prefix="$folder/${template%XXXXXX}"
-  name="$("$@" | as_folder_owner --pipe bash -c "$smtp_owner_write_script" smtp-owner-write "$folder" "$template" "$mode")" || status=$?
-  smtp_write_status="$status"
-  # The name comes from a process the owner could steer: only one of the
-  # template's shape is used, and only by commands run as the owner.
-  if [[ -n "$name" ]] && ! [[ "${name:0:${#prefix}}" == "$prefix" && "${name:${#prefix}}" =~ ^[A-Za-z0-9]{6}$ ]]; then
-    return 1
-  fi
+  smtp_step_tmp=""
+  smtp_write_status=1
+  [[ "$template" == *XXXXXX ]] || return 1
+  suffix="$(owner_temp_suffix)" || return 1
+  name="$folder/${template%XXXXXX}$suffix"
   smtp_step_tmp="$name"
-  if [[ "$status" == 0 && -n "$name" ]] && { [[ -z "$target" ]] || as_folder_owner mv -fT -- "$name" "$target"; }; then
+  bound="$((owner_step_timeout + owner_step_grace))"
+  out="$("$@" | LC_ALL=C timeout -k 1 "$bound" cat |
+    as_folder_owner --pipe bash -c "$smtp_owner_write_script" smtp-owner-write "$name" "$folder" "$template" "$mode" |
+    { LC_ALL=C timeout -k 1 "$bound" head -c 4097; printf '\n%s' "$?"; })" || status=$?
+  reader="${out##*$'\n'}"
+  said="${out%$'\n'*}"
+  while [[ "$said" == *$'\n' ]]; do said="${said%$'\n'}"; done
+  if ((reader == 124 || reader == 137)) && ((status != 124 && status != 137)); then
+    owner_step_timed_out smtp-owner-write
+    owner_step_problem="timed out"
+    status="$reader"
+  fi
+  smtp_write_status="$status"
+  if (("$(LC_ALL=C; printf '%s' "${#said}")" > 4096)); then
+    printf "Orbit repair: %s: what the step smtp-owner-write printed as the deployment folder's owner is too large (over 4096 bytes), so it was not used.\n" "$owner_action" >&2 || true
+    [[ "$status" != 0 ]] || status=1
+  elif [[ "$status" == 0 && "$said" != "$name" ]]; then
+    status=1
+  fi
+  if [[ "$status" == 0 ]] && { [[ -z "$target" ]] || as_folder_owner mv -fT -- "$name" "$target"; }; then
     [[ -z "$target" ]] || smtp_step_tmp=""
     return 0
   fi
-  [[ -z "$name" ]] || as_folder_owner rm -f -- "$name" || true
+  # The removal must not hide why the write failed (a caller reads it).
+  problem="$owner_step_problem"
+  as_folder_owner rm -f -- "$name" || true
+  owner_step_problem="$problem"
   smtp_step_tmp=""
   return 1
 }
 
-# smtp_read_file <path>: its bytes, never through a symlink (O_NOFOLLOW).
+# smtp_read_file <path>: its bytes, as root, from a file the deployment
+# folder's owner controls (#1858 T4). The lstat-open-fstat-compare pattern:
+# the path must be a regular file (lstat, no link followed), and the file
+# opened must be that same regular file (same device and inode, so a link or
+# a FIFO swapped in between is never read), at most 1 MiB before and after
+# the read. The whole read runs under $owner_step_timeout, TERM then KILL
+# $owner_step_grace s later, so a FIFO or a stalled file can't hold root;
+# the open itself gets $owner_open_timeout s (a watchdog TERMs the reader),
+# so a FIFO swapped in after the lstat fails at once rather than holding
+# root for the whole limit (#1875 W4). The watchdog closes every inherited
+# descriptor above 2 (the held locks' included), kills its own sleep and is
+# waited for, so it never keeps a lock held even if the reader is killed.
+# A refusal prints one "Orbit repair:" line naming the action, the file and
+# the reason; any other failure returns 1 quietly, as dd did.
+readonly owner_read_cap=1048576
+readonly owner_open_timeout=5
+# shellcheck disable=SC2016 # expanded by the child bash
+readonly owner_read_script='before="$(stat -c "%d:%i %F" -- "$1")" || exit 1
+case "${before#* }" in "regular file"|"regular empty file") ;; *) exit 3;; esac
+{ for fd in /proc/"$BASHPID"/fd/*; do fd="${fd##*/}"; [[ "$fd" =~ ^[0-9]+$ ]] && ((fd > 2)) && eval "exec $fd<&-"; done
+trap "kill \$s 2>/dev/null; exit 0" TERM; sleep "$3" & s=$!; wait "$s" && kill -TERM "$$"; } </dev/null >/dev/null 2>&1 &
+watchdog=$!
+exec 3<"$1" || exit 1
+kill "$watchdog" 2>/dev/null
+wait "$watchdog"
+read -r id size type < <(stat -L -c "%d:%i %s %F" /dev/fd/3) || exit 1
+case "$type" in "regular file"|"regular empty file") ;; *) exit 3;; esac
+[[ "$id" == "${before%% *}" ]] || exit 5
+((size <= $2)) || exit 4
+head -c "$2" <&3 || exit 1
+size="$(stat -L -c %s /dev/fd/3)" || exit 1
+((size <= $2)) || exit 4'
+# folder_file_checksum <path> (#1875 W3): the SHA-256 of a file in the
+# deployment folder, for root's compares (collision-resistant: the folder's
+# owner controls the bytes, so a CRC such as cksum's could be forged). As
+# root through smtp_read_file (no link followed, regular files only, 1 MiB,
+# time limit); otherwise read by path. Returns non-zero when the read fails
+# (pipefail), so a caller never counts an unread file as the same.
+folder_file_checksum() {
+  local sum
+  if [[ "$(id -u)" == 0 ]]; then
+    sum="$(set -o pipefail; smtp_read_file "$1" | sha256sum)" || return 1
+  else
+    sum="$(sha256sum < "$1")" || return 1
+  fi
+  printf '%s\n' "${sum%% *}"
+}
+
 smtp_read_file() {
-  dd if="$1" iflag=nofollow status=none
+  local status=0 reason
+  LC_ALL=C timeout -k "$owner_step_grace" "$owner_step_timeout" bash -c "$owner_read_script" owner-read "$1" "$owner_read_cap" "$owner_open_timeout" || status=$?
+  case "$status" in
+    0) return 0 ;;
+    3) reason="it is not a regular file" ;;
+    4) reason="it is too large (over 1 MiB)" ;;
+    5) reason="it changed while it was being opened" ;;
+    143) reason="opening it did not finish within $owner_open_timeout s (not a regular file)" ;;
+    124 | 137) reason="reading it timed out after $owner_step_timeout s and was stopped" ;;
+    *) return 1 ;;
+  esac
+  printf 'Orbit repair: %s: %s was not read: %s.\n' "$owner_action" "$1" "$reason" >&2 || true
+  return 1
 }
 
 # The step record's lines for step $1.
@@ -4907,14 +5675,14 @@ smtp_env_lines() {
 }
 
 # smtp_write_record <step>: the step record (step=, and copy= naming the undo
-# copy's folder when one is known), written to a name mktemp chooses (created
-# O_EXCL, mode 600) and renamed over the record, so no fixed name a planted
+# copy's folder when one is known), written to a name root chooses (created
+# by the owner O_EXCL, mode 600, #1873 X1) and renamed over the record, so no fixed name a planted
 # symlink could sit at is ever opened for writing (FIX-S1).
 smtp_write_record() {
   smtp_owner_write . "${smtp_retirement_record}.XXXXXX" 600 "$smtp_retirement_record" smtp_record_lines "$1"
 }
 
-# #1848 FR-S1b: the mktemp name that exists right now, for the EXIT trap
+# #1848 FR-S1b: the temporary name that exists right now, for the EXIT trap
 # (cleanup): the rewrite of .env-orbit, and one of the record or undo-copy
 # temporary files, which never exist at the same time.
 smtp_rewrite_tmp=""
@@ -4990,8 +5758,8 @@ smtp_find_orphan_copy() {
 }
 
 # smtp_write_copy <folder>: the undo copy of the lines the retirement removes
-# from .env-orbit, written as the owner to a mktemp name in <folder> (mode
-# 600) and renamed over <folder>/.env-orbit, so an existing copy (a hard
+# from .env-orbit, written as the owner to a name root chooses in <folder>
+# (created exclusively, mode 600, #1873 X1) and renamed over <folder>/.env-orbit, so an existing copy (a hard
 # link or a symlink included) is replaced, never written through (#1834,
 # #1848 FIX-S1).
 smtp_write_copy() {
@@ -5065,7 +5833,7 @@ smtp_backup_dir() {
 # nothing is checked here (smtp_backup_dir still refuses a foreign
 # orbit-install-backups).
 smtp_foreign_folder_refusal() {
-  local path owner_uid owner_name folder_name
+  local path
   local -a paths=()
   [[ "$(id -u)" == 0 ]] || return 0
   # Addendum 2 item 1: step 3 removes the secret as that user, which a
@@ -5082,27 +5850,39 @@ smtp_foreign_folder_refusal() {
   fi
   for path in "${paths[@]}"; do
     if [[ -L "$path" ]] || { [[ ! -d "$path" ]] && ! [[ "$path" == "$smtp_secret_file" && -f "$path" ]]; }; then continue; fi
-    owner_uid="$(stat -c %u -- "$path")" || owner_uid=""
-    [[ "$owner_uid" != "$smtp_writer_uid" ]] || continue
-    owner_name="$(stat -c %U -- "$path" 2>/dev/null)" || owner_name="uid $owner_uid"
-    folder_name="$(stat -c %U -- . 2>/dev/null)" || folder_name="uid $smtp_folder_uid"
-    if [[ "$path" == .orbit-secrets || "$path" == "$smtp_secret_file" ]]; then
-      # The secret is still in use until the retirement deletes it: never
-      # "remove it".
-      printf "%s belongs to another user (%s); give it to the deployment folder's owner (%s), then re-run repair" \
-        "$path" "$owner_name" "$folder_name"
-    else
-      printf "%s belongs to another user (%s); remove it if it is empty, or give it to the deployment folder's owner (%s), then re-run repair" \
-        "$path" "$owner_name" "$folder_name"
-    fi
-    return 0
+    foreign_owner_refusal "$path" && return 0
   done
 }
 
+# foreign_owner_refusal <path>: when <path> belongs to anyone but
+# $smtp_writer_uid, prints the refusal naming it and its owner and returns
+# 0; otherwise prints nothing and returns 1.
+foreign_owner_refusal() {
+  local path="$1" owner_uid owner_name folder_name
+  owner_uid="$(stat -c %u -- "$path")" || owner_uid=""
+  [[ "$owner_uid" != "$smtp_writer_uid" ]] || return 1
+  owner_name="$(stat -c %U -- "$path" 2>/dev/null)" || owner_name="uid $owner_uid"
+  folder_name="$(stat -c %U -- . 2>/dev/null)" || folder_name="uid $smtp_folder_uid"
+  if [[ "$path" == .orbit-secrets || "$path" == "$smtp_secret_file" ]]; then
+    # The secret is still in use until the retirement deletes it: never
+    # "remove it".
+    printf "%s belongs to another user (%s); give it to the deployment folder's owner (%s), then re-run repair" \
+      "$path" "$owner_name" "$folder_name"
+  else
+    printf "%s belongs to another user (%s); remove it if it is empty, or give it to the deployment folder's owner (%s), then re-run repair" \
+      "$path" "$owner_name" "$folder_name"
+  fi
+  return 0
+}
+
 # A checksum of .env-orbit's bytes, to see that nothing edited it between the
-# read and the rename.
+# read and the rename (#1887 R2/R3): its SHA-256 (folder_file_checksum), as
+# root through the bounded no-follow read (smtp_read_file), never CRC32,
+# which the folder's owner can forge. A failed read prints nothing and
+# returns non-zero, so it never matches an earlier sum: the first read
+# refuses, and a later one counts the file as changed.
 smtp_env_sum() {
-  cksum < "$environment_file"
+  folder_file_checksum "$environment_file"
 }
 
 # Step 1 of retire-smtp-lines, run under the lock do_retire_smtp_lines holds:
@@ -5227,28 +6007,15 @@ do_retire_smtp_lines() {
     refusal="$environment_file is missing"
   elif ! environment_file_ok_now; then
     refusal="$environment_file has changed or is not valid (owner-only KEY=value lines naming this project)"
-  elif ! smtp_owner_init; then
-    refusal="the deployment folder's owner could not be read"
-  elif [[ "$(id -u)" == 0 && "$smtp_folder_uid" != 0 ]] && ! command -v setpriv >/dev/null 2>&1; then
-    # #1848 FIX-S1: as root it writes only as the folder's owner.
-    refusal="run as root, it writes as the deployment folder's owner through setpriv (util-linux), which is not on PATH"
-  elif [[ "$(id -u)" == 0 && "$smtp_folder_uid" != 0 ]] && ! setsid --wait true </dev/null >/dev/null 2>&1; then
-    # #1848 FIX-S1 addendum 2 item 2: that child runs in a new session, and
-    # root waits for it (addendum 3 item 4: --wait is util-linux 2.31+).
-    refusal="run as root, it runs the deployment folder's owner's commands in a new session through setsid --wait (util-linux 2.31 or later), which is not on PATH or does not support --wait"
-  elif [[ "$(id -u)" == 0 && "$smtp_folder_uid" != 0 && -z "$smtp_owner_gid" ]]; then
-    # #1848 FIX-S1 addendum 2 item 3: the owner's own group, from the user
-    # database; addendum 3 item 3: no entry, no getent or a failed lookup.
-    refusal="run as root, it could not look up the deployment folder's owner (uid $smtp_folder_uid) in the user database (getent passwd)"
+  elif ! check_folder_owner; then
+    refusal="$owner_refusal"
   else
     refusal="$(smtp_foreign_folder_refusal)"
   fi
   if [[ -z "$refusal" ]]; then
     # #1848 FIX-S1 addendum: a missing backups folder or lock file is made
     # as the folder's owner.
-    lock_made_as_owner=1
-    acquire_backup_restore_lock
-    lock_made_as_owner=0
+    acquire_backup_restore_lock_as_owner
     refusal="$lock_refusal"
   fi
   if [[ -n "$refusal" ]]; then
@@ -5273,7 +6040,10 @@ do_retire_smtp_lines() {
 
   # 2. Start the stack on the rewritten file. Until it is up, the running
   # containers may still mount the secret, so it stays.
-  detail="$(set -o pipefail
+  detail="$(
+    # #1893: repair's own process holds the backup/restore lock; the compose child does not.
+    [[ -z "$held_lock_fd" ]] || exec {held_lock_fd}<&-
+    set -o pipefail
     trap '' INT TERM HUP
     timeout --signal=TERM --kill-after=10s "${docker_compose_up_timeout_seconds}s" \
       docker compose --project-name "$project" --env-file "$environment_file" up -d --no-build \
@@ -5439,11 +6209,15 @@ do_recreate_services() {
     refusal="the Compose file $compose_file is missing"
   elif ! secrets_all_ok_now; then
     refusal="a secret is missing or has the wrong permissions"
+  elif [[ "$(id -u)" == 0 ]] && ! check_folder_owner; then
+    # #1857 S1: as root, the lock is made as the folder's owner.
+    refusal="$owner_refusal"
   fi
 
   # #1823 O-R2: take the lock for the whole compose call; a run that starts
-  # meanwhile sees it held and refuses.
-  [[ -n "$refusal" ]] || { acquire_backup_restore_lock; refusal="$lock_refusal"; }
+  # meanwhile sees it held and refuses. #1857 S2: a missing backups folder or
+  # lock file is made as the deployment folder's owner.
+  [[ -n "$refusal" ]] || { acquire_backup_restore_lock_as_owner; refusal="$lock_refusal"; }
   if [[ -n "$refusal" ]]; then
     printf 'Orbit repair: recreate-services refused, nothing was changed: %s.\n' "$refusal" >&2
     return 1
@@ -5453,7 +6227,10 @@ do_recreate_services() {
     "$folder_old_path" >&2
   # #1804 point 4: Docker's words on a failure, bounded and control-free, as
   # start-services gives them; stdout stays enum-only.
-  detail="$(set -o pipefail
+  detail="$(
+    # #1893: repair's own process holds the backup/restore lock; the compose child does not.
+    [[ -z "$held_lock_fd" ]] || exec {held_lock_fd}<&-
+    set -o pipefail
     trap '' INT TERM HUP
     timeout --signal=TERM --kill-after=10s "$docker_recreate_timeout" \
       docker compose --project-name "$project" --env-file "$environment_file" \
@@ -5533,13 +6310,21 @@ do_start_services() {
     else
       refusal="there is no database container and no database volume, so starting Orbit would make a new, empty database; restore from a backup or run the installer"
     fi
+  elif [[ "$(id -u)" == 0 ]] && ! check_folder_owner; then
+    # #1857 S1: as root, the lock is made as the folder's owner.
+    refusal="$owner_refusal"
   fi
-  [[ -n "$refusal" ]] || { acquire_backup_restore_lock; refusal="$lock_refusal"; }
+  # #1857 S2: a missing backups folder or lock file is made as the
+  # deployment folder's owner.
+  [[ -n "$refusal" ]] || { acquire_backup_restore_lock_as_owner; refusal="$lock_refusal"; }
   if [[ -n "$refusal" ]]; then
     printf 'Orbit repair: start-services refused, nothing was changed: %s.\n' "$refusal" >&2
     return 1
   fi
-  detail="$(set -o pipefail
+  detail="$(
+    # #1893: repair's own process holds the backup/restore lock; the compose child does not.
+    [[ -z "$held_lock_fd" ]] || exec {held_lock_fd}<&-
+    set -o pipefail
     trap '' INT TERM HUP
     timeout --signal=TERM --kill-after=10s "${docker_compose_up_timeout_seconds}s" \
       docker compose --project-name "$project" --env-file "$environment_file" up -d --no-build --no-recreate \
@@ -5643,27 +6428,56 @@ resolve_rotate_db_identity() {
 # reused unmodified) inside a one-off orbit-app container, exactly like
 # export-recovery-bundle.sh does for the document KEK — see "Passphrase —
 # the checkpoint" above for the full rationale, including why the passphrase
-# only ever travels over this child's stdin.
+# only ever travels over this child's stdin. The bundle goes to stdout, for
+# the deployment folder's owner to write (smtp_owner_write, #1872 V3).
 checkpoint_encrypt_postgres_password() {
-  local out_path="$1"
   printf '%s' "$checkpoint_passphrase" | timeout "$docker_checkpoint_timeout" \
     docker compose --project-name "$project" --env-file "$environment_file" \
     run --rm --no-deps -T --entrypoint node orbit-app \
     /opt/orbit/scripts/recovery-crypto.mjs encrypt /run/secrets/orbit-postgres-password \
-    > "$out_path" 2>/dev/null
+    2>/dev/null
 }
 
 # Mirrors import-recovery-bundle.sh's own bind-mount-and-decrypt pattern.
 # Prints the recovered 64-hex-character value on stdout (the caller alone is
-# responsible for never printing it onward) or nothing on failure.
+# responsible for never printing it onward) or nothing on failure. $1 is
+# the mount's source: the bundle itself, or as root its private copy
+# (checkpoint_private_copy, #1875 W4).
 checkpoint_decrypt_verify() {
-  local bundle_path="$1"
+  local mount_source="$1"
   printf '%s' "$checkpoint_passphrase" | timeout "$docker_checkpoint_timeout" \
     docker compose --project-name "$project" --env-file "$environment_file" \
     run --rm --no-deps -T \
-    --volume "$repo_dir/$bundle_path:/recovery/postgres-password.enc:ro" \
+    --volume "$mount_source:/recovery/postgres-password.enc:ro" \
     --entrypoint node orbit-app \
     /opt/orbit/scripts/recovery-crypto.mjs decrypt /recovery/postgres-password.enc 2>/dev/null
+}
+
+# #1875 W4: as root, the decrypt check never mounts a path in the
+# deployment folder, which its owner controls: root reads the bundle through
+# the bounded read (smtp_read_file: no link followed, regular file only,
+# 1 MiB, time limit) into a new mktemp file (mode 600) of its own outside
+# the folder (copy to a trusted location, then use), and that copy is
+# mounted read-only. Its name is in $checkpoint_bundle_copy until it is
+# removed, whatever the check's result (the EXIT trap removes it too).
+# Returns 1, with no copy left, when the read fails: the check then cannot
+# be made, which is never a pass.
+checkpoint_bundle_copy=""
+checkpoint_private_copy() {
+  checkpoint_bundle_copy="$(mktemp "${TMPDIR:-/tmp}/orbit-repair-checkpoint-bundle.XXXXXX")" || {
+    checkpoint_bundle_copy=""
+    return 1
+  }
+  if ! smtp_read_file "$1" > "$checkpoint_bundle_copy" ||
+    [[ ! -s "$checkpoint_bundle_copy" ]]; then
+    discard_checkpoint_copy
+    return 1
+  fi
+}
+
+discard_checkpoint_copy() {
+  [[ -z "$checkpoint_bundle_copy" ]] || rm -f -- "$checkpoint_bundle_copy"
+  checkpoint_bundle_copy=""
 }
 
 validate_checkpoint_passphrase() {
@@ -5814,36 +6628,49 @@ do_checkpoint_step() {
     return 1
   fi
 
-  checkpoint_dir="$(mktemp -d "./.orbit-repair-checkpoint.XXXXXX")" || {
+  # #1872 V3: the folder (mode 700) and the bundle in it (mode 600, by
+  # rename from a root-chosen name beside it that the owner creates
+  # exclusively, #1873 X1) are made by the deployment
+  # folder's owner; root only produces the bundle's bytes.
+  owner_private_dir checkpoint_dir ./.orbit-repair-checkpoint. || {
+    # #1872 V10: a folder its timed-out owner step made and could not
+    # remove is settled (named, kept) like any checkpoint of this run.
+    [[ -z "$checkpoint_dir" ]] || run_checkpoint_dirs+=("$checkpoint_dir")
     checkpoint_passphrase=""
     original_hex=""
     return 1
   }
   run_checkpoint_dirs+=("$checkpoint_dir")
-  chmod 700 -- "$checkpoint_dir" || {
-    checkpoint_passphrase=""
-    original_hex=""
-    rm -rf -- "$checkpoint_dir"
-    return 1
-  }
 
   bundle_path="$checkpoint_dir/postgres-password.orbkek"
-  if ! checkpoint_encrypt_postgres_password "$bundle_path" || [[ ! -s "$bundle_path" ]]; then
+  if ! smtp_owner_write "$checkpoint_dir" "postgres-password.orbkek.XXXXXX" 600 "$bundle_path" \
+    checkpoint_encrypt_postgres_password || [[ ! -s "$bundle_path" ]]; then
     printf 'Orbit repair: could not create the pre-rotation checkpoint; refusing to rotate the database credential.\n' >&2
     checkpoint_passphrase=""
     original_hex=""
-    rm -rf -- "$checkpoint_dir"
+    as_folder_owner rm -rf -- "$checkpoint_dir" || true
     return 1
   fi
-  chmod 600 -- "$bundle_path" 2>/dev/null || true
 
-  recovered_hex="$(checkpoint_decrypt_verify "$bundle_path")" || verify_status=$?
+  if [[ "$(id -u)" == 0 ]]; then
+    if ! checkpoint_private_copy "$bundle_path"; then
+      printf 'Orbit repair: cannot check the pre-rotation checkpoint %s: it could not be read as a regular file, so it is not trusted; refusing to rotate the database credential.\n' "$bundle_path" >&2
+      checkpoint_passphrase=""
+      original_hex=""
+      as_folder_owner rm -rf -- "$checkpoint_dir" || true
+      return 1
+    fi
+    recovered_hex="$(checkpoint_decrypt_verify "$checkpoint_bundle_copy")" || verify_status=$?
+    discard_checkpoint_copy
+  else
+    recovered_hex="$(checkpoint_decrypt_verify "$repo_dir/$bundle_path")" || verify_status=$?
+  fi
   if [[ "$verify_status" != 0 || "$recovered_hex" != "$original_hex" ]]; then
     printf 'Orbit repair: the pre-rotation checkpoint failed verification; refusing to rotate the database credential.\n' >&2
     checkpoint_passphrase=""
     original_hex=""
     recovered_hex=""
-    rm -rf -- "$checkpoint_dir"
+    as_folder_owner rm -rf -- "$checkpoint_dir" || true
     return 1
   fi
 
@@ -5857,8 +6684,8 @@ do_checkpoint_step() {
 }
 
 # Step 2. Generates a fresh credential, stages it to the FIXED
-# $staged_postgres_password_path, by rename from a mktemp name in the same
-# folder, BEFORE touching the database (see "Step
+# $staged_postgres_password_path, by rename from a root-chosen name in the
+# same folder that the owner creates exclusively (#1873 X1), BEFORE touching the database (see "Step
 # iterator" above for why), then rotates the database role over a
 # local-socket (trust-auth) connection so no prior knowledge of the
 # database's current password is ever required.
@@ -5868,13 +6695,15 @@ do_rotate_credential_step() {
   is_real_non_symlink_directory "$secrets_directory" || return 1
   has_mode "$secrets_directory" 700 || return 1
 
-  local new_password="" status=0 staged_tmp=""
+  local new_password="" status=0
   new_password="$(generate_hex_secret)" || return 1
-  staged_tmp="$(mktemp "$secrets_directory/.installing.XXXXXX")" || { new_password=""; return 1; }
-  if ! printf '%s\n' "$new_password" > "$staged_tmp" || ! chmod 600 -- "$staged_tmp" ||
-    ! mv -f -- "$staged_tmp" "$staged_postgres_password_path"; then
+  # #1872 V4: the deployment folder's owner creates the root-chosen file
+  # exclusively (#1873 X1), writes the
+  # password it reads on stdin (printf is a builtin: on no command line),
+  # sets mode 600 and renames it onto the staged name (smtp_owner_write).
+  if ! smtp_owner_write . "$secrets_directory/.installing.XXXXXX" 600 "$staged_postgres_password_path" \
+    printf '%s\n' "$new_password"; then
     new_password=""
-    rm -f -- "$staged_tmp"
     return 1
   fi
 
@@ -5896,12 +6725,16 @@ do_update_config_step() {
   [[ -f "$staged_postgres_password_path" && ! -L "$staged_postgres_password_path" ]] || return 1
   is_real_non_symlink_directory "$secrets_directory" || return 1
   has_mode "$secrets_directory" 700 || return 1
-  mv -- "$staged_postgres_password_path" "$secrets_directory/postgres-password"
+  # #1875 W1: as root in a folder another user owns, the rename is that
+  # owner's (as_folder_owner, under the #1858 limits; the owner check ran
+  # before the rotation), with -T so a folder planted at the name is never
+  # renamed into. On failure the staged file stays for the guidance line.
+  as_folder_owner mv -T -- "$staged_postgres_password_path" "$secrets_directory/postgres-password"
 }
 
 # Step 4 of the rotation, and the reason it is not do_restart_services itself.
 #
-# update-config lands the new secret with `mktemp` + `mv` (:3113), which is
+# update-config lands the new secret with a rename of a newly made file, which is
 # what makes a half-written secret impossible -- and which necessarily gives
 # the path a NEW inode. A Compose `file:` secret is a bind mount of an inode,
 # not of a path, so any container that keeps running across that rename holds
@@ -5971,6 +6804,13 @@ run_dangerous_step() {
 run_rotate_database_credential_steps() {
   local step
   dangerous_failure_reason=none
+  # #1858 T5, #1872 V1/V4: the action an owner step's line names; as root,
+  # the owner check before the passphrase prompt and any write.
+  owner_action=rotate-database-credential
+  if ! refuse_unless_owner_writes rotate-database-credential "$secrets_directory"; then
+    dangerous_failure_reason="checkpoint-failed"
+    return 1
+  fi
   for step in "${rotate_database_credential_steps[@]}"; do
     if ! run_dangerous_step "$step"; then
       if [[ "$step" == checkpoint ]]; then
@@ -6027,8 +6867,9 @@ run_rotate_database_credential_steps() {
 #
 # The write itself mirrors configure.sh's ensure_secret_file discipline
 # (scripts/configure.sh:777-802) exactly, not a different one invented here:
-# staged under the secrets directory via mktemp (which creates the file at
-# mode 600 atomically, before any content is written), content written,
+# staged under the secrets directory at a name repair chooses, which the
+# deployment folder's owner creates exclusively (dd conv=excl under umask
+# 077: mode 600 atomically, before any content is written; #1873 X1), content written,
 # mode 600 set again defensively, then an atomic same-directory rename onto
 # the live secret path. No checkpoint step: the finding only ever fires when
 # the secret file is absent/empty, so there is no valid prior content to
@@ -6036,7 +6877,7 @@ run_rotate_database_credential_steps() {
 do_regenerate_secret_step() {
   local target="$1"
   local path="$secrets_directory/$target"
-  local new_secret="" tmp_path=""
+  local new_secret=""
 
   is_real_non_symlink_directory "$secrets_directory" || return 1
   has_mode "$secrets_directory" 700 || return 1
@@ -6045,22 +6886,14 @@ do_regenerate_secret_step() {
   fi
 
   new_secret="$(generate_hex_secret)" || return 1
-  tmp_path="$(mktemp "$secrets_directory/.installing.XXXXXX")" || {
+  # #1872 V4: made, written from stdin (printf is a builtin: the secret is
+  # on no command line), set to mode 600 and renamed into place by the
+  # deployment folder's owner (smtp_owner_write); nothing is left on failure.
+  smtp_owner_write . "$secrets_directory/.installing.XXXXXX" 600 "$path" printf '%s\n' "$new_secret" || {
     new_secret=""
-    return 1
-  }
-  printf '%s\n' "$new_secret" > "$tmp_path" || {
-    new_secret=""
-    rm -f -- "$tmp_path"
-    return 1
-  }
-  chmod 600 -- "$tmp_path" || {
-    new_secret=""
-    rm -f -- "$tmp_path"
     return 1
   }
   new_secret=""
-  mv -- "$tmp_path" "$path"
 }
 
 # O-F1/O-F4 (#1670): the manual restart guidance names the same command
@@ -6088,7 +6921,7 @@ print_manual_restart_commands() {
 # decision 8: "the iterator... stops at the first failed step; nothing
 # later runs"). No checkpoint bundle to name in failure guidance here —
 # unlike rotate-credential, a failed regenerate step has written nothing
-# (mktemp + rename is all-or-nothing), so there is no half-applied state to
+# (exclusive create + rename is all-or-nothing), so there is no half-applied state to
 # recover, only a target that still needs a secret.
 #
 # SS1-S5: a freshly minted secret only reaches the running orbit-app
@@ -6115,6 +6948,11 @@ print_manual_restart_commands() {
 run_regenerate_secret_steps() {
   local target written=""
   dangerous_failure_reason=none
+  owner_action=regenerate-secret
+  if ! refuse_unless_owner_writes regenerate-secret "$secrets_directory"; then
+    dangerous_failure_reason="step-failed"
+    return 1
+  fi
   for target in "$@"; do
     if ! do_regenerate_secret_step "$target"; then
       dangerous_failure_reason="step-failed"
@@ -6291,6 +7129,7 @@ execute_dangerous_batch() {
     dangerous_exit_code=6
     return 0
   fi
+  remove_leftover_discards
 
   # Approved. rotate-database-credential's own entries always share one
   # execution instance and outcome (mirrors do_restart_services's own
@@ -6386,6 +7225,8 @@ run_safe_batch() {
     fi
     printf 'execution result=%s done=0 failed=0\n' "$terminal_result"
     safe_batch_exit_code=0
+    # #1876: nothing to confirm here; a dangerous batch clears after its own.
+    [[ "$dangerous" == 1 ]] || remove_leftover_discards
     return 0
   fi
 
@@ -6401,6 +7242,7 @@ run_safe_batch() {
     safe_batch_exit_code=1
     return 0
   fi
+  remove_leftover_discards
 
   for entry in "${plan_entries[@]:-}"; do
     [[ -n "$entry" ]] || continue
@@ -6413,6 +7255,8 @@ run_safe_batch() {
     fi
 
     status=0
+    # #1858 T5: the action an owner step's failure line names.
+    owner_action="$action"
     case "$action" in
       fix-permissions) do_fix_permissions "$fclass" "$ftarget" || status=$? ;;
       restore-compose-file) do_restore_compose_file || status=$? ;;
@@ -6477,11 +7321,18 @@ run_safe_batch() {
 # the operator.
 settle_credential_checkpoints() {
   local clean="$1" reason="${2:-}" dir
+  # #1875 W2: as root the removal is the deployment folder's owner's
+  # (as_folder_owner, under the #1858 limits); the owner globals are read
+  # here when no action read them. A refused, failed or timed-out removal
+  # keeps the folder and names it below.
+  if [[ "$(id -u)" == 0 && -z "$smtp_folder_uid" ]]; then
+    check_folder_owner || true
+  fi
   for dir in "${run_checkpoint_dirs[@]:-}"; do
     [[ -n "$dir" ]] || continue
     [[ -e "$dir" || -L "$dir" ]] || continue
     if [[ "$clean" == 1 ]] && is_real_non_symlink_directory "$dir" && is_removable_checkpoint_dir "$dir"; then
-      if rm -rf -- "$dir"; then
+      if as_folder_owner rm -rf -- "$dir"; then
         printf 'Orbit repair: the re-check is clean, so the pre-rotation credential checkpoint %s (the old database password) was removed.\n' "$dir" >&2
         continue
       fi
@@ -6511,7 +7362,7 @@ snapshot_run_checkpoints() {
 }
 
 # True when $1 can be read and holds nothing but the checkpoint bundle (a
-# regular file), or nothing at all (a run killed between mktemp and the
+# regular file), or nothing at all (a run killed between mkdir and the
 # bundle write). An unreadable folder cannot be listed, so it is never judged
 # removable.
 is_removable_checkpoint_dir() {
@@ -6525,12 +7376,44 @@ is_removable_checkpoint_dir() {
   return 0
 }
 
+# #1876: removes each `.orbit-repair-discard.*` an earlier run left when it
+# was stopped between discard_staging_root's rename and the end of its
+# removal. Runs at most once per --execute, under the run lock, after the
+# version gate: once a batch is confirmed, before any action, or at once on
+# an empty or manual-only plan, which has nothing to confirm. A declined or
+# refused run, and --check and --plan, never call it (guarantees 33 and 56).
+# It never reads what is inside. Only a real folder is removed, as
+# the folder owner (#1872), and rm -rf does not follow a symlink inside it;
+# anything else under that name is named and left for the operator.
+discards_cleared=0
+remove_leftover_discards() {
+  local dir
+  local -a dirs=()
+  [[ "$discards_cleared" == 0 ]] || return 0
+  discards_cleared=1
+  for dir in ./.orbit-repair-discard.*; do
+    [[ -e "$dir" || -L "$dir" ]] || continue
+    dirs+=("$dir")
+  done
+  [[ ${#dirs[@]} -gt 0 ]] || return 0
+  refuse_unless_owner_writes discard-cleanup || return 0
+  for dir in "${dirs[@]}"; do
+    if is_real_non_symlink_directory "$dir" && as_folder_owner rm -rf -- "$dir"; then
+      printf 'Orbit repair: removed %s, which an earlier repair run left part removed.\n' "$dir" >&2
+      continue
+    fi
+    printf 'Orbit repair: %s was kept: it is not a folder repair made, or could not be removed; check it and delete it yourself.\n' "$dir" >&2
+  done
+}
+
 # #1849: one --execute run per deployment folder. Takes an exclusive,
 # non-blocking flock on a read-only descriptor of the folder itself (no lock
 # file, so nothing to plant or leave behind) and keeps it open, not
 # in a subshell, until the process exits (the descriptor is never closed). Held: refuses with exit 6 and
 # changes nothing. No flock, or one that cannot lock the folder: says so on
-# stderr and carries on without the lock.
+# stderr and carries on without the lock. A taken lock's descriptor is left
+# in $repair_run_lock_fd for the lock holder (#1893).
+repair_run_lock_fd=""
 acquire_repair_run_lock() {
   local fd status=0 words
   if ! command -v flock >/dev/null 2>&1; then
@@ -6543,7 +7426,10 @@ acquire_repair_run_lock() {
   fi
   words="$(flock -n -x "$fd" 2>&1 >/dev/null)" || status=$?
   # Taken: $fd stays open (never closed) until the process exits.
-  [[ "$status" == 0 ]] && return 0
+  if [[ "$status" == 0 ]]; then
+    repair_run_lock_fd="$fd"
+    return 0
+  fi
   exec {fd}<&-
   if [[ "$status" == 1 && -z "$words" ]]; then
     printf 'execution result=refused done=0 failed=0 reason=repair-running\n'
@@ -6559,15 +7445,83 @@ acquire_repair_run_lock() {
   return 0
 }
 
+# #1893 (design note 63866): the lock holder, the `flock -o cmd` shape with a
+# signal-forwarding supervisor and a parent-death signal (the init/tini
+# shape). It holds the #1849 folder lock taken on $repair_run_lock_fd, does
+# no work and runs no $(...), and starts the run itself again as its worker
+# with the descriptor closed, so only the holder ever holds the lock: when the
+# holder dies, the folder is free at once. The worker (stdin kept, marked by
+# ORBIT_REPAIR_RUN_LOCK_HELD) dies with the holder: setpriv --pdeathsig
+# (util-linux 2.33+) sends it TERM when the holder dies, even of KILL; without
+# it only INT, TERM and HUP are passed on, and a KILLed holder's worker runs
+# all its remaining steps with the lock free. The holder exits with the
+# worker's status, or dies of the signal the worker died of (of INT, when INT
+# ended the run), so the exit code and stdout are the worker's. Never returns.
+#
+# INT reaches the worker as TERM: a bash that receives INT while it waits for
+# a foreground child (the compose $(...) subshells ignore INT) acts on it only
+# once that child ends, so an INT would leave the run going for as long as the
+# docker call takes. TERM ends it at once, as it did before the holder.
+hold_lock_and_run_worker() {
+  local worker_pid status rewait holder_signal=""
+  # The subshell resets INT, which bash ignores in a background job (so a
+  # Ctrl-C to the whole process group still reaches the worker), and execs
+  # the worker; it never holds the lock.
+  if command -v setpriv >/dev/null 2>&1 &&
+    setpriv --pdeathsig=TERM -- true {repair_run_lock_fd}<&- </dev/null >/dev/null 2>&1; then
+    (
+      trap - INT
+      ORBIT_REPAIR_RUN_LOCK_HELD="$$" exec setpriv --pdeathsig=TERM -- "$BASH" "$repair_script_path" "$@"
+    ) {repair_run_lock_fd}<&- <&0 &
+  else
+    (
+      trap - INT
+      ORBIT_REPAIR_RUN_LOCK_HELD="$$" exec "$BASH" "$repair_script_path" "$@"
+    ) {repair_run_lock_fd}<&- <&0 &
+  fi
+  worker_pid=$!
+  trap 'holder_signal=INT; kill -TERM "$worker_pid" 2>/dev/null || true' INT
+  trap 'kill -TERM "$worker_pid" 2>/dev/null || true' TERM
+  trap 'kill -HUP "$worker_pid" 2>/dev/null || true' HUP
+  for (( ; ; )); do
+    status=0
+    wait "$worker_pid" || status=$?
+    if ((status > 128)); then
+      # A trapped signal ends the wait early while the worker lives on: wait again.
+      kill -0 "$worker_pid" 2>/dev/null && continue
+      # The worker ended meanwhile: its saved status, not the signal's.
+      rewait=0
+      wait "$worker_pid" || rewait=$?
+      ((rewait == 127)) || status="$rewait"
+    fi
+    break
+  done
+  # A worker that died of a signal: the holder dies of the same one (of INT,
+  # when INT ended the run), so the caller sees what it saw before (#1893
+  # note 63872). The holder has nothing of its own to clean up.
+  if [[ -n "$holder_signal" ]] || ((status > 128)); then
+    [[ -n "$holder_signal" ]] || holder_signal="$((status - 128))"
+    trap - EXIT "$holder_signal" 2>/dev/null || true
+    kill -s "$holder_signal" "$$" 2>/dev/null || true
+  fi
+  exit "$status"
+}
+
 execute_repair() {
   local entry action fclass ftarget
 
   recovery_dir=""
+  owner_recovery_dir=""
   service_restart_result=()
   checkpoint_bundle_path=""
   safe_batch_exit_code=0
   dangerous_exit_code=0
-  acquire_repair_run_lock
+  # #1893: the worker runs under its holder's lock; a run that took the lock
+  # becomes its holder. With no lock taken, the run carries on as itself.
+  if [[ -z "$repair_run_lock_held" || "$repair_run_lock_held" != "$PPID" ]]; then
+    acquire_repair_run_lock
+    [[ -z "$repair_run_lock_fd" ]] || hold_lock_and_run_worker "$@"
+  fi
   snapshot_run_checkpoints
 
   run_diagnosis
@@ -6724,29 +7678,33 @@ confirm_export_diagnostics() {
 
 # Writes $1 (the already-previewed, already-confirmed export content) to a
 # freshly created file, mirroring the checkpoint bundle's own discipline:
-# mktemp (mode 600 from creation) under the installation directory, content
+# a name repair chooses under the installation directory, created
+# exclusively by the owner (mode 600 from creation; #1873 X1), content
 # written, mode 600 set again defensively, then an atomic same-directory
-# rename onto a second, equally random final name — so a reader can never
+# rename onto that name plus `.txt` — so a reader can never
 # observe a partially-written file at the path this run ultimately reports.
 # Returns 0 and prints the final path on stderr only (never stdout, matching
 # the checkpoint bundle path above) on success; returns 1, with any partial
 # temp file removed, on any failure.
+#
+# #1872 V5: the file is made, written (from stdin), set to mode 600 and
+# renamed by the deployment folder's owner (smtp_owner_write,
+# as_folder_owner); as root, after the owner check.
 write_export_diagnostics() {
   local content="$1" tmp_path="" final_path=""
 
-  tmp_path="$(mktemp "./.orbit-repair-diagnostics.XXXXXX")" || return 1
-  chmod 600 -- "$tmp_path" 2>/dev/null || true
-  if ! printf '%s\n' "$content" > "$tmp_path" 2>/dev/null; then
-    rm -f -- "$tmp_path"
-    return 1
-  fi
-  chmod 600 -- "$tmp_path" 2>/dev/null || true
+  owner_action=export-diagnostics
+  refuse_unless_owner_writes export-diagnostics || return 1
+  smtp_owner_write . ".orbit-repair-diagnostics.XXXXXX" 600 "" printf '%s\n' "$content" || return 1
+  tmp_path="$smtp_step_tmp"
 
   final_path="${tmp_path}.txt"
-  if ! mv -- "$tmp_path" "$final_path" 2>/dev/null; then
-    rm -f -- "$tmp_path"
+  if ! as_folder_owner mv -T -- "$tmp_path" "$final_path"; then
+    as_folder_owner rm -f -- "$tmp_path" || true
+    smtp_step_tmp=""
     return 1
   fi
+  smtp_step_tmp=""
 
   printf 'Orbit repair: diagnostics exported to %s\n' "$final_path" >&2
   printf 'Orbit repair: (plain text, mode 600 — no encryption; these are public values under ADR-0008.)\n' >&2
@@ -6781,7 +7739,7 @@ export_diagnostics_repair() {
 
 case "$mode" in
   execute)
-    execute_repair
+    execute_repair "$@"
     ;;
   export-diagnostics)
     export_diagnostics_repair

@@ -153,7 +153,14 @@ require_deployment() {
 # key back, or puts back "no key" (#1420).
 # shellcheck disable=SC2317  # import-recovery-bundle.sh carries it unused
 require_live_key() {
+  refuse_dangling_key
   [[ -f "$secrets_directory/document-kek" && ! -L "$secrets_directory/document-kek" ]] || fail 'preflight/key failed; the configured document key is missing.'
+}
+
+# A dangling document-key link is neither a key nor its absence: name the link and how to put
+# the key back, never only "the key is missing" (#1536 O-F2, X-F3; #1603 O-S1, ops-2).
+refuse_dangling_key() {
+  [[ ! -L "$secrets_directory/document-kek" || -e "$secrets_directory/document-kek" ]] || fail 'preflight/key failed; .orbit-secrets/document-kek is a link to a file that does not exist, so the key file is missing. Remove the link and restore the document key from your kept copy of the secrets directory: rm .orbit-secrets/document-kek && install -m 0400 /path/to/your/copy/document-kek .orbit-secrets/document-kek, then run again.'
 }
 
 # Who owns what the engine writes (#1210 D5, #1258). The one-off runs as the
@@ -316,7 +323,7 @@ require_deployment health
 # A dangling document-key link is neither a key nor its absence: refuse it before Orbit is
 # touched, naming the link and what to do (#1536 O-F2, X-F3). It goes before the generic key
 # check, which follows the link and would only say the key is missing.
-[[ ! -L "$secrets_directory/document-kek" || -e "$secrets_directory/document-kek" ]] || fail 'preflight/key failed; .orbit-secrets/document-kek is a link to a file that does not exist. Remove the link and run again.'
+refuse_dangling_key
 [[ "$recover" == true ]] || require_live_key
 engine_host_identity
 [[ "$recover" == true ]] || run_engine "$backup_file" restore --preflight /orbit-input/bundle.tar </dev/null || exit $?
@@ -341,7 +348,7 @@ restart_app() {
 trap restart_app EXIT
 marked="$(marker_names)"
 [[ -n "$marked" || ! ( -e "$marker_path" || -L "$marker_path" ) ]] || fail 'checkpoint/marker failed; .orbit-restore-pending in this folder is not a readable restore marker, so Orbit was not stopped. Check it, and remove it only if no restore is unfinished.'
-[[ -z "$marked" || "$marked" == "$journal_path" ]] || { [[ ! -e "$marked" && ! -L "$marked" ]] || { marked_dir="${marked%/.orbit-restore/restore.journal}"; marked_hint="Set ORBIT_BACKUP_DIR to the backups folder that holds it and run bash scripts/restore.sh --recover"; [[ -z "$marked_dir" || "$marked_dir" == "$marked" ]] || marked_hint="Run ORBIT_BACKUP_DIR=$(printf '%q' "$marked_dir") bash scripts/restore.sh --recover"; fail "checkpoint/marker failed; an earlier restore is unfinished (its journal is $marked), so Orbit was not stopped. $marked_hint."; }; rm -f -- "$marker_path"; }
+[[ -z "$marked" || "$marked" == "$journal_path" ]] || { [[ ! -e "$marked" && ! -L "$marked" ]] || { marked_dir="${marked%/.orbit-restore/restore.journal}"; marked_hint="Set ORBIT_BACKUP_DIR to the backups folder that holds it and run bash scripts/restore.sh --recover"; [[ -z "$marked_dir" || "$marked_dir" == "$marked" ]] || marked_hint="Run ORBIT_BACKUP_DIR=$(printf '%q' "$marked_dir") bash scripts/restore.sh --recover"; fail "checkpoint/marker failed; an earlier restore is unfinished (its journal is $marked), so Orbit was not stopped. $marked_hint"; }; rm -f -- "$marker_path"; }
 [[ -e "$marker_path" ]] || { { marker_temporary="$(mktemp "$marker_path.XXXXXX")" && chmod "$(printf '%o' "$((0666 & ~0$(umask)))")" "$marker_temporary" && printf '%s\n' "$journal_path" >"$marker_temporary" && sync -- "$marker_temporary" && ln -- "$marker_temporary" "$marker_path"; } 2>/dev/null && marker_written=0 || marker_written=$?; rm -f -- "${marker_temporary:-}" 2>/dev/null || true; ((marker_written == 0)) || fail 'checkpoint/marker failed; could not write the restore marker, so Orbit was not stopped.'; marker_new=true; }
 compose stop orbit-app >/dev/null 2>&1 || fail 'checkpoint/stop failed; Orbit was not stopped for a consistent recovery point.'
 app_stopped=true

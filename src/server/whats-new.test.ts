@@ -77,14 +77,15 @@ describe("recordNewAccountSeenVersion", () => {
   });
 
   it("uses the executor it is given (the account creation's transaction) rather than the database", async () => {
-    const { writes } = fakeDb([]);
     const own = fakeDb([]);
-    mocks.getDb.mockClear();
+    // Built last, so getDb() answers with this one: a write that ignored the
+    // given executor would land here, not on `own`.
+    const database = fakeDb([]);
     const { recordNewAccountSeenVersion } = await import("@/server/whats-new");
     // @ts-expect-error the recording fake stands in for a transaction
     await recordNewAccountSeenVersion("u2", "v1.0.0", own.executor);
     expect(own.writes.inserts).toHaveLength(1);
-    expect(writes.inserts).toHaveLength(0);
+    expect(database.writes.inserts).toHaveLength(0);
   });
 });
 

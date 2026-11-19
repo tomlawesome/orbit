@@ -1,3 +1,4 @@
+import { PgDialect } from "drizzle-orm/pg-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /*
@@ -32,6 +33,7 @@ const session = { id: "s-1", token: "tok-1", user: { id: "user-1" } };
 function stubDatabase() {
   let stored = { themeId: "afterdark", textSize: "comfortable", emailNotifications: false, pushNotifications: false, labelDays: 30, skyDriver: "due", planetSize: "cost", importanceOfferDismissed: false };
   const cancelled = vi.fn();
+  const dialect = new PgDialect();
   const db = {
     transaction: async (/** @type {(tx: any) => Promise<void>} */ run) => run(db),
     insert: () => ({
@@ -41,7 +43,7 @@ function stubDatabase() {
         },
       }),
     }),
-    update: () => ({ set: (/** @type {unknown} */ values) => ({ where: async () => { cancelled(values); } }) }),
+    update: () => ({ set: (/** @type {unknown} */ values) => ({ where: async (/** @type {any} */ condition) => { cancelled(values, dialect.sqlToQuery(condition)); } }) }),
     select: () => ({ from: () => ({ where: () => ({ limit: async () => [stored] }) }) }),
   };
   mocks.getDb.mockReturnValue(db);
@@ -85,9 +87,30 @@ describe("PUT /api/preferences leaves channels the body does not carry", () => {
     expect(current().pushNotifications).toBe(false);
   });
 
-  it("a body that carries a channel as false cancels that channel's pending deliveries", async () => {
+  it("a body that carries a channel as false cancels that channel's pending deliveries, and only that channel's", async () => {
     const { cancelled } = stubDatabase();
     await put({ theme: "dawn", textSize: "comfortable", pushNotifications: false });
     expect(cancelled).toHaveBeenCalledTimes(1);
+    const [values, query] = cancelled.mock.calls[0];
+    expect(values).toMatchObject({ status: "cancelled" });
+    expect(query.params).toContain("web_push");
+    expect(query.params).not.toContain("email");
+    expect(query.params).toEqual(expect.arrayContaining(["user-1", "pending", "retry"]));
+  });
+
+  it("a body that carries email as false cancels email only, not push", async () => {
+    const { cancelled } = stubDatabase();
+    await put({ theme: "dawn", textSize: "comfortable", emailNotifications: false });
+    expect(cancelled).toHaveBeenCalledTimes(1);
+    const [, query] = cancelled.mock.calls[0];
+    expect(query.params).toContain("email");
+    expect(query.params).not.toContain("web_push");
+  });
+
+  it("a body that carries both channels as false cancels both", async () => {
+    const { cancelled } = stubDatabase();
+    await put({ theme: "dawn", textSize: "comfortable", emailNotifications: false, pushNotifications: false });
+    expect(cancelled).toHaveBeenCalledTimes(1);
+    expect(cancelled.mock.calls[0][1].params).toEqual(expect.arrayContaining(["email", "web_push"]));
   });
 });

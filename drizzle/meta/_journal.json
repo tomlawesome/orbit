@@ -141,6 +141,27 @@
       "when": 1794899362770,
       "tag": "0019_sign_in_approval_sends",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1794943350149,
+      "tag": "0020_document_bound_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1794954007889,
+      "tag": "0021_password_change_required",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1795036225732,
+      "tag": "0022_staged_token_hash",
+      "breakpoints": true
     }
   ]
 }

@@ -123,3 +123,38 @@ export function renderSetupMail(context: SetupMailContext): SetupMail {
     text,
   });
 }
+
+export interface AddressChangedMailContext {
+  /** The recipient's chosen display name; only its first word is used. */
+  displayName: string;
+  /** The instance's own `APP_URL`, for the host line; unreadable leaves it out. */
+  appUrl?: string;
+}
+
+/**
+ * The notice to the OLD address when an administrator changes the account's
+ * address (#1869). It says that it happened and whom to tell; it never names
+ * the new address, so a mailbox that is no longer the member's learns nothing
+ * about where the account went.
+ */
+export function renderAddressChangedMail(context: AddressChangedMailContext): SetupMail {
+  const given = firstName(context.displayName);
+  const host = hostOf(context.appUrl ?? "");
+  const where = host ? ` at ${host}` : "";
+  const subject = "Your Orbit email address was changed";
+  const lines = [
+    `An administrator has changed the email address on your Orbit account${where}.`,
+    "This address will no longer be used for the account.",
+  ];
+  const unexpected = "Not expecting this? Tell your administrator.";
+
+  const text = [`Hello ${given},`, "", ...lines, "", unexpected, "", householdLine(host), ""].join("\n");
+  return renderMail({
+    subject,
+    preheader: "An administrator changed the address on your account.",
+    headline: subject,
+    body: [`Hello ${given},`, ...lines],
+    footer: [unexpected, householdLine(host)],
+    text,
+  });
+}

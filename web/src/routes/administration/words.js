@@ -60,6 +60,18 @@ export function setupWords(error) {
 }
 
 /**
+ * A refused address change (#1869) in its own words: nothing is created by
+ * one, so a wrong password says the address was not changed.
+ * @param {unknown} error
+ */
+export function addressWords(error) {
+  const code = /** @type {{ code?: string }} */ (error)?.code;
+  if (code === "recent_authentication_required") return "that isn't your current password — the address was not changed";
+  if (code === "address_confirmation_required") return "press set again to confirm your own address — the address was not changed";
+  return setupWords(error);
+}
+
+/**
  * A document size limit as the upload limit card says it (#1285): whole MB
  * where it is whole, which every limit set here is. @param {number} bytes
  */
@@ -94,6 +106,9 @@ export const gigabytes = (bytes) => `${bytes / 1073741824} GB`;
 
 /** The export settings in short, for the phone's row and the desk's "defaults" line (#1792). @param {{ retentionHours: number, keepPerHousehold: number, maxTotalBytes: number }} kept @param {string} [per] */
 export const exportsKeptShort = (kept, per = "") => `${kept.retentionHours} h · ${kept.keepPerHousehold}${per} · ${gigabytes(kept.maxTotalBytes)}`;
+
+/** The phone's Exports kept row title: hours and count, with the size as the row's meta (#1913, R5). @param {{ retentionHours: number, keepPerHousehold: number }} kept */
+export const exportsKeptTitle = (kept) => `${kept.retentionHours} h · ${kept.keepPerHousehold} per system`;
 
 /** @param {string} word */
 export const plainly = (word) => word.replaceAll("_", " ");

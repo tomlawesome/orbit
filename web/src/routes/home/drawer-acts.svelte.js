@@ -58,7 +58,7 @@
  * the drawer opens any item, and offers what fits its state).
  *
  * `onamend` and `onaccept` are a suggestion's (SuggestionView.svelte, #1319):
- * `review & amend →` puts its rows into editing, and `add to orbit` approves
+ * `review & amend →` puts its rows into editing, and the amend button (`add to orbit`, or `add without it` when a file is flagged) approves
  * what they hold.
  *
  * @typedef {"snooze" | "complete" | "attach" | "retire" | "restore"} FootKind
@@ -163,7 +163,7 @@ export function createDrawerActs({
      owner-decisions §34; on the phone too (owner, 2026-10-08). `review &
      amend →` puts the suggestion's rows into editing (EditRows), the relay's
      proposal standing in for the item it would become (proposedItemOf); the
-     choosers are a filed item's. `add to orbit` sends the rows as the
+     choosers are a filed item's. The amend button (`add to orbit`, or `add without it` when a file is flagged) sends the rows as the
      amended item on the two-tap decision's own operation id (`amend`), into
      the section the rows chose; `cancel` puts the readings back. */
   /* #1316: the latest review & amend press still waiting on the reminder
@@ -310,31 +310,53 @@ export function createDrawerActs({
   let papersReady = $state(false);
   /** @type {object | null} */
   let searchDocumentsFor = null;
+  /* #1605 W-R7: each read takes a token and only the newest one lands, so a
+     read a re-read overtook never writes its older papers over the newer
+     (the same household object no longer tells the two reads apart). */
+  let searchReads = 0;
+  /* #1905: the newest read's answer, the items it could not read; #1916: and
+     the items it did read. */
+  /** @type {Promise<{ failed: Set<string>, read: Set<string> }>} */
+  let searchLoad = Promise.resolve({ failed: new Set(), read: new Set() });
 
   /** #1151 W1-Q8: pocket-search.js's readSearchDocuments carries the
    *  concurrency cap (#1151 W1-R9). Answers the items whose papers could
-   *  not be read (empty when nothing was read). @param {string | null} [also]
-   *  @returns {Promise<Set<string>>} */
+   *  not be read, and those it read (both empty when nothing was read).
+   *  @param {string | null} [also]
+   *  @returns {Promise<{ failed: Set<string>, read: Set<string> }>} */
   async function loadSearchDocuments(also = null) {
     /** @type {Set<string>} */
     const failed = new Set();
+    /** @type {Set<string>} */
+    const readIds = new Set();
     const current = view();
     const household = current?.household;
     const householdId = current?.primary;
-    if (!household || !householdId || searchDocumentsFor === household) return failed;
+    if (!household || !householdId || searchDocumentsFor === household) return { failed, read: readIds };
     searchDocumentsFor = household;
+    const read = ++searchReads;
     const carrying = (household.items ?? []).filter((item) => (item.status === "active" || item.id === also) && (item.documentCount ?? 0) > 0);
     // Additive: an item whose papers cannot be read loses its papers from the
     // results, not the search. Which items those were is answered, for the
     // one caller that must know (rereadSearchDocuments).
+    /** #1916: the same reader, noting each item it read. @param {string} h @param {string} id */
+    const readNoting = async (h, id) => { const papers = await readItemDocuments(h, id); readIds.add(id); return papers; };
     const found = await readSearchDocuments(
-      carrying, readItemDocuments, householdId, () => searchDocumentsFor !== household, (id) => failed.add(id),
+      carrying, readNoting, householdId, () => searchDocumentsFor !== household, (id) => failed.add(id),
     );
-    if (searchDocumentsFor === household) {
+    if (searchDocumentsFor === household && searchReads === read) {
       searchDocuments = found;
       papersReady = true;
     }
-    return failed;
+    return { failed, read: readIds };
+  }
+  /** #1905: every load goes through here, so the newest read's answer is kept
+      for a re-read it overtook to await. @param {string | null} [also] */
+  function loadNewest(also = null) {
+    const before = searchReads;
+    const loading = loadSearchDocuments(also);
+    if (searchReads !== before) searchLoad = loading;
+    return loading;
   }
   /** The papers again, after one was attached, removed or restored. Rejects
       when `mustRead`'s own papers could not be read: the drawer that acted on
@@ -344,8 +366,24 @@ export function createDrawerActs({
   async function rereadSearchDocuments(also = null, mustRead = null) {
     searchDocumentsFor = null;
     papersReady = false;
-    const failed = await loadSearchDocuments(also);
+    const loading = loadNewest(also);
+    const read = searchReads;
+    const { failed, read: readIds } = await loading;
+    /* #1905: a newer read overtook this one, which stopped early and may never
+       have reached `mustRead`. Await the read that superseded it, and any that
+       superseded that, so a failure either read saw is still answered. */
+    for (let seen = read; seen !== searchReads;) {
+      seen = searchReads;
+      const newer = await searchLoad;
+      for (const id of newer.failed) failed.add(id);
+      for (const id of newer.read) readIds.add(id);
+    }
     if (mustRead && failed.has(mustRead)) throw new Error(`the papers of ${mustRead} could not be read`);
+    /* #1916: a plain load reads only active items and its own `also`, so an
+       overtaking read may never have read `mustRead` (a retired item). Nobody
+       read it: say so rather than done. An item with no papers is never read. */
+    const owed = (view()?.household?.items ?? []).some((item) => item.id === mustRead && (item.documentCount ?? 0) > 0);
+    if (mustRead && owed && !readIds.has(mustRead)) throw new Error(`the papers of ${mustRead} were not read`);
   }
 
   /* ---- #1319: THE DRAWER'S FOOT ROW (FootRow.svelte) ---------------------
@@ -477,7 +515,7 @@ export function createDrawerActs({
     get papersReady() { return papersReady; },
     startAmend, addAmended,
     openPreview, closePreview, removePaper, restorePaper,
-    loadSearchDocuments, rereadSearchDocuments,
+    loadSearchDocuments: loadNewest, rereadSearchDocuments,
     copyLink, runRowAct, attach, pickChoice, save, record,
   };
 }
