@@ -51,7 +51,8 @@
 
   import { onMount } from "svelte";
   import { page, updated } from "$app/state";
-  import { beforeNavigate } from "$app/navigation";
+  import { beforeNavigate, goto } from "$app/navigation";
+  import { anyUnsaved, markLeaving, resetLeaving, unsavedAsker } from "$lib/unsaved.js";
   import { reloadWhenUpdated } from "$lib/reload-when-updated.js";
   import { readSession, savePreferences } from "$lib/data/workspace.js";
   import { applyTheme } from "$lib/theme-swatches.js";
@@ -61,9 +62,14 @@
 
   let { children } = $props();
 
-  /* A new app version was found by kit's polling: the next navigation loads the whole page (#1738 A-F1). */
+  /* The one guard for every navigation (#1879 W-S1): typed text asks the discard question first; a new app version found by kit's polling makes the next navigation load the whole page (#1738 A-F1). */
   beforeNavigate((navigation) => {
-    reloadWhenUpdated(navigation, updated, (href) => { location.href = href; });
+    reloadWhenUpdated(navigation, updated, (href) => { location.href = href; }, {
+      isDirty: anyUnsaved,
+      ask: () => confirm("Discard this entry? What you've typed will be lost."),
+      holderAsk: unsavedAsker(),
+      leaving: markLeaving,
+    }, (href) => goto(href).catch(() => { /* a refused navigation leaves the page as it was */ }));
   });
 
   /* The server is the source of truth for theme and text size (#1180);
@@ -97,6 +103,8 @@
 <WhatsNew />
 <Wake />
 <NavigationBusy />
+
+<svelte:window onpageshow={(event) => { if (event.persisted) resetLeaving(); }} />
 
 <style>
   /* A theme change crossfades rather than snapping, on every screen (review

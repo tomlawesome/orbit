@@ -20,6 +20,7 @@ import {
   detectDocumentMediaType,
   normalizedDocumentFilename,
   classifyDocumentStructure,
+  declaredImageDimensions,
   type DocumentStructureVerdict,
   type SupportedDocumentMediaType,
 } from "@/server/documents/validation";
@@ -508,6 +509,9 @@ export async function readDocumentTransferState(documentId: string): Promise<{ s
   return { state: "pending" };
 }
 
+/** #1605 P-1: staged uploads one member may hold waiting to be attached to an item. */
+export const STAGED_UPLOADS_PER_MEMBER_LIMIT = 100;
+
 async function reserveDocumentMetadata(input: {
   documentId: string;
   userId: string;
@@ -516,6 +520,8 @@ async function reserveDocumentMetadata(input: {
   itemId: string;
   /** A staged upload: stored with no item, due to be retired unless bound in time. */
   staged: boolean;
+  /** Whether the #1605 per-member cap judges this staging (the member's own direct upload only). */
+  enforceStagedLimit: boolean;
   displayName: string;
   mediaType: string;
   sizeBytes: number;
@@ -548,6 +554,19 @@ async function reserveDocumentMetadata(input: {
     if (Number(householdUsage.total) + input.sizeBytes > config.householdQuotaBytes) {
       throw new AppError("document_household_quota", "This household has reached its document storage limit", 413);
     }
+    if (input.staged && input.enforceStagedLimit) {
+      const [{ total: staged }] = await transaction
+        .select({ total: sql<number>`count(*)` })
+        .from(documents)
+        .where(and(eq(documents.uploadedByUserId, input.userId), isNull(documents.itemId), isNull(documents.boundAt), inArray(documents.lifecycle, ["quarantined", "scanning", "available"])));
+      if (Number(staged) >= STAGED_UPLOADS_PER_MEMBER_LIMIT) {
+        throw new AppError(
+          "document_staged_limit",
+          "You already have 100 uploads waiting to be attached to an item. Attach or delete some first",
+          429,
+        );
+      }
+    }
     await transaction.insert(documents).values({
       id: input.documentId,
       householdId: input.householdId,
@@ -568,12 +587,19 @@ async function reserveDocumentMetadata(input: {
   });
 }
 
+/** How much of an image the header fence reads from the front of the file (#1920). */
+const IMAGE_HEAD_BYTES = 1024 * 1024;
+
 /**
- * The open check's one read of the quarantine file (#1567). The buffer lives
- * only in this function's frame: it is zeroed and freed when the check
- * answers, so the encrypt stage that follows never runs with it still held.
- * Kept in the upload's own frame, a suspended async function keeps it
- * reachable across the later awaits.
+ * The open check (#1567, #1920). The server never holds the whole document
+ * for it: a PDF goes to the sandbox as the file on disk, and an image's
+ * header fence reads only the front of the file (the sandbox child reads the
+ * rest from its descriptor). Only an image whose header lies past that front
+ * falls back to one whole-file read, so no file is judged differently. Every
+ * buffer lives only in this function's frame and is zeroed and freed when the
+ * check answers, so the encrypt stage that follows never runs beside it
+ * (#1151 F13); kept in the upload's own frame, a suspended async function
+ * would keep it reachable across the later awaits.
  */
 async function checkQuarantinedStructure(
   storage: LocalDocumentStorage,
@@ -582,9 +608,19 @@ async function checkQuarantinedStructure(
   maxBytes: number,
   maxPages?: number,
 ): Promise<DocumentStructureVerdict> {
-  const bytes = await storage.readQuarantine(received.quarantinePath, maxBytes);
+  const file = { path: received.quarantinePath, sizeBytes: received.sizeBytes };
+  if (mediaType === "application/pdf") return classifyDocumentStructure(Buffer.alloc(0), mediaType, file, { maxPages });
+  const { head, sizeBytes } = await storage.readQuarantineHead(received.quarantinePath, maxBytes, IMAGE_HEAD_BYTES);
+  let bytes = head;
   try {
-    return await classifyDocumentStructure(bytes, mediaType, { path: received.quarantinePath, sizeBytes: received.sizeBytes }, { maxPages });
+    if (head.length < sizeBytes && !declaredImageDimensions(head, mediaType)) {
+      releaseBuffer(head);
+      // A detached buffer cannot be released again: if the read throws, the
+      // finally below must not mask its error (#1920 review).
+      bytes = Buffer.alloc(0);
+      bytes = await storage.readQuarantine(received.quarantinePath, maxBytes);
+    }
+    return await classifyDocumentStructure(bytes, mediaType, file, { maxPages });
   } finally {
     // Zeroed and freed the moment the check answers, as the recovery and
     // mail-in checks do, so the seal never runs beside it (#1151 F13).
@@ -603,6 +639,12 @@ export async function uploadItemDocument(input: {
    * the item. The item need not exist yet.
    */
   staged?: boolean;
+  /**
+   * #1605 P-1 / #1904: set only by the member's own direct staged upload, the one
+   * path the per-member staged cap limits. System staging (archive import, mail
+   * approval) leaves it unset: never refused by the cap.
+   */
+  enforceStagedLimit?: boolean;
   filename: string;
   body: ReadableStream<Uint8Array> | null;
   declaredBytes?: number;
@@ -786,6 +828,7 @@ export async function uploadItemDocument(input: {
       householdId: input.householdId,
       itemId: input.itemId,
       staged,
+      enforceStagedLimit: input.enforceStagedLimit === true,
       displayName,
       mediaType,
       sizeBytes: received.sizeBytes,
@@ -1281,6 +1324,36 @@ export async function restoreDocument(userId: string, documentId: string): Promi
       // Ciphertext may already be gone after a worker interruption. Keep the
       // pending purge and its metadata so a valid retry can finalize it.
       throw new AppError("document_unavailable", "That document cannot currently be restored", 503);
+    }
+    // #1605 P-1: a never-bound staged upload counts against its member's cap
+    // again once restored; checked under the same locks as the reserve.
+    const [row] = await transaction.select({
+      itemId: documents.itemId,
+      sealedItemId: documents.sealedItemId,
+      uploadedByUserId: documents.uploadedByUserId,
+      boundAt: documents.boundAt,
+    }).from(documents).where(eq(documents.id, documentId)).limit(1);
+    if (row && row.itemId === null && row.boundAt === null && row.sealedItemId !== null && row.uploadedByUserId !== null) {
+      await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended('orbit:document-instance-quota', 0))`);
+      await transaction.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${`orbit:document-household-quota:${record.householdId}`}, 0))`,
+      );
+      const [{ total: staged }] = await transaction
+        .select({ total: sql<number>`count(*)` })
+        .from(documents)
+        .where(and(
+          eq(documents.uploadedByUserId, row.uploadedByUserId),
+          isNull(documents.itemId),
+          isNull(documents.boundAt),
+          inArray(documents.lifecycle, ["quarantined", "scanning", "available"]),
+        ));
+      if (Number(staged) >= STAGED_UPLOADS_PER_MEMBER_LIMIT) {
+        throw new AppError(
+          "document_staged_limit",
+          "You already have 100 uploads waiting to be attached to an item. Attach or delete some first",
+          429,
+        );
+      }
     }
     const [changed] = await transaction.update(documents).set({
       lifecycle: "available",

@@ -1477,7 +1477,7 @@ export function createFilmContext({
    * @param {string} text
    * @param {Point} pt
    * @param {"left"|"right"|"top"|"bottom"} side
-   * @param {{ dy?: number, label?: boolean, w?: number, pin?: boolean }} o
+   * @param {{ dy?: number, label?: boolean, w?: number, pin?: boolean, surface?: boolean }} o
    *   `pin` (#1174): keep the side asked for even when the box does not fit
    *   there, and clamp it into the band instead of flipping — chapter 5's
    *   reminder line sits over the dial's top under the chrome (round 8's
@@ -1544,14 +1544,22 @@ export function createFilmContext({
        does not fit in the band it was asked to sit in (< box height + the
        gap). `left`/`right` are resolved to `top`/`bottom` by the caller
        (callout(), below) before this ever runs. */
-    let finalSide = side;
+    /* #1895: `o.surface` on the pocket: the anchor is a sheet, and the line
+       goes inside it, hung from its top edge. Read once, here: no flip and
+       no height test, so the side is fixed from the first frame; the box
+       follows the sheet's top edge through pointNow(). */
+    const surface = Boolean(pocket && o.surface && !o.pin && pocketFit.box);
+    let flipSide = side;
     if (pocket && !o.pin && pocketFit.box && (side === "top" || side === "bottom")) {
       const band = pocketBand();
       const room = side === "top" ? pt[1] - band.top : band.bottom - pt[1];
-      if (room < ht + CALLOUT_GAP) finalSide = side === "top" ? "bottom" : "top";
+      if (room < ht + CALLOUT_GAP) flipSide = side === "top" ? "bottom" : "top";
     }
-    if (finalSide !== side && pocketFit.box) {
-      pt = edgeOf(pocketFit.box, finalSide);
+    const finalSide = surface ? "bottom" : flipSide;
+    if (surface) {
+      pt = edgeOf(/** @type {any} */ (pocketFit.box), "top");
+    } else if (flipSide !== side && pocketFit.box) {
+      pt = edgeOf(pocketFit.box, flipSide);
     }
 
     /* #1174: the anchor point is read fresh each time the box is placed, so
@@ -1560,7 +1568,7 @@ export function createFilmContext({
        keeps that point. */
     const control = pocketFit.control ?? null;
     const pointNow = () => (control && control.els.length > 0)
-      ? edgeOf(boxOf(control.ringEls, control.pad), finalSide)
+      ? edgeOf(boxOf(control.ringEls, control.pad), surface ? "top" : finalSide)
       : pt;
 
     function place() {
@@ -1625,7 +1633,7 @@ export function createFilmContext({
    * @param {string} text
    * @param {Control | Point} anchor
    * @param {"left"|"right"|"top"|"bottom"} side
-   * @param {{ hold?: number, dy?: number, label?: boolean, w?: number, mark?: string, pin?: boolean }} [o]
+   * @param {{ hold?: number, dy?: number, label?: boolean, w?: number, mark?: string, pin?: boolean, surface?: boolean }} [o]
    */
   async function callout(text, anchor, side, o = {}) {
     dropCallout();

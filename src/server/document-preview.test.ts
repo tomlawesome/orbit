@@ -459,4 +459,23 @@ describe("a kept page that cannot be read", () => {
 
     expectEvictedByIdentity();
   });
+
+  it("#1446: a full view queue answers 503 document_preview_busy with Retry-After 5, and writes nothing", async () => {
+    arrangeKeptPageFailing(await damage());
+    mocks.drawDocumentPage = vi.fn(async () => ({ outcome: "busy", retryAfterSeconds: 5 }));
+
+    const error = await readDocumentPagePreview(READER, DOCUMENT, 1).catch((caught: unknown) => caught);
+
+    expect(error).toMatchObject({ code: "document_preview_busy", status: 503, retryAfterSeconds: 5 });
+    expect(mocks.storeDrawnPreview, "no document_previews row for a queue refusal").not.toHaveBeenCalled();
+  });
+
+  it("#1446: a draw refused for an unavailable renderer keeps its 30 s retry", async () => {
+    arrangeKeptPageFailing(await damage());
+    mocks.drawDocumentPage = vi.fn(async () => ({ outcome: "busy" }));
+
+    const error = await readDocumentPagePreview(READER, DOCUMENT, 1).catch((caught: unknown) => caught);
+
+    expect(error).toMatchObject({ code: "document_preview_busy", status: 503, retryAfterSeconds: 30 });
+  });
 });

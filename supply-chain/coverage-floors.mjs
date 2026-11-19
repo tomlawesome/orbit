@@ -21,7 +21,9 @@ export const floors = {
   // statements, functions and lines raised to batch-a 3fe2b996's 56.48, 63.18
   // and 56.88 (pipeline 4510, job `fast` 54598, 2026-11-17; #1889); branches
   // raised to batch-b 76ec0a7a's 58.54, measured locally (2026-11-18; #1909)
-  "scripts": { statements: 56, branches: 58, functions: 63, lines: 56 },
+  // statements and lines raised to batch-a 524c26dc's 61.11 and 61.41
+  // (pipeline for !1409, job `fast` 57021, 2026-11-19; audit G)
+  "scripts": { statements: 61, branches: 58, functions: 63, lines: 61 },
   // measured on `dev` 230e6396, pipeline 3049, job `fast` 39963, 2026-10-27
   // the CLI is exercised by the install acceptance stacks, not unit tests;
   // below the 70-85 band and known

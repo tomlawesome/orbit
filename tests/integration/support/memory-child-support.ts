@@ -48,6 +48,7 @@ export function printMemoryResult(
   afterKiB: number,
   result: unknown,
   first?: { beforeKiB: number; afterKiB: number },
+  warm?: { beforeKiB: number; afterKiB: number }[],
 ): void {
-  console.log(`MEMORY_RESULT ${JSON.stringify({ ...(first ? { first } : {}), beforeKiB, afterKiB, result })}`);
+  console.log(`MEMORY_RESULT ${JSON.stringify({ ...(first ? { first } : {}), ...(warm ? { warm } : {}), beforeKiB, afterKiB, result })}`);
 }

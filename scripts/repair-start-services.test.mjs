@@ -467,7 +467,6 @@ describe("repair starts services that are not running (#1535)", () => {
       const said = stderrLines(result).filter((line) => line.includes("Docker said:"));
       expect(said).toHaveLength(1);
       expect(said[0].length).toBeLessThanOrEqual(600);
-      // eslint-disable-next-line no-control-regex
       expect(said[0]).not.toMatch(/[\u0000-\u0008\u000b-\u001f\u007f]/u);
       expect(result.stderr).not.toContain("\u001b");
       expect(said[0]).not.toContain("[31m");

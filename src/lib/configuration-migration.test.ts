@@ -337,28 +337,34 @@ describe("standalone migration drops its rollback copy once the new file is conf
     expect(readdirSync(dir)).toEqual([".env-orbit"]);
   });
 
-  // Review of a7aa25e5: a copy that differs (the pre-migration file a killed run leaves) is kept and named.
-  for (const [label, content] of [
-    ["the pre-migration file a killed run leaves", LEGACY],
-    ["some other content", "ORBIT_IMAGE=something-else\n"],
-  ] as const) {
-    it(`already current with a leftover copy that differs (${label}): kept, one stderr line names it and the next step, still "already current" with exit 0`, () => {
-      const { dir, migrated } = currentWithLeftover();
-      writeFileSync(copyOf(dir), content, { mode: 0o600 });
-      const result = migrateEnvironmentFile(envFile(dir), standalone(dir));
-      expect(result.status).toBe(0);
-      expect(result.stdout).toBe(ALREADY_CURRENT.stdout);
-      const lines = result.stderr.split("\n").filter(Boolean);
-      expect(lines).toHaveLength(1);
-      expect(lines[0]).toContain(copyOf(dir));
-      expect(lines[0]).toMatch(/remove/iu);
-      expect(lines[0]).toMatch(/working/iu);
-      expect(lines[0]).toMatch(/repair/iu);
-      expect(readFileSync(copyOf(dir), "utf8")).toBe(content);
-      expect(lstatSync(copyOf(dir)).mode & 0o777).toBe(0o600);
-      expect(readFileSync(envFile(dir), "utf8")).toBe(migrated);
-    });
-  }
+  // #1877: the pre-migration file a killed run leaves is proven (by replaying the migration) to come from a finished migration, so it is removed with no note.
+  it("already current with a leftover copy that is the pre-migration file a killed run leaves (#1877): removed, no note, the file untouched", () => {
+    const { dir, migrated } = currentWithLeftover();
+    writeFileSync(copyOf(dir), LEGACY, { mode: 0o600 });
+    const result = migrateEnvironmentFile(envFile(dir), standalone(dir));
+    expect(result).toEqual(ALREADY_CURRENT);
+    expect(existsSync(copyOf(dir))).toBe(false);
+    expect(readFileSync(envFile(dir), "utf8")).toBe(migrated);
+  });
+
+  // Review of a7aa25e5: a copy that differs and is not proven by replay (#1877) is kept and named.
+  it(`already current with a leftover copy that differs (some other content, not proven by the #1877 replay): kept, one stderr line names it and the next step, still "already current" with exit 0`, () => {
+    const content = "ORBIT_IMAGE=something-else\n";
+    const { dir, migrated } = currentWithLeftover();
+    writeFileSync(copyOf(dir), content, { mode: 0o600 });
+    const result = migrateEnvironmentFile(envFile(dir), standalone(dir));
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe(ALREADY_CURRENT.stdout);
+    const lines = result.stderr.split("\n").filter(Boolean);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain(copyOf(dir));
+    expect(lines[0]).toMatch(/remove/iu);
+    expect(lines[0]).toMatch(/working/iu);
+    expect(lines[0]).toMatch(/repair/iu);
+    expect(readFileSync(copyOf(dir), "utf8")).toBe(content);
+    expect(lstatSync(copyOf(dir)).mode & 0o777).toBe(0o600);
+    expect(readFileSync(envFile(dir), "utf8")).toBe(migrated);
+  });
 
   it("already current with a leftover copy that is a symlink: refused, the link, its target and the file untouched", () => {
     const { dir, migrated } = currentWithLeftover();

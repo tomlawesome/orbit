@@ -326,6 +326,15 @@ async function openFilm(page) {
   page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
   page.on("pageerror", (error) => errors.push(error.message));
   await installFilmEnded(page);
+  /* #1895: this headless WebKit has no push service, and on a desk context
+     (which, unlike an isMobile one, exposes PushManager) the first
+     `pushManager.getSubscription()` blocks the page's main thread for good.
+     Settings calls it on mount (alerts.js syncAlerts), so chapter 6's walk to
+     /settings froze the page: no timer, no film, no waitForFunction answer.
+     The browser reports no subscription instead, as a fresh one would. */
+  await page.addInitScript(() => {
+    if (window.PushManager) PushManager.prototype.getSubscription = () => Promise.resolve(null);
+  });
   await page.route("**/api/settings/tour", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: '{"tour":{"tourSeenAt":null}}' }));
   await page.goto(`${APP}/home`, { waitUntil: "load" });
@@ -1543,5 +1552,284 @@ test.describe("chapters 8 and 9 stay on the sky when the household has nothing i
     expect.soft([...urls].filter((u) => u.startsWith("/item")), "no item is opened in chapters 8 and 9").toEqual([]);
     expect.soft(lines.size, "the lines of chapters 8 and 9 were seen").toBeGreaterThanOrEqual(4);
     expect.soft(faults, "every line points at something on the screen").toEqual({});
+  });
+});
+
+
+/* ---- #1895: the phone's callouts on a sky line and on a sheet ------------
+   Two callouts sat on top of things on the phone: chapter 3's "Bodies orbit
+   by when they're due." landed on the dial's own planet names, and chapter
+   8's "item-read" line straddled the item drawer's head above the sheet.
+   The design ruling (issue note 63824): a sky line anchors the sun, side
+   `bottom`, dy 30, as chapters 1 and 5 do (#1083 §3.3); a pocket anchor that
+   is a surface (a sheet) takes its line inside, hung from its top edge. */
+const CALLOUT_GAP = 18; /* vocabulary.js's CALLOUT_GAP */
+
+/**
+ * Holds the film at one mark (jumping to its chapter first when it is the
+ * chapter's first mark) and reads the callout standing there: the film's
+ * own stamp on it, its box, its stem's tip, the sampler's faults, and the
+ * boxes the test asks for.
+ * @param {import("@playwright/test").Page} page
+ * @param {string} mark
+ * @param {number | null} jumpTo  chapter index to jump to, or null to play on
+ * @param {string[]} selectors  elements whose boxes are wanted
+ */
+async function holdAndRead(page, mark, jumpTo, selectors) {
+  await page.evaluate((m) => {
+    const hooks = /** @type {any} */ (window);
+    hooks.__held = null;
+    hooks.__hold = m;
+  }, mark);
+  if (jumpTo !== null) await page.evaluate((k) => /** @type {any} */ (window).__jump(k), jumpTo);
+  else await page.evaluate(() => /** @type {any} */ (window).__play());
+  await page.waitForFunction((m) => /** @type {any} */ (window).__held === m, mark, { timeout: 45_000 });
+  await settled(page);
+  return page.evaluate((sels) => {
+    const el = [...document.querySelectorAll(".tourfilm-callout")]
+      .find((c) => /** @type {HTMLElement} */ (c).style.opacity !== "0");
+    if (!el) return null;
+    const rect = (/** @type {DOMRect} */ r) => ({ x: r.left, y: r.top, w: r.width, h: r.height, right: r.right, bottom: r.bottom });
+    const stem = el.querySelector("i");
+    const sb = (stem ?? el).getBoundingClientRect();
+    const d = /** @type {HTMLElement} */ (el).dataset;
+    const lit = /** @type {any} */ (window).__lit?.() ?? [];
+    return {
+      anchor: d.tourfilmAnchor ?? "",
+      side: d.tourfilmSide ?? "",
+      dy: Number(d.tourfilmDy ?? 0),
+      box: rect(el.getBoundingClientRect()),
+      tipX: (sb.left + sb.right) / 2,
+      tipY: sb.top, /* the stem's point on a `bottom` callout */
+      boxes: Object.fromEntries(sels.map((s) => {
+        const found = document.querySelector(s);
+        return [s, found ? rect(found.getBoundingClientRect()) : null];
+      })),
+      litSels: lit.map((/** @type {any} */ l) => l.sel),
+    };
+  }, selectors);
+}
+
+/** @param {string} anchor "x,y,w,h" */
+const anchorBox = (anchor) => {
+  const [x, y, w, h] = anchor.split(",").map(Number);
+  return { x, y, w, h, right: x + w, bottom: y + h };
+};
+/** @param {{ x: number, y: number, w: number, h: number }} a @param {{ x: number, y: number, w: number, h: number }} b */
+const sameBox = (a, b) => [a.x - b.x, a.y - b.y, a.w - b.w, a.h - b.h].every((d) => Math.abs(d) <= 2);
+
+test.describe("the phone's callouts sit on the sky line and on the sheet (#1895)", () => {
+  test.use({ reducedMotion: "reduce" });
+
+  for (const phone of PHONES) {
+    test(`at ${phone.width}x${phone.height}, chapter 3's line sits under the sun and chapter 8's lines sit on their sheets`, async ({ browser }) => {
+      test.setTimeout(240_000);
+      const context = await browser.newContext({
+        viewport: { width: phone.width, height: phone.height }, isMobile: true, hasTouch: true, deviceScaleFactor: 2,
+        reducedMotion: "reduce",
+      });
+      const page = await context.newPage();
+      await openFilm(page);
+      /** @type {string[]} */
+      const wrong = [];
+      const coverFaults = (/** @type {string[]} */ fs) => fs.filter((f) => /covers the text|misses its anchor|past the screen|under the top chrome|pointing at nothing/u.test(f));
+
+      /* Chapter 3, lands-body: the sun's line. */
+      const SUN = ".pocket .mdial .pk-sun";
+      const DIAL = ".pocket .mdial";
+      const lands = await holdAndRead(page, "lands-body", MARKS.findIndex(([id]) => id === "lands"), [SUN, DIAL]);
+      if (!lands) wrong.push("lands-body: no callout up");
+      else {
+        const sun = lands.boxes[SUN], dial = lands.boxes[DIAL];
+        if (!sun || !dial) wrong.push("lands-body: no sun or dial on the screen");
+        else {
+          if (!sameBox(anchorBox(lands.anchor), sun)) wrong.push(`lands-body: anchored on ${lands.anchor}, not the sun's box`);
+          if (lands.side !== "bottom") wrong.push(`lands-body: side ${lands.side}, not bottom`);
+          if (Math.abs(lands.dy) !== 30) wrong.push(`lands-body: dy ${lands.dy}, not 30`);
+          if (!lands.litSels.some((/** @type {unknown} */ s) => String(s).includes("tourfilm-lands-body"))) wrong.push("lands-body: the demo body is not ringed");
+          const b = lands.box;
+          if (b.x < dial.x - 0.5 || b.right > dial.right + 0.5 || b.y < dial.y - 0.5 || b.bottom > dial.bottom + 0.5) wrong.push("lands-body: the callout is not wholly inside the dial");
+          if (b.y < sun.bottom - 0.5) wrong.push(`lands-body: the callout (top ${Math.round(b.y)}) is not below the sun (bottom ${Math.round(sun.bottom)})`);
+        }
+        const s = await page.evaluate(sample);
+        wrong.push(...coverFaults(s?.faults ?? []).map((f) => `lands-body: ${f}`));
+      }
+
+      /* Chapter 8: the item's marks in order, up to item-read and the calendar. */
+      const itemIndex = MARKS.findIndex(([id]) => id === "item");
+      const itemMarks = /** @type {string[]} */ (MARKS[itemIndex][1]);
+      const PREVIEW = "[data-preview-card]";
+      for (const [k, mark] of itemMarks.entries()) {
+        const read = await holdAndRead(page, mark, k === 0 ? itemIndex : null, [PREVIEW]);
+        if (mark !== "item-read" && mark !== "item-calendar") continue;
+        if (!read) { wrong.push(`${mark}: no callout up`); continue; }
+        if (mark === "item-calendar") {
+          /* also a bottom sheet: it keeps holding the sampler's rules */
+          const cs = await page.evaluate(sample);
+          wrong.push(...coverFaults(cs?.faults ?? []).map((f) => `${mark}: ${f}`));
+          continue;
+        }
+        const sheet = read.boxes[PREVIEW];
+        if (!sheet) { wrong.push(`${mark}: no preview sheet on the screen`); continue; }
+        if (!sameBox(anchorBox(read.anchor), sheet)) wrong.push(`${mark}: anchored on ${read.anchor}, not the sheet's box`);
+        if (read.side !== "bottom") wrong.push(`${mark}: side ${read.side}, not bottom`);
+        const b = read.box;
+        if (b.x < sheet.x - 0.5 || b.right > sheet.right + 0.5 || b.bottom > sheet.bottom + 0.5) wrong.push(`${mark}: the callout is not wholly inside the sheet`);
+        if (b.y < sheet.y + CALLOUT_GAP - 0.5) wrong.push(`${mark}: the callout (top ${Math.round(b.y)}) is not ${CALLOUT_GAP}px inside the sheet's top (${Math.round(sheet.y)})`);
+        if (Math.abs(read.tipY - sheet.y) > 12) wrong.push(`${mark}: the stem's tip (${Math.round(read.tipY)}) is not on the sheet's top edge (${Math.round(sheet.y)})`);
+        if (b.y < sheet.y) wrong.push(`${mark}: part of the callout is above the sheet's top edge`);
+        const s = await page.evaluate(sample);
+        wrong.push(...coverFaults(s?.faults ?? []).map((f) => `${mark}: ${f}`));
+      }
+      await context.close();
+      expect(wrong, "the callouts sit where the ruling puts them").toEqual([]);
+    });
+  }
+});
+
+
+/* ---- #1895 (ruling, issue note 63948): the sheet lines opt in ---------------
+   `item-read` and `item-calendar` are the only lines that sit inside their
+   anchor (a sheet), hung from its top edge, side `bottom`, from the first
+   frame to the last. Every other held mark's line lies wholly outside its
+   anchor, takes the same side at every phone width (unless the §3.2 flip
+   fires for want of room), and never changes side during its hold. Played
+   under NORMAL motion: the preview sheet grows 900ms after it rises, and a
+   per-frame "is it a surface now" re-check made `item-read` jump mid-hold. */
+const SHEET_MARKS = new Set(["item-read", "item-calendar"]);
+/* `time-toast` is pinned into the band over its anchor (o.pin, chapter 4's
+   toast), the one line the ruling leaves where it is; not judged "outside". */
+const PINNED_INSIDE = "time-toast";
+const ABOVE_OR_BELOW = ["relay-addr", "inbox-lane-review", "item-edit"];
+
+/** Records every side each callout element wears, from its first frame on.
+ *  @param {import("@playwright/test").Page} page */
+async function recordSides(page) {
+  await page.evaluate(() => {
+    const w = /** @type {any} */ (window);
+    if (w.__sideSeen) return;
+    w.__sideSeen = new WeakMap();
+    const rec = () => {
+      for (const el of document.querySelectorAll(".tourfilm-callout")) {
+        const side = /** @type {HTMLElement} */ (el).dataset.tourfilmSide;
+        if (!side) continue;
+        const seen = w.__sideSeen.get(el) ?? [];
+        if (seen[seen.length - 1] !== side) { seen.push(side); w.__sideSeen.set(el, seen); }
+      }
+    };
+    new MutationObserver(rec).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-tourfilm-side"] });
+    const tick = () => { rec(); requestAnimationFrame(tick); };
+    requestAnimationFrame(tick);
+  });
+}
+
+test.describe("every phone callout but the two sheet lines stays outside its anchor, and none changes side (#1895 normal motion)", () => {
+  test("#1895 normal motion at 430, 390 and 360: sheet lines inside, every other line outside, one side per hold and per width", async ({ browser }) => {
+    test.setTimeout(2_400_000);
+    /** @type {string[]} */
+    const wrong = [];
+    /** @type {Map<string, Map<number, { side: string, box: any, anchor: any, vh: number }>>} */
+    const byMark = new Map();
+    const coverFaults = (/** @type {string[]} */ fs) => fs.filter((f) => /covers the text|misses its anchor|past the screen|under the top chrome|pointing at nothing/u.test(f));
+    const PREVIEW = "[data-preview-card]";
+    const ordered = MARKS.flatMap(([, marks], ci) => /** @type {string[]} */ (marks).map((m, k) => /** @type {[string, number, number]} */ ([m, ci, k])));
+
+    for (const phone of PHONES) {
+      const context = await browser.newContext({
+        viewport: { width: phone.width, height: phone.height }, isMobile: true, hasTouch: true, deviceScaleFactor: 2,
+        reducedMotion: "no-preference",
+      });
+      const page = await context.newPage();
+      await openFilm(page);
+      await recordSides(page);
+      for (const [mark, ci, k] of ordered) {
+        const w = `${phone.width}`;
+        const read = await holdAndRead(page, mark, k === 0 ? ci : null, [PREVIEW]).catch(() => null);
+        if (!read) {
+          /* most marks hold no line (a ring, a beat): only the sheet lines must be up */
+          if (SHEET_MARKS.has(mark) || mark === "relay-addr") wrong.push(`${w} ${mark}: no callout up at the hold`);
+          continue;
+        }
+        const first = await page.evaluate(() => {
+          const el = [...document.querySelectorAll(".tourfilm-callout")].find((c) => /** @type {HTMLElement} */ (c).style.opacity !== "0");
+          return el ? /** @type {any} */ (window).__sideSeen.get(el) ?? [] : [];
+        });
+        /* the sheet's late growth (900ms) and the line's own follow-on */
+        await page.waitForTimeout(1500);
+        await settled(page);
+        const later = await page.evaluate(() => {
+          const el = [...document.querySelectorAll(".tourfilm-callout")].find((c) => /** @type {HTMLElement} */ (c).style.opacity !== "0");
+          if (!el) return null;
+          const r = el.getBoundingClientRect();
+          const d = /** @type {HTMLElement} */ (el).dataset;
+          const stem = el.querySelector("i");
+          const sb = (stem ?? el).getBoundingClientRect();
+          const sheet = document.querySelector("[data-preview-card]")?.getBoundingClientRect();
+          return {
+            side: d.tourfilmSide ?? "", anchor: d.tourfilmAnchor ?? "",
+            seen: /** @type {any} */ (window).__sideSeen.get(el) ?? [],
+            box: { x: r.left, y: r.top, w: r.width, h: r.height, right: r.right, bottom: r.bottom },
+            tipY: sb.top, tipBottom: sb.bottom,
+            addr: (() => { const e = document.querySelector("#p-mail .st-address"); if (!e) return null; const q = e.getBoundingClientRect(); return { x: q.left, y: q.top, w: q.width, h: q.height, right: q.right, bottom: q.bottom }; })(),
+            sheet: sheet ? { x: sheet.left, y: sheet.top, right: sheet.right, bottom: sheet.bottom } : null,
+          };
+        });
+        if (!later) { wrong.push(`${w} ${mark}: the callout went away during the hold`); continue; }
+        const sides = [...new Set([...first, ...later.seen])];
+        if (sides.length > 1) wrong.push(`${w} ${mark}: the side changed during the hold (${sides.join(" -> ")})`);
+        const b = later.box;
+        const a = later.anchor === "none" || later.anchor === "point" || !later.anchor ? null : anchorBox(later.anchor);
+        if (SHEET_MARKS.has(mark)) {
+          if (later.side !== "bottom" || first[0] !== "bottom") wrong.push(`${w} ${mark}: side ${first[0]} then ${later.side}, not bottom from the first frame`);
+          if (!a) wrong.push(`${w} ${mark}: no anchor box`);
+          else {
+            if (b.x < a.x - 0.5 || b.right > a.right + 0.5 || b.y < a.y - 0.5 || b.bottom > a.bottom + 0.5) wrong.push(`${w} ${mark}: the callout (${Math.round(b.y)}-${Math.round(b.bottom)}) is not wholly inside its anchor (${Math.round(a.y)}-${Math.round(a.bottom)})`);
+            if (Math.abs(later.tipY - a.y) > 12) wrong.push(`${w} ${mark}: the stem's tip (${Math.round(later.tipY)}) is not on the anchor's top edge (${Math.round(a.y)})`);
+          }
+          if (mark === "item-read" && later.sheet && a && !sameBox(a, { x: later.sheet.x, y: later.sheet.y, w: later.sheet.right - later.sheet.x, h: later.sheet.bottom - later.sheet.y })) wrong.push(`${w} ${mark}: anchored on ${later.anchor}, not the settled sheet`);
+          const s = await page.evaluate(sample);
+          wrong.push(...coverFaults(s?.faults ?? []).map((f) => `${w} ${mark}: ${f}`));
+        } else if (a && mark !== PINNED_INSIDE) {
+          if (b.x < a.right - 0.5 && b.right > a.x + 0.5 && b.y < a.bottom - 0.5 && b.bottom > a.y + 0.5) wrong.push(`${w} ${mark}: the callout (${Math.round(b.y)}-${Math.round(b.bottom)}) lies on its anchor (${Math.round(a.y)}-${Math.round(a.bottom)}), not outside it`);
+          if (ABOVE_OR_BELOW.includes(mark) && later.side !== "top" && later.side !== "bottom") wrong.push(`${w} ${mark}: side ${later.side}, not above or below its anchor`);
+          if (ABOVE_OR_BELOW.includes(mark) && !(b.bottom <= a.y + 0.5 || b.y >= a.bottom - 0.5)) wrong.push(`${w} ${mark}: not above or below its anchor`);
+          if (mark === "relay-addr") {
+            /* ruling 1895c: chapter 6's phone line points at the address row, not the card */
+            if (!later.addr) wrong.push(`${w} ${mark}: no relay address row on the screen`);
+            else {
+              /* the ruling's `pad: 2`: the anchor is the row's box grown 2px on each side */
+              const grown = { x: later.addr.x - 2, y: later.addr.y - 2, w: later.addr.w + 4, h: later.addr.h + 4 };
+              if (!sameBox(a, grown)) wrong.push(`${w} ${mark}: anchored on ${later.anchor}, not the address row's box grown by 2px (${Math.round(grown.x)},${Math.round(grown.y)},${Math.round(grown.w)},${Math.round(grown.h)})`);
+              if (!(b.bottom <= later.addr.y + 0.5 || b.y >= later.addr.bottom - 0.5)) wrong.push(`${w} ${mark}: the callout (${Math.round(b.y)}-${Math.round(b.bottom)}) is not wholly above or below the address row (${Math.round(later.addr.y)}-${Math.round(later.addr.bottom)})`);
+              const edge = later.side === "top" ? later.addr.y : later.addr.bottom;
+              const tip = later.side === "top" ? later.tipBottom : later.tipY;
+              if (Math.abs(tip - edge) > 12) wrong.push(`${w} ${mark}: the stem's tip (${Math.round(tip)}) is not on the address row's ${later.side === "top" ? "top" : "bottom"} edge (${Math.round(edge)})`);
+            }
+            const rs = await page.evaluate(sample);
+            wrong.push(...coverFaults(rs?.faults ?? []).map((f) => `${w} ${mark}: ${f}`));
+          }
+        }
+        if (!byMark.has(mark)) byMark.set(mark, new Map());
+        byMark.get(mark)?.set(phone.width, { side: later.side, box: b, anchor: a, vh: phone.height });
+      }
+      await context.close();
+    }
+
+    /* One side per mark at every width, unless the §3.2 flip fires for want of
+       room: judged generously (the band's own limits are not visible here, so
+       any width where the viewport edge leaves less than the box and its gap
+       plus 140px of chrome counts as no room). */
+    for (const [mark, widths] of byMark) {
+      if (SHEET_MARKS.has(mark)) continue;
+      const sides = new Set([...widths.values()].map((v) => v.side));
+      if (sides.size <= 1) continue;
+      const flipped = [...widths.values()].some((v) => {
+        if (!v.anchor) return false;
+        const roomAbove = v.anchor.y, roomBelow = v.vh - v.anchor.bottom;
+        return Math.min(roomAbove, roomBelow) - 140 < v.box.h + CALLOUT_GAP;
+      });
+      if (!flipped) wrong.push(`${mark}: the side differs by width (${[...widths].map(([w, v]) => `${w}:${v.side}`).join(", ")}) with room to spare`);
+    }
+    expect(wrong, "the sheet lines sit inside, every other line outside, steady in a hold and across widths").toEqual([]);
   });
 });

@@ -7,7 +7,7 @@
 //    "not removed".
 // Harness as in install.update-prune-undo-copies.test.mjs (same names, copied: that file exports nothing).
 
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -161,5 +161,112 @@ describe("FR-S1b (#1848) install.sh smtp_discard_copy: an update that confirms a
     expect(existsSync(join(targetDir, copy, ENV_LEFTOVER)), "the .env-orbit leftover").toBe(false);
     expect(existsSync(join(targetDir, copy, OVERLAY_LEFTOVER)), "the overlay leftover").toBe(false);
     expect(existsSync(join(targetDir, copy)), "the folder").toBe(false);
+  });
+});
+
+// #1874 O-F7: repair.sh also writes a temporary file for the copy marker (marker name + ".??????"), and
+// smtp_discard_copy removes it; the prune's allowlist must accept it too.
+const MARKER_LEFTOVER = `${MARKER}.Ab12Cd`;
+
+describe("#1874 O-F7 install.sh prune: the copy marker's temporary file qualifies", () => {
+  for (const [label, files] of [
+    ["only the marker's temporary file with .env-orbit", { ".env-orbit": COPY, [MARKER_LEFTOVER]: `copy=orbit-install-backups/${FOLDER}\n` }],
+    ["the marker and every temporary name", { ".env-orbit": COPY, [MARKER]: `copy=orbit-install-backups/${FOLDER}\n`, [MARKER_LEFTOVER]: "x\n", [ENV_LEFTOVER]: COPY, [OVERLAY_LEFTOVER]: "services: {}\n" }],
+  ]) {
+    it(`${label}: the folder is not "not removed", and ${ENV_FORM}=yes removes it`, () => {
+      const targetDir = installedFolder();
+      writeFolder(join(backups(targetDir), FOLDER), files);
+      const listed = update(targetDir);
+      expect(mentioning(listed.stderr, FOLDER), "listed").not.toEqual([]);
+      expect(notRemoved(listed.stderr, FOLDER), mentioning(listed.stderr, FOLDER).join(" | ")).toBe(false);
+      const removed = update(targetDir, { [ENV_FORM]: "yes" });
+      expect(removed.status).toBe(0);
+      expect(existsSync(join(backups(targetDir), FOLDER))).toBe(false);
+    });
+  }
+
+  it("a symlink named like the marker's temporary file still makes the folder not removed", () => {
+    const targetDir = installedFolder();
+    const folder = join(backups(targetDir), FOLDER);
+    writeFolder(folder, { ".env-orbit": COPY });
+    const target = join(mkdtempSync(join(tmpdir(), "orbit-1874-target-")), "target");
+    writeFileSync(target, "KEEP\n");
+    symlinkSync(target, join(folder, MARKER_LEFTOVER));
+    const result = update(targetDir, { [ENV_FORM]: "yes" });
+    expect(notRemoved(result.stderr, FOLDER)).toBe(true);
+    expect(existsSync(folder)).toBe(true);
+  });
+
+  it("a marker-named file with a 5-character suffix keeps the folder not removed", () => {
+    const targetDir = installedFolder();
+    writeFolder(join(backups(targetDir), FOLDER), { ".env-orbit": COPY, [`${MARKER}.Ab12C`]: "mine\n" });
+    const result = update(targetDir, { [ENV_FORM]: "yes" });
+    expect(notRemoved(result.stderr, FOLDER)).toBe(true);
+  });
+});
+
+// #1874 O-R2: Ctrl-C at the undo-copy prompt must leave the terminal with echo on.
+describe("#1874 O-R2 install.sh prune: Ctrl-C at the undo-copy prompt", () => {
+  it("restores echo on the terminal", async () => {
+    const targetDir = installedFolder();
+    writeFolder(join(backups(targetDir), FOLDER), { ".env-orbit": COPY });
+    const binDir = makeFakeBin();
+    const logDir = mkdtempSync(join(tmpdir(), "orbit-install-log-"));
+    const env = { ...baseEnvironment(binDir, logDir), ...updateEnv() };
+    const command = `trap : INT; bash ${installScript} --plain --update; printf '\\nSTTY-BEGIN\\n'; stty -a; printf 'STTY-END\\n'`;
+    const output = await new Promise((resolve, reject) => {
+      const child = spawn("script", ["-qeE", "never", "-c", command, "/dev/null"], { cwd: targetDir, env });
+      let stdout = "";
+      let sent = false;
+      const timer = setTimeout(() => { child.kill("SIGKILL"); reject(new Error(`timed out; output so far: ${stdout}`)); }, PROCESS_TEST_TIMEOUT_MS);
+      child.stdout.setEncoding("utf8");
+      child.stdout.on("data", (chunk) => {
+        stdout += chunk;
+        if (!sent && stdout.includes("CANNOT")) {
+          sent = true;
+          setTimeout(() => child.stdin.write("\x03"), 300);
+        }
+      });
+      child.on("error", reject);
+      child.on("close", () => { clearTimeout(timer); resolve(stdout); });
+    });
+    const settings = output.replace(/\r/gu, "").split("STTY-BEGIN\n")[1]?.split("STTY-END")[0] ?? "";
+    expect(settings, `no stty output in: ${output}`).not.toBe("");
+    const flags = settings.split(/[\s;]+/u);
+    expect(flags, settings).not.toContain("-echo");
+    expect(flags, settings).toContain("echo");
+  });
+});
+
+// Same prompt, but stdin is not the terminal: the stty state must be saved from /dev/tty, not stdin.
+describe("#1874 install.sh prune: Ctrl-C at the undo-copy prompt with stdin redirected", () => {
+  it("restores echo on /dev/tty when stdin is /dev/null", async () => {
+    const targetDir = installedFolder();
+    writeFolder(join(backups(targetDir), FOLDER), { ".env-orbit": COPY });
+    const binDir = makeFakeBin();
+    const logDir = mkdtempSync(join(tmpdir(), "orbit-install-log-"));
+    const env = { ...baseEnvironment(binDir, logDir), ...updateEnv() };
+    const command = `trap : INT; bash ${installScript} --plain --update </dev/null; printf '\\nSTTY-BEGIN\\n'; stty -a; printf 'STTY-END\\n'`;
+    const output = await new Promise((resolve, reject) => {
+      const child = spawn("script", ["-qeE", "never", "-c", command, "/dev/null"], { cwd: targetDir, env });
+      let stdout = "";
+      let sent = false;
+      const timer = setTimeout(() => { child.kill("SIGKILL"); reject(new Error(`timed out; output so far: ${stdout}`)); }, PROCESS_TEST_TIMEOUT_MS);
+      child.stdout.setEncoding("utf8");
+      child.stdout.on("data", (chunk) => {
+        stdout += chunk;
+        if (!sent && stdout.includes("CANNOT")) {
+          sent = true;
+          setTimeout(() => child.stdin.write("\x03"), 300);
+        }
+      });
+      child.on("error", reject);
+      child.on("close", () => { clearTimeout(timer); resolve(stdout); });
+    });
+    const settings = output.replace(/\r/gu, "").split("STTY-BEGIN\n")[1]?.split("STTY-END")[0] ?? "";
+    expect(settings, `no stty output in: ${output}`).not.toBe("");
+    const flags = settings.split(/[\s;]+/u);
+    expect(flags, settings).not.toContain("-echo");
+    expect(flags, settings).toContain("echo");
   });
 });

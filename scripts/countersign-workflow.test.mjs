@@ -330,7 +330,7 @@ describe("countersign workflow: evidence window from the tag date", () => {
 // D-S6 43a addendum 1, item 2: the verifier's bytes are pinned again, so an
 // unreviewed edit to it fails a test. The hash is of the final verifier and is
 // filled in as the last step of the build; until then this fails by design.
-const VERIFIER_SHA256 = "66b1a3951fef333174ed332e26633a0ae9fbf8a14fefb15b7c8b746039810046";
+const VERIFIER_SHA256 = "4728d0819ba9595fdb33e1137c829ba95fddb6b20fb6af072ff9f52c6d10aabc";
 
 describe("the shared verifier's byte pin (D-S6 43a addendum 1)", () => {
   it("pins scripts/ci/verify-validation-evidence.sh by sha256", () => {
