@@ -21,6 +21,13 @@ const MIB = 1_048_576;
 /** SOI, then a baseline frame header (SOF0) at once: 48 x 64, three components. */
 const JPEG_FRONT = Buffer.from([0xff, 0xd8, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x00, 0x30, 0x00, 0x40, 0x03, 0x01, 0x22, 0x00, 0x02, 0x11, 0x01, 0x03, 0x11, 0x01]);
 
+/** A PNG signature and IHDR: 64 x 48. */
+const PNG_FRONT = Buffer.concat([
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d]),
+  Buffer.from("IHDR", "latin1"),
+  Buffer.from([0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x30, 0x08, 0x06, 0x00, 0x00, 0x00]),
+]);
+
 /** SOI then APP1 segments of 65,533 data bytes, running past the end of the buffer: no frame header in it. */
 function fillAppChain(buffer: Buffer): void {
   buffer[0] = 0xff;
@@ -42,7 +49,8 @@ const mocks = vi.hoisted(() => ({
   bufferLengthsWhenSealing: [] as number[],
   mediaType: "application/pdf" as string,
   fileSize: 5,
-  headKind: "front" as "front" | "late",
+  headKind: "front" as "front" | "late" | "jpegLarge" | "pngLarge",
+  readFailure: null as Error | null,
   scanStatus: "clean" as "clean" | "infected",
   structureValid: true as boolean | "no_verdict" | "password_required",
   lastQuarantineBuffer: null as Buffer | null,
@@ -210,6 +218,7 @@ vi.mock("@/server/documents/storage", async (importActual) => {
     }
     async readQuarantine() {
       mocks.readQuarantineCalls += 1;
+      if (mocks.readFailure) throw mocks.readFailure;
       // Not from Node's shared pool, as a real read of a file is not: the whole
       // ArrayBuffer is this buffer's, so it can be detached.
       const buffer = Buffer.alloc(9, "plaintext");
@@ -219,8 +228,9 @@ vi.mock("@/server/documents/storage", async (importActual) => {
     }
     async readQuarantineHead(...args: unknown[]) {
       mocks.readHeadCalls.push(args);
-      const head = Buffer.alloc(mocks.headKind === "late" ? MIB : JPEG_FRONT.length);
+      const head = Buffer.alloc(mocks.headKind === "front" ? JPEG_FRONT.length : MIB);
       if (mocks.headKind === "late") fillAppChain(head);
+      else if (mocks.headKind === "pngLarge") PNG_FRONT.copy(head);
       else JPEG_FRONT.copy(head);
       mocks.lastQuarantineBuffer = head;
       mocks.checkBuffers.push(head);
@@ -283,6 +293,7 @@ beforeEach(() => {
   mocks.mediaType = "application/pdf";
   mocks.fileSize = 5;
   mocks.headKind = "front";
+  mocks.readFailure = null;
   mocks.scanStatus = "clean";
   mocks.structureValid = true;
   mocks.lastQuarantineBuffer = null;
@@ -482,6 +493,41 @@ describe("uploadItemDocument quarantine reads (#1151 A2-Q1, #1920)", () => {
     expect(headBytes as number, "at most the first 1 MiB").toBeLessThanOrEqual(MIB);
     expect(mocks.readQuarantineCalls).toBe(whole);
     expect(mocks.classifyCalls).toHaveLength(1);
+  });
+});
+
+describe("an image over 1 MiB with its header at the front is not read whole (#1920)", () => {
+  it.each([
+    ["image/jpeg", "jpegLarge", "photo.jpg"],
+    ["image/png", "pngLarge", "photo.png"],
+  ] as const)("reads only the head of a large %s, and never calls readQuarantine", async (mediaType, headKind, filename) => {
+    mocks.mediaType = mediaType;
+    mocks.headKind = headKind;
+    mocks.fileSize = 5 * MIB;
+    seedUploadHappyPath();
+
+    await uploadFile(filename);
+
+    expect(mocks.readQuarantineCalls).toBe(0);
+    expect(mocks.readHeadCalls).toHaveLength(1);
+    expect(mocks.readHeadCalls[0]![2] as number).toBeLessThanOrEqual(MIB);
+    expect(mocks.checkBuffers).toHaveLength(1);
+    expectEveryCheckBufferDetached();
+  });
+});
+
+describe("the late-header fallback's whole-file read fails (#1920)", () => {
+  it("fails the upload with that error, and the head buffer is still zeroed and detached", async () => {
+    useImage("late");
+    mocks.readFailure = new AppError("document_quarantine_invalid", "The quarantined document is invalid", 422);
+    seedUploadHappyPath();
+
+    await expect(uploadFile("photo.jpg")).rejects.toMatchObject({ code: "document_quarantine_invalid", status: 422 });
+
+    expect(mocks.readQuarantineCalls).toBe(1);
+    expect(mocks.checkBuffers).toHaveLength(1);
+    expectEveryCheckBufferDetached();
+    expect(mocks.sealCalls).toEqual([]);
   });
 });
 
