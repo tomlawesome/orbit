@@ -462,10 +462,10 @@
       "id": "CVE-2026-109518",
       "package": "apt",
       "owner": "Orbit maintainers",
-      "expiresOn": "2026-11-20",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 1729,
       "installedVersion": "2.8.3",
-      "rationale": "Debian/Ubuntu package manager in ollama/ollama:0.40.15; Orbit never runs apt in this container (no entrypoint or command calls it), so the flaw is not reachable. Fixed in 2.8.4ubuntu0.1, but no published image ships it yet (checked 2026-11-13 on 0.40.16, the newest release). Owner granted 7 days and a re-check, 2026-11-05, and 7 more, 2026-11-13 (#1729)."
+      "rationale": "Debian/Ubuntu package manager in ollama/ollama:0.40.15; Orbit never runs apt in this container (no entrypoint or command calls it), so the flaw is not reachable. Fixed in 2.8.4ubuntu0.1, but no published image ships it yet (checked 2026-11-13 on 0.40.16, the newest release). Owner granted 7 days and a re-check, 2026-11-05, and 7 more, 2026-11-13 (#1729). Extended 2026-11-18 to 2027-01-04: Ollama 0.40.16 still ships apt 2.8.3 and the rebuilt Tika 4.2.0-full still ships apt 3.2.0 (#1729); owner 23a, 2026-11-18."
     },
     {
       "kind": "vulnerability",
@@ -473,10 +473,10 @@
       "id": "CVE-2026-109518",
       "package": "libapt-pkg6.0t64",
       "owner": "Orbit maintainers",
-      "expiresOn": "2026-11-20",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 1729,
       "installedVersion": "2.8.3",
-      "rationale": "Debian/Ubuntu package manager in ollama/ollama:0.40.15; Orbit never runs apt in this container (no entrypoint or command calls it), so the flaw is not reachable. Fixed in 2.8.4ubuntu0.1, but no published image ships it yet (checked 2026-11-13 on 0.40.16, the newest release). Owner granted 7 days and a re-check, 2026-11-05, and 7 more, 2026-11-13 (#1729)."
+      "rationale": "Debian/Ubuntu package manager in ollama/ollama:0.40.15; Orbit never runs apt in this container (no entrypoint or command calls it), so the flaw is not reachable. Fixed in 2.8.4ubuntu0.1, but no published image ships it yet (checked 2026-11-13 on 0.40.16, the newest release). Owner granted 7 days and a re-check, 2026-11-05, and 7 more, 2026-11-13 (#1729). Extended 2026-11-18 to 2027-01-04: Ollama 0.40.16 still ships apt 2.8.3 and the rebuilt Tika 4.2.0-full still ships apt 3.2.0 (#1729); owner 23a, 2026-11-18."
     },
     {
       "kind": "vulnerability",
@@ -484,10 +484,10 @@
       "id": "CVE-2026-109518",
       "package": "apt",
       "owner": "Orbit maintainers",
-      "expiresOn": "2026-11-20",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 1729,
       "installedVersion": "3.2.0",
-      "rationale": "Debian/Ubuntu package manager in apache/tika:4.2.0-full; Orbit never runs apt in this container (no entrypoint or command calls it), so the flaw is not reachable. Fixed in 3.2.1ubuntu0.1, but no published image ships it yet (checked 2026-11-13: no newer release). Owner granted 7 days and a re-check, 2026-11-05, and 7 more, 2026-11-13 (#1729)."
+      "rationale": "Debian/Ubuntu package manager in apache/tika:4.2.0-full; Orbit never runs apt in this container (no entrypoint or command calls it), so the flaw is not reachable. Fixed in 3.2.1ubuntu0.1, but no published image ships it yet (checked 2026-11-13: no newer release). Owner granted 7 days and a re-check, 2026-11-05, and 7 more, 2026-11-13 (#1729). Extended 2026-11-18 to 2027-01-04: Ollama 0.40.16 still ships apt 2.8.3 and the rebuilt Tika 4.2.0-full still ships apt 3.2.0 (#1729); owner 23a, 2026-11-18."
     },
     {
       "kind": "vulnerability",
@@ -495,10 +495,10 @@
       "id": "CVE-2026-109518",
       "package": "libapt-pkg7.0",
       "owner": "Orbit maintainers",
-      "expiresOn": "2026-11-20",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 1729,
       "installedVersion": "3.2.0",
-      "rationale": "Debian/Ubuntu package manager in apache/tika:4.2.0-full; Orbit never runs apt in this container (no entrypoint or command calls it), so the flaw is not reachable. Fixed in 3.2.1ubuntu0.1, but no published image ships it yet (checked 2026-11-13: no newer release). Owner granted 7 days and a re-check, 2026-11-05, and 7 more, 2026-11-13 (#1729)."
+      "rationale": "Debian/Ubuntu package manager in apache/tika:4.2.0-full; Orbit never runs apt in this container (no entrypoint or command calls it), so the flaw is not reachable. Fixed in 3.2.1ubuntu0.1, but no published image ships it yet (checked 2026-11-13: no newer release). Owner granted 7 days and a re-check, 2026-11-05, and 7 more, 2026-11-13 (#1729). Extended 2026-11-18 to 2027-01-04: Ollama 0.40.16 still ships apt 2.8.3 and the rebuilt Tika 4.2.0-full still ships apt 3.2.0 (#1729); owner 23a, 2026-11-18."
     },
     {
       "kind": "vulnerability",
@@ -506,10 +506,10 @@
       "id": "CVE-2026-78661",
       "package": "golang.org/x/net",
       "owner": "Orbit maintainers",
-      "expiresOn": "2026-11-21",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 1759,
       "installedVersion": "v0.61.0",
-      "rationale": "x/net html parser slows on crafted input, in /usr/bin/ollama in ollama/ollama:0.40.15. Fixed in x/net 0.62.0, but the newest release, 0.40.15, still ships v0.61.0, so no image carries the fix. Orbit runs Ollama only under the optional ai profile, with no internet access and no published port (ADR-0025). Owner decision 2026-11-07, question 137: 14 days. Checked 2026-11-09 on 0.40.15."
+      "rationale": "x/net html parser slows on crafted input, in /usr/bin/ollama in ollama/ollama:0.40.15. Fixed in x/net 0.62.0, but the newest release, 0.40.15, still ships v0.61.0, so no image carries the fix. Orbit runs Ollama only under the optional ai profile, with no internet access and no published port (ADR-0025). Owner decision 2026-11-07, question 137: 14 days. Checked 2026-11-09 on 0.40.15. Extended 2026-11-18 to 2027-01-04: Ollama 0.40.16, the newest release, still has golang.org/x/net v0.61.0 (#1759); owner 24a, 2026-11-18."
     },
     {
       "kind": "vulnerability",
