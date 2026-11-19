@@ -2942,7 +2942,7 @@ check_update_readiness() {
   compose_project_name="$(update_readiness_project_name)" ||
     fail_with update-readiness retry "$update_readiness_could_not_check"
   if ! probe_database_health; then
-    printf 'Orbit installer: the database is not running, so the update readiness check will run when Orbit starts.\n' >&2 || true
+    printf 'Orbit installer: the database did not answer its health check, so the update readiness check will run when Orbit starts.\n' >&2 || true
     return 0
   fi
   # As restore.sh's run_engine: Docker will not mount a missing secret file,
