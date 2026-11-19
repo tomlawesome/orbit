@@ -3399,6 +3399,20 @@ smtp_release_backup_restore_lock() {
   smtp_lock_fd=""
 }
 
+# smtp_sweep_retire_tmp: removes the .env-orbit.retire-smtp.<6> files a
+# killed retirement left (#1901 O-R3). Under the lock, so no other run's
+# file is live; only regular files with exactly that name go.
+smtp_sweep_retire_tmp() {
+  local saved_options entry
+  saved_options="$(shopt -p nullglob)" || true
+  shopt -s nullglob
+  for entry in "$environment_file".retire-smtp.??????; do
+    [[ "$entry" =~ ^\.env-orbit\.retire-smtp\.[A-Za-z0-9]{6}$ && -f "$entry" && ! -L "$entry" ]] || continue
+    rm -f -- "$entry" || true
+  done
+  eval "$saved_options"
+}
+
 retire_smtp_lines() {
   [[ "$target_was_empty" != 1 ]] || return 0
   smtp_retirement_due || return 0
@@ -3411,6 +3425,7 @@ retire_smtp_lines() {
 
 # The retirement itself, under the lock retire_smtp_lines took.
 retire_smtp_steps() {
+  smtp_sweep_retire_tmp
   smtp_read_record
 
   # A retirement that finished but was not confirmed: the gate holds now, so
