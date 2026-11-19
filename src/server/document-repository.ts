@@ -20,6 +20,7 @@ import {
   detectDocumentMediaType,
   normalizedDocumentFilename,
   classifyDocumentStructure,
+  declaredImageDimensions,
   type DocumentStructureVerdict,
   type SupportedDocumentMediaType,
 } from "@/server/documents/validation";
@@ -586,12 +587,19 @@ async function reserveDocumentMetadata(input: {
   });
 }
 
+/** How much of an image the header fence reads from the front of the file (#1920). */
+const IMAGE_HEAD_BYTES = 1024 * 1024;
+
 /**
- * The open check's one read of the quarantine file (#1567). The buffer lives
- * only in this function's frame: it is zeroed and freed when the check
- * answers, so the encrypt stage that follows never runs with it still held.
- * Kept in the upload's own frame, a suspended async function keeps it
- * reachable across the later awaits.
+ * The open check (#1567, #1920). The server never holds the whole document
+ * for it: a PDF goes to the sandbox as the file on disk, and an image's
+ * header fence reads only the front of the file (the sandbox child reads the
+ * rest from its descriptor). Only an image whose header lies past that front
+ * falls back to one whole-file read, so no file is judged differently. Every
+ * buffer lives only in this function's frame and is zeroed and freed when the
+ * check answers, so the encrypt stage that follows never runs beside it
+ * (#1151 F13); kept in the upload's own frame, a suspended async function
+ * would keep it reachable across the later awaits.
  */
 async function checkQuarantinedStructure(
   storage: LocalDocumentStorage,
@@ -600,9 +608,16 @@ async function checkQuarantinedStructure(
   maxBytes: number,
   maxPages?: number,
 ): Promise<DocumentStructureVerdict> {
-  const bytes = await storage.readQuarantine(received.quarantinePath, maxBytes);
+  const file = { path: received.quarantinePath, sizeBytes: received.sizeBytes };
+  if (mediaType === "application/pdf") return classifyDocumentStructure(Buffer.alloc(0), mediaType, file, { maxPages });
+  const { head, sizeBytes } = await storage.readQuarantineHead(received.quarantinePath, maxBytes, IMAGE_HEAD_BYTES);
+  let bytes = head;
   try {
-    return await classifyDocumentStructure(bytes, mediaType, { path: received.quarantinePath, sizeBytes: received.sizeBytes }, { maxPages });
+    if (head.length < sizeBytes && !declaredImageDimensions(head, mediaType)) {
+      releaseBuffer(head);
+      bytes = await storage.readQuarantine(received.quarantinePath, maxBytes);
+    }
+    return await classifyDocumentStructure(bytes, mediaType, file, { maxPages });
   } finally {
     // Zeroed and freed the moment the check answers, as the recovery and
     // mail-in checks do, so the seal never runs beside it (#1151 F13).
