@@ -153,7 +153,7 @@ export const SIDECARS = [
   {
     name: "ClamAV",
     service: "orbit-clamav",
-    image: "clamav/clamav:1.5.4",
+    image: "clamav/clamav:1.5.5",
     author: "Cisco Systems, Inc.",
     licence: "GNU General Public License 2.0",
     spdx: "GPL-2.0-only",
@@ -163,7 +163,7 @@ export const SIDECARS = [
   {
     name: "Ollama",
     service: "orbit-ollama",
-    image: "ollama/ollama:0.40.15",
+    image: "ollama/ollama:0.40.16",
     author: "Ollama",
     licence: "MIT License",
     spdx: "MIT",
