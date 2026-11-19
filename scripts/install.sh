@@ -3208,8 +3208,9 @@ smtp_read_record() {
 
 # smtp_discard_copy: the change is confirmed. Removes the files the
 # retirement wrote into the undo copy's folder (.env-orbit's lines and its
-# temporary file, the copy marker and, from repair.sh, the overlay and the
-# temporary files a killed repair left, #1848 FR-S1b), the folder when
+# temporary file, the copy marker and its temporary file and, from repair.sh,
+# the overlay and the temporary files a killed repair left, #1848 FR-S1b,
+# #1915 O-F1), the folder when
 # nothing else is in it, then the step record. Anything else in the folder
 # stays.
 smtp_discard_copy() {
@@ -3219,7 +3220,8 @@ smtp_discard_copy() {
       "$smtp_copy_dir/.env-orbit.smtp-copy.tmp" || return 1
     saved_options="$(shopt -p nullglob)" || true
     shopt -s nullglob
-    for entry in "$smtp_copy_dir"/.env-orbit.smtp-copy.?????? "$smtp_copy_dir/$smtp_overlay_file".smtp-copy.??????; do
+    for entry in "$smtp_copy_dir"/.env-orbit.smtp-copy.?????? "$smtp_copy_dir/$smtp_overlay_file".smtp-copy.?????? \
+      "$smtp_copy_dir/$smtp_copy_marker".??????; do
       if smtp_copy_tmp_name "${entry##*/}"; then rm -f -- "$entry" || status=1; fi
     done
     eval "$saved_options"
