@@ -3441,10 +3441,10 @@ smtp_release_backup_restore_lock() {
 }
 
 # smtp_sweep_retire_tmp: removes the .env-orbit.retire-smtp.<6> files a
-# killed retirement left (#1901 O-R3). Only under the lock, so no other run's
-# file is live (no lock, no sweep); only regular files with exactly that name go.
+# killed retirement left (#1901 O-R3); they hold the SMTP lines. Run with the lock where flock exists;
+# without it a live one may go too, which only fails that run's rename. Only exact-name regular files go.
 smtp_sweep_retire_tmp() {
-  [[ -n "$smtp_lock_fd" ]] || return 0; local saved_options entry LC_ALL=C
+  local saved_options entry LC_ALL=C
   saved_options="$(shopt -p nullglob)" || true
   shopt -s nullglob
   for entry in "$environment_file".retire-smtp.??????; do
