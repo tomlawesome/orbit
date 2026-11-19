@@ -30,6 +30,11 @@ cd "${repo_root}" || exit 1
 readonly default_compose_files='-f docker-compose.yml -f docker-compose.mail.yml -f compose/docker-compose.acceptance.yml'
 read -r -a compose_files <<< "${COMPOSE_FILES:-${default_compose_files}}"
 
+# A daemon killed mid-job (#1921) is the commonest reason the rest prints nothing.
+if ! docker info >/dev/null 2>&1; then
+  echo "Docker daemon lost during the job (#1921)"
+fi
+
 export ORBIT_IMAGE="${ORBIT_IMAGE:-orbit-local:000000000000}"
 docker compose --env-file .env-orbit "${compose_files[@]}" ps
 docker compose --env-file .env-orbit "${compose_files[@]}" logs --no-color
