@@ -148,7 +148,7 @@ fi
 # simulation script (never a fetched, caller-supplied or symlinked path),
 # which in turn may only source the fixed sibling installer-ui.sh.
 if [[ "$simulate_mode" == 1 ]]; then
-  installer_script_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd -P)" ||
+  installer_script_dir="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd -P)" ||
     { printf 'Orbit installer: could not resolve the installer script directory for simulation.\n' >&2; exit 1; }
   simulation_script="$installer_script_dir/installer-simulation.sh"
   simulation_ui_script="$installer_script_dir/installer-ui.sh"
