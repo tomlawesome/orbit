@@ -234,6 +234,9 @@ describe("the check and background pools keep unbounded waits (#1446 decision 1)
     await vi.advanceTimersByTimeAsync(10 * VIEW_SLOT_WAIT_MS);
     for (const job of jobs.slice(2)) expect(await settled(job)).toBe(false);
     const infoStarts = () => readdirSync(directory).filter((name) => name.startsWith("ran-a-")).length;
+    /* The second child may still be spawning on a loaded runner: wait for two, then hold at two. */
+    await until(() => infoStarts() >= 2, "two check children started");
+    await vi.advanceTimersByTimeAsync(VIEW_SLOT_WAIT_MS);
     expect(infoStarts(), "the check pool's limit is two: exactly two children running, the other ten waiting").toBe(2);
 
     open("a");

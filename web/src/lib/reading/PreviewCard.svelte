@@ -197,7 +197,7 @@
       }
       if (result.kind === "busy" && !again) {
         // The wait is the server's own, so the stall timer must not run through it;
-        // the retry arms a fresh one for the load itself.
+        // the retry starts a fresh one for the load itself.
         clearTimeout(loadTimer);
         busyTimer = setTimeout(() => {
           if (mine !== token) return;
