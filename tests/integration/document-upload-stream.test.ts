@@ -32,7 +32,7 @@ import { scanFileWithClamAv } from "@/server/documents/scanner";
 import { classifyDocumentStructure } from "@/server/documents/validation";
 import { LocalDocumentStorage } from "@/server/documents/storage";
 import { cleanupIntegrationEnvironment, createIntegrationFixture, withRequiredScanMode } from "./support/fixtures";
-import { progressive40Mpx, writePaddedImageFile } from "../support/image-fixtures";
+import { progressive40Mpx, solidRaster, writePaddedImageFile } from "../support/image-fixtures";
 import { paddedPdfOfSize, writePaddedPdfFile } from "../support/large-pdf";
 import { syntheticPdf } from "../support/synthetic-documents";
 
@@ -326,8 +326,8 @@ describe("the recovery worker decrypts into a quarantine file and verifies it be
   }, 300_000);
 });
 
-describe("a file the open check refuses leaves nothing, and the check's buffer is released (#1567)", () => {
-  it("leaves no object, no staging file, no quarantine file and no metadata, and releases the buffer it read", async () => {
+describe("a PDF upload's open check reads no whole file, and a refused file leaves nothing (#1567, #1920)", () => {
+  it("leaves no object, no staging file, no quarantine file and no metadata, and never calls readQuarantine", async () => {
     const fixture = await createIntegrationFixture("doc-upload-stream-refused");
     const documentId = randomUUID();
     const refused = Buffer.from("%PDF-1.7\ntruncated, nothing a reader can open");
@@ -339,41 +339,121 @@ describe("a file the open check refuses leaves nothing, and the check's buffer i
     expect(await storedFiles()).toEqual(filesBefore);
     expect(await getDb().select({ id: documents.id }).from(documents).where(eq(documents.id, documentId))).toHaveLength(0);
     expect(await getDb().select({ id: documentCrypto.documentId }).from(documentCrypto).where(eq(documentCrypto.documentId, documentId))).toHaveLength(0);
-    expect(reads).toHaveBeenCalledTimes(1);
-    const buffer = await reads.mock.results[0]!.value as Buffer;
-    // Released, not only zeroed (A-Q1, A-Q4): a detached buffer has no length and holds no plaintext.
-    expect(buffer.length, "the check's buffer is detached").toBe(0);
-    expect(buffer.buffer.byteLength).toBe(0);
+    expect(reads, "the sandbox reads the file on disk; the server reads none of it (#1920 S1)").toHaveBeenCalledTimes(0);
   }, 60_000);
 
-  it("releases the buffer the check read on an accepted upload too, and reads the quarantine file once through readQuarantine", async () => {
+  it("ends an acceptable PDF available and byte-identical on download, with readQuarantine never called", async () => {
     const fixture = await createIntegrationFixture("doc-upload-stream-wiped");
-    const bytes = syntheticPdf("wiped after the check");
+    const bytes = syntheticPdf("no whole-file read for the check");
     const reads = vi.spyOn(LocalDocumentStorage.prototype, "readQuarantine");
 
-    await expect(upload(fixture, bytes)).resolves.toMatchObject({ lifecycle: "available" });
+    const summary = await upload(fixture, bytes);
 
-    expect(reads).toHaveBeenCalledTimes(1);
-    const buffer = await reads.mock.results[0]!.value as Buffer;
-    expect(buffer.length, "the check's buffer is detached").toBe(0);
-    expect(buffer.buffer.byteLength).toBe(0);
+    expect(summary).toMatchObject({ lifecycle: "available" });
+    expect(reads).toHaveBeenCalledTimes(0);
+    const downloaded = await readDocumentDownload(fixture.users.member.id, summary.id);
+    expect(downloaded.bytes.equals(bytes)).toBe(true);
   }, 60_000);
 
-  it("lets go of the buffer the check read before the seal starts, so the encrypt stage never runs beside it", async () => {
+  it("reads nothing through readQuarantine for a PDF of several MiB before the seal starts, and still seals it once", async () => {
     const fixture = await createIntegrationFixture("doc-upload-stream-dropped");
     const bytes = paddedPdfOfSize(2 * MIB + 5);
+    const originalRead = LocalDocumentStorage.prototype.readQuarantine;
+    const originalSeal = LocalDocumentStorage.prototype.sealQuarantine;
+    let reads = 0;
+    let seals = 0;
+    let readsBeforeSeal = -1;
+    LocalDocumentStorage.prototype.readQuarantine = async function (this: LocalDocumentStorage, ...args: Parameters<typeof originalRead>) {
+      reads += 1;
+      return originalRead.apply(this, args);
+    };
+    LocalDocumentStorage.prototype.sealQuarantine = function (this: LocalDocumentStorage, ...args: Parameters<typeof originalSeal>) {
+      seals += 1;
+      readsBeforeSeal = reads;
+      return originalSeal.apply(this, args);
+    } as typeof originalSeal;
+    let summary: Awaited<ReturnType<typeof upload>>;
+    try {
+      summary = await upload(fixture, bytes);
+    } finally {
+      LocalDocumentStorage.prototype.readQuarantine = originalRead;
+      LocalDocumentStorage.prototype.sealQuarantine = originalSeal;
+    }
+
+    expect(summary).toMatchObject({ lifecycle: "available" });
+    expect(reads).toBe(0);
+    expect(seals).toBe(1);
+    expect(readsBeforeSeal).toBe(0);
+    const downloaded = await readDocumentDownload(fixture.users.member.id, summary.id);
+    expect(downloaded.bytes.equals(bytes)).toBe(true);
+  }, 60_000);
+});
+
+/** A valid JPEG with `count` APP1 segments of 65,533 data bytes each inserted after SOI, so its SOF marker starts past 1 MiB. */
+function jpegWithLateFrameHeader(jpeg: Buffer, count: number): Buffer {
+  const segment = Buffer.alloc(65_537);
+  segment[0] = 0xff;
+  segment[1] = 0xe1;
+  segment.writeUInt16BE(65_535, 2);
+  return Buffer.concat([jpeg.subarray(0, 2), ...Array.from({ length: count }, () => segment), jpeg.subarray(2)]);
+}
+
+function uploadImage(fixture: Fixture, bytes: Buffer, filename: string) {
+  return uploadItemDocument({
+    userId: fixture.users.member.id,
+    householdId: fixture.household.id,
+    itemId: fixture.item.id,
+    filename,
+    body: bodyOf(bytes),
+    declaredBytes: bytes.length,
+  });
+}
+
+describe("an image whose header is in the first MiB is parsed without a whole-file read (#1920)", () => {
+  it.each([
+    ["image/png", "photo.png"],
+    ["image/jpeg", "photo.jpg"],
+  ] as const)("accepts a %s, stored whole, with readQuarantine never called", async (mediaType, filename) => {
+    const fixture = await createIntegrationFixture(`doc-upload-header-${mediaType.slice(6)}`);
+    const bytes = solidRaster(mediaType, 64, 48);
+    const reads = vi.spyOn(LocalDocumentStorage.prototype, "readQuarantine");
+
+    const summary = await uploadImage(fixture, bytes, filename);
+
+    expect(summary).toMatchObject({ lifecycle: "available", sizeBytes: bytes.length });
+    expect(reads).toHaveBeenCalledTimes(0);
+    const downloaded = await readDocumentDownload(fixture.users.member.id, summary.id);
+    expect(downloaded.bytes.equals(bytes)).toBe(true);
+  }, 60_000);
+
+  it("still refuses a PNG whose header declares more than the pixel cap, leaving nothing, with readQuarantine never called", async () => {
+    const fixture = await createIntegrationFixture("doc-upload-header-over-cap");
+    const bytes = Buffer.from(solidRaster("image/png", 64, 48));
+    bytes.writeUInt32BE(100_000, 16);
+    const filesBefore = await storedFiles();
+    const reads = vi.spyOn(LocalDocumentStorage.prototype, "readQuarantine");
+
+    await expect(uploadImage(fixture, bytes, "huge.png")).rejects.toMatchObject({ code: "document_structure_invalid" });
+
+    expect(reads).toHaveBeenCalledTimes(0);
+    expect(await storedFiles()).toEqual(filesBefore);
+  }, 60_000);
+});
+
+describe("a JPEG whose frame header starts after the first MiB falls back to one whole-file read (#1920)", () => {
+  it("gets the verdict it always got, with one readQuarantine whose buffer is detached before the seal starts", async () => {
+    const fixture = await createIntegrationFixture("doc-upload-late-sof");
+    const bytes = jpegWithLateFrameHeader(solidRaster("image/jpeg", 64, 48), 17);
+    expect(bytes.length).toBeGreaterThan(MIB + 65_537);
     setFlagsFromString("--expose-gc");
     const collect = runInNewContext("gc") as () => void;
-
-    // Wrapped by hand: a vi.spyOn would keep the returned buffer alive in mock.results.
     const originalRead = LocalDocumentStorage.prototype.readQuarantine;
     const originalSeal = LocalDocumentStorage.prototype.sealQuarantine;
     let reads = 0;
     let readLength = -1;
     let heldBuffer: WeakRef<Buffer> | undefined;
-    let seals = 0;
-    let bufferCleared: boolean | undefined;
     let readBeforeSeal = false;
+    let bufferCleared: boolean | undefined;
     LocalDocumentStorage.prototype.readQuarantine = async function (this: LocalDocumentStorage, ...args: Parameters<typeof originalRead>) {
       reads += 1;
       const buffer = await originalRead.apply(this, args);
@@ -382,29 +462,40 @@ describe("a file the open check refuses leaves nothing, and the check's buffer i
       return buffer;
     };
     LocalDocumentStorage.prototype.sealQuarantine = function (this: LocalDocumentStorage, ...args: Parameters<typeof originalSeal>) {
-      seals += 1;
       readBeforeSeal = heldBuffer !== undefined;
-      // The module mock's spy keeps its arguments, and the upload hands the check its buffer: clear it
-      // so only the upload's own references are measured (vi.restoreAllMocks does not clear a vi.fn
-      // made inside vi.mock).
       vi.mocked(classifyDocumentStructure).mockClear();
       collect();
       collect();
       bufferCleared = heldBuffer?.deref() === undefined;
       return originalSeal.apply(this, args);
     } as typeof originalSeal;
+    let summary: Awaited<ReturnType<typeof uploadImage>>;
     try {
-      await expect(upload(fixture, bytes)).resolves.toMatchObject({ lifecycle: "available" });
+      summary = await uploadImage(fixture, bytes, "late.jpg");
     } finally {
       LocalDocumentStorage.prototype.readQuarantine = originalRead;
       LocalDocumentStorage.prototype.sealQuarantine = originalSeal;
     }
 
+    // Verdict on the code before #1920: the whole file is parsed, the frame header is found and within the cap, the file is accepted.
+    expect(summary).toMatchObject({ lifecycle: "available", sizeBytes: bytes.length });
     expect(reads).toBe(1);
     expect(readLength).toBe(bytes.length);
-    expect(seals).toBe(1);
-    expect(readBeforeSeal, "the check read the quarantine file before the seal started").toBe(true);
-    expect(bufferCleared, "the open check's buffer is still reachable when the seal starts").toBe(true);
+    expect(readBeforeSeal).toBe(true);
+    expect(bufferCleared, "the fallback's buffer is still reachable when the seal starts").toBe(true);
+  }, 60_000);
+
+  it("releases (detaches) the fallback's buffer", async () => {
+    const fixture = await createIntegrationFixture("doc-upload-late-sof-detached");
+    const bytes = jpegWithLateFrameHeader(solidRaster("image/jpeg", 64, 48), 17);
+    const reads = vi.spyOn(LocalDocumentStorage.prototype, "readQuarantine");
+
+    await expect(uploadImage(fixture, bytes, "late.jpg")).resolves.toMatchObject({ lifecycle: "available" });
+
+    expect(reads).toHaveBeenCalledTimes(1);
+    const buffer = await reads.mock.results[0]!.value as Buffer;
+    expect(buffer.length, "the check's buffer is detached").toBe(0);
+    expect(buffer.buffer.byteLength).toBe(0);
   }, 60_000);
 });
 
