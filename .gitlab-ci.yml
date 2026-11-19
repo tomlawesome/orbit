@@ -423,7 +423,7 @@ variables:
   # mean the same thing.
   TRIVY_IMAGE: aquasec/trivy@sha256:2e6c00d711ab4ae41d8a30c2c1fd3bd3b62704c177bb120f95012e939edfb3df
   # The digest scripts/test-integration.mjs pins for its disposable database.
-  POSTGRES_IMAGE: postgres:18-alpine@sha256:fa1b61f5a4844f4d4b73c9b15716cfc75fe70c931f2d32723630f3b900056366
+  POSTGRES_IMAGE: postgres:18-alpine@sha256:68e33adb18d9962952f00d5e3b8644305e10e375f98dd652bf6ee6a1836314ba
   # scripts/ci/start-installer-registry.sh's disposable loopback registry
   # (acceptance, repair_journeys via its own copy below, and
   # launcher_install_compat all start it). A plain Docker Hub name, which the
