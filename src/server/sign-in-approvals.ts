@@ -479,11 +479,13 @@ async function mailApproval(
  * by looking up an existing row. Writing the row first means that same
  * crash instead leaves an unsent, harmless row that simply expires -- the
  * waiting tab never got a response either, so it retries and gets a new one.
- * A pending sign-in that could not be posted is still written. Every
- * attempted mail counts toward the hourly limit: its count row is reserved
- * before the send (#1879 A-R2) and kept when the send fails (#1879 ruling,
- * note 64435), so five failed sends in an hour answer `limited`. Only a mail
- * that went sets the approval's own count and send time.
+ * A pending sign-in that could not be posted is still written. Every mail
+ * handed to the mailer counts toward the hourly limit: its count row is
+ * reserved before the send (#1879 A-R2) and kept when the send fails (#1879
+ * ruling, note 64435), so five failed sends in an hour answer `limited`. A
+ * mail that never reached the mailer (no readable address, or a link that
+ * could not be built) gives its slot back (#1915 A-F1). Only a mail that went
+ * sets the approval's own count and send time.
  */
 export async function startSignInApproval(
   userId: string,
