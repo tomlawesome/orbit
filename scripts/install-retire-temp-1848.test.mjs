@@ -188,3 +188,20 @@ describe("#1848 smtp_write_copy: the undo copy of .env-orbit goes through a fres
     expect(copyLeftovers(targetDir)).toEqual([]);
   });
 });
+
+// #1901 O-R3: a killed retirement leaves its .env-orbit.retire-smtp.<6> temporary file; the next retirement sweeps it.
+describe("#1901 O-R3 retire_smtp_steps sweeps stale .env-orbit.retire-smtp.* files", () => {
+  it("removes leftovers beside .env-orbit at the start, and leaves the live .env-orbit and unrelated files alone", () => {
+    const targetDir = folderWithSmtp();
+    const stale = [".env-orbit.retire-smtp.Ab12Cd", ".env-orbit.retire-smtp.Zz9Yx8"];
+    for (const name of stale) writeFileSync(join(targetDir, name), "SMTP_PASSWORD=stale-copy\n", { mode: 0o600 });
+    writeFileSync(join(targetDir, ".env-orbit.keep-me"), "mine\n");
+    const result = update(targetDir, { extraEnv: NONE_AFTER });
+    expect(result.status).toBe(0);
+    for (const name of stale) expect(existsSync(join(targetDir, name)), name).toBe(false);
+    expect(readdirSync(targetDir).filter((name) => name.startsWith(".env-orbit.retire-smtp."))).toEqual([]);
+    expect(readFileSync(join(targetDir, ".env-orbit.keep-me"), "utf8")).toBe("mine\n");
+    expect(existsSync(join(targetDir, ".env-orbit"))).toBe(true);
+    expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).not.toContain("SMTP_HOST=");
+  });
+});
