@@ -24,6 +24,12 @@ import {
   originalsIn,
   filesNamed,
   backupsDir,
+  privateStateFixture,
+  r5DownFailedKnobs,
+  r5DownCommand,
+  recoveryCommands,
+  runPasted,
+  containersLeft,
   ownTree,
 } from "./install-test-support.mjs";
 
@@ -111,6 +117,96 @@ describe("install.sh: the rollback restore falls back to a rename-aside when the
     expect(originalsIn(ownTree(targetDir))).toEqual(originalsIn(before));
     expect(existsSync(join(targetDir, engineMade))).toBe(false);
     expect(leftovers(targetDir)).toEqual([]);
+  });
+});
+
+// Branches of restore_original_aside beyond the plain fallback: the containers could not be stopped (the aside is
+// <stamp>/engine/<name>), the aside that cannot be removed, and the aside that cannot be moved back.
+const failAsideRemoval = 'for a; do case "$a" in *.aside) exit 1;; esac; done\nexec /bin/rm "$@"';
+const moveBackShim = (pattern) => `for a; do case "$a" in -*) ;; *) first=$a; break;; esac; done\ncase "$first" in ${pattern}) exit 1;; esac\nexec /bin/mv "$@"`;
+const failAsideMoveBackNormal = moveBackShim("*.aside");
+const failAsideMoveBackEngine = moveBackShim("*/engine/*");
+
+/** Guarantee 58: no "clear what is named above" line may follow a line naming orbit-install-backups. */
+function expectNoClearAfterBackups(stderr) {
+  const lines = stderr.split("\n");
+  const named = lines.findIndex((line) => line.includes("orbit-install-backups"));
+  const clear = lines.findIndex((line, index) => index > named && line.includes("Clear the entries this install could not remove, named above"));
+  expect(named >= 0 && clear >= 0, `a "Clear the entries" line follows a line naming orbit-install-backups:\n${stderr}`).toBe(false);
+}
+
+describe("install.sh: restore_original_aside, the containers could not be stopped (#1901 O-R1)", () => {
+  function downFailedInstall(tools, extraEnvironment = {}) {
+    const fixture = privateStateFixture();
+    const environment = {
+      ...fixture.environment,
+      ...r5DownFailedKnobs(),
+      FAKE_COMPOSE_STRICT: "1",
+      ...extraEnvironment,
+      ...(tools ? { PATH: toolsPath(tools) } : {}),
+    };
+    return { ...fixture, result: runInstall(fixture.targetDir, environment) };
+  }
+
+  it("the fallback copy succeeds: the path is restored, the aside is the entry under <stamp>/engine, and the printed stop command still works", () => {
+    const { targetDir, stateDir, before, result } = downFailedInstall({ cp: failStagingCopy });
+    expect(result.status).toBe(1);
+    expect(result.stderr).not.toContain("Could not put back");
+    expect(ownTree(targetDir)).toEqual(before);
+    const stamp = onlyStamp(targetDir);
+    expect(existsSync(join(stamp, "originals"))).toBe(false);
+    expect(readFileSync(join(stamp, "engine", ".env-orbit"), "utf8")).toContain("COMPOSE_PROJECT_NAME=");
+    expect(existsSync(join(stamp, "engine", "docker-compose.yml"))).toBe(true);
+    expect(leftovers(targetDir)).toEqual([]);
+    const commands = recoveryCommands(result.stderr).map((entry) => entry.command);
+    expect(commands).toHaveLength(1);
+    expect(commands[0]).toMatch(r5DownCommand);
+    const pasted = runPasted(commands[0], stateDir);
+    expect(pasted.ran.status, pasted.ran.stderr).toBe(0);
+    expect(pasted.loaded?.found).toBe(true);
+    expect(containersLeft(stateDir)).toEqual([]);
+  });
+
+  it("engine/ variant: the copy fails and the aside under engine/ cannot be moved back: originals/ is kept, the path is named, and nothing tells the person to clear entries after a line naming the backups folder", () => {
+    const { targetDir, result } = downFailedInstall({ cp: failAnyRestoreCopy, mv: failAsideMoveBackEngine }, { CP_LOG: join(mkdtempSync(join(tmpdir(), "orbit-cplog-")), "cp.log") });
+    expect(result.status).toBe(1);
+    expect(terminalFailure(result.stdout)).toMatch(/ action=abort /u);
+    expect(result.stderr).toContain("Could not move");
+    expect(result.stderr).toContain(join(targetDir, ".orbit-secrets"));
+    const stamp = onlyStamp(targetDir);
+    expect(readFileSync(join(stamp, "originals", ".orbit-secrets", "oidc-client-secret"), "utf8")).toBe("preprovisioned-oidc-secret");
+    expectNoClearAfterBackups(result.stderr);
+    // engine/ under the stamp is the installer's own: the person is never told to clear it.
+    const lines = result.stderr.split("\n");
+    const engineLine = lines.findIndex((line) => line.includes(`${stamp}/engine`));
+    if (engineLine >= 0) expect(lines.slice(engineLine + 1).some((line) => line.includes("Clear the entries"))).toBe(false);
+  });
+});
+
+describe("install.sh: restore_original_aside, the aside that cannot be removed or moved back (#1901 O-R1)", () => {
+  it("the aside cannot be removed after a verified restore: the obstacle names the aside, the run aborts, and the original is still in originals/", () => {
+    const { targetDir, before, result } = failedInstall({ cp: failStagingCopy, rm: failAsideRemoval });
+    expect(result.status).toBe(1);
+    expect(terminalFailure(result.stdout)).toMatch(/ action=abort /u);
+    expect(result.stderr).toMatch(/Could not remove \S*\.orbit-restore\.\d+\.aside/u);
+    // The original is back in place, and its copy is kept.
+    expect(originalsIn(ownTree(targetDir))).toEqual(originalsIn(before));
+    const stamp = onlyStamp(targetDir);
+    expect(readFileSync(join(stamp, "originals", ".orbit-secrets", "oidc-client-secret"), "utf8")).toBe("preprovisioned-oidc-secret");
+  });
+
+  it("the copy fails and the aside cannot be moved back: originals/ is kept, the path is named, and nothing tells the person to clear entries after a line naming the backups folder", () => {
+    const { targetDir, result } = failedInstall(
+      { cp: failAnyRestoreCopy, mv: failAsideMoveBackNormal },
+      { CP_LOG: join(mkdtempSync(join(tmpdir(), "orbit-cplog-")), "cp.log") },
+    );
+    expect(result.status).toBe(1);
+    expect(terminalFailure(result.stdout)).toMatch(/ action=abort /u);
+    expect(result.stderr).toMatch(/Could not move \S*\.orbit-restore\.\d+\.aside back/u);
+    expect(result.stderr).toContain(join(targetDir, ".orbit-secrets"));
+    const stamp = onlyStamp(targetDir);
+    expect(readFileSync(join(stamp, "originals", ".orbit-secrets", "oidc-client-secret"), "utf8")).toBe("preprovisioned-oidc-secret");
+    expectNoClearAfterBackups(result.stderr);
   });
 });
 
