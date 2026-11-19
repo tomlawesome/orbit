@@ -1,10 +1,11 @@
-import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import { ACTIONS, runOwner } from "./repair-owner-fixtures.mjs";
-import { privShims, realTool } from "./repair-priv-shims.mjs";
-import { makeFixture, scratchDir } from "./repair-test-harness.mjs";
+import { UID, privShims, realTool } from "./repair-priv-shims.mjs";
+import { composeUpCalls, makeFixture, scratchDir } from "./repair-test-harness.mjs";
 
 // #1915 (held items, repair.sh): O-F8/O-F10 leftover discards cleared on an empty dangerous batch, O-S1 a recovery
 // folder that cannot be removed is named, O-S2 and O-R2 a rename that timed out but landed is done, SEC-O3 names are
@@ -194,4 +195,144 @@ describe("#1915 O-F11: a checkpoint folder holding the bundle's temp file is rem
       expect(checkpoints(targetDir), result.stderr.slice(0, 1500)).toEqual([]);
     });
   }
+});
+
+// SEC-O3, the "was kept" line of remove_leftover_discards prints the same untrusted name.
+describe("#1915 SEC-O3: remove_leftover_discards' 'was kept' line cleans the name", () => {
+  it("a leftover .orbit-repair-discard.* that is a file, with a control sequence in its name, is named cleaned", () => {
+    const targetDir = makeFixture();
+    writeFileSync(join(targetDir, ".orbit-repair-discard.ab\x1b[31mcd"), "not a folder\n");
+    const result = runOwner(targetDir, { shims: privShims(targetDir, { root: false }), state: { ...RUNNING }, capSeconds: 60 });
+    const lines = result.stderr.split("\n").filter((line) => line.includes("was kept: it is not a folder repair made"));
+    expect(lines.length, result.stderr.slice(0, 1500)).toBe(1);
+    expect(lines[0], "an escape character reached the terminal").not.toContain("\x1b");
+    expect(lines[0]).toContain("./.orbit-repair-discard.abcd was kept");
+  });
+});
+
+// --- O-S3 (ruling, note 66727): engine_lock_idle removes the empty lock its own open created ---------------------------
+
+describe("#1915 O-S3: an engine lock that vanishes before repair's open is not left behind empty", () => {
+  const STAGING = ".orbit-install-staging.abc123";
+  const MANAGED = ["docker-compose.yml", "docker-compose.mail.yml", ".env-orbit.example", "config/tika-config.json", "scripts/configure.sh", "scripts/installer-ui.sh", "scripts/backup.sh", "scripts/restore.sh", "scripts/repair.sh", "update.sh", ".env-orbit", ".orbit-secrets", ".orbit-files"];
+  const VANISHED = "Orbit repair: the engine lock .orbit-engine.lock vanished while repair was checking it (an install or update just finished) and repair's open created an empty one in its place; repair removed that file again, so no install waits on it; run repair again.";
+
+  function engineFolder() {
+    const targetDir = makeFixture();
+    const original = join(targetDir, STAGING, "rollback", "original");
+    mkdirSync(original, { recursive: true, mode: 0o700 });
+    for (const dir of [join(targetDir, STAGING), join(targetDir, STAGING, "rollback"), original]) chmodSync(dir, 0o700);
+    const present = MANAGED.filter((path) => existsSync(join(targetDir, path)));
+    const copied = spawnSync("cp", ["-a", "--parents", ...present, original], { cwd: targetDir, encoding: "utf8" });
+    if (copied.status !== 0) throw new Error(copied.stderr);
+    const path = join(targetDir, ".orbit-engine.lock");
+    writeFileSync(path, "", { mode: 0o600 });
+    utimesSync(path, new Date("2020-01-01T00:00:00Z"), new Date("2020-01-01T00:00:00Z"));
+    return { targetDir, path };
+  }
+
+  /** BASH_ENV hook (the #1899 seam): just before `exec {fd}<` inside `fn`, removes the lock; the flag file records it. */
+  function removeHook(path, fn) {
+    const hook = scratchDir("orbit-1915-hook-");
+    const flag = join(hook, "removed");
+    writeFileSync(
+      join(hook, "env.sh"),
+      `set -T
+__orbit_lock_remove() {
+  case "\${BASH_COMMAND-}" in *'exec {fd}<'*) ;; *) return 0;; esac
+  [[ " \${FUNCNAME[*]-} " == *" ${fn} "* ]] || return 0
+  [[ -e '${flag}' ]] && return 0
+  : > '${flag}'
+  ${realTool("rm")} -f -- '${path}'
+  return 0
+}
+trap __orbit_lock_remove DEBUG
+`,
+    );
+    return { env: { BASH_ENV: join(hook, "env.sh") }, flag };
+  }
+
+  for (const [who, opts] of [["not root", { root: false, setpriv: false, getent: "fail" }], ["simulated root", {}]]) {
+    it(`${who}: the created empty lock is removed, the run refuses as unwritable, and the vanished line is printed`, () => {
+      const { targetDir, path } = engineFolder();
+      const hook = removeHook(path, "engine_lock_idle");
+      const shims = privShims(targetDir, { extraTools: ["diff", "sha256sum"], ...opts });
+      try {
+        const result = runOwner(targetDir, { shims, state: { ...RUNNING }, args: ["--execute", "--safe-only"], capSeconds: 40, env: hook.env });
+        expect(existsSync(hook.flag), "the removal did not happen, so the test proves nothing").toBe(true);
+        expect(result.hung).toBe(false);
+        expect(existsSync(path), "the empty lock repair's open created is still there").toBe(false);
+        expect(result.stderr.split("\n"), result.stderr.slice(0, 1500)).toContain(VANISHED);
+        expect(orbitLines(result).some((line) => line.includes("refusing restore-transaction") && line.includes("could not be opened for writing")), "not refused as unwritable").toBe(true);
+        expect(result.status).not.toBe(0);
+        expect(existsSync(join(targetDir, STAGING)), "the staging folder was removed").toBe(true);
+      } finally {
+        shims.cleanup();
+      }
+    });
+  }
+
+  it("pin: the backup/restore lock a repair open creates is kept (own_created_lock, creating is intended), no vanished line", () => {
+    const { targetDir, state } = ACTIONS["start-services"].make();
+    mkdirSync(join(targetDir, "backups"), { mode: 0o700, recursive: true });
+    const path = join(targetDir, "backups", ".orbit-backup-restore.lock");
+    writeFileSync(path, "", { mode: 0o600 });
+    const hook = removeHook(path, "probe_backup_restore_lock");
+    const shims = privShims(targetDir, { root: false, setpriv: false, getent: "fail" });
+    try {
+      const result = runOwner(targetDir, { shims, state, env: hook.env, capSeconds: 20 });
+      expect(existsSync(hook.flag), "the removal did not happen, so the test proves nothing").toBe(true);
+      expect(existsSync(path), "the backup/restore lock was removed").toBe(true);
+      expect(statSync(path).size).toBe(0);
+      expect(result.stderr).not.toContain("vanished while repair was checking it");
+    } finally {
+      shims.cleanup();
+    }
+  });
+});
+
+// --- O-S4 (ruling): the owner has no user-database entry -----------------------------------------------------------------
+
+describe("#1915 O-S4: root, and the folder's owner is not in the user database", () => {
+  it("start-services is refused with the way back, the uid named twice", () => {
+    const { targetDir, state, fakeBin } = ACTIONS["start-services"].make();
+    const shims = privShims(targetDir, { getent: "fail" });
+    try {
+      const result = runOwner(targetDir, { shims, state, fakeBin });
+      const want = `Orbit repair: start-services refused, nothing was changed: run as root, it could not look up the deployment folder's owner (uid ${UID}) in the user database (getent passwd), so it cannot write in the deployment folder as that user; add a user with that uid to the user database (for example: useradd --uid ${UID} --no-create-home <name>), then run repair again as root or as that user; do not start or change Orbit as root by hand, which leaves root-owned files in the deployment folder.`;
+      expect(result.stderr.split("\n"), result.stderr.slice(0, 1500)).toContain(want);
+      expect(result.stdout).not.toContain(ACTIONS["start-services"].done);
+      expect(composeUpCalls(result)).toEqual([]);
+    } finally {
+      shims.cleanup();
+    }
+  });
+});
+
+// --- #1874 O-S2 (ruling, note 66728): no checkpoint removal when Docker was never checked ---------------------------------
+
+describe("#1874 O-S2: a healthy re-check that could not check Docker keeps the credential checkpoint", () => {
+  const checkpoint = () => {
+    const targetDir = makeFixture();
+    const dir = join(targetDir, ".orbit-repair-checkpoint.zzzzzz");
+    mkdirSync(dir, { mode: 0o700 });
+    writeFileSync(join(dir, "postgres-password.orbkek"), "bundle\n", { mode: 0o600 });
+    return targetDir;
+  };
+
+  it("docker unavailable: the checkpoint is kept and both docker-unavailable lines are printed", () => {
+    const targetDir = checkpoint();
+    const result = runOwner(targetDir, { shims: privShims(targetDir, { root: false }), state: { ...RUNNING, docker: { unavailable: true } }, capSeconds: 60 });
+    const lines = result.stderr.split("\n");
+    expect(names(targetDir, ".orbit-repair-checkpoint."), result.stderr.slice(0, 1500)).toEqual([".orbit-repair-checkpoint.zzzzzz"]);
+    expect(lines).toContain("Orbit repair: the pre-rotation credential checkpoint ./.orbit-repair-checkpoint.zzzzzz was kept, because this run's re-check could not check Docker (docker-unavailable), so it could not confirm the rotated database password works.");
+    expect(lines).toContain("Orbit repair: next step: ensure the docker CLI is installed and the daemon is reachable, then run repair again; the first run whose re-check is clean removes the checkpoint.");
+  });
+
+  it("control: docker available and a healthy re-check removes the checkpoint", () => {
+    const targetDir = checkpoint();
+    const result = runOwner(targetDir, { shims: privShims(targetDir, { root: false }), state: { ...RUNNING }, capSeconds: 60 });
+    expect(names(targetDir, ".orbit-repair-checkpoint."), result.stderr.slice(0, 1500)).toEqual([]);
+    expect(result.stderr).not.toContain("docker-unavailable");
+  });
 });
