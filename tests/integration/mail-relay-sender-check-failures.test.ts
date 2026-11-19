@@ -195,15 +195,13 @@ const senderWarns = (spy: { mock: { calls: unknown[][] } }) =>
   spy.mock.calls.map((call) => call[0] as { event?: string; reason?: string } | undefined).filter((entry) => entry?.event === "mail-relay.sender");
 
 describe("finding 1: a mailer that never answers", () => {
-  it("answers 202 at once, the deadline (shortened to 300 ms here) ends the send in the warn log, the attempt counts, and the relay read is not held up", async () => {
+  it("answers 202, the deadline (shortened to 300 ms here) ends the send in the warn log, the attempt counts, and the relay read is not held up", async () => {
     await turnMailInOn();
     mail.mode = "stall";
     setSenderSendDeadlineForTests(300);
     const warn = vi.spyOn(log, "warn").mockImplementation(() => undefined);
     try {
-      const started = Date.now();
       const response = await send();
-      expect(Date.now() - started).toBeLessThan(3 * SECOND);
       expect(response.status).toBe(202);
 
       const reading = readRelaySettings(memberActor()).then(() => "read" as const);
@@ -220,6 +218,36 @@ describe("finding 1: a mailer that never answers", () => {
       expect(next.status).toBe(429);
       expect(await codeOf(next)).toBe("sender_check_too_soon");
       expect(mail.sent).toEqual([]);
+    } finally {
+      warn.mockRestore();
+    }
+  }, 15 * SECOND);
+});
+
+describe("finding 1, by order: the 202 does not wait for the mailer", () => {
+  it("answers 202 while the mailer is still held, and the held send finishes only when the test releases it", async () => {
+    await turnMailInOn();
+    mail.mode = "stall";
+    /* A deadline nothing here reaches, so only the release below can end the send. */
+    setSenderSendDeadlineForTests(10 * 60 * SECOND);
+    const warn = vi.spyOn(log, "warn").mockImplementation(() => undefined);
+    try {
+      const response = await send();
+      expect(response.status).toBe(202);
+
+      /* The 202 came first: the mailer was never released, so it cannot have been waited for. */
+      expect(mail.sent).toEqual([]);
+      expect(senderWarns(warn)).toEqual([]);
+
+      /* The send reaches the mailer after the 202; wait for it rather than read it at once. */
+      await vi.waitFor(() => expect(mail.stalled).toHaveLength(1), { timeout: 5 * SECOND });
+      expect(senderWarns(warn)).toEqual([]);
+
+      /* Released, the held send completes: the attempt stays counted and nothing is logged as a failure. */
+      for (const release of mail.stalled.splice(0)) release();
+      mail.mode = "ok";
+      await vi.waitFor(async () => expect((await rowsOf(fixture.users.member.id)).flatMap((row) => row.checkSentAt)).toHaveLength(1), { timeout: 5 * SECOND });
+      expect(senderWarns(warn)).toEqual([]);
     } finally {
       warn.mockRestore();
     }

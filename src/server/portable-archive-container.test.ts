@@ -394,36 +394,34 @@ describe("§4 line 10: key derivation is asynchronous", () => {
     expect(offenders).toEqual([]);
   });
 
-  /** The largest delay a 5 ms interval saw while `work` ran, and how long the work took. */
-  async function lagDuring(work: () => Promise<unknown>): Promise<{ maxLagMs: number; tookMs: number }> {
-    let last = performance.now();
-    let maxLagMs = 0;
-    const timer = setInterval(() => {
-      const now = performance.now();
-      maxLagMs = Math.max(maxLagMs, now - last - 5);
-      last = now;
-    }, 5);
-    const started = performance.now();
-    try { await work().catch(() => undefined); } finally { clearInterval(timer); }
-    return { maxLagMs, tookMs: performance.now() - started };
+  /**
+   * The order in which a macrotask scheduled right after `work` starts and the
+   * work's own settling happen. Off the event loop, the next loop turn comes
+   * first; a synchronous derivation finishes inside the call, so the work
+   * settles first. An ordering, not a duration: nothing here depends on speed.
+   */
+  async function orderDuring(work: () => Promise<unknown>): Promise<string[]> {
+    const order: string[] = [];
+    const pending = work().catch(() => undefined).then(() => { order.push("derivation settled"); });
+    await new Promise<void>((resolve) => setImmediate(() => { order.push("next loop turn"); resolve(); }));
+    await pending; // a hang is bounded by the file's test timeout
+    return order;
   }
 
-  it("the v1 opener's key derivation (PortableArchiveOpener.open) does not block a timer by more than 50 ms at a 1 s scrypt cost", async () => {
-    // Catches keyFor left on scryptSync: the timer would stall for the whole second.
+  it("the v1 opener's key derivation (PortableArchiveOpener.open) runs off the event loop: the next loop turn comes before it settles", async () => {
+    // Catches keyFor left on scryptSync: it would finish inside the call, before any later turn.
     const v1 = await import("./portable-archive") as unknown as { PortableArchiveOpener: { open(salt: string, iv: string, passphrase: string): Promise<unknown> } };
     expect(typeof v1.PortableArchiveOpener.open, "PortableArchiveOpener.open is static and async").toBe("function");
     crypto.boost = true;
-    const { maxLagMs, tookMs } = await lagDuring(() => v1.PortableArchiveOpener.open(randomBytes(16).toString("base64url"), randomBytes(12).toString("base64url"), passphrase));
-    expect(tookMs, "the boosted derivation really is slow (else the lag proves nothing)").toBeGreaterThan(300);
-    expect(maxLagMs).toBeLessThan(50);
+    const order = await orderDuring(() => v1.PortableArchiveOpener.open(randomBytes(16).toString("base64url"), randomBytes(12).toString("base64url"), passphrase));
+    expect(order).toEqual(["next loop turn", "derivation settled"]);
   });
 
-  it("v2's deriveArchiveKey does not block a timer by more than 50 ms at a 1 s scrypt cost", async () => {
+  it("v2's deriveArchiveKey runs off the event loop: the next loop turn comes before it settles", async () => {
     // Catches a v2 derivation written with the synchronous form.
     crypto.boost = true;
-    const { maxLagMs, tookMs } = await lagDuring(() => api().deriveArchiveKey(passphrase, randomBytes(16), { N: 16_384, r: 8, p: 1 }));
-    expect(tookMs, "the boosted derivation really is slow (else the lag proves nothing)").toBeGreaterThan(300);
-    expect(maxLagMs).toBeLessThan(50);
+    const order = await orderDuring(() => api().deriveArchiveKey(passphrase, randomBytes(16), { N: 16_384, r: 8, p: 1 }));
+    expect(order).toEqual(["next loop turn", "derivation settled"]);
   });
 });
 
