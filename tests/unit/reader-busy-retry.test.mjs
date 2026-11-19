@@ -121,10 +121,10 @@ describe("a busy page turn is retried once, quietly (#1446 decision 3)", () => {
     expect(asked.filter((n) => n === 3), "try again fetches the page again").toHaveLength(3);
   });
 
-  it("clamps a long Retry-After to 10 s for the wait", async () => {
+  it("clamps a long Retry-After to 30 s for the wait (#1915 W-F3)", async () => {
     const { target, flushSync, asked } = await mountReader((n, call) => Promise.resolve(n === 2 && call === 1 ? busy("300") : ok()));
     await press(target, flushSync, "Next page");
-    await vi.advanceTimersByTimeAsync(9_900);
+    await vi.advanceTimersByTimeAsync(29_900);
     await quiet();
     expect(asked.filter((n) => n === 2)).toHaveLength(1);
     await vi.advanceTimersByTimeAsync(100);

@@ -148,7 +148,7 @@ fi
 # simulation script (never a fetched, caller-supplied or symlinked path),
 # which in turn may only source the fixed sibling installer-ui.sh.
 if [[ "$simulate_mode" == 1 ]]; then
-  installer_script_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd -P)" ||
+  installer_script_dir="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd -P)" ||
     { printf 'Orbit installer: could not resolve the installer script directory for simulation.\n' >&2; exit 1; }
   simulation_script="$installer_script_dir/installer-simulation.sh"
   simulation_ui_script="$installer_script_dir/installer-ui.sh"
@@ -608,8 +608,28 @@ cleanup() {
     printf 'Orbit installer: could not remove a temporary directory: %s.\n' "$release_manifest_work_dir" >&2 || true
     exit_status=1
   fi
-  [[ -z "${saved_stty:-}" ]] || { stty "$saved_stty" </dev/tty 2>/dev/null; stty echo </dev/tty 2>/dev/null; } || true
+  # #1915 O-R1: stty on the terminal from a background job stops it
+  # (SIGTTOU), so only the terminal's foreground group restores it; TTOU is
+  # ignored for a group that could not be told or that moves mid-restore.
+  if [[ -n "${saved_stty:-}" ]] && ! terminal_background_job; then
+    trap '' TTOU
+    { stty "$saved_stty" </dev/tty 2>/dev/null; stty echo </dev/tty 2>/dev/null; } || true
+  fi
   exit "$exit_status"
+}
+
+# terminal_background_job: true when this process's group is known not to be
+# the terminal's foreground group (/proc, else ps); false when it is, or when
+# that cannot be told.
+terminal_background_job() {
+  local stat fields pgid="" tpgid=""
+  if { read -r stat </proc/$$/stat; } 2>/dev/null; then
+    read -r -a fields <<<"${stat##*) }"
+    pgid="${fields[2]:-}" tpgid="${fields[5]:-}"
+  else
+    read -r pgid tpgid < <(ps -o pgid= -o tpgid= -p "$$" 2>/dev/null) || true
+  fi
+  [[ "$pgid" =~ ^[0-9]+$ && "$tpgid" =~ ^-?[0-9]+$ && "$tpgid" -gt 0 && "$pgid" != "$tpgid" ]]
 }
 
 original_stdout_fd="" original_stderr_fd="" saved_stty=""
@@ -1382,7 +1402,9 @@ snapshot_fresh_target() {
   for name in "${entries[@]}"; do
     case "$name" in
       .env-orbit | .orbit-secrets) originals+=("$name") ;;
-      orbit-install-backups) ;;
+      # O-R1: a rollback's aside left by an interrupted restore is the
+      # installer's own; it is not an original and is not copied.
+      orbit-install-backups | ..env-orbit.orbit-restore.*.aside | ..orbit-secrets.orbit-restore.*.aside) ;;
       *) return 0 ;;
     esac
   done
@@ -1780,10 +1802,13 @@ rollback_walk_folder() {
 
 # restore_originals
 #
-# Puts each original entry back from originals/ as a unit: the current entry
-# removed (or, when the containers could not be stopped, moved into engine/,
-# where the stop command needs it), then `cp -a` from the copy, then verified
-# with `diff -r`. A put-back that fails keeps the copy and names it.
+# Puts each original entry back from originals/ as a unit, staged then
+# switched (O-R4): the copy is made with `cp -a` beside the entry and verified
+# with `diff -r`, then the current entry is removed (or, when the containers
+# could not be stopped, moved into engine/, where the stop command needs it)
+# and the staged copy renamed into place. When the staging copy fails and the
+# entry is still there, restore_original_aside puts the entry aside and copies
+# straight into place (O-R1). A put-back that fails keeps the copy and names it.
 restore_originals() {
   local name path staged copy="${backup_dir}/originals"
   for name in "${rollback_original_entries[@]}"; do
@@ -1797,7 +1822,12 @@ restore_originals() {
     if ! cp -a -- "${copy}/${name}" "$staged" ||
       ! diff -r --no-dereference -- "${copy}/${name}" "$staged" >/dev/null 2>&1; then
       rm -rf -- "$staged" 2>/dev/null || true
-      rollback_restore_failed "$path"
+      # O-R1: with the path still there, put it aside and copy into place.
+      if [[ -e "$path" || -L "$path" ]]; then
+        restore_original_aside "$name" "$staged" || rollback_restore_failed "$path"
+      else
+        rollback_restore_failed "$path"
+      fi
       continue
     fi
     if [[ -e "$path" || -L "$path" ]]; then
@@ -1813,11 +1843,49 @@ restore_originals() {
         continue
       fi
     fi
-    if ! mv -- "$staged" "$path"; then
+    if ! mv -T -- "$staged" "$path"; then
       rm -rf -- "$staged" 2>/dev/null || true
       rollback_restore_failed "$path"
     fi
   done
+}
+
+# restore_original_aside <name> <staged>
+#
+# O-R1: the fallback when the staged copy could not be made. The current
+# entry is renamed to "<staged>.aside" (or, when the containers could not be
+# stopped, moved into engine/ as before), the original is copied straight
+# into place with `cp -a` and checked with `diff -r`, and only then is the
+# aside removed. If that copy fails too, the partial copy is removed (the
+# original is still in originals/) and the aside is moved back; an aside
+# that cannot be moved back is kept and named. Returns 1 when the original
+# is not back in place.
+restore_original_aside() {
+  local name="$1" path="${target_dir}/$1" source="${backup_dir}/originals/$1" aside="$2.aside"
+  if [[ "$rollback_down_failed" == 1 ]]; then
+    aside="${backup_dir}/engine/${name}"
+    rollback_move "$name" engine || return 1
+  else
+    [[ ! -e "$aside" && ! -L "$aside" ]] || return 1
+    mv -T -- "$path" "$aside" || return 1
+  fi
+  if cp -a -- "$source" "$path" &&
+    diff -r --no-dereference -- "$source" "$path" >/dev/null 2>&1; then
+    if [[ "$rollback_down_failed" != 1 ]] && ! rm -rf -- "$aside"; then
+      rollback_obstacle 'Could not remove %s, which holds what the install left in place of the original.' "$aside"
+    fi
+    return 0
+  fi
+  if { [[ ! -e "$path" && ! -L "$path" ]] || rm -rf -- "$path"; } &&
+    [[ ! -e "$path" && ! -L "$path" ]] && mv -T -- "$aside" "$path"; then
+    return 1
+  fi
+  # Not an entry to clear: the aside may sit under the backups folder
+  # (engine/), and the caller's rollback_restore_failed names the copy of the
+  # original and the closing "Replace ..." line (guarantee 58).
+  rollback_obstacles+=("Could not move $(printf '%q' "$aside") back; it holds what the install left in place of the original. Keep it: the original is in $(printf '%q' "${backup_dir}/originals").")
+  rollback_folder_failed=1
+  return 1
 }
 
 rollback_restore_failed() {
@@ -3208,8 +3276,9 @@ smtp_read_record() {
 
 # smtp_discard_copy: the change is confirmed. Removes the files the
 # retirement wrote into the undo copy's folder (.env-orbit's lines and its
-# temporary file, the copy marker and, from repair.sh, the overlay and the
-# temporary files a killed repair left, #1848 FR-S1b), the folder when
+# temporary file, the copy marker and its temporary file and, from repair.sh,
+# the overlay and the temporary files a killed repair left, #1848 FR-S1b,
+# #1915 O-F1), the folder when
 # nothing else is in it, then the step record. Anything else in the folder
 # stays.
 smtp_discard_copy() {
@@ -3219,7 +3288,8 @@ smtp_discard_copy() {
       "$smtp_copy_dir/.env-orbit.smtp-copy.tmp" || return 1
     saved_options="$(shopt -p nullglob)" || true
     shopt -s nullglob
-    for entry in "$smtp_copy_dir"/.env-orbit.smtp-copy.?????? "$smtp_copy_dir/$smtp_overlay_file".smtp-copy.??????; do
+    for entry in "$smtp_copy_dir"/.env-orbit.smtp-copy.?????? "$smtp_copy_dir/$smtp_overlay_file".smtp-copy.?????? \
+      "$smtp_copy_dir/$smtp_copy_marker".??????; do
       if smtp_copy_tmp_name "${entry##*/}"; then rm -f -- "$entry" || status=1; fi
     done
     eval "$saved_options"
@@ -3377,6 +3447,20 @@ smtp_release_backup_restore_lock() {
   smtp_lock_fd=""
 }
 
+# smtp_sweep_retire_tmp: removes the .env-orbit.retire-smtp.<6> files a
+# killed retirement left (#1901 O-R3); they hold the SMTP lines. Run with the lock where flock exists;
+# without it a live one may go too, which only fails that run's rename. Only exact-name regular files go.
+smtp_sweep_retire_tmp() {
+  local saved_options entry LC_ALL=C
+  saved_options="$(shopt -p nullglob)" || true
+  shopt -s nullglob
+  for entry in "$environment_file".retire-smtp.??????; do
+    [[ "$entry" =~ ^\.env-orbit\.retire-smtp\.[A-Za-z0-9]{6}$ && -f "$entry" && ! -L "$entry" ]] || continue
+    rm -f -- "$entry" || true
+  done
+  eval "$saved_options"
+}
+
 retire_smtp_lines() {
   [[ "$target_was_empty" != 1 ]] || return 0
   smtp_retirement_due || return 0
@@ -3389,6 +3473,7 @@ retire_smtp_lines() {
 
 # The retirement itself, under the lock retire_smtp_lines took.
 retire_smtp_steps() {
+  smtp_sweep_retire_tmp
   smtp_read_record
 
   # A retirement that finished but was not confirmed: the gate holds now, so

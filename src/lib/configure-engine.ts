@@ -590,7 +590,7 @@ export function ensureSecretFile(
 
   if (!isFreshInstall && interruptedFirstRun) {
     refuse(
-      `${relativePath} is missing, but other Orbit secrets are already in ${SECRETS_DIRECTORY_NAME} and ${ENVIRONMENT_FILE_NAME} has no applied-configuration stamp: an earlier first \`orbit configure\` was probably interrupted. Refusing to generate a replacement in case this deployment has run. If it has never run, remove ${SECRETS_DIRECTORY_NAME} and run \`orbit configure\` again; if it has, restore ${relativePath} from backup (or Orbit's recovery bundle) to the exact path ${path}.`,
+      `${relativePath} is missing, but other Orbit secrets are already in ${SECRETS_DIRECTORY_NAME} and ${ENVIRONMENT_FILE_NAME} has no applied-configuration stamp: an earlier first \`orbit configure\` was probably interrupted. Refusing to generate a replacement in case this deployment has run. If it has never run, remove only the generated files ${GENERATED_SECRET_RELATIVE_PATHS.join(", ")} (never ${OIDC_SECRET_RELATIVE_PATH} or any secret you supplied) and run \`orbit configure\` again; if it has, restore ${relativePath} from backup (or Orbit's recovery bundle) to the exact path ${path}.`,
       "secret-file-invalid",
     );
   }

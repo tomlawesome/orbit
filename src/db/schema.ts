@@ -514,7 +514,8 @@ export const signInApprovals = pgTable("sign_in_approvals", {
  * per hour" counts the sends inside the hour and nothing older (#1604 P-20).
  * A row is written under the per-user lock as a reservation before its mail
  * goes (#1882), and kept whether or not the mail goes: the limit counts
- * attempts, not successes (#1879 ruling, note 64435). The
+ * attempts, not successes (#1879 ruling, note 64435). Only a mail that never
+ * reached the mailer gives its row back (#1915 A-F1). The
  * approval's own send_count and last_sent_at stay what they were; this table
  * is only the hour's tally, swept with the approvals it belongs to.
  */

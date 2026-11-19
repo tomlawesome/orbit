@@ -310,7 +310,7 @@ describe("sendBoundedMail reads the sending row, not SMTP_*", () => {
 
     const outcome = await sendBoundedMail("someone@orbit-test.example", { subject: "Hello", text: "A test." });
 
-    expect(outcome).toEqual({ sentAt: null, sendError: "smtp_unconfigured" });
+    expect(outcome).toEqual({ sentAt: null, sendError: "smtp_unconfigured", maybeDelivered: false });
     expect(await outgoingMailReady()).toBe(false);
     expect(mocks.createTransport).not.toHaveBeenCalled();
   });

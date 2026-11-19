@@ -362,8 +362,10 @@ for readers who want to check it, is in
 - `password_mismatch`: the two new-password entries do not match, or the
   second is missing.
 - `password_change_lapsed`: the ten minutes on the new-password step ran out,
-  the step was already used, or a later refused sign-in replaced it — sign in
-  again.
+  a later refused sign-in replaced it, or the password was changed another
+  way (a setup link, say) — sign in again.
+- `password_change_saved`: the new-password step was used again after its
+  password was saved, with that same password; sign in with it.
 - `password_recovery_required`: a marked password was typed on an instance
   with no mail relay, so it signs nobody in; see the two ways back under
   "Approving each password sign-in by email".

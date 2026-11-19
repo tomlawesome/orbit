@@ -1815,7 +1815,16 @@ test.describe("every phone callout but the two sheet lines stays outside its anc
       await recordSides(page);
       for (const [mark, ci, k] of ordered) {
         const w = `${phone.width}`;
-        const read = await holdAndRead(page, mark, k === 0 ? ci : null, [PREVIEW]).catch(() => null);
+        /** @type {Awaited<ReturnType<typeof holdAndRead>> | null} */
+        let read = null;
+        try {
+          read = await holdAndRead(page, mark, k === 0 ? ci : null, [PREVIEW]);
+        } catch (error) {
+          /* a hold that never arrived is a failure at every mark, not "no line":
+             the checks below would otherwise be skipped without a word */
+          wrong.push(`${w} ${mark}: the film never held here (${String(error).split("\n")[0].slice(0, 120)})`);
+          continue;
+        }
         if (!read) {
           /* most marks hold no line (a ring, a beat): only the sheet lines must be up */
           if (SHEET_MARKS.has(mark) || mark === "relay-addr") wrong.push(`${w} ${mark}: no callout up at the hold`);
