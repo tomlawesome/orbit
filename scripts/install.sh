@@ -1802,10 +1802,13 @@ rollback_walk_folder() {
 
 # restore_originals
 #
-# Puts each original entry back from originals/ as a unit: the current entry
-# removed (or, when the containers could not be stopped, moved into engine/,
-# where the stop command needs it), then `cp -a` from the copy, then verified
-# with `diff -r`. A put-back that fails keeps the copy and names it.
+# Puts each original entry back from originals/ as a unit, staged then
+# switched (O-R4): the copy is made with `cp -a` beside the entry and verified
+# with `diff -r`, then the current entry is removed (or, when the containers
+# could not be stopped, moved into engine/, where the stop command needs it)
+# and the staged copy renamed into place. When the staging copy fails and the
+# entry is still there, restore_original_aside puts the entry aside and copies
+# straight into place (O-R1). A put-back that fails keeps the copy and names it.
 restore_originals() {
   local name path staged copy="${backup_dir}/originals"
   for name in "${rollback_original_entries[@]}"; do
@@ -1840,7 +1843,7 @@ restore_originals() {
         continue
       fi
     fi
-    if ! mv -- "$staged" "$path"; then
+    if ! mv -T -- "$staged" "$path"; then
       rm -rf -- "$staged" 2>/dev/null || true
       rollback_restore_failed "$path"
     fi
@@ -1864,7 +1867,7 @@ restore_original_aside() {
     rollback_move "$name" engine || return 1
   else
     [[ ! -e "$aside" && ! -L "$aside" ]] || return 1
-    mv -- "$path" "$aside" || return 1
+    mv -T -- "$path" "$aside" || return 1
   fi
   if cp -a -- "$source" "$path" &&
     diff -r --no-dereference -- "$source" "$path" >/dev/null 2>&1; then
@@ -1874,10 +1877,14 @@ restore_original_aside() {
     return 0
   fi
   if { [[ ! -e "$path" && ! -L "$path" ]] || rm -rf -- "$path"; } &&
-    [[ ! -e "$path" && ! -L "$path" ]] && mv -- "$aside" "$path"; then
+    [[ ! -e "$path" && ! -L "$path" ]] && mv -T -- "$aside" "$path"; then
     return 1
   fi
-  rollback_obstacle 'Could not move %s back; it holds what the install left in place of the original.' "$aside"
+  # Not an entry to clear: the aside may sit under the backups folder
+  # (engine/), and the caller's rollback_restore_failed names the copy of the
+  # original and the closing "Replace ..." line (guarantee 58).
+  rollback_obstacles+=("Could not move $(printf '%q' "$aside") back; it holds what the install left in place of the original. Keep it: the original is in $(printf '%q' "${backup_dir}/originals").")
+  rollback_folder_failed=1
   return 1
 }
 
