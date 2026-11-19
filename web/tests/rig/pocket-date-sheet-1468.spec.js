@@ -70,7 +70,7 @@ test.describe("the phone due-date sheet is the desk calendar (#1468)", () => {
     await page.goto(`${APP}/create`, { waitUntil: "load" });
     await page.getByRole("textbox", { name: "name", exact: true }).fill("Date sheet proving");
     await page.locator('button[aria-label^="Reminders"]').first().click();
-    const reminders = page.getByRole("dialog", { name: /Reminders/ });
+    const reminders = page.getByRole("dialog", { name: /^Choose reminders/i });
     await expect(reminders).toBeVisible();
     await page.waitForTimeout(900);
     const remindBack = await style(reminders, "backgroundColor");
@@ -141,6 +141,8 @@ test.describe("the phone due-date sheet is the desk calendar (#1468)", () => {
     const again = page.getByRole("dialog", { name: /^Choose due date/i });
     await expect(again.locator(".day.chosen")).toHaveAttribute("data-iso", iso);
     const long = new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "long", year: "numeric", timeZone: "UTC" }).format(ahead);
+    /* a phone has no hover: park the mouse the last pick left, which now sits over another day */
+    await page.mouse.move(0, 0);
     await expect(again.locator(".foot")).toContainText(long);
     await expect(again.locator(".foot .rel")).toContainText(/10\s*d/);
   });
