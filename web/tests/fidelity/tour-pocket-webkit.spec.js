@@ -356,10 +356,12 @@ async function openFilm(page, { fakeClock = true } = {}) {
  */
 async function settled(page) {
   if (!CLOCKED.has(page)) { await finiteMotionSettled(page); return; }
-  /* its frames are the faked clock's: step it along until the wait ends */
+  /* its frames are the faked clock's: step it along until the wait ends. The
+     steps outlast the page-side 20 s bound (finite-motion.js) by 2 s, so a
+     wait that cannot end ends by that bound's own answer, not a test timeout */
   let done = false;
   const wait = finiteMotionSettled(page).finally(() => { done = true; });
-  for (let i = 0; i < 400 && !done; i++) {
+  for (let i = 0; i < 440 && !done; i++) {
     await page.clock.fastForward(50);
     /* CSS animations and transitions run on the real document timeline, which
        the faked clock does not move: a few real ms between steps lets them
@@ -372,7 +374,7 @@ async function settled(page) {
 /**
  * THE FILM RUNS ON THE PAGE'S FAKED CLOCK (#1914). `openFilm` installs
  * `page.clock` before the page loads, and every wait for the film is the
- * clock stepped on in 250 ms pieces until the state is there: no wall-clock
+ * clock stepped on in 120 ms pieces until the state is there: no wall-clock
  * wait, no timed check. A step that never gets there ends at its cap in
  * FAKED milliseconds and the caller names what never came; each test's own
  * setTimeout is only the hang guard. The steps are `fastForward(120)`: one
@@ -388,10 +390,10 @@ const vnow = (page) => page.evaluate(() => Date.now());
 /**
  * Waits for `fn` to be truthy in the page. On a page with the faked clock the
  * clock is run on between looks; `timeout` is then faked milliseconds, and a
- * miss throws as `waitForFunction` does.
+ * miss throws as `waitForFunction` does. `pace` is real ms between steps, for
+ * a wait on something on the real document timeline (a CSS transition), which
+ * the faked clock does not move.
  * @param {import("@playwright/test").Page} page
- * `pace` is real ms between steps, for a wait on something on the real
- * document timeline (a CSS transition), which the faked clock does not move.
  * @param {(arg: any) => any} fn @param {any} [arg] @param {{ timeout?: number, pace?: number }} [options]
  */
 async function waitFor(page, fn, arg, { timeout = 30_000, pace = 0 } = {}) {
@@ -419,7 +421,12 @@ async function runClockToHold(page, mark, cap = 400_000) {
   try {
     await waitFor(page, (m) => /** @type {any} */ (window).__held === m, mark, { timeout: cap });
     return true;
-  } catch { return false; }
+  } catch (error) {
+    /* only the wait's own miss is "never reached"; a closed page or a failed
+       evaluate is that error */
+    if (String(error).includes("of the film's own time")) return false;
+    throw error;
+  }
 }
 
 /** The pill at rest: not between places (20s at most for a move that never
@@ -659,11 +666,10 @@ const PHONES = [
   { width: 360, height: 780, through: "lands" },
 ];
 
-/** How long a film that never ends is watched, by how far a phone plays it:
- *  far past a loaded host's pace (a quiet one plays the whole film in ~3
- *  minutes). The test's own limit is derived from it, FILM_TAIL above it for
- *  the checks that follow the loop, so the two cannot cross and leave a bare
- *  "Test timeout" where the named failure should be (T-Q21). */
+/** Hang guard, in the film's own (faked) milliseconds: how far a phone's film
+ *  is played before it counts as one that never ends. The film's whole length
+ *  is deterministic (~3.5 minutes at 430x932), so this is not host timing, and
+ *  the test's setTimeout sits above what it costs to play. */
 const FILM_BOUND = { yours: 840_000, lands: 380_000 };
 
 test.describe("the pocket film in WebKit (#1174)", () => {
@@ -715,6 +721,8 @@ test.describe("the pocket film in WebKit (#1174)", () => {
       const chapters = [];
       let tapped = false;
       let tapTook = false;
+      /** @type {string | null} */
+      let tapRead = null;
       let done = false;
       let samples = 0;
       let barSeen = false;
@@ -766,10 +774,7 @@ test.describe("the pocket film in WebKit (#1174)", () => {
               await pillSettled(page);
               const rested = await page.evaluate(sampleTransport);
               pillFaults = rested && !rested.ended ? rested.faults.filter((f) => !isOver(f)) : [];
-              /* a faint pill is looked at again too (#1914): its fade is a real-timeline
-                 transition and a look can land between two of the clock's steps; one
-                 still faint after three rests is a fault */
-              if (!pillFaults.some((f) => f.startsWith("pill moving") || f.startsWith("pill faint"))) break;
+              if (!pillFaults.some((f) => f.startsWith("pill moving"))) break;
             }
           }
           pillFaults = [...over, ...pillFaults];
@@ -811,9 +816,11 @@ test.describe("the pocket film in WebKit (#1174)", () => {
             if (await chip.count()) {
               tapped = true;
               await chip.tap({ force: true });
+              /* read at once, before the film moves on and off the form; null when
+                 the chip is gone, which is asserted below and not read as "not pressed" */
+              tapRead = await page.evaluate(() => document.querySelector('#pocket-entry .pc-chip[data-imp="low"]')?.getAttribute("aria-pressed") ?? null);
+              tapTook = tapRead === "true";
               await settled(page);
-              /* read, not waited for: the film may have walked off the form by now */
-              tapTook = await page.evaluate(() => document.querySelector('#pocket-entry .pc-chip[data-imp="low"]')?.getAttribute("aria-pressed") === "true");
             }
           }
           done = s.ended || s.chapter > last;
@@ -842,6 +849,7 @@ test.describe("the pocket film in WebKit (#1174)", () => {
       expect.soft(done, stalled ?? "the film plays as far as this phone watches it").toBe(true);
       if (!stalled) expect.soft(chapters, "every chapter, in order, none skipped").toEqual(expected);
       expect.soft(tapped, "the reader's tap on the form was made").toBe(true);
+      expect.soft(tapRead, "the chip was on the form when the tap was read (aria-pressed present)").not.toBeNull();
       expect.soft(tapTook, "the reader's tap on the form landed on the film, not the form").toBe(false);
       expect.soft(faults, "the pill in front and never faint; the callouts and rings where the design puts them").toEqual({});
       expect.soft(unreadable, "the pill's readout reads at 4.5:1 or better wherever it stands, on either pack").toEqual([]);
@@ -1557,6 +1565,9 @@ test.describe("chapter 8 plays through on a new household (#1174 round 6)", () =
    then plays its second line as before. So, on an empty household at
    390x844: every line either chapter shows is anchored to an element on
    the screen, with its stem on it, and the film never walks to /item. */
+/** Hang guard in faked ms for the loop below: chapters 8 and 9 play well inside it. */
+const HANG_GUARD_8_9 = 120_000;
+
 test.describe("chapters 8 and 9 stay on the sky when the household has nothing in it (#1174 round 6, #1319)", () => {
   test("at 390x844 on a household with nothing in it, every line of chapters 8 and 9 points at something on the screen, and no item is opened", async ({ browser }) => {
     test.setTimeout(150_000);
@@ -1583,7 +1594,7 @@ test.describe("chapters 8 and 9 stay on the sky when the household has nothing i
     let streak = new Map();
     let reached = false;
     const started = await vnow(page);
-    while ((await vnow(page)) - started < 120_000) {
+    while ((await vnow(page)) - started < HANG_GUARD_8_9) {
       const m = await page.evaluate(sample);
       const s = await page.evaluate(sampleTransport);
       if (!s || !m) break;
