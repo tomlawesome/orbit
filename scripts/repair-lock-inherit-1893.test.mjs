@@ -94,38 +94,65 @@ const fdTargets = (pid) =>
     }
   });
 
-describe("#1893 K2: a killed run frees the folder lock while its child lives on", () => {
-  for (const signal of ["SIGTERM", "SIGKILL", "SIGINT", "SIGHUP"]) {
-    it(`${signal}: a second run started at once is not refused with repair-running`, async () => {
-      const targetDir = makeFixture();
-      const { run, childPid, exited } = await startRunWithChild(targetDir);
-      run.kill(signal);
-      // Note 63872: the lock holder dies of the signal it was sent, so the caller sees what it saw before the fix.
-      const end = await exited;
-      expect(end.signal, "the run should end by the signal it was sent").toBe(signal);
-      expect(end.code, "a run ended by a signal has no exit code").toBeNull();
-      expect(alive(childPid), "the docker child should outlive the killed run").toBe(true);
-      const second = runRepair(targetDir, SAFE, STOPPED);
-      expect(alive(childPid), "the docker child should still be alive when the second run started").toBe(true);
-      expect(second.stdout).not.toContain(REFUSED);
-      expect(second.stderr).not.toMatch(/another Repair run is working on this folder/iu);
-      expect(second.status).not.toBe(6);
+// Does any process on the host still hold a descriptor of the folder (the lock)?
+const holdersOf = (folder) =>
+  readdirSync("/proc")
+    .filter((name) => /^\d+$/u.test(name))
+    .filter((pid) => {
+      try {
+        return fdTargets(pid).includes(folder);
+      } catch {
+        return false;
+      }
     });
 
-    it(`${signal}: no repair step runs on after the kill, once the sleeping docker child ends`, async () => {
+const secondRun = (targetDir) => runRepair(targetDir, SAFE, STOPPED);
+const refused = (second) => second.stdout.includes(REFUSED) || second.status === 6;
+
+// #1919 ruling: after TERM/INT/HUP the run keeps the lock until the step in progress ends.
+// #1893 still holds: the child never inherits the lock, so once the run is gone nothing holds it.
+describe("#1893 K2: after TERM, INT or HUP the lock is held while the step's child runs, and free once the run has exited", () => {
+  for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"]) {
+    it(`${signal}: lock held while the child runs; once the child ends and the run exits, a second run is not refused and nothing holds the folder`, async () => {
       const targetDir = makeFixture();
       const { run, childPid, exited, stateDir } = await startRunWithChild(targetDir);
       const dockerCalls = () => (existsSync(join(stateDir, "argv.log")) ? readFileSync(join(stateDir, "argv.log"), "utf8") : "");
       const before = dockerCalls();
       run.kill(signal);
-      await exited;
-      // Let the already-started docker child end; a worker that outlived the run would now go on to its next step.
+      // The step's child is still running: the lock stays held, so a second run is refused.
+      expect(alive(childPid), "the docker child should still be running").toBe(true);
+      expect(refused(secondRun(targetDir)), "the lock should be held while the step's child runs").toBe(true);
+      expect(alive(childPid), "the docker child should still be alive after the second run").toBe(true);
+      // The child ends; the run then exits without starting another step.
       process.kill(childPid, "SIGKILL");
       await until(() => !alive(childPid), "the docker child to end");
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-      expect(dockerCalls(), "a repair step ran after the run was killed").toBe(before);
+      const end = await exited;
+      expect(dockerCalls(), "a repair step ran after the stop").toBe(before);
+      expect(end.signal, "the run should end by the signal it was sent").toBe(signal);
+      expect(end.code, "a run ended by a signal has no exit code").toBeNull();
+      const folder = realpathSync(targetDir);
+      expect(holdersOf(folder), "a leftover process still holds the folder lock").toEqual([]);
+      const second = secondRun(targetDir);
+      expect(second.stdout).not.toContain(REFUSED);
+      expect(second.stderr).not.toMatch(/another Repair run is working on this folder/iu);
+      expect(second.status).not.toBe(6);
     });
   }
+
+  it("SIGKILL: the run dies with no chance to wait, its child lives on, and the lock is free at once", async () => {
+    const targetDir = makeFixture();
+    const { run, childPid, exited } = await startRunWithChild(targetDir);
+    run.kill("SIGKILL");
+    const end = await exited;
+    expect(end.signal, "the run should end by the signal it was sent").toBe("SIGKILL");
+    expect(alive(childPid), "the docker child should outlive the killed run").toBe(true);
+    const second = secondRun(targetDir);
+    expect(alive(childPid), "the docker child should still be alive when the second run started").toBe(true);
+    expect(second.stdout).not.toContain(REFUSED);
+    expect(second.stderr).not.toMatch(/another Repair run is working on this folder/iu);
+    expect(second.status).not.toBe(6);
+    expect(holdersOf(realpathSync(targetDir)), "a leftover process holds the folder lock").toEqual([]);
+  });
 });
 
 describe("#1893 K1: a child holds no descriptor of the folder lock", () => {

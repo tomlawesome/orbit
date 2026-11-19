@@ -1638,6 +1638,9 @@ cd "$repo_dir"
 # must never itself fail under `set -u`.
 cleanup() {
   local exit_status=$?
+  # #1919: a further INT/TERM/HUP (a group kill also forwarded by the lock
+  # holder) must not kill the shell mid-cleanup; children inherit the ignore.
+  trap '' INT TERM HUP
 
   [[ -z "${compose_image_tmp:-}" ]] || rm -f -- "$compose_image_tmp" 2>/dev/null || true
   [[ -z "${compose_live_tmp:-}" ]] || rm -f -- "$compose_live_tmp" 2>/dev/null || true
@@ -1671,7 +1674,18 @@ cleanup() {
   exit "$exit_status"
 }
 
+# #1919 (note 65893): a trapped signal is never fatal mid-command, so a
+# second one cannot kill the shell while the EXIT trap runs. The handler
+# ignores further ones and exits 128+signo, which runs `cleanup` once.
+on_terminating_signal() {
+  trap '' INT TERM HUP
+  exit $((128 + $1))
+}
+
 trap cleanup EXIT
+trap 'on_terminating_signal 15' TERM
+trap 'on_terminating_signal 1' HUP
+trap 'on_terminating_signal 2' INT
 
 readonly environment_file=".env-orbit"
 readonly compose_file="docker-compose.yml"
@@ -7458,12 +7472,21 @@ acquire_repair_run_lock() {
 # worker's status, or dies of the signal the worker died of (of INT, when INT
 # ended the run), so the exit code and stdout are the worker's. Never returns.
 #
-# INT reaches the worker as TERM: a bash that receives INT while it waits for
-# a foreground child (the compose $(...) subshells ignore INT) acts on it only
-# once that child ends, so an INT would leave the run going for as long as the
-# docker call takes. TERM ends it at once, as it did before the holder.
+# INT reaches the worker as TERM. #1919 (note 65893): the worker traps INT,
+# TERM and HUP (on_terminating_signal), so it acts on a signal at the next
+# command boundary, not mid-command: in a group kill the foreground child dies
+# of the same signal and that boundary comes at once, but a signal during a
+# compose $(...) call (whose subshells ignore INT/TERM/HUP) takes effect when
+# the call ends, bounded by its timeout, and the lock is held until then.
+# Signals that reach the worker twice (group and forwarded) are harmless.
+holder_said_stop() {
+  [[ -z "${stop_said:-}" ]] || return 0
+  stop_said=1
+  printf 'Orbit repair: stop requested; the step in progress finishes first, then this run stops and tidies up.\n' >&2
+}
+
 hold_lock_and_run_worker() {
-  local worker_pid status rewait holder_signal=""
+  local worker_pid status rewait holder_signal="" stop_said=""
   # The subshell resets INT, which bash ignores in a background job (so a
   # Ctrl-C to the whole process group still reaches the worker), and execs
   # the worker; it never holds the lock.
@@ -7480,9 +7503,11 @@ hold_lock_and_run_worker() {
     ) {repair_run_lock_fd}<&- <&0 &
   fi
   worker_pid=$!
-  trap 'holder_signal=INT; kill -TERM "$worker_pid" 2>/dev/null || true' INT
-  trap 'kill -TERM "$worker_pid" 2>/dev/null || true' TERM
-  trap 'kill -HUP "$worker_pid" 2>/dev/null || true' HUP
+  # #1919: one line on the first signal only; the worker stops at its next
+  # command boundary, which can be minutes away inside a compose call.
+  trap 'holder_said_stop; holder_signal=INT; kill -TERM "$worker_pid" 2>/dev/null || true' INT
+  trap 'holder_said_stop; kill -TERM "$worker_pid" 2>/dev/null || true' TERM
+  trap 'holder_said_stop; kill -HUP "$worker_pid" 2>/dev/null || true' HUP
   for (( ; ; )); do
     status=0
     wait "$worker_pid" || status=$?
