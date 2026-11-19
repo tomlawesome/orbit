@@ -165,7 +165,7 @@ require_live_key() {
 # A dangling document-key link is neither a key nor its absence: name the link and how to put
 # the key back, never only "the key is missing" (#1536 O-F2, X-F3; #1603 O-S1, ops-2).
 refuse_dangling_key() {
-  [[ ! -L "$secrets_directory/document-kek" || -e "$secrets_directory/document-kek" ]] || fail 'preflight/key failed; .orbit-secrets/document-kek is a link to a file that does not exist, so the key file is missing. Remove the link and restore the document key from your kept copy of the secrets directory: rm .orbit-secrets/document-kek && install -m 0400 /path/to/your/copy/document-kek .orbit-secrets/document-kek, then run again.'
+  [[ ! -L "$secrets_directory/document-kek" || -e "$secrets_directory/document-kek" ]] || fail 'preflight/key failed; .orbit-secrets/document-kek is a link to a file that does not exist, so the key file is missing. Remove the link and restore the document key from your kept copy of the secrets directory: rm .orbit-secrets/document-kek && install -m 0600 /path/to/your/copy/document-kek .orbit-secrets/document-kek, then run again.'
 }
 
 # Who owns what the engine writes (#1210 D5, #1258). The one-off runs as the

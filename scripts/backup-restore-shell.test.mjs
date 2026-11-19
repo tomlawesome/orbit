@@ -906,7 +906,7 @@ describe("the stop / engine / start rule (E3)", () => {
     const result = run(deployment, script, args.map((arg) => (arg === "BUNDLE" ? bundle : arg)));
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("document-kek is a link to a file that does not exist");
-    expect(result.stderr).toContain("install -m 0400 /path/to/your/copy/document-kek .orbit-secrets/document-kek");
+    expect(result.stderr).toContain("install -m 0600 /path/to/your/copy/document-kek .orbit-secrets/document-kek");
     expect(result.stderr).not.toContain("import-recovery-bundle.sh");
     expect(verbs(result.calls)).toEqual([]);
   });
