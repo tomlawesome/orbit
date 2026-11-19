@@ -2,6 +2,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { log } from "@/lib/logger";
 
 /**
+ * #1920: the open check reads no whole file. A PDF is checked by the sandbox
+ * from the file on disk (readQuarantine never called); a JPEG or PNG has its
+ * header parsed from a read of at most the first 1 MiB (readQuarantineHead),
+ * with one whole-file readQuarantine only when the header lies beyond it. Every
+ * buffer the check read is detached before the seal starts.
+ *
  * A2-Q1: `uploadItemDocument` read the quarantine file twice on every upload
  * -- once to validate structure, once to encrypt -- where the inspection
  * endpoint (`item-document-inspection.ts`) reads once. Since ADR-0033 the
@@ -10,10 +16,41 @@ import { log } from "@/lib/logger";
  * and no plaintext is held in memory for the scan's duration.
  */
 
+const MIB = 1_048_576;
+
+/** SOI, then a baseline frame header (SOF0) at once: 48 x 64, three components. */
+const JPEG_FRONT = Buffer.from([0xff, 0xd8, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x00, 0x30, 0x00, 0x40, 0x03, 0x01, 0x22, 0x00, 0x02, 0x11, 0x01, 0x03, 0x11, 0x01]);
+
+/** A PNG signature and IHDR: 64 x 48. */
+const PNG_FRONT = Buffer.concat([
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d]),
+  Buffer.from("IHDR", "latin1"),
+  Buffer.from([0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x30, 0x08, 0x06, 0x00, 0x00, 0x00]),
+]);
+
+/** SOI then APP1 segments of 65,533 data bytes, running past the end of the buffer: no frame header in it. */
+function fillAppChain(buffer: Buffer): void {
+  buffer[0] = 0xff;
+  buffer[1] = 0xd8;
+  for (let at = 2; at < buffer.length; at += 65_537) {
+    buffer[at] = 0xff;
+    buffer[at + 1] = 0xe1;
+    buffer.writeUInt16BE(65_535, at + 2);
+  }
+}
+
 const mocks = vi.hoisted(() => ({
   selectQueues: new Map<string, unknown[][]>(),
   updateReturningQueues: new Map<string, unknown[][]>(),
   readQuarantineCalls: 0,
+  readHeadCalls: [] as unknown[][],
+  /** Every buffer the check read: the head and, in the late-header fallback, the whole file. */
+  checkBuffers: [] as Buffer[],
+  bufferLengthsWhenSealing: [] as number[],
+  mediaType: "application/pdf" as string,
+  fileSize: 5,
+  headKind: "front" as "front" | "late" | "jpegLarge" | "pngLarge",
+  readFailure: null as Error | null,
   scanStatus: "clean" as "clean" | "infected",
   structureValid: true as boolean | "no_verdict" | "password_required",
   lastQuarantineBuffer: null as Buffer | null,
@@ -126,8 +163,9 @@ vi.mock("@/server/upload-limit", () => ({
   readEffectiveUploadLimit: async (config: { maxBytes: number }) => config.maxBytes,
 }));
 
-vi.mock("@/server/documents/validation", () => ({
-  detectDocumentMediaType: () => "application/pdf",
+vi.mock("@/server/documents/validation", async (importActual) => ({
+  ...await importActual<typeof import("@/server/documents/validation")>(),
+  detectDocumentMediaType: () => mocks.mediaType,
   normalizedDocumentFilename: (name: string) => name,
   classifyDocumentStructure: async (...args: unknown[]) => {
     mocks.order.push("open");
@@ -176,15 +214,27 @@ vi.mock("@/server/documents/scanner", () => ({
 vi.mock("@/server/documents/storage", async (importActual) => {
   class LocalDocumentStorage {
     async receive() {
-      return { quarantinePath: "/tmp/q", sizeBytes: 5, contentSha256: "hash", leadingBytes: Buffer.from("%PDF") };
+      return { quarantinePath: "/tmp/q", sizeBytes: mocks.fileSize, contentSha256: "hash", leadingBytes: Buffer.from("%PDF") };
     }
     async readQuarantine() {
       mocks.readQuarantineCalls += 1;
+      if (mocks.readFailure) throw mocks.readFailure;
       // Not from Node's shared pool, as a real read of a file is not: the whole
       // ArrayBuffer is this buffer's, so it can be detached.
       const buffer = Buffer.alloc(9, "plaintext");
       mocks.lastQuarantineBuffer = buffer;
+      mocks.checkBuffers.push(buffer);
       return buffer;
+    }
+    async readQuarantineHead(...args: unknown[]) {
+      mocks.readHeadCalls.push(args);
+      const head = Buffer.alloc(mocks.headKind === "front" ? JPEG_FRONT.length : MIB);
+      if (mocks.headKind === "late") fillAppChain(head);
+      else if (mocks.headKind === "pngLarge") PNG_FRONT.copy(head);
+      else JPEG_FRONT.copy(head);
+      mocks.lastQuarantineBuffer = head;
+      mocks.checkBuffers.push(head);
+      return { head, sizeBytes: mocks.fileSize };
     }
     createStorageKey() {
       return "a".repeat(64);
@@ -193,6 +243,7 @@ vi.mock("@/server/documents/storage", async (importActual) => {
       mocks.sealCalls.push(args);
       // The check's buffer must already be released (detached) before the sealing pass starts.
       mocks.bufferLengthWhenSealing = mocks.lastQuarantineBuffer?.byteLength ?? null;
+      mocks.bufferLengthsWhenSealing = mocks.checkBuffers.map((buffer) => buffer.byteLength);
       if (mocks.sealFailure) throw mocks.sealFailure;
       return { ciphertextSize: 10, envelope: SEALED_ENVELOPE };
     }
@@ -236,6 +287,13 @@ beforeEach(() => {
   mocks.selectQueues.clear();
   mocks.updateReturningQueues.clear();
   mocks.readQuarantineCalls = 0;
+  mocks.readHeadCalls = [];
+  mocks.checkBuffers = [];
+  mocks.bufferLengthsWhenSealing = [];
+  mocks.mediaType = "application/pdf";
+  mocks.fileSize = 5;
+  mocks.headKind = "front";
+  mocks.readFailure = null;
   mocks.scanStatus = "clean";
   mocks.structureValid = true;
   mocks.lastQuarantineBuffer = null;
@@ -378,34 +436,98 @@ describe("uploadItemDocument scans before anything opens the file (ADR-0033)", (
   });
 });
 
-describe("uploadItemDocument quarantine reads (#1151 A2-Q1)", () => {
-  it("reads the quarantine file once when scanning is disabled", async () => {
-    configState.scanMode = "disabled";
+function uploadFile(filename = "bill.pdf") {
+  return uploadItemDocument({ userId, householdId, itemId, filename, body: fakeBody(), declaredBytes: 5 });
+}
+
+/** The three ways an image's header can be found: at the front, or beyond the first MiB (whole-file fallback). */
+const imageCases = [
+  { name: "a JPEG with its header at the front", headKind: "front", whole: 0 },
+  { name: "a JPEG whose header lies beyond the first MiB", headKind: "late", whole: 1 },
+] as const;
+
+function useImage(headKind: "front" | "late") {
+  mocks.mediaType = "image/jpeg";
+  mocks.headKind = headKind;
+  if (headKind === "late") mocks.fileSize = 1_200_000;
+}
+
+describe("uploadItemDocument quarantine reads (#1151 A2-Q1, #1920)", () => {
+  it.each(["disabled", "required"] as const)("reads no quarantine file into the server for a PDF, scanning %s", async (scanMode) => {
+    configState.scanMode = scanMode;
     seedUploadHappyPath();
 
-    await uploadItemDocument({
-      userId, householdId, itemId, filename: "bill.pdf", body: fakeBody(), declaredBytes: 5,
-    });
+    await uploadFile();
 
-    expect(mocks.readQuarantineCalls).toBe(1);
+    expect(mocks.readQuarantineCalls).toBe(0);
+    expect(mocks.readHeadCalls).toHaveLength(0);
+    expect(mocks.classifyCalls).toHaveLength(1);
   });
 
-  it("reads once when a scan runs too, and only after the scan, so no plaintext is held across it (ADR-0033)", async () => {
+  it("reads nothing before the scan runs, so no plaintext is held across it (ADR-0033)", async () => {
     configState.scanMode = "required";
     seedUploadHappyPath();
+    useImage("front");
     let readsWhenScanned = -1;
     const scanned = mocks.order.push.bind(mocks.order);
     mocks.order.push = (...entries: string[]) => {
-      if (entries.includes("scan")) readsWhenScanned = mocks.readQuarantineCalls;
+      if (entries.includes("scan")) readsWhenScanned = mocks.readQuarantineCalls + mocks.readHeadCalls.length;
       return scanned(...entries);
     };
 
-    await uploadItemDocument({
-      userId, householdId, itemId, filename: "bill.pdf", body: fakeBody(), declaredBytes: 5,
-    });
+    await uploadFile("photo.jpg");
 
     expect(readsWhenScanned).toBe(0);
+    expect(mocks.readHeadCalls).toHaveLength(1);
+  });
+
+  it.each(imageCases)("reads the front of the file for $name, with readQuarantine called $whole time(s)", async ({ headKind, whole }) => {
+    useImage(headKind);
+    seedUploadHappyPath();
+
+    await uploadFile("photo.jpg");
+
+    expect(mocks.readHeadCalls).toHaveLength(1);
+    const [path, , headBytes] = mocks.readHeadCalls[0]!;
+    expect(path).toBe("/tmp/q");
+    expect(headBytes as number, "at most the first 1 MiB").toBeLessThanOrEqual(MIB);
+    expect(mocks.readQuarantineCalls).toBe(whole);
+    expect(mocks.classifyCalls).toHaveLength(1);
+  });
+});
+
+describe("an image over 1 MiB with its header at the front is not read whole (#1920)", () => {
+  it.each([
+    ["image/jpeg", "jpegLarge", "photo.jpg"],
+    ["image/png", "pngLarge", "photo.png"],
+  ] as const)("reads only the head of a large %s, and never calls readQuarantine", async (mediaType, headKind, filename) => {
+    mocks.mediaType = mediaType;
+    mocks.headKind = headKind;
+    mocks.fileSize = 5 * MIB;
+    seedUploadHappyPath();
+
+    await uploadFile(filename);
+
+    expect(mocks.readQuarantineCalls).toBe(0);
+    expect(mocks.readHeadCalls).toHaveLength(1);
+    expect(mocks.readHeadCalls[0]![2] as number).toBeLessThanOrEqual(MIB);
+    expect(mocks.checkBuffers).toHaveLength(1);
+    expectEveryCheckBufferDetached();
+  });
+});
+
+describe("the late-header fallback's whole-file read fails (#1920)", () => {
+  it("fails the upload with that error, and the head buffer is still zeroed and detached", async () => {
+    useImage("late");
+    mocks.readFailure = new AppError("document_quarantine_invalid", "The quarantined document is invalid", 422);
+    seedUploadHappyPath();
+
+    await expect(uploadFile("photo.jpg")).rejects.toMatchObject({ code: "document_quarantine_invalid", status: 422 });
+
     expect(mocks.readQuarantineCalls).toBe(1);
+    expect(mocks.checkBuffers).toHaveLength(1);
+    expectEveryCheckBufferDetached();
+    expect(mocks.sealCalls).toEqual([]);
   });
 });
 
@@ -435,39 +557,62 @@ describe("uploadItemDocument page bound (#1801 A-F14)", () => {
 });
 
 describe("quarantine buffer zeroing on a rejected upload (#1151 F13)", () => {
-  it("releases the reused validation buffer when structure validation fails with scanning disabled", async () => {
+  it.each(imageCases)("releases every buffer the check read for $name when structure validation fails", async ({ headKind }) => {
+    configState.scanMode = "disabled";
+    mocks.structureValid = false;
+    useImage(headKind);
+    seedUploadHappyPath();
+
+    await expect(uploadFile("photo.jpg")).rejects.toMatchObject({ code: "document_structure_invalid" });
+
+    expectEveryCheckBufferDetached();
+  });
+
+  it("reads no buffer at all for a refused PDF", async () => {
     configState.scanMode = "disabled";
     mocks.structureValid = false;
     seedUploadHappyPath();
 
-    await expect(uploadItemDocument({
-      userId, householdId, itemId, filename: "bill.pdf", body: fakeBody(), declaredBytes: 5,
-    })).rejects.toMatchObject({ code: "document_structure_invalid" });
+    await expect(uploadFile()).rejects.toMatchObject({ code: "document_structure_invalid" });
 
-    // With scanning disabled the encrypt stage would have reused this same
-    // buffer and released it there -- but the throw above means that stage is
-    // never reached, so it must be released before this function exits instead
-    // of being dropped still holding the plaintext.
-    expect(mocks.lastQuarantineBuffer).not.toBeNull();
-    expect(mocks.lastQuarantineBuffer!.byteLength, "no plaintext copy remains: the check's buffer is detached").toBe(0);
-    expect(mocks.lastQuarantineBuffer!.buffer.byteLength).toBe(0);
+    expect(mocks.readQuarantineCalls).toBe(0);
+    expect(mocks.checkBuffers).toHaveLength(0);
   });
 });
 
-describe("uploadItemDocument seals from quarantine in pieces (#1567)", () => {
+function expectEveryCheckBufferDetached() {
+  expect(mocks.checkBuffers.length, "the check read at least one buffer").toBeGreaterThan(0);
+  for (const buffer of mocks.checkBuffers) {
+    expect(buffer.byteLength, "no plaintext copy remains: the check's buffer is detached").toBe(0);
+    expect(buffer.buffer.byteLength).toBe(0);
+  }
+}
+
+describe("uploadItemDocument seals from quarantine in pieces (#1567, #1920)", () => {
   function upload() {
     seedUploadHappyPath();
-    return uploadItemDocument({ userId, householdId, itemId, filename: "bill.pdf", body: fakeBody(), declaredBytes: 5 });
+    return uploadFile();
   }
 
-  it("hands the check the bytes it read and the quarantine file's path and size, so the sandbox can open it by descriptor", async () => {
+  it("hands the check the quarantine file's path and size for a PDF, so the sandbox opens the file on disk, and reads none of it itself", async () => {
     await upload();
 
     expect(mocks.classifyCalls).toHaveLength(1);
-    const [bytes, mediaType, file] = mocks.classifyCalls[0]!;
-    expect(bytes).toBe(mocks.lastQuarantineBuffer);
+    const [, mediaType, file] = mocks.classifyCalls[0]!;
     expect(mediaType).toBe("application/pdf");
     expect(file).toEqual({ path: "/tmp/q", sizeBytes: 5 });
+    expect(mocks.readQuarantineCalls).toBe(0);
+  });
+
+  it.each(imageCases)("hands the check the quarantine file's path and size for $name", async ({ headKind }) => {
+    useImage(headKind);
+    seedUploadHappyPath();
+
+    await uploadFile("photo.jpg");
+
+    const [, mediaType, file] = mocks.classifyCalls[0]!;
+    expect(mediaType).toBe("image/jpeg");
+    expect(file).toEqual({ path: "/tmp/q", sizeBytes: mocks.fileSize });
   });
 
   it("seals from the quarantine file through a document sealer, with the expected size and digest, and never with the one-shot encrypt", async () => {
@@ -484,12 +629,15 @@ describe("uploadItemDocument seals from quarantine in pieces (#1567)", () => {
     expect(destination).toEqual({ kind: "object", storageKey: "a".repeat(64) });
   });
 
-  it("releases the check's buffer before the sealing pass starts", async () => {
-    await upload();
+  it.each(imageCases)("releases every buffer the check read for $name before the sealing pass starts", async ({ headKind }) => {
+    useImage(headKind);
+    seedUploadHappyPath();
 
-    expect(mocks.bufferLengthWhenSealing, "detached by the time sealQuarantine is called").toBe(0);
-    expect(mocks.lastQuarantineBuffer!.byteLength, "no plaintext copy remains: the check's buffer is detached").toBe(0);
-    expect(mocks.lastQuarantineBuffer!.buffer.byteLength).toBe(0);
+    await uploadFile("photo.jpg");
+
+    expect(mocks.bufferLengthsWhenSealing.length, "the check read a buffer before the seal").toBeGreaterThan(0);
+    expect(mocks.bufferLengthsWhenSealing.every((length) => length === 0), "all detached by the time sealQuarantine is called").toBe(true);
+    expectEveryCheckBufferDetached();
   });
 
   it("stores the ciphertext size and the envelope that the sealing pass produced", async () => {
@@ -500,53 +648,49 @@ describe("uploadItemDocument seals from quarantine in pieces (#1567)", () => {
     expect(crypto!.values).toMatchObject({ storageKey: "a".repeat(64), ciphertextSize: 10, keyId: SEALED_ENVELOPE.keyId });
   });
 
-  it("releases the check's buffer when the sealing pass refuses the file, and passes the refusal on as it is", async () => {
+  it.each(imageCases)("releases every buffer the check read for $name when the sealing pass refuses the file, and passes the refusal on as it is", async ({ headKind }) => {
+    useImage(headKind);
     mocks.sealFailure = new AppError("document_quarantine_invalid", "The quarantined document is invalid", 422);
+    seedUploadHappyPath();
 
-    await expect(upload()).rejects.toMatchObject({ code: "document_quarantine_invalid", status: 422 });
+    await expect(uploadFile("photo.jpg")).rejects.toMatchObject({ code: "document_quarantine_invalid", status: 422 });
 
-    expect(mocks.lastQuarantineBuffer!.byteLength, "no plaintext copy remains: the check's buffer is detached").toBe(0);
-    expect(mocks.lastQuarantineBuffer!.buffer.byteLength).toBe(0);
+    expectEveryCheckBufferDetached();
     expect(mocks.discarded).toContain("/tmp/q");
   });
 });
 
-describe("the upload's check buffer is freed, not only zeroed (A-Q1, A-Q4)", () => {
-  it("hands the sealing pass a check buffer that is already detached, and leaves it detached after a clean upload", async () => {
+describe("the upload's check buffers are freed, not only zeroed (A-Q1, A-Q4, #1920)", () => {
+  it.each(imageCases)("leaves every buffer detached after a clean upload of $name", async ({ headKind }) => {
     configState.scanMode = "disabled";
+    useImage(headKind);
     seedUploadHappyPath();
 
-    await uploadItemDocument({ userId, householdId, itemId, filename: "bill.pdf", body: fakeBody(), declaredBytes: 5 });
+    await uploadFile("photo.jpg");
 
-    expect(mocks.bufferLengthWhenSealing, "detached by the time sealQuarantine is called").toBe(0);
-    expect(mocks.lastQuarantineBuffer!.byteLength, "still detached after the upload returns").toBe(0);
-    expect(mocks.lastQuarantineBuffer!.buffer.byteLength).toBe(0);
+    expect(mocks.bufferLengthsWhenSealing.every((length) => length === 0)).toBe(true);
+    expectEveryCheckBufferDetached();
   });
 
-  it("detaches the check buffer when the structure check reached no verdict and the upload answers 503 (#1593)", async () => {
+  it.each(imageCases)("detaches every check buffer for $name when the check reached no verdict and the upload answers 503 (#1593)", async ({ headKind }) => {
     configState.scanMode = "disabled";
     mocks.structureValid = "no_verdict";
+    useImage(headKind);
     seedUploadHappyPath();
 
-    await expect(uploadItemDocument({
-      userId, householdId, itemId, filename: "bill.pdf", body: fakeBody(), declaredBytes: 5,
-    })).rejects.toMatchObject({ code: "document_check_unavailable", status: 503 });
+    await expect(uploadFile("photo.jpg")).rejects.toMatchObject({ code: "document_check_unavailable", status: 503 });
 
-    expect(mocks.lastQuarantineBuffer).not.toBeNull();
-    expect(mocks.lastQuarantineBuffer!.byteLength).toBe(0);
+    expectEveryCheckBufferDetached();
   });
 
-  it("detaches the check buffer when the structure check refuses the upload with a 422", async () => {
+  it.each(imageCases)("detaches every check buffer for $name when the check refuses the upload with a 422", async ({ headKind }) => {
     configState.scanMode = "disabled";
     mocks.structureValid = false;
+    useImage(headKind);
     seedUploadHappyPath();
 
-    await expect(uploadItemDocument({
-      userId, householdId, itemId, filename: "bill.pdf", body: fakeBody(), declaredBytes: 5,
-    })).rejects.toMatchObject({ code: "document_structure_invalid", status: 422 });
+    await expect(uploadFile("photo.jpg")).rejects.toMatchObject({ code: "document_structure_invalid", status: 422 });
 
-    expect(mocks.lastQuarantineBuffer).not.toBeNull();
-    expect(mocks.lastQuarantineBuffer!.byteLength).toBe(0);
-    expect(mocks.lastQuarantineBuffer!.buffer.byteLength).toBe(0);
+    expectEveryCheckBufferDetached();
   });
 });

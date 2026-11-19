@@ -179,6 +179,35 @@ export class LocalDocumentStorage {
   }
 
   /**
+   * The first `headBytes` of the quarantine file (all of it when smaller), with
+   * the same checks as `readQuarantine` (#1920): the image header fence reads
+   * this, so the open check never holds the whole document in the server.
+   */
+  async readQuarantineHead(path: string, maximumBytes: number, headBytes: number): Promise<{ head: Buffer; sizeBytes: number }> {
+    const handle = await open(path, "r");
+    try {
+      const details = await handle.stat();
+      if (!details.isFile() || details.size < 1 || details.size > maximumBytes) {
+        throw new AppError("document_quarantine_invalid", "The quarantined document is invalid", 422);
+      }
+      const head = Buffer.alloc(Math.min(details.size, headBytes));
+      let offset = 0;
+      while (offset < head.length) {
+        const { bytesRead } = await handle.read(head, offset, head.length - offset, offset);
+        if (bytesRead === 0) break;
+        offset += bytesRead;
+      }
+      if (offset !== head.length) {
+        releaseBuffer(head);
+        throw new AppError("document_quarantine_invalid", "The quarantined document is invalid", 422);
+      }
+      return { head, sizeBytes: details.size };
+    } finally {
+      await handle.close();
+    }
+  }
+
+  /**
    * Encrypts the quarantine file into `destination` in pieces: one reusable
    * 1 MiB buffer, each piece hashed, fed to the sealer and appended to a
    * temporary file that is fsynced and renamed into place (stage, then

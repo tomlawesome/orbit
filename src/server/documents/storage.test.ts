@@ -47,6 +47,46 @@ describe("local document storage", () => {
     expect(handle.close).toHaveBeenCalledTimes(1);
   });
 
+  describe("readQuarantineHead (#1920)", () => {
+    it("returns the first headBytes of a larger file, and the file's size", async () => {
+      const { root, storage } = await createStorage();
+      const file = join(root, "big.bin");
+      const bytes = randomBytes(5_000);
+      await writeFile(file, bytes);
+
+      const result = await storage.readQuarantineHead(file, 10_000, 1_024);
+
+      expect(result.sizeBytes).toBe(5_000);
+      expect(result.head.length).toBe(1_024);
+      expect(result.head.equals(bytes.subarray(0, 1_024))).toBe(true);
+    });
+
+    it("returns the whole file when it is smaller than headBytes", async () => {
+      const { root, storage } = await createStorage();
+      const file = join(root, "small.bin");
+      const bytes = randomBytes(300);
+      await writeFile(file, bytes);
+
+      const result = await storage.readQuarantineHead(file, 10_000, 1_024);
+
+      expect(result.sizeBytes).toBe(300);
+      expect(result.head.equals(bytes)).toBe(true);
+    });
+
+    it("refuses an empty file, a file over maximumBytes and a directory as invalid quarantine, as readQuarantine does", async () => {
+      const { root, storage } = await createStorage();
+      const empty = join(root, "empty.bin");
+      const large = join(root, "large.bin");
+      await writeFile(empty, Buffer.alloc(0));
+      await writeFile(large, randomBytes(2_000));
+
+      for (const path of [empty, large, root]) {
+        await expect(storage.readQuarantineHead(path, 1_000, 100)).rejects.toMatchObject({ code: "document_quarantine_invalid", status: 422 });
+        await expect(storage.readQuarantineHead(path, 1_000, 100)).rejects.toBeInstanceOf(AppError);
+      }
+    });
+  });
+
   it("validates and reads ciphertext through one open handle", async () => {
     const storage = new LocalDocumentStorage("objects-root", "unused-quarantine-root");
     const key = "a".repeat(64);
