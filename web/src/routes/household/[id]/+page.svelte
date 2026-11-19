@@ -4,6 +4,7 @@
   import { onMount, tick, untrack } from "svelte";
   import { SvelteMap } from "svelte/reactivity";
   import { invalidateAll } from "$app/navigation";
+  import { page } from "$app/state";
   import Chrome from "$lib/Chrome.svelte";
   import Mark from "$lib/Mark.svelte";
   import { createArm } from "$lib/arm.js";
@@ -462,6 +463,8 @@
       let reread = "ok";
       try {
         await invalidateAll();
+        /* A load that fails inside invalidateAll() resolves and leaves `data` as it was. */
+        if (page.error) reread = "failed";
       } catch {
         reread = "failed";
       }
@@ -471,6 +474,10 @@
       rows = settled.rows;
       colourProblems = settled.problems;
       if (reread === "ok" && pickedColours.get(id) === colour) pickedColours.delete(id);
+      /* Stored as picked: the save landed, so it is no longer an unsaved change. */
+      if (reread === "ok" && stored === colour) {
+        sectionsBaseline = JSON.stringify(JSON.parse(sectionsBaseline).map((/** @type {{ id: string }} */ one) => (one.id === id ? { ...one, colour } : one)));
+      }
     }
   }
 
