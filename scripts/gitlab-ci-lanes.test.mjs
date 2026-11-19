@@ -3484,7 +3484,11 @@ describe("nightly browser slots and starved-run messages (#1921)", () => {
     const block = allBlocks.get(name);
     const jobMinutes = Number(block.match(/^ {2}timeout: (\d+)m$/mu)?.[1]);
     expect(jobMinutes, `${name}: timeout`).toBeGreaterThan(0);
-    const wrapped = block.match(/timeout -k 30s (\d+)m bash scripts\/test-frontend\.sh(?! --quarantine)(?=\s|$|\))/mu);
+    // smoke_local_only runs Playwright directly, not test-frontend.sh.
+    const call = name === "smoke_local_only"
+      ? String.raw`node node_modules\/@playwright\/test\/cli\.js test --config tests\/e2e\/playwright\.config\.ts`
+      : String.raw`bash scripts\/test-frontend\.sh(?! --quarantine)(?=\s|$|\))`;
+    const wrapped = block.match(new RegExp(String.raw`timeout -k 30s (\d+)m ${call}`, "mu"));
     expect(wrapped, `${name}: the suite call is wrapped in timeout -k 30s Nm`).not.toBeNull();
     expect(Number(wrapped[1]), `${name}: N at least 5 below the job timeout`).toBeLessThanOrEqual(jobMinutes - 5);
     expect(block, `${name}: failure message`).toMatch(/#1921[^\n]*starved|starved[^\n]*#1921/u);
