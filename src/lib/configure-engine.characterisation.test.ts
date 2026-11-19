@@ -324,6 +324,12 @@ describe("the bare flow (ported from scripts/configure.test.mjs)", () => {
       ".orbit-secrets/postgres-password is missing, but other Orbit secrets are already in .orbit-secrets and .env-orbit has no applied-configuration stamp: an earlier first `orbit configure` was probably interrupted.",
     );
     expect(refusal.message).toContain("Refusing to generate a replacement");
+    // #1901 A-S3: the remedy names only the generated files, never the whole secrets directory
+    // (which would also hold the OIDC client secret the operator supplied).
+    expect(refusal.message).toContain(
+      "remove only the generated files .orbit-secrets/session-secret, .orbit-secrets/postgres-password, .orbit-secrets/document-kek (never .orbit-secrets/oidc-client-secret or any secret you supplied) and run `orbit configure` again",
+    );
+    expect(refusal.message).not.toContain("remove .orbit-secrets and");
     expect(existsSync(secretsPath("postgres-password"))).toBe(false);
     expect(existsSync(secretsPath("document-kek"))).toBe(false);
   });
