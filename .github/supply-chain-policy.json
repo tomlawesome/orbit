@@ -449,6 +449,16 @@
     {
       "kind": "vulnerability",
       "scope": "image",
+      "id": "CVE-2026-114938",
+      "package": "openjdk-25-jre-headless",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-11-26",
+      "trackingIssue": 1918,
+      "rationale": "Java runtime in apache/tika:4.2.0-full; Tika runs on it to parse uploaded documents, so reachability has not been ruled out. Fixed in the 25.0.5 update 1 build (Debian revision 2-1~26.04.1); installedVersion is left out because the scanner's four-part Java version reads as a network address to the private-details check. No published Tika image ships it yet (checked 2026-11-19 on 4.2.0-full, 4.2.1-SNAPSHOT-full and the 4.3.0-SNAPSHOT-full nightly). Owner granted 7 days and a re-check, 2026-11-19 (#1918, 69a)."
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
       "id": "CVE-2026-109518",
       "package": "apt",
       "owner": "Orbit maintainers",
@@ -500,14 +510,36 @@
       "trackingIssue": 1759,
       "installedVersion": "v0.61.0",
       "rationale": "x/net html parser slows on crafted input, in /usr/bin/ollama in ollama/ollama:0.40.15. Fixed in x/net 0.62.0, but the newest release, 0.40.15, still ships v0.61.0, so no image carries the fix. Orbit runs Ollama only under the optional ai profile, with no internet access and no published port (ADR-0025). Owner decision 2026-11-07, question 137: 14 days. Checked 2026-11-09 on 0.40.15. Extended 2026-11-18 to 2027-01-04: Ollama 0.40.16, the newest release, still has golang.org/x/net v0.61.0 (#1759); owner 24a, 2026-11-18."
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-97054",
+      "package": "stdlib",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-12-03",
+      "trackingIssue": 1922,
+      "installedVersion": "v1.24.6",
+      "rationale": "CVE-2026-97054 is a Go net/http flaw: an HTTP/1 server that uses MaxBytesReader can panic if its handler reads the body while writing the response header. It is in the Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine. gosu only drops privileges and then runs postgres; it serves no HTTP, so the flaw is not reachable. Fixed in Go 1.26.11 and 1.27.4, but no postgres image ships gosu built on either yet. Owner 47a, 2026-11-19: 14 days."
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-97054",
+      "package": "stdlib",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-12-03",
+      "trackingIssue": 1922,
+      "installedVersion": "v1.26.10",
+      "rationale": "CVE-2026-97054 is a Go net/http flaw: an HTTP/1 server that uses MaxBytesReader can panic if its handler reads the body while writing the response header. It is in the Go standard library compiled into /usr/bin/ollama in ollama/ollama:0.40.16. Orbit runs Ollama only under the optional ai profile, on the internal network, with no published port (ADR-0025), so only Orbit's app can reach it and the worst case is a crash and restart. Fixed in Go 1.26.11 and 1.27.4, but no Ollama image ships a build on either yet. Owner 47a, 2026-11-19: 14 days."
     }
   ],
   "containerImages": [
     {
       "name": "Orbit base image (Alpine plus Node from official signed source)",
       "tag": "ghcr.io/tomlawesome/orbit-base-image:latest",
-      "reference": "ghcr.io/tomlawesome/orbit-base-image:latest@sha256:ed90d17aaa54cc4fec123bc1270616bd4925b8598e7a7fb87b1e87e619253cda",
-      "indexDigest": "sha256:ed90d17aaa54cc4fec123bc1270616bd4925b8598e7a7fb87b1e87e619253cda",
+      "reference": "ghcr.io/tomlawesome/orbit-base-image:latest@sha256:899a5fe4cdeb76138307bb1ecedb91c71f21b83bafb386cf83d1d1a0a30e82fa",
+      "indexDigest": "sha256:899a5fe4cdeb76138307bb1ecedb91c71f21b83bafb386cf83d1d1a0a30e82fa",
       "platform": "linux/amd64",
       "locations": [
         "Dockerfile"
@@ -517,7 +549,7 @@
       "license": "MIT",
       "licenseSource": "https://github.com/nodejs/node/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-11-16",
+      "resolvedOn": "2026-11-19",
       "reviewBy": "2026-11-30"
     },
     {
@@ -674,7 +706,7 @@
       "reason": "CI image for the weekly dependency-update job; ships nothing to operators. Pinned under an `image:`/`services:` key in .gitlab-ci.yml, which Renovate's gitlabci manager proposes updates for; not watched by sidecar-pins."
     },
     {
-      "reference": "greenmail/standalone:2.1.13@sha256:3df66b7edd01c8a301343ca5e3601d8674760d4708655573560c24745e624fb2",
+      "reference": "greenmail/standalone:2.1.15@sha256:309ba544ea482e5d4265d09921cdab07c8dad2cc4481d715c9b8ff5d3f0a149f",
       "locations": [
         "compose/docker-compose.acceptance.yml"
       ],

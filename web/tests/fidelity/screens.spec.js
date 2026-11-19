@@ -587,12 +587,8 @@ const SCREENS = [
        standalone page (`/settings/mail`, against relay-satellites.html) is
        gone: the route only redirects here. */
     path: "/settings#mail",
-    stage: "porting",
-    /* (#1509) retired with /settings/mail; the Mail card's relay tab earns an
-       owned baseline once the owner has seen it. The `relay.png` baseline
-       was the retired page's, so this screen has no baseline of its own yet
-       and is judged against its mock alone. */
-    baseline: false,
+    /* owned (owner 27a, 2026-11-19): approved as built after room stars following the Planets setting and the "click to copy" button text (#1738); no longer compared with its mock-up (#1917). */
+    stage: "owned",
     mockup: "/design/v19/relay-settings/round-2/n-relay-tab.html?shot#working",
     /* At rest, for the reason capture() gives: the sky streams on a
        requestAnimationFrame clock that `animations: "disabled"` cannot reach,
@@ -693,7 +689,8 @@ const SCREENS = [
   {
     name: "administration",
     path: "/administration",
-    stage: "porting",
+    /* owned (owner 27a, 2026-11-19): approved as built after per-person actions (#1869); no longer compared with its mock-up (#1917). */
+    stage: "owned",
     /*
      * The living station backdrop (#472/#475, §14), ratified 2026-09-02,
      * replaces the family sheet's still starfield: the ISS — this instance's
@@ -736,7 +733,8 @@ const SCREENS = [
   {
     name: "inbox",
     path: "/inbox",
-    stage: "porting",
+    /* owned (owner 27a, 2026-11-19): approved as built after "remove" left the unreadable fixture item (#1605); no longer compared with its mock-up (#1917). */
+    stage: "owned",
     mockup: "/design/v19/inbox.html",
     /* Settled once the queue has its review card — the data arrives client-side. */
     settle: () => Boolean(document.querySelector(".receipt .actions")),
