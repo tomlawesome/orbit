@@ -4,6 +4,7 @@
   import { onMount, tick, untrack } from "svelte";
   import { SvelteMap } from "svelte/reactivity";
   import { invalidateAll } from "$app/navigation";
+  import { page } from "$app/state";
   import Chrome from "$lib/Chrome.svelte";
   import Mark from "$lib/Mark.svelte";
   import { createArm } from "$lib/arm.js";
@@ -26,7 +27,7 @@
   import ChooserCard from "$lib/editing/ChooserCard.svelte";
   import SectionSwatches from "$lib/editing/SectionSwatches.svelte";
   import { sectionColourOf } from "$lib/option-colour.js";
-  import { settleColourPick, startColourPick } from "$lib/section-colours.js";
+  import { colourFailureKind, settleColourPick, settleUnknownColourPick, startColourPick } from "$lib/section-colours.js";
   import { WIDE_QUERY } from "../../home/preview-pair.js";
   import "./household.css";
 
@@ -448,11 +449,35 @@
       await invalidateAll();
       for (const one of data.household.sections) if (pickedColours.get(one.id) === one.colour) pickedColours.delete(one.id);
     } catch (error) {
-      if (pickedColours.get(id) === colour) pickedColours.delete(id);
-      const saved = Object.fromEntries(data.household.sections.map((one) => [one.id, one.colour]));
-      const settled = settleColourPick({ rows, saved, problems: colourProblems, id, colour, error: wordsOf(error) });
+      if (colourFailureKind(error) === "refused") {
+        if (pickedColours.get(id) === colour) pickedColours.delete(id);
+        const saved = Object.fromEntries(data.household.sections.map((one) => [one.id, one.colour]));
+        const settled = settleColourPick({ rows, saved, problems: colourProblems, id, colour, error: wordsOf(error) });
+        rows = settled.rows;
+        colourProblems = settled.problems;
+        return;
+      }
+      /* #1915 W-R1: unknown outcome. Read the sections again and settle on what is stored;
+         the pick stays in pickedColours until then so a later Save does not overwrite it. */
+      /** @type {"ok" | "failed"} */
+      let reread = "ok";
+      try {
+        await invalidateAll();
+        /* A load that fails inside invalidateAll() resolves and leaves `data` as it was. */
+        if (page.error) reread = "failed";
+      } catch {
+        reread = "failed";
+      }
+      const stored = data.household.sections.find((one) => one.id === id)?.colour;
+      if (reread === "ok" && stored === undefined) reread = "failed";
+      const settled = settleUnknownColourPick({ rows, problems: colourProblems, id, colour, stored, reread });
       rows = settled.rows;
       colourProblems = settled.problems;
+      if (reread === "ok" && pickedColours.get(id) === colour) pickedColours.delete(id);
+      /* Stored as picked: the save landed, so it is no longer an unsaved change. */
+      if (reread === "ok" && stored === colour) {
+        sectionsBaseline = JSON.stringify(JSON.parse(sectionsBaseline).map((/** @type {{ id: string }} */ one) => (one.id === id ? { ...one, colour } : one)));
+      }
     }
   }
 
