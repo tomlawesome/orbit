@@ -626,8 +626,12 @@
      since this layout's own `resendFor` is a whole Person, not an id.
      `email_address_set` (#1869) is the same: the person and what was typed
      come back from the desk's draft, and the address sheet reopens. */
+  /* #1901 W-F5: the effect below re-runs on every re-read of `view`; a proof is resumed once.
+     Plain (not reactive) on purpose: it is read only to stop the second run. */
+  let resumedProof = false;
   function resumeProvenErrand() {
-    if (!view) return;
+    if (!view || resumedProof) return;
+    resumedProof = true;
     if (provenIntent === "local_user_create") inviteOpen = true;
     if (provenIntent === "system_create") { systemName = ""; systemOpen = true; }
     if (provenIntent === "setup_link_issue" && resumedResendPersonId) {
@@ -650,7 +654,9 @@
       }
     }
   }
-  $effect(() => resumeProvenErrand());
+  $effect(() => {
+    if (!resumedProof) resumeProvenErrand();
+  });
 </script>
 
 <div class="ad-pocket">
