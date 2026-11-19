@@ -67,7 +67,7 @@ describe("completePasswordRenewal", () => {
     ["a later refusal replaced the mark", [{ requiredAt: new Date(MARK.getTime() + 1), disabledAt: null }]],
   ])("answers lapsed and writes nothing when %s", async (_why, rows) => {
     state.answers = [rows];
-    await expect(completePasswordRenewal(USER, MARK, "new-hash")).rejects.toMatchObject({
+    await expect(completePasswordRenewal(USER, MARK, "new-hash", "typed-password")).rejects.toMatchObject({
       code: "password_change_lapsed",
       status: 400,
     });
@@ -105,7 +105,7 @@ describe("completePasswordRenewal", () => {
     state.answers = [[{ requiredAt: new Date(MARK.getTime()), disabledAt: null }], [{ userId: USER }]];
     state.deleted = [{ id: "s1" }, { id: "s2" }];
 
-    await expect(completePasswordRenewal(USER, MARK, "new-hash")).resolves.toEqual({ replaced: true, sessionsRevoked: 2 });
+    await expect(completePasswordRenewal(USER, MARK, "new-hash", "typed-password")).resolves.toEqual({ replaced: true, sessionsRevoked: 2 });
 
     const credential = state.writes.find((w) => w.op === "update" && w.table === localCredentials);
     expect(credential?.values).toMatchObject({ passwordHash: "new-hash", passwordChangeRequiredAt: null, failedAttemptCount: 0 });

@@ -84,7 +84,7 @@ export const POST = api(
       throw error;
     }
 
-    await completePasswordRenewal(hold.userId, hold.requiredAt, passwordHash);
+    await completePasswordRenewal(hold.userId, hold.requiredAt, passwordHash, password);
 
     /* Saved. The hold stays until a session exists (#1901 ruling 1): a mint
        that fails leaves this browser either a fresh hold or a plain "sign in
