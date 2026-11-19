@@ -929,24 +929,32 @@ export async function completePasswordRenewal(
   passwordHash: string,
   typedPassword: string,
 ): Promise<PasswordChangeOutcome> {
-  return getDb().transaction(async (transaction) => {
+  const lapsed = () => new AuthError("password_change_lapsed", "This sign-in has lapsed; sign in again", 400);
+  const answer = await getDb().transaction(async (transaction) => {
     const [row] = await transaction
       .select({
         requiredAt: localCredentials.passwordChangeRequiredAt,
         disabledAt: users.disabledAt,
         passwordHash: localCredentials.passwordHash,
+        lockedUntil: localCredentials.lockedUntil,
       })
       .from(localCredentials)
       .innerJoin(users, eq(users.id, localCredentials.userId))
       .where(eq(localCredentials.userId, userId))
       .for("update", { of: localCredentials })
       .limit(1);
-    const lapsed = () => new AuthError("password_change_lapsed", "This sign-in has lapsed; sign in again", 400);
     /* A disabled account's hold changes nothing (#1881 review): disabling
        is an administrator's decision and outranks the reader's renewal. It
        answers as lapsed, the one word every dead hold gets. */
     if (!row || row.disabledAt) throw lapsed();
     if (!row.requiredAt) {
+      /* A password check like the door's, under the door's throttle (#1901,
+         OWASP Authentication Cheat Sheet): a locked credential answers as
+         the door's lock does, before any verify, so there is no oracle while
+         locked; a miss is counted below, outside this transaction. */
+      if (row.lockedUntil && row.lockedUntil > new Date()) {
+        throw new AuthError("too_many_attempts", "Too many sign-in attempts; try again shortly", 429);
+      }
       /* "Saved" only if what was typed is what is stored (#1901 review):
          the constant-time verify, never a string compare. */
       let verified: boolean;
@@ -958,12 +966,19 @@ export async function completePasswordRenewal(
         }
         throw error;
       }
-      if (!verified) throw lapsed();
-      throw new AuthError("password_change_saved", "Your new password is already saved; sign in with it", 400);
+      return { cleared: true as const, verified };
     }
     if (row.requiredAt.getTime() !== requiredAt.getTime()) throw lapsed();
-    return applyPasswordChange(transaction, userId, passwordHash, userId);
+    return { cleared: false as const, outcome: await applyPasswordChange(transaction, userId, passwordHash, userId) };
   });
+  if (!answer.cleared) return answer.outcome;
+  if (!answer.verified) {
+    /* Counted as a wrong password at the door is, by the door's own helper,
+       and committed: the refusal thrown next must not roll it back. */
+    await recordFailure(userId);
+    throw lapsed();
+  }
+  throw new AuthError("password_change_saved", "Your new password is already saved; sign in with it", 400);
 }
 
 export interface ConsumedSetupToken extends PasswordChangeOutcome {
