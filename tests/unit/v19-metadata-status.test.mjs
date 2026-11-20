@@ -152,16 +152,20 @@ describe("the mail-in review surfaces", () => {
     expect(INBOX).toContain("{unreadable(receipt)}");
     // Hidden, not disabled: there is nothing on the amend card to amend.
     expect(INBOX).toContain("{#if !locked(receipt)}");
-    expect(INBOX).toContain("disabled={busy === receipt.id || locked(receipt)}");
-    // Dismiss is untouched, so a receipt is never trapped.
-    expect(INBOX).toContain('<button disabled={busy === receipt.id} onclick={(event) => tap(receipt, "dismiss", event.currentTarget)}>');
+    // #1182: busy is aria-disabled (focus stays) and tap() ignores the press; the lock stays a real `disabled`.
+    expect(INBOX).toContain('disabled={locked(receipt)} aria-disabled={busy ? "true" : undefined} onclick={(event) => tap(receipt, "approve", event.currentTarget)}');
+    expect(INBOX).toMatch(/async function tap\(receipt, act, button\) \{[\s\S]*?if \(busy\) return;/);
+    // Dismiss is never locked, so a receipt is never trapped.
+    expect(INBOX).toContain('<button aria-disabled={busy ? "true" : undefined} onclick={(event) => tap(receipt, "dismiss", event.currentTarget)}>');
+    expect(INBOX).not.toMatch(/<button[^>]*\sdisabled=\{[^}]*busy[^}]*\}/);
   });
 
   it("leaves a damaged message every action, because re-forwarding is a real repair", () => {
     // `locked()` alone gates the two removals above, so damaged keeps them.
     expect(INBOX).toContain('fieldState(receipt.metadataStatus, "proposal") === LOCKED');
     expect(SUGGESTION).toContain("const locked = $derived(reviewLockedOf(suggestion));");
-    expect(SUGGESTION).toContain("disabled={busy || locked}");
+    // #1182: only the lock is a real `disabled`; busy is aria-disabled and the press is ignored.
+    expect(SUGGESTION).toContain('disabled={locked} aria-disabled={busy ? "true" : undefined} onclick={() => !busy && onReceiptTap(suggestion, "approve")}');
   });
 
   it("suppresses the READ marks when their evidence is damaged", () => {
