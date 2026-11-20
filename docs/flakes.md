@@ -512,3 +512,11 @@ timeout on this one case rather than a global raise.
 ## scripts/repair-owner-lows-1873.test.mjs "#1873 X5: ... > restore-compose-file: an owner child that ignores TERM ends the action as timed out within the limit plus grace" (:461, #1928)
 
 - 2026-11-20 · !1428 at aee70e43 (batch-b 09ee759c merged in; !1428 touches no repair file) · pipeline 4872 / fast (job 58535) · `expected 20598 to be less than 20000` at :461 (BUDGET_MS). The file passed 38/38 locally on the same tree; retried as job 58620. First sighting. Load only, no code fault (#1928): the case normally takes 14.9-15.4 s, about 5 s under the budget; the budget is left for the owner.
+
+## tests/unit/v19-mail-sender-rows-1650.test.mjs "#1650: the desk lists the extra addresses > keeps the sign-in rows as they were, and draws no extra row when there is only the sign-in address"
+
+- 2026-11-20 · !1431 c13324bc · pipeline 4885 / fast (job 58706) · timed out at the 5 s default (5118 ms) in a 1507 s run on a loaded runner; the change touched only scripts/test-backup-restore.sh. Retried as job 58725, passed. First sighting.
+
+## scripts/repair-owner-writes-1872.test.mjs "#1872 V7: ... > rotate-credential: a stalled owner step ends as timed out within the limit plus grace, no lock held, nothing left"
+
+- 2026-11-20 · !1431 c13324bc · pipeline 4885 / fast (job 58706) · failed in the same loaded 1507 s run; the change touched only scripts/test-backup-restore.sh. Retried as job 58725, passed. First sighting.
