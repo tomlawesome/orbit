@@ -98,10 +98,14 @@ const test: TestUserConfig = {
         // a file about the key sets its own.
         setupFiles: ["./tests/support/temp-root.ts", "./tests/support/key-usable.ts", "./scripts/vitest-cli-bundle-setup.mjs"],
         // Vitest's defaults (5s / 10s) already fail a hung test rather than the
-        // whole job — pinned here, unchanged, so intent is explicit and can't
-        // silently drift. A handful of tests that spawn real subprocesses
-        // already declare their own longer `timeout` and are unaffected.
-        testTimeout: 5_000,
+        // whole job — pinned here so intent is explicit and can't silently
+        // drift. A handful of tests that spawn real subprocesses already
+        // declare their own longer `timeout` and are unaffected.
+        // In CI the test limit is 15 s (#1933, owner decision 81a): the shared
+        // runner is overcommitted and ordinary tests ran past 5 s there. It is
+        // a hang guard, sized like the integration project's below; locally it
+        // stays 5 s so a slow test still shows while it is being written.
+        testTimeout: process.env.CI === "true" ? 15_000 : 5_000,
         hookTimeout: 10_000,
         exclude: [
           ...configDefaults.exclude,
