@@ -475,11 +475,6 @@ timeout on this one case rather than a global raise.
 
 - 2026-11-05 · dbc2e3ba (chore/batch-a-intake-1, !1174) · pipeline 3615 / `film_webkit` job 46467 · "execution took longer than 35m0s"; 22 of the pocket-webkit specs had passed and the last running was `tour-pocket-webkit.spec.js:1418` (chapter 8, at 390x844, 46 s in). host load; code unchanged since 3614. First sighting. #1546 (CI sharding) removes these kills.
 
-## tests/unit/archive-slot-upload-spool-1792.test.mjs "L4: ... a spooled preview waits (not 200, not 429) while another import processes, an export is still refused at once, and the waiters are served first come first served"
-
-- 2026-11-11 · chore/1801-repins (batch-b 6d00597b + a base-image pin and supply-chain policy data, nowhere near the archive slot) · pipeline 3955 / `fast` job 49133 · "the slot went to the one that waited longest first": got owner-1, owner-4, owner-2. Likely cause: the test waits only until owner-2's spool has started, not finished, so under load owner-4's spool can finish and queue first. Passed in pipeline 3949 on the same batch-b code. First sighting.
-- 2026-11-19 · !1415 852ea382 (the upload open check, nowhere near the archive slot) · pipeline 4774 / `fast` job 57519 · "the slot went to the one that waited longest first": got owner-1, owner-4, owner-2 again. Passed 5 of 5 locally on the same commit. Second sighting.
-
 ## src/server/documents/pdf-structure-sandbox-poppler.test.ts "line 14: with check 1 / view 1, a render holding the view slot does not delay a structure check" (after-test check, :108)
 
 - 2026-11-12 · chore/v039-batch-b-ci d92e92b6 (Dockerfile pin and JSON policy only, nowhere near the PDF sandbox) · pipeline 4032 / fast (job 49856) · "§1.5 line 16: a child still in flight after the test: expected 1 to be +0"; the retried job 49859 passed. First sighting.
@@ -516,6 +511,7 @@ timeout on this one case rather than a global raise.
 ## scripts/pty-deadline.test.mjs "pty deadline reporting > re-arms the idle deadline on every chunk, so a slow but live child is not killed"
 
 - 2026-11-20 · !1433 602b02c06 · pipeline 4890 / fast (job 58758) · the pty child printed nothing for 300 ms on a loaded runner and was killed. Passed in pipeline 4902 on the same test code. First sighting.
+- 2026-11-20 · local, fix/1494-tiles at aaeb03729 · full local gate · failed; the file re-run alone passed. Second sighting.
 
 ## scripts/install-undo-copy-1848.test.mjs "#1874 O-R2 install.sh prune: Ctrl-C at the undo-copy prompt > restores echo on the terminal"
 
@@ -524,6 +520,7 @@ timeout on this one case rather than a global raise.
 ## scripts/repair-owner-writes-1875.test.mjs "#1875 W1: update-config renames the staged password as the owner, under the #1858 limits > an owner rename that stalls is timed out ..."
 
 - 2026-11-20 · !1433 602b02c06 · pipeline 4890 / fast (job 58758) · "the rename never went through setpriv: expected [] to not deeply equal []". Passed in pipeline 4902 on the same test code. First sighting.
+- 2026-11-20 · !1433 eb548d90a · pipeline 4944 / fast retry (job 59391) · the same "never went through setpriv" message, this time on the flood-capped case, with this host idle (Orbit is having it looked at apart from load). Second sighting.
 
 ## scripts/ci/batch-intake-ci.test.mjs "every other pipeline is as it is without the batch-intake rule (#1720) > scheduleInstallBootstrap: same pipeline, same jobs, same verdicts"
 
@@ -552,6 +549,7 @@ timeout on this one case rather than a global raise.
 ## scripts/repair-signal-1919.test.mjs "#1919: ... > TERM to the group, 20 times in a row (the race is repeated, bounded): the copy is gone every time"
 
 - 2026-11-20 · !1433 80582f500 · pipeline 4912 / fast (job 58965) · `Test timed out in 45000ms` on a loaded runner. Passed in the retry (job 59031). First sighting.
+- 2026-11-20 · !1433 eb548d90a · pipeline 4944 / fast (job 59284) · `Test timed out in 45000ms` again. Passed in the retries (jobs 59336, 59391). Second sighting.
 
 ## src/lib/backup-restore-cli.test.ts "runBackup > O2-R3: a SIGTERM while the adapter is dumping leaves the .orbit-backup.* scratch in place, and the next runBackup removes it"
 
@@ -560,3 +558,11 @@ timeout on this one case rather than a global raise.
 ## scripts/repair-restore-lock-1902.test.mjs "#1902 L1: the compose-restore lock does not lapse silently > as root, a restore whose steps outlast the owner step limit still holds the scratch-file lock ..."
 
 - 2026-11-20 · !1433 5ec1733ff · pipeline 4928 / fast (job 59118) · "the lock lapsed silently (probes: [], status 4)" after the mv step timed out at 3 s on a loaded runner. Passed in pipelines 4890, 4902 and 4912 on the same test code. First sighting.
+
+## scripts/repair-owner-writes-1872.test.mjs "#1872 V7: each owner step is time- and size-bounded; a failure releases the lock and leaves nothing root made > restore-transaction (mv): an owner ..."
+
+- 2026-11-20 · !1433 eb548d90a · pipeline 4944 / fast (job 59284) · "a temp file or folder was left behind: expected [ '.orbit-repair-recovery.…' ] to deeply equal []". Passed in the retries (jobs 59336, 59391). Possibly a cleanup race, not load; Orbit is having it diagnosed. First sighting.
+
+## tests/unit/admin-alert-repeat-1810.test.ts "the alert footer says the rule for its kind (#1810 A-F8) > scanner_unavailable html / text: the scanner sentence, not the per-fault one"
+
+- 2026-11-20 · !1433 eb548d90a · pipeline 4944 / fast retry (job 59336) · the html case timed out at 5 s and the text case then saw the mail sender called twice, not once. The file passed 3 of 3 locally and in job 59391. First sighting.
