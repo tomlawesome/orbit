@@ -56,9 +56,55 @@ describe("testWorkers (#1864)", () => {
     },
   );
 
-  it("P3: CI set, no override -> no worker settings", async () => {
+  it("P3: CI set, no override, no quota file -> sized from cpus, not {}", async () => {
     const { testWorkers } = await load();
-    expect(testWorkers({ env: { CI: "true" }, cpus: 32 })).toEqual({});
+    expect(testWorkers({ env: { CI: "true" }, cpus: 32, cpuMax: undefined })).toEqual({
+      maxWorkers: 8,
+    });
+  });
+});
+
+describe("testWorkers CI sizing from the cgroup CPU quota (#1933)", () => {
+  const ci = { CI: "true" };
+
+  it.each([
+    ["800000 100000", 32, 4, "8-CPU quota on a 32-core host"],
+    ["max 100000", 32, 8, "unlimited quota falls back to cpus"],
+    [undefined, 6, 3, "no quota file falls back to cpus"],
+    ["150000 100000", 32, 1, "1.5 CPUs rounds down, minimum 1"],
+    ["3200000 100000", 8, 4, "quota above cpus is capped by cpus"],
+    ["100000 100000", 32, 1, "1 CPU -> 1 worker"],
+    ["2400000 100000", 64, 8, "result is capped at 8"],
+  ])("CI cpu.max %j, %i cpus -> %i workers (%s)", async (cpuMax, cpus, want) => {
+    const { testWorkers } = await load();
+    expect(testWorkers({ env: ci, cpus, cpuMax })).toEqual({ maxWorkers: want });
+  });
+
+  it.each(["abc def", "0 100000", "-100000 100000", "800000", "", "800000 ", "x 100000"])(
+    "CI malformed cpu.max %j falls back to cpus (6 -> 3)",
+    async (cpuMax) => {
+      const { testWorkers } = await load();
+      expect(testWorkers({ env: ci, cpus: 6, cpuMax })).toEqual({ maxWorkers: 3 });
+    },
+  );
+
+  it("CI override still wins over the quota", async () => {
+    const { testWorkers } = await load();
+    expect(
+      testWorkers({
+        env: { ...ci, ORBIT_TEST_WORKERS: "5" },
+        cpus: 32,
+        cpuMax: "800000 100000",
+      }),
+    ).toEqual({ maxWorkers: 5 });
+  });
+
+  it("local profile ignores cpu.max", async () => {
+    const { testWorkers } = await load();
+    expect(testWorkers({ env: {}, cpus: 32, cpuMax: "200000 100000" })).toEqual({
+      maxWorkers: 8,
+    });
+    expect(testWorkers({ env: {}, cpus: 6, cpuMax: undefined })).toEqual({ maxWorkers: 3 });
   });
 });
 
