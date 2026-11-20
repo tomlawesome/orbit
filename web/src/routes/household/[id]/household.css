@@ -209,8 +209,8 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page .note{font:0.65625rem var(--mono);color:var(--ink-quiet);line-height:1.85}
 .household-page .note.top{margin-top:13px}
 .household-page .note b{color:var(--ink-mid);font-weight:400}
-.household-page .said{display:none;margin-top:12px;font:0.6875rem var(--mono);color:var(--ok-text);line-height:1.8}
-.household-page .said.show{display:block}
+.household-page .said{margin:0;font:0.6875rem var(--mono);color:var(--ok-text);line-height:1.8}
+.household-page .said.show{margin-top:12px}
 /* #1332: the status line under the sections list, said once a section is removed */
 .household-page .moved{margin:0;font:0.6875rem var(--mono);color:var(--ok-text);line-height:1.8}
 .household-page .moved.show{margin-top:12px}
@@ -225,6 +225,8 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 /* What a control says when it could not do what it looked like it did — the
    helm's .note in the warm ink, never on the happy path. */
 .household-page .problem{margin-top:12px;font:0.6875rem var(--mono);color:var(--warm-text);line-height:1.8}
+/* a live region stays in the page, empty: no gap until it speaks */
+.household-page .problem:empty{margin:0}
 
 /* sections: one editable list, saved whole. OWNER-ONLY (2b) — a plain
    member never sees this card at all, not even read-only. */

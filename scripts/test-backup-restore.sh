@@ -33,6 +33,12 @@
 #   test_restore_removes_post_backup_table      restore.sh #8 (#1316): a table
 #     created after the backup point does not survive restoring it, Orbit
 #     boots healthy and the restore does not roll back.
+#   seed_real_document, assert_real_document_reads_back  #1199 (--own-stack
+#     only): a real PNG uploaded through the app's own API, so the app encrypts
+#     it under the document key, is downloaded through the app after every
+#     valid restore and after the recovery-bundle import, and must read back
+#     as the original bytes. The other fixtures are made-up ciphertext checked
+#     by sha256 and row; this one proves a document decrypts.
 #   assert_credential_fixture_present            restore.sh #49 (authentication
 #     data and the revocation boundary, #917, ADR-0022 §6, ADR-0023 §7): a
 #     local credential and an unconsumed setup token seeded before the backup
@@ -70,6 +76,11 @@
 #   volume, network or image, or deletes the deployment's data. The restore
 #   steps rewind the database and documents to the backup the drill took at its
 #   own start, which is the point of the drill.
+#
+#   The real document (#1199) needs an unclaimed instance to create its
+#   administrator, so it is seeded only with --own-stack, whose fresh install
+#   always is one; the borrowed path skips it and says so. Its administrator,
+#   household and file go with the owned stack.
 #
 #   Owned, removed on every exit: the fixture rows (household, documents,
 #   IMAP message, credential user and the post-backup session) and the three
@@ -519,6 +530,9 @@ command -v sha256sum >/dev/null 2>&1 || fail 'sha256sum is required.'
 command -v tar >/dev/null 2>&1 || fail 'tar is required.'
 command -v head >/dev/null 2>&1 || fail 'head is required.'
 if [[ "$own_stack" == 1 ]]; then
+  command -v jq >/dev/null 2>&1 || fail 'jq is required for the real-document check.'
+fi
+if [[ "$own_stack" == 1 ]]; then
   install_own_stack
   # Every relative path below -- Compose's project directory and the
   # `bash scripts/...` calls -- now resolves in the owned deployment.
@@ -788,6 +802,118 @@ remove_credential_fixture() {
     sh "$credential_user_id" "$credential_session_id" >/dev/null
 }
 
+# --- #1199: a real document, written and read through the app --------------
+#
+# The fixtures above are made-up bytes, so nothing they prove says a document
+# still decrypts after a restore. This one goes through the HTTP API the
+# deployment serves. scripts/ci/upgrade-seed.sh's seed, which the upgrade
+# matrix uses for the same proof across an update, claims the instance with
+# the code from orbit-app's log, creates a local administrator with a
+# generated password, a household and an item, and uploads a small PNG, which
+# the app encrypts under the document key. Its state (cookie jar, CSRF header,
+# credentials, ids, the PNG itself; mode 600) sits in the owned deployment's
+# .upgrade-seed directory, so no secret reaches argv and it goes with the stack.
+#
+# The readback is the drill's own: download the document through the app and
+# compare it byte for byte with the PNG. upgrade-seed.sh's readback first reads
+# /api/workspace, and an instance administrator's workspace lists every
+# household, including the SQL fixture household above, which it refuses to
+# render (422); the download is the claim under test, so only it is asked.
+real_document=0
+if [[ "$own_stack" == 1 ]]; then real_document=1; fi
+real_document_state=""
+
+app_base_url() {
+  local url
+  url="$(health_probe_url)"
+  printf '%s' "${url%/api/health}"
+}
+
+# The origin the app checks requests against: APP_URL's, not the loopback
+# address the drill connects to (as upgrade-seed.sh sends it).
+app_origin() {
+  awk -F= '$1 == "APP_URL" { sub(/\r$/, ""); sub(/^[^=]*=/, ""); value = $0 } END { print value }' "$environment_file" |
+    tr -d "\"'" | sed -E 's#^([a-z]+://[^/]+).*#\1#'
+}
+
+real_document_field() {
+  jq -r --arg field "$1" '.[$field]' "$real_document_state/ids.json"
+}
+
+# One download through the app into $1; prints the HTTP status. Cookies and
+# the password come from the seed's 600-mode files, never argv.
+real_document_download() {
+  local output="$1" base origin document status
+  base="$(app_base_url)" origin="$(app_origin)" document="$(real_document_field documentId)"
+  status="$(curl -sS --max-time 30 -o "$output" -w '%{http_code}' \
+    -b "$real_document_state/cookies" -c "$real_document_state/cookies" -H "Origin: $origin" \
+    "$base/api/documents/$document/download" 2>/dev/null)" || status=000
+  if [[ "$status" == 401 ]]; then
+    # The session may not survive every restore; sign in again, once.
+    local login_args=(-sS --max-time 30 -o /dev/null -w '%{http_code}' -X POST
+      -b "$real_document_state/cookies" -c "$real_document_state/cookies"
+      -H "Origin: $origin" -H 'Content-Type: application/json' --data-binary @-)
+    if [[ -s "$real_document_state/csrf-header" ]]; then login_args+=(-H "@$real_document_state/csrf-header"); fi
+    jq -c '{email, password}' "$real_document_state/credentials.json" |
+      curl "${login_args[@]}" "$base/api/auth/local/login" >/dev/null 2>&1 || true
+    status="$(curl -sS --max-time 30 -o "$output" -w '%{http_code}' \
+      -b "$real_document_state/cookies" -c "$real_document_state/cookies" -H "Origin: $origin" \
+      "$base/api/documents/$document/download" 2>/dev/null)" || status=000
+  fi
+  printf '%s' "$status"
+}
+
+# Retried until a deadline: straight after the upload the scan may still hold
+# the document back, and straight after a restore the app may still be warming.
+assert_real_document_reads_back() {
+  local label="$1" deadline=$((SECONDS + ${2:-30})) download="$test_directory/real-document.download" status=""
+  while :; do
+    status="$(real_document_download "$download")"
+    if [[ "$status" == 200 ]] && cmp -s -- "$download" "$real_document_state/document.png"; then
+      rm -f -- "$download"
+      return 0
+    fi
+    (( SECONDS < deadline )) ||
+      fail "The real document did not read back through the app as its original bytes ${label} (download answered ${status})."
+    sleep 2
+  done
+}
+
+# What the upload left on disk must be ciphertext: an object holding the
+# plaintext would let the readback pass with nothing decrypted.
+assert_real_document_encrypted_at_rest() {
+  local document plaintext_hash key stored_hash
+  document="$(real_document_field documentId)"
+  plaintext_hash="$(real_document_field sha256)"
+  key="$(compose exec -T orbit-db sh -c \
+    'psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --tuples-only --no-align --command="select storage_key from document_crypto where document_id = '\''$1'\'' and length(wrapped_dek) > 0;"' \
+    sh "$document")"
+  [[ "$key" =~ ^[0-9a-f]{64}$ ]] || fail 'The real document has no crypto row with a wrapped key.'
+  stored_hash="$(compose exec -T orbit-app sha256sum "/var/lib/orbit/documents/objects/${key:0:2}/${key:2:2}/${key}.bin" | awk '{print $1}')"
+  [[ "$stored_hash" =~ ^[0-9a-f]{64}$ ]] || fail 'The real document has no stored object.'
+  [[ "$stored_hash" != "$plaintext_hash" ]] || fail 'The real document is stored as plaintext.'
+}
+
+seed_real_document() {
+  local output
+  if [[ "$real_document" != 1 ]]; then
+    printf 'Orbit backup test: the real-document check (#1199) needs --own-stack; skipped on a borrowed deployment.\n' >&2
+    return 0
+  fi
+  real_document_state="$deploy_dir/.upgrade-seed"
+  output="$(bash "$repo_dir/scripts/ci/upgrade-seed.sh" seed "$deploy_dir" "$(app_base_url)" 2>&1)" ||
+    fail "Could not seed a real document through the app: ${output}"
+  # The scan decides when the document becomes readable; allow it time.
+  assert_real_document_reads_back 'after the upload' 300
+  assert_real_document_encrypted_at_rest
+}
+
+# Called after each restore and import the drill expects to succeed.
+check_real_document() {
+  [[ "$real_document" == 1 ]] || return 0
+  assert_real_document_reads_back "$1"
+}
+
 prepare_variant() {
   local name="$1"
   variant_directory="$test_directory/$name"
@@ -931,6 +1057,7 @@ expect_restore_acceptance() {
   assert_fixture_present
   assert_staging_fixture_present
   assert_credential_fixture_present
+  check_real_document "after the ${label} restore"
   insert_post_backup_session_fixture
 }
 
@@ -940,6 +1067,7 @@ run_valid_restore() {
   assert_fixture_present
   assert_recovery_jobs_restored
   assert_credential_fixture_present
+  check_real_document 'after a restore'
 }
 
 maintenance_sql() {
@@ -997,6 +1125,9 @@ test_restore_during_maintenance() {
   # Idempotent by design, so an operator who is unsure may simply run it again.
   bash scripts/end-maintenance.sh >/dev/null
   [[ "$(maintenance_active)" == 'f' ]] || fail 'Re-running the recovery path did not leave Orbit open.'
+  # Downloads are closed while maintenance is on, so the restore made during
+  # it is checked once the instance is open again.
+  check_real_document 'after the restore during maintenance'
 
   rm -f -- "$maintenance_backup_path"
   maintenance_backup_path=""
@@ -1046,6 +1177,7 @@ test_restore_removes_post_backup_table() {
     fail 'A table created after the backup survived the restore; the database is not as the backup had it.'
   }
   assert_fixture_present
+  check_real_document 'after the restore that removes a later table'
 }
 
 test_local_key_rejections() {
@@ -1329,6 +1461,7 @@ test_import_with_missing_key() {
   assert_fixture_present
   assert_recovery_jobs_restored
   assert_credential_fixture_present
+  check_real_document 'after the recovery-bundle import'
   insert_post_backup_session_fixture
   rm -f -- "$key_backup"
   key_backup=""
@@ -1338,6 +1471,7 @@ test_directory="$(mktemp -d "${TMPDIR:-/tmp}/orbit-backup-test.XXXXXX")"
 # From here the deployment is changed, so teardown puts it back (#1241).
 touched=1
 fixtures_seeded=1
+seed_real_document
 compose exec -T --user orbit:orbit orbit-app sh -c \
   'mkdir -p /var/lib/orbit/documents/objects/aa/aa /var/lib/orbit/documents/objects/cc/cc /var/lib/orbit/documents/staging && printf "%s" "orbit-backup-ciphertext-00001" > "$1" && printf "%s" "orbit-imap-attachment-00001" > "$2" && printf "%s" "orbit-encrypted-recovery-00001" > "$3"' \
   sh "$storage_path" "$attachment_storage_path" "$staging_path"
@@ -1396,3 +1530,6 @@ drop_post_backup_table
 fixtures_removed=1
 
 printf 'Orbit backup test: staged correspondence, rollback, interruption recovery, key handling, restore during maintenance, document/crypto round trip, and the authentication-data revocation boundary passed.\n'
+if [[ "$real_document" == 1 ]]; then
+  printf 'Orbit backup test: a real document uploaded through the app decrypted to its original bytes after every restore the drill expects to succeed and after the recovery-bundle import.\n'
+fi
