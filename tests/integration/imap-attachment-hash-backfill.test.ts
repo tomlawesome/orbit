@@ -2,7 +2,9 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
-import { metadataKeys } from "@/db/schema";
+import { metadataDamageSightings, metadataKeys } from "@/db/schema";
+import { log } from "@/lib/logger";
+import { flushMetadataDamageSightings, resetMetadataDamageSightingsForTests } from "@/server/metadata/damage-sightings";
 import { runDocumentMaintenanceCycle } from "@/server/document-worker";
 import { getImapReview } from "@/server/mail-in/imap-inbox";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
@@ -62,6 +64,10 @@ const pdf = (label: string) => syntheticPdf(`attachment hash backfill ${label}`)
 const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
 const household = (fixture: Fixture, which: "first" | "second" = "first"): SealScope => ({ household: which === "first" ? fixture.household.id : fixture.secondHousehold.id });
 
+async function attachmentUpdatedAt(id: string): Promise<number> {
+  const rows = await getDb().execute<{ at: string }>(sql`select updated_at as at from imap_ingestion_attachments where id = ${id}`);
+  return new Date(rows[0]!.at).getTime();
+}
 async function plainCount(): Promise<number> {
   const rows = await getDb().execute<{ n: number }>(sql`select count(*)::int as n from imap_ingestion_attachments where content_sha256 is not null`);
   return Number(rows[0]!.n);
@@ -232,20 +238,80 @@ describe("the mail-in attachment hash backfill (#1778)", () => {
     }
   });
 
-  it("leaves a plain value that is not a SHA-256 exactly as it is and does not block the rows behind it", async () => {
+  it("reports a plain value that is not a SHA-256 once, then clears it (plain, sealed and index all NULL) without blocking the rows behind it (#1931)", async () => {
     const fixture = await createIntegrationFixture("attach-backfill-odd");
+    const warn = vi.spyOn(log, "warn");
     try {
       await drainAll();
+      await getDb().delete(metadataDamageSightings);
+      resetMetadataDamageSightingsForTests();
       const odd = await legacyAttachment(fixture, fixture.household.id, "not-a-hash", `0${randomUUID().slice(1)}`);
       const shas = [0, 1, 2].map((n) => sha256Of(`backfill behind odd ${n}`));
       const behind = [] as Array<{ receiptId: string; attachmentId: string }>;
       for (const sha of shas) behind.push(await legacyAttachment(fixture, fixture.household.id, sha));
-      for (let call = 0; call < 10; call += 1) await backfill(1);
+      const before = await attachmentUpdatedAt(odd.attachmentId);
+      let fixed = 0;
+      for (let call = 0; call < 10; call += 1) fixed += await backfill(1);
       const row = await attachmentColumns(odd.attachmentId);
-      expect(row.plain, "the plain column is unchanged").toBe("not-a-hash");
-      expect(row.sealed).toBeNull();
+      expect(row.plain, "the plain column is cleared").toBeNull();
+      expect(row.sealed, "no seal of garbage").toBeNull();
+      expect(row.contentIndex, "no index of garbage").toBeNull();
+      expect(fixed, "the clearing counts as a fix: the odd row and the three behind it").toBe(4);
+      expect(await attachmentUpdatedAt(odd.attachmentId), "updated_at moves with the clear").toBeGreaterThan(before);
       for (const [position, one] of behind.entries()) await expectBackfilled(household(fixture), one.receiptId, one.attachmentId, shas[position]);
+
+      await flushMetadataDamageSightings();
+      const sightings = await getDb().select().from(metadataDamageSightings).where(eq(metadataDamageSightings.rowId, odd.attachmentId));
+      expect(sightings, "one damage sighting").toHaveLength(1);
+      expect(sightings[0]).toMatchObject({ tableName: "imap_ingestion_attachments", columnName: "content_sha256" });
+      const reports = () => warn.mock.calls.filter(([entry]) => (entry as { event?: string }).event === "metadata.integrity" && JSON.stringify(entry).includes(odd.attachmentId)).length;
+      expect(reports(), "reported once").toBe(1);
+      const settled = await attachmentColumns(odd.attachmentId);
+      expect(await backfill()).toBe(0);
+      expect(await backfill()).toBe(0);
+      expect(reports(), "not reported again").toBe(1);
+      expect(await attachmentColumns(odd.attachmentId), "and not touched").toEqual(settled);
       await getDb().execute(sql`delete from imap_ingestion_attachments where id = ${odd.attachmentId}`);
+    } finally {
+      warn.mockRestore();
+      await fixture.cleanup();
+    }
+  });
+
+  it("leaves a damaged plain value alone when it changed between the read and the write (#1931 guard)", async () => {
+    const fixture = await createIntegrationFixture("attach-backfill-odd-guard");
+    try {
+      await drainAll();
+      const newSha = sha256Of("backfill odd guard new");
+      const { receiptId, attachmentId } = await legacyAttachment(fixture, fixture.household.id, "not-a-hash");
+      let locked!: () => void;
+      const lockTaken = new Promise<void>((resolve) => { locked = resolve; });
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      const holder = getDb().transaction(async (transaction) => {
+        await transaction.execute(sql`select 1 from imap_ingestion_attachments where id = ${attachmentId} for update`);
+        locked();
+        await gate;
+        await transaction.execute(sql`update imap_ingestion_attachments set content_sha256 = ${newSha} where id = ${attachmentId}`);
+      });
+      await lockTaken;
+      const running = backfill();
+      for (let waited = 0; waited < 3_000; waited += 50) {
+        const rows = await getDb().execute<{ n: number }>(sql`select count(*)::int as n from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock'`);
+        if (Number(rows[0]!.n) > 0) break;
+        await sleep(50);
+      }
+      release();
+      await holder;
+      await running;
+      const mid = await attachmentColumns(attachmentId);
+      if (mid.sealed !== null) {
+        expect(await openSeal(household(fixture), attachmentId, mid.sealed)).toEqual({ ok: true, sha256: newSha });
+      } else {
+        expect(mid.plain, "the changed value is untouched by the clear").toBe(newSha);
+      }
+      await drainAll();
+      await expectBackfilled(household(fixture), receiptId, attachmentId, newSha);
     } finally {
       await fixture.cleanup();
     }

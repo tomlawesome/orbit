@@ -931,11 +931,12 @@
           <div class="cardhead"><h2>Damaged encrypted details</h2></div>
           <p class="rotationwords">
             {view.metadata.damagedValues} values have failed their integrity check and can't be
-            recovered — notes or references on {view.metadata.damagedItems} items, and
-            {view.metadata.damagedReceipts} mail-in messages. Each occurrence is in the logs with its
-            row and column. Overwriting a damaged value repairs the record; a damaged mail-in message
-            can be re-forwarded. Counted as they're encountered, so the number can grow as items are
-            opened.
+            recovered — notes or references on {view.metadata.damagedItems} items,
+            {view.metadata.damagedReceipts} mail-in messages, and the fingerprints of
+            {view.metadata.damagedDocuments} documents. Each occurrence is in the logs with its row
+            and column. Overwriting a damaged value repairs the record; a damaged mail-in message can
+            be re-forwarded; a damaged document is repaired by removing it and attaching it again.
+            Counted as they're encountered, so the number can grow as items are opened.
           </p>
         </div>
       {/if}

@@ -3,6 +3,9 @@ import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { sql as drizzleSql } from "drizzle-orm";
+import { getDb } from "@/db";
+import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
 import { CONTRACT_PRECONDITIONS, runUpdatePreflight, type ContractPrecondition } from "../../src/db/contract-preconditions";
 import { createMigrationTestDatabase, runMigrations } from "./support/migration-fixture";
 
@@ -184,5 +187,48 @@ describe("runUpdatePreflight on a real database (#1779)", () => {
     const entry = CONTRACT_PRECONDITIONS.find((candidate) => candidate.column === "documents.content_sha256")!;
     expect(entry.pendingSql).toMatch(/content_sha256\s+IS\s+NOT\s+NULL/iu);
     expect(entry.remedy.length).toBeGreaterThan(0);
+  });
+});
+
+/* #1931 (ruling #1779 note 67344, item 4): one predicate, `content_sha256 IS NOT NULL`, no regex.
+   A damaged plain value blocks the preflight until a maintenance cycle has reported and cleared it. This runs
+   against the integration database, the one the maintenance cycle works on. */
+describe("a damaged plain document hash and the preflight (#1931)", () => {
+  it("is blocked, rows=1, while a document holds 'not-a-hash', and ready once a maintenance cycle has run", async () => {
+    const folder = await shippedContractFolder();
+    const query = async (text: string): Promise<string[][]> => {
+      const rows = await getDb().execute(drizzleSql.raw(text));
+      return [...rows].map((row) => Object.values(row as Record<string, unknown>).map((cell) => String(cell)));
+    };
+    const fixture = await createIntegrationFixture("preflight-damaged-hash");
+    const { runDocumentMaintenanceCycle } = await import("@/server/document-worker");
+    await getDb().execute(drizzleSql`delete from documents where content_sha256 is not null`);
+    const householdId = fixture.household.id;
+    const documentId = randomUUID();
+    try {
+      await getDb().execute(drizzleSql`
+        insert into documents (id, household_id, display_name, media_type, size_bytes, content_sha256)
+        values (${documentId}, ${householdId}, 'a.pdf', 'application/pdf', 10, 'not-a-hash')`);
+      const blocked = await runUpdatePreflight({ query, migrationsFolder: folder });
+      expect(blocked.ready).toBe(false);
+      expect(blocked.lines[0]).toBe("update-preflight: blocked documents.content_sha256 rows=1");
+
+      for (let guard = 0; guard < 20; guard += 1) {
+        await runDocumentMaintenanceCycle();
+        const rows = await getDb().execute<{ n: number }>(drizzleSql`select count(*)::int as n from documents where content_sha256 is not null`);
+        if (Number(rows[0]!.n) === 0) break;
+      }
+      const ready = await runUpdatePreflight({ query, migrationsFolder: folder });
+      expect(ready).toMatchObject({ ready: true, exitCode: 0, lines: ["update-preflight: ready"] });
+    } finally {
+      await getDb().execute(drizzleSql`delete from documents where id = ${documentId}`);
+      await fixture.cleanup();
+      await cleanupIntegrationEnvironment();
+    }
+  });
+
+  it("the remedy says that a value Orbit cannot read is reported and cleared by the background work", () => {
+    const entry = CONTRACT_PRECONDITIONS.find((candidate) => candidate.column === "documents.content_sha256")!;
+    expect(entry.remedy.join(" ")).toMatch(/clear/iu);
   });
 });

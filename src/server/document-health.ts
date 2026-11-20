@@ -51,6 +51,7 @@ export interface DocumentHealth {
     damagedValues: number;
     damagedItems: number;
     damagedReceipts: number;
+    damagedDocuments: number;
   };
 }
 
@@ -62,6 +63,7 @@ const NO_METADATA_TROUBLE: DocumentHealth["metadata"] = {
   damagedValues: 0,
   damagedItems: 0,
   damagedReceipts: 0,
+  damagedDocuments: 0,
 };
 
 /**
@@ -114,6 +116,7 @@ async function readMetadataHealth(): Promise<DocumentHealth["metadata"]> {
     damagedValues: damage.values,
     damagedItems: damage.items,
     damagedReceipts: damage.receipts,
+    damagedDocuments: damage.documents,
   };
 }
 
@@ -187,7 +190,7 @@ export function toPublicDocumentHealth(health: DocumentHealth): DocumentHealth {
     previewBytes: health.previewBytes === null ? null : Number(health.previewBytes ?? 0),
     previewsPending: health.previewsPending === null ? null : Number(health.previewsPending ?? 0),
     // Numbers and one boolean, projected field by field like everything above
-    // it: whatever a future caller puts on the internal shape, only these six
+    // it: whatever a future caller puts on the internal shape, only these seven
     // values can reach an administrator's browser.
     metadata: {
       locked: Boolean(health.metadata?.locked),
@@ -196,6 +199,7 @@ export function toPublicDocumentHealth(health: DocumentHealth): DocumentHealth {
       damagedValues: Number(health.metadata?.damagedValues ?? 0),
       damagedItems: Number(health.metadata?.damagedItems ?? 0),
       damagedReceipts: Number(health.metadata?.damagedReceipts ?? 0),
+      damagedDocuments: Number(health.metadata?.damagedDocuments ?? 0),
     },
   };
 }
