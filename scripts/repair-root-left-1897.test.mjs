@@ -19,7 +19,10 @@ import { makeFixture, scratchDir } from "./repair-test-harness.mjs";
 vi.setConfig({ testTimeout: 90_000 });
 
 const isRoot = process.getuid?.() === 0;
-const LIMIT = { ORBIT_REPAIR_OWNER_STEP_TIMEOUT: "2" };
+// #1928: the limit applies to every owner step, not only the find. At 2 s an earlier owner step (the checksum or
+// the owner `diff -r`) could overrun on a loaded runner and end the check before the find ran. 5 s leaves those
+// steps room; the stalled find still times out at 5 s plus the kill grace, well inside BUDGET_MS.
+const LIMIT = { ORBIT_REPAIR_OWNER_STEP_TIMEOUT: "5" };
 const BUDGET_MS = 30_000;
 const RUNNING = { db: "running", app: "running" };
 const SAME_LINE = /would change nothing/u;
@@ -99,7 +102,7 @@ describe("#1897 T1: as root, the tree-mode listing of the owner's live tree runs
       const shims = shimsFor(folder.targetDir, { variant: { kind, match: "*find*" } });
       try {
         const result = restore(shims, folder, { env: LIMIT });
-        expect(setprivNaming(shims, /find/u), "the tree-mode find never went through setpriv").not.toEqual([]);
+        expect(setprivNaming(shims, /find/u), `the tree-mode find never went through setpriv:\n${result.stderr.slice(0, 1200)}`).not.toEqual([]);
         expect(result.hung, "repair was still running after the test's own cap").toBe(false);
         expect(result.ms, "repair outlived the step limit plus the kill grace").toBeLessThan(BUDGET_MS);
         expect(result.stderr, "a listing that did not finish was compared as the same").not.toMatch(SAME_LINE);

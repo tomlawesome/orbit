@@ -202,20 +202,6 @@ timeout on this one case rather than a global raise.
 
 - 2026-10-09 · dad77c25 (#1325 rebased onto dev; the tree differs from pipeline 2287's green 8170fecb only in design files, an ADR, this log and one e2e spec) · pipeline 2290 / fidelity (job 33718) · `ArrowRight did not come back`; the same test passed at 390x844 in the same run. 45/45 locally with `--repeat-each=5` on the same commit; job retried as 33765. First sighting.
 
-## pocket-measure.spec.js:551 "/home · row-… meets the pocket floors" — `openRow`'s tap never opens the panel (row-retire-armed at 390x664, row-snooze at 360x640) (#1376) — quarantined 2026-10-16 (agent-infra#30)
-
-- 2026-10-09 · abcb06f1 · pipeline 2301 / fidelity (job 33822) · `openRow`'s tap on Car MOT's face never opened its panel (`locator.waitFor` ran to the 60 s test timeout), after `go()` had already waited for `body[data-home-ready]`; 487 others passed. Locally in the pinned image on 6afb412e: 20 repeats alone, then every `/home · row-` state 15 times over 4 workers (420 runs), all green. First sighting.
-- 2026-10-10 · cd964294 (!1052; since 8b9bf878, whose fidelity job 34065 passed, only e2e specs and one unit test changed) · pipeline 2341 / fidelity (job 34107) · row-snooze at 360x640, the same wait at `pocket-states.js:61` for Car MOT's opened panel ran to the 60 s test timeout; 487 others passed. Retried as job 34122. Second sighting.
-
-- 2026-10-10 · d80cf61b (!1054) · pipeline 2392 / fidelity (job 34627) · "/home · document-preview meets the pocket floors" at 390x664, the same wait at `pocket-states.js:61` for Car MOT's opened panel ran to the 60 s timeout; 487 others passed. Third sighting: filed as #1376.
-- 2026-10-10 · e0d5d796 (`dev`, merge of !1057; its head 327d32c1 passed fidelity in pipeline 2440, and the merge adds only `scripts/install.sh`, its test and `scripts/ci/repin-base-image.sh`) · pipeline 2461 / fidelity (job 35271) · "/home · row-complete meets the pocket floors" at 390x664, `locator.waitFor` ran to the 60 s test timeout; 487 of 488 passed.
-- 2026-10-14 · 00987a9d (door branch, !1066) · pipeline 2590 / fidelity (job 36196) · `pocket-measure.spec.js:544` "pocket measurement at 390x664 › /home · row-open meets the pocket floors" — `locator.waitFor: Test timeout of 60000ms exceeded`; 487 others passed. Diff since pipeline 2588 (where it passed) is an e2e keyboard spec and docs only; job retried as 36215.
-- 2026-10-16 · 614118ff (!1069; one e2e spec and this file changed since pipeline 2645, where fidelity passed) · pipeline 2649 / fidelity (job 36559) · "pocket measurement at 360x640 › /home · row-edit": `openRow` tapped the Car MOT row and the panel never opened (`locator.waitFor: Test timeout of 60000ms exceeded`); 487 others passed. Retried as 36573.
-- 2026-10-28 · 6274d16c (!1104) · pipeline 3086 / fidelity (job 40427, the `pocket-measure` project; the job's allowed exit code 3 kept the pipeline green) · "pocket measurement at 390x664 › /home · row-edit-section", tagged `@quarantine`: `locator.waitFor: Test timeout of 60000ms exceeded` after 1.0 m; 189 fidelity shots and every other measurement passed. Not retried.
-- 2026-10-28 · bffece83 (`dev`, nightly started by hand) · pipeline 3094 / fidelity (job 40514, `pocket-measure`; allowed exit code 3, nightly stayed green) · "pocket measurement at 390x664 › /home · row-snooze", tagged `@quarantine`: timed out; 486 fidelity shots and every other measurement passed. Not retried.
-- 2026-11-04 · 79eebff5 (`fix/v037-three-flakes`) · local full fidelity run, host load about 40 · `pocket-home-drawers.spec.js:90` "a chooser sheet holds the page behind it inert…" at 390x664 touch: `openRow (#1376): the tap opened no panel within 10 s; {"row":"i-mot","expanded":"false","open":false,"box":[17,263,356,56],"hit":"span.title in i-mot","scrollY":377}`. The tap point was on the row's own title, so the tap reached the row and the row did not act on it. The file passed alone straight after.
-- 2026-11-04 · 754ab8a2 (`fix/v037-three-1355`) · local full fidelity run, same host load · `pocket-home-drawers.spec.js:49` "a paper opens the preview as the bottom sheet…": the same diagnostics, word for word. Passed alone straight after.
-
 ## v19-tour-chapter-add.test.mjs
 
 - 2026-10-09 · 73481e5e (#1345) · local scripts/test-backend.sh under parallel load · 5–7 s timeout; passed alone and on rerun
@@ -468,20 +454,10 @@ timeout on this one case rather than a global raise.
 - 2026-11-05 · feat/v037-three-sky 9834d7e8 · local sky-run.sh rig-webkit-desktop, `--cpus=3`, shared host at load 15-18 · `body[data-home-ready]` not reached after a reload within the 5s expect default; passed when the drawer tests were re-run alone. First sighting.
 - 2026-11-05 · feat/v037-three-sky 20d05324 (waits now 20s SETTLE) · same · the test's 60s budget ran out waiting for home after the reload; the next run of the file passed (20 of 20). Second sighting.
 
-## web/tests/rig/v19-home-drawer-scrolled.spec.js:268 "Space on the focused north star, with a row opened part-way down and the page scrolled further, ..." — rig-firefox (#1717)
-
-- 2026-11-05 · c9805ba8 (dev; the spec was at :237) · pipeline 3577 / `rig_firefox` job 45967 · "the page moved 273px from scrollY 1393 when the north star was pressed". First sighting.
-- 2026-11-05 · 34e87dae (chore/batch-a-intake-1, !1174) · pipeline 3609 / `rig_firefox` job 46352 · the same 273px from scrollY 1393. Local rig-firefox on the same commit passed 7 of 7 (the spec once, then the case `--repeat-each=6` at four workers). The identical figures on two CI runs suggest something the CI Firefox runner does every time, not a race. Second sighting.
-- 2026-11-05 · dbc2e3ba (chore/batch-a-intake-1, !1174) · pipeline 3615 / `rig_firefox` job 46465 · the same "page moved 273px from scrollY 1393", this time the Enter case of the loop at :268. host load; code unchanged since 3614. Third sighting: filed as #1717 (north star press moves the page on CI Firefox); the loop's two tests are quarantined.
-
 ## web/tests/rig/v19-screen-reader.spec.js:172 "/home?item=<id>: the item drawer, read and edited" — rig-firefox
 
 - 2026-11-05 · 34e87dae (chore/batch-a-intake-1, !1174) · pipeline 3609 / `rig_firefox` job 46352 · in the editing walk, links #9 to #14 (the dial's last body link and the manifest rows, by a local probe of the same state) read an empty accessible name, until the 30 s test timeout. Local rig-firefox on the same commit passed 16 of 16 at eight workers, and every one of those links is named there. Same run, rig-webkit-desktop timed out at `locator.count()` in the same walk. First sighting.
 - 2026-11-05 · dbc2e3ba (chore/batch-a-intake-1, !1174) · pipeline 3615 / `rig_webkit` job 46466 (rig-webkit-desktop; the spec is at :180 now) · `locator.count()` in `assertEveryControlIsNamed` ran to the 30 s test timeout in the same walk. host load; code unchanged since 3614. Second sighting.
-
-## web/tests/rig/sign-out-descent.spec.js:134 "sign out from home's menu reaches the dusk (phone-narrow, as the browser is)" — rig-webkit-desktop (#1716, fixed by 97cf5f82)
-
-- 2026-11-05 · dbc2e3ba (chore/batch-a-intake-1, !1174) · pipeline 3615 / `rig_webkit` job 46466 · "#1262: the descent was not seen to start and end" (`expect(took).not.toBeNull()` at :176, Received: null). Before the fix: 97cf5f82 corrects both causes of this test's failures (#1716), the unread `withdrawing` state among them. host load; code unchanged since 3614. Heading goes when a pipeline on 97cf5f82 shows the fix held.
 
 ## web/tests/rig/v19-document-preview.spec.js:278 "each page turn in the reader asks the server for that page's picture once"
 
@@ -494,10 +470,6 @@ timeout on this one case rather than a global raise.
 ## web/tests/rig/local-sign-in.spec.js:112 "no sign-in card sits over the arrival with no climb owed" — rig-webkit-phone
 
 - 2026-11-05 · dbc2e3ba (chore/batch-a-intake-1, !1174) · pipeline 3615 / `rig_webkit` job 46466 · `locator.click` at :130 on "name your own system": "waiting for element to be visible, enabled and stable" until the 30 s test timeout. host load; code unchanged since 3614. First sighting.
-
-## web/tests/rig/v19-home-drawer-scrolled.spec.js:258 "a row opened part-way down, then scrolled further, one press on the north star opens the drawer and the page stays put" — rig-firefox (#1717)
-
-- 2026-11-05 · dbc2e3ba (chore/batch-a-intake-1, !1174) · pipeline 3615 / `rig_firefox` job 46465 · "the page moved 273px from scrollY 1393 when the north star was pressed", the same figures as the :268 cases above (#1717). host load; code unchanged since 3614. First sighting.
 
 ## `film_webkit` job: killed at its 35 min limit (host) (#1546)
 
@@ -536,3 +508,7 @@ timeout on this one case rather than a global raise.
 ## upgrade_cell: [latest-3, all-keys] "Could not download the release manifest for channel v0.3.7" (image-registry)
 
 - 2026-11-19 · !1409 a44b60f8 · pipeline 4800 / upgrade_cell: [latest-3, all-keys] (job 57816) · the old installer's identity phase failed `reason=image-registry`, then "Could not download the release manifest for channel v0.3.7", step=install assertion=install-exited-0. The retry, job 57965, passed on the same commit. First sighting.
+
+## scripts/repair-owner-lows-1873.test.mjs "#1873 X5: ... > restore-compose-file: an owner child that ignores TERM ends the action as timed out within the limit plus grace" (:461, #1928)
+
+- 2026-11-20 · !1428 at aee70e43 (batch-b 09ee759c merged in; !1428 touches no repair file) · pipeline 4872 / fast (job 58535) · `expected 20598 to be less than 20000` at :461 (BUDGET_MS). The file passed 38/38 locally on the same tree; retried as job 58620. First sighting. Load only, no code fault (#1928): the case normally takes 14.9-15.4 s, about 5 s under the budget; the budget is left for the owner.

@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
 
 import { THEME_PACKS } from "../../src/lib/theme.js";
-import { settle } from "./pocket-states.js";
+import { APP, settle } from "./pocket-states.js";
 
 /*
  * #873 step 1: measure the launch hand-off before anything about it changes.
@@ -49,7 +49,6 @@ import { settle } from "./pocket-states.js";
  * what a shared machine could not give it.
  */
 
-const APP = process.env.FIDELITY_APP ?? "http://127.0.0.1:4173";
 
 /*
  * Where each pack's numbers are left for something other than a human to read
