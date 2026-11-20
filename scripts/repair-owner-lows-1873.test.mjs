@@ -316,6 +316,7 @@ trap __orbit_lock_swap DEBUG
         const result = runOwner(targetDir, { shims, state, env, capSeconds: 30 });
         expect(existsSync(flag), "the swap did not happen, so the test proves nothing").toBe(true);
         expect(result.hung, "repair blocked opening the FIFO").toBe(false);
+        expect(orbitLines(result).filter((line) => /timed out/iu.test(line)), "root blocked until a step limit stopped it").toEqual([]);
         expect(result.stdout).not.toContain(start.done);
         expect(orbitLines(result).some((line) => /the lock at .*can't be read/u.test(line)), `no lock refusal line:\n${result.stderr.slice(0, 1500)}`).toBe(true);
         expect(composeUpCalls(result)).toEqual([]);
@@ -353,6 +354,7 @@ trap __orbit_lock_swap DEBUG
       try {
         const result = runOwner(targetDir, { shims, state, capSeconds: 30 });
         expect(result.hung, "repair blocked opening the FIFO").toBe(false);
+        expect(orbitLines(result).filter((line) => /timed out/iu.test(line)), "root blocked until a step limit stopped it").toEqual([]);
         expect(result.stdout).not.toContain(start.done);
         expect(orbitLines(result).some((line) => /the lock at .*can't be read/u.test(line)), result.stderr.slice(0, 1500)).toBe(true);
       } finally {

@@ -145,6 +145,7 @@ describe("#1858 T4: root reads only a regular file, at most 1 MiB, in time", () 
     try {
       const result = runOwner(targetDir, { shims, state: { db: "running", app: "running" }, env: { ...LIMIT, PATH: `${statDir}:${shims.env.PATH}` } });
       expect(result.hung, "root blocked on the FIFO").toBe(false);
+      expect(orbitLines(result).filter((line) => /timed out/iu.test(line)), "root blocked until a step limit stopped it").toEqual([]);
       expect(result.stdout).not.toContain(MAIL_DONE);
       expect(orbitLines(result).some((line) => /not a regular file/iu.test(line)), `no line says 'not a regular file':\n${result.stderr.slice(0, 1500)}`).toBe(true);
       expect(treeSnapshot(targetDir).split("\n").filter((line) => !line.startsWith("./docker-compose.mail.yml ")).join("\n")).toBe(before);

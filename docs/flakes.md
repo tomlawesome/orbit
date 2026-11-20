@@ -529,6 +529,10 @@ timeout on this one case rather than a global raise.
 
 - 2026-11-20 · !1431 c13324bc · pipeline 4885 / fast (job 58706) · timed out at the 5 s default (5118 ms) in a 1507 s run on a loaded runner; the change touched only scripts/test-backup-restore.sh. Retried as job 58725, passed. First sighting.
 
+## scripts/repair-owner-writes-1872.test.mjs "#1872 V7: ... > rotate-credential: a stalled owner step ends as timed out within the limit plus grace, no lock held, nothing left"
+
+- 2026-11-20 · !1431 c13324bc · pipeline 4885 / fast (job 58706) · failed in the same loaded 1507 s run; the change touched only scripts/test-backup-restore.sh. Retried as job 58725, passed. First sighting.
+
 ## scripts/check-svelte-server-parse.test.mjs "the client output check (#1267) > passes every component in web/src today"
 
 - 2026-11-20 · !1433 80582f500 · pipeline 4912 / fast (job 58965) · the check was killed at its 30 s deadline without exiting on a loaded runner. Passed in the retry (job 59031). First sighting.
