@@ -443,7 +443,8 @@ export const SIGNED_IN = [
   { route: "/create", state: "reminders-sheet", reach: async (page) => {
     await go(page, "/create");
     await page.locator(".pc-remind").click();
-    await sheetUp(page);
+    // #1892 made the reminders picker a ChooserCard, not a sheet (#1894).
+    await page.locator("[data-chooser-card]").waitFor();
   } },
   { route: "/create", state: "filled", reach: async (page) => {
     await go(page, "/create");
