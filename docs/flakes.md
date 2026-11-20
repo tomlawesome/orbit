@@ -540,3 +540,19 @@ timeout on this one case rather than a global raise.
 ## scripts/repair-owner-writes-1872.test.mjs "#1872 V7: ... > rotate-credential: a stalled owner step ends as timed out within the limit plus grace, no lock held, nothing left"
 
 - 2026-11-20 · !1431 c13324bc · pipeline 4885 / fast (job 58706) · failed in the same loaded 1507 s run; the change touched only scripts/test-backup-restore.sh. Retried as job 58725, passed. First sighting.
+
+## scripts/check-svelte-server-parse.test.mjs "the client output check (#1267) > passes every component in web/src today"
+
+- 2026-11-20 · !1433 80582f500 · pipeline 4912 / fast (job 58965) · the check was killed at its 30 s deadline without exiting on a loaded runner. Passed in the retry (job 59031). First sighting.
+
+## scripts/repair-owner-limits-1858.test.mjs "#1858 T1, T2, T5: ... > the write step (smtp_owner_write, root reads its stdout and stderr): a child ..."
+
+- 2026-11-20 · !1433 80582f500 · pipeline 4912 / fast (job 58965) · "repair was still running after the test's own cap" after the step timed out at 2 s as designed. Passed in the retry (job 59031). First sighting.
+
+## scripts/repair-signal-1919.test.mjs "#1919: ... > TERM to the group, 20 times in a row (the race is repeated, bounded): the copy is gone every time"
+
+- 2026-11-20 · !1433 80582f500 · pipeline 4912 / fast (job 58965) · `Test timed out in 45000ms` on a loaded runner. Passed in the retry (job 59031). First sighting.
+
+## src/lib/backup-restore-cli.test.ts "runBackup > O2-R3: a SIGTERM while the adapter is dumping leaves the .orbit-backup.* scratch in place, and the next runBackup removes it"
+
+- 2026-11-20 · !1433 80582f500 · pipeline 4912 / fast retry (job 59031) · `Test timed out in 5000ms`. Passed in job 58965 on the same code. First sighting.
