@@ -57,6 +57,7 @@ test's own name, which does not move with the shard.
 ## tests/unit/auth-pending-login-session-callback.test.mjs "passes session creation as collectSignInApproval's own mint callback, not a separate call"
 
 - 2026-11-04 · batch/v037-1 a5d0141f · local `pnpm exec vitest run --coverage`, shared host at load 35-65 · timed out at the 5s default (6.5s); the file's first test pays for the cold, instrumented import. Failed again run alone with two other files, then passed run alone (5/5). First sighting.
+- 2026-11-20 · !1441 68d651e2f · pipeline 4980 / fast retry (job 59988) · timed out at 5 s, with "never calls createSession outside the callback" in the same file failing after it. Passed in jobs 59718 and 59854.
 
 ## tests/unit/portable-archive-download-route.test.mjs "answers 200 with the stream's bytes, Content-Length equal to sizeBytes, and the unchanged headers"
 
@@ -480,9 +481,11 @@ timeout on this one case rather than a global raise.
 - 2026-11-12 · chore/v039-batch-b-ci d92e92b6 (Dockerfile pin and JSON policy only, nowhere near the PDF sandbox) · pipeline 4032 / fast (job 49856) · "§1.5 line 16: a child still in flight after the test: expected 1 to be +0"; the retried job 49859 passed. First sighting.
 - 2026-11-18 · !1371 batch-a 5a2828af (the batch-a dev gate fix: an exceptions file and coverage floors, nowhere near the PDF sandbox) · pipeline 4550 / fast (job 54979) · the timing check: "expected 87.98 to be less than or equal to 86.68" (ms, the 2x-solo bound); the retried job 55050 passed. Second sighting.
 
-## github-await-handoff.sh, a flaky GitHub › counts a successful read as a reset (scripts/ci/github-await-handoff.test.mjs)
+## github-await-handoff.sh, a flaky GitHub › counts a successful read as a reset (scripts/ci/github-await-handoff.test.mjs) (#1940)
 
 - 2026-11-15 · local, chore/next-4 on the dev merge plus the #1846 change (docs and the guarantees test only) · full `npx vitest run`, load average about 30 · `Test timed out in 30000ms`; the file re-run twice passed 53/53. First sighting.
+- 2026-11-20 · !1441 68d651e2f · pipeline 4980 / fast retry (job 59854) · the script was killed on its deadline after "GitHub could not be read (1 of 3 in a row)". Passed in job 59718 on the same code. Second sighting.
+- 2026-11-20 · !1441 68d651e2f · pipeline 4980 / fast retry (job 59988) · killed on its deadline again. Passed in job 59718 on the same code. Third sighting.
 
 ## src/server/documents/pdf-structure-sandbox-poppler.test.ts "D5: a background draw holding its one slot does not delay a view draw (within 2x its solo time)"
 
@@ -566,3 +569,28 @@ timeout on this one case rather than a global raise.
 ## tests/unit/admin-alert-repeat-1810.test.ts "the alert footer says the rule for its kind (#1810 A-F8) > scanner_unavailable html / text: the scanner sentence, not the per-fault one"
 
 - 2026-11-20 · !1433 eb548d90a · pipeline 4944 / fast retry (job 59336) · the html case timed out at 5 s and the text case then saw the mail sender called twice, not once. The file passed 3 of 3 locally and in job 59391. First sighting.
+- 2026-11-20 · !1441 68d651e2f · pipeline 4980 / fast retry (job 59988) · the same pair: html timed out at 5 s, text then saw the sender called twice. Second sighting.
+
+## tests/unit/v19-tour-chapter-done.test.mjs "the chapter played for real > played on from chapter 8, closes the drawer chapter 8 opened and leaves home exactly as it found it"
+
+- 2026-11-20 · !1441 68d651e2f · pipeline 4980 / fast (job 59718) · took 5652 ms against the 5 s limit; locally 1.5 to 1.8 s, 3 of 3 passed. Passed in the retry (job 59854). First sighting.
+
+## scripts/repair-lock-rw-1890.test.mjs "#1890 L1: no open of the lock waits, read-only lock or not > a lock the user can only read (0444): swapped for a link to a regular file between the lstat and the open, the link is not followed"
+
+- 2026-11-20 · !1441 68d651e2f · pipeline 4980 / fast retry (job 59854) · "expected true to be false". Passed in job 59718 on the same code. First sighting.
+
+## tests/unit/about-page-load.test.mjs "the About page load reads the library list once per build (#1465) > does not read the library list again on a second visit"
+
+- 2026-11-20 · !1441 68d651e2f · pipeline 4980 / fast retry (job 59854) · `Test timed out in 5000ms`. Passed in job 59718 on the same code. First sighting.
+
+## tests/unit/about-prebuilt-libraries.test.mjs "the About page load reads the list built with the image (#1575) > returns exactly the prebuilt list, with no fetch and no grouping"
+
+- 2026-11-20 · !1441 68d651e2f · pipeline 4980 / fast retry (job 59854) · `Test timed out in 5000ms`. Passed in job 59718 on the same code. First sighting.
+
+## tests/unit/admin-alert-wording-1800.test.ts "the undo-failed alert wording (#1800) > html: carries the lede verbatim and nothing after it" and "html: carries the new Orbit did fact and not the old one"
+
+- 2026-11-20 · !1441 68d651e2f · pipeline 4980 / fast retry (job 59988) · timed out at 5 s. Passed in jobs 59718 and 59854 on the same code. First sighting.
+
+## tests/unit/admin-mailbox-fetch-now-route-1651.test.mjs "POST /api/admin/mailbox fetch_now > runs the engine for the caller's own id ..." and "passes the refusal already_running back as the outcome"
+
+- 2026-11-20 · !1441 68d651e2f · pipeline 4980 / fast retry (job 59988) · timed out at 5 s. Passed in jobs 59718 and 59854 on the same code. First sighting.
