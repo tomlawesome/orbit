@@ -35,7 +35,7 @@
    *   · "timezone", "currency": a filter over the household's pick-list
    *     (PickList.svelte, #1338; the `ask`'s value is the stored one).
    *
-   * A day, tile, cell or list row pressed (or Enter/Space on it) hands its
+   * A day, tile, cell or list row pressed (or Enter/Space on it; on a tile an arrow only moves the highlight, #1494) hands its
    * value to `onpick`: a `YYYY-MM-DD` date, a section id, a type, the
    * period's months as a string, or a zone or currency code. Esc, anywhere while the card stands, calls
    * `onclose` before anything else hears it, so an open chooser takes Esc
@@ -69,6 +69,13 @@
       : ask.key === "importance" ? "importance"
       : ask.key === "reminders" ? "days"
       : "tiles");
+
+  /** The tiles' highlight: arrows stage a check here, a press, Enter or Space
+      lands it through `onpick`, Esc drops it with the card (#1494). Starts from
+      the ask's value each time the card opens or its ask changes. */
+  let staged = $derived(ask.value);
+  /** @param {string} v */
+  const stage = (v) => { staged = v; };
 
   /** @type {HTMLDivElement | undefined} */
   let body = $state();
@@ -116,10 +123,10 @@
       {:else if kind === "days"}
         <DayChips days={ask.days ?? []} due={ask.due ?? null} {onpick} />
       {:else if kind === "importance"}
-        <ImportanceTiles value={ask.value} colour={ask.colour} {onpick} />
+        <ImportanceTiles value={staged} colour={ask.colour} onpick={stage} oncommit={onpick} />
         <p class="why">Shows as the planet's size when <b>planet size shows importance</b>. Under cost, the callout still says it.</p>
       {:else}
-        <Tiles choices={ask.choices} value={ask.value} label={ask.label} cols={2} {onpick} />
+        <Tiles choices={ask.choices} value={staged} label={ask.label} cols={2} onpick={stage} oncommit={onpick} />
       {/if}
     {/key}
   </div>
