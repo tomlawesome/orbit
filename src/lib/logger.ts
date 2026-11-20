@@ -88,6 +88,10 @@ export const operationalReasons = [
   "push_unconfigured",
   "push_unsubscribed",
   "push_unavailable",
+  // Log-only (#1929): a push endpoint whose hostname resolved to a blocked
+  // address. Never a lastError category; categorizeProviderError still
+  // returns push_unsubscribed for it.
+  "push_endpoint_blocked",
   "recipient_preferences_disabled",
   "household_pending_deletion",
   "worker_cycle_failed",
