@@ -305,27 +305,35 @@ async function homeWithRowOpenedThenScrolledOn(page) {
     await expect(row).toBeInViewport({ timeout: 500 });
   }).toPass({ timeout: 15_000 });
   await restingScrollY(page);
+  /* #1717: the farthest the page can scroll once the row is closed again. The
+     open row's drawer makes the page 273px taller at 1600x1000, so a page
+     resting below this when the star closes the row MUST move up by the
+     difference: the page got shorter, and no product can keep that. */
+  const closedFoot = await page.evaluate(() => document.documentElement.scrollHeight - window.innerHeight);
   await row.click();
   await expect(page.locator(`[id="${ITEM_ID}-view"]`)).toBeVisible({ timeout: SETTLE });
   await expect(page).toHaveURL(new RegExp(`/home\\?item=${ITEM_ID}$`));
   const openedAt = await restingScrollY(page);
 
-  /* on down, well past where the row was opened */
+  /* On down, well past where the row was opened, but no further than the
+     closed page's foot (#1717: on a loaded runner a late wheel above leaves the
+     row opened at 600, not 300, and two 400px wheels from there reached the
+     open page's foot, 1393; closing the row then put the page at 1120). */
+  const target = Math.min(openedAt + 800, closedFoot);
+  const step = (target - openedAt) / 2;
   await page.mouse.move((viewport?.width ?? 1280) / 2, (viewport?.height ?? 800) / 2);
-  await page.mouse.wheel(0, 400);
-  await page.mouse.wheel(0, 400);
+  await page.mouse.wheel(0, step);
+  await page.mouse.wheel(0, step);
   /* Rest only once the page has taken BOTH wheels. A wheel's scroll can land
      late on a loaded machine, so resting alone can report the position between
-     the two and the press then sees the page "move" on. The target is the two
-     wheels' worth, or the bottom of the page if that is nearer. */
-  await expect.poll(async () => {
-    return page.evaluate(({ from }) => {
-      const bottom = document.documentElement.scrollHeight - window.innerHeight;
-      return window.scrollY >= Math.min(from + 800, bottom) - 4;
-    }, { from: openedAt });
-  }, { timeout: 15_000, message: "the page did not take both wheels" }).toBe(true);
+     the two and the press then sees the page "move" on. */
+  await expect.poll(
+    () => page.evaluate(() => window.scrollY),
+    { timeout: 15_000, message: "the page did not take both wheels" },
+  ).toBeGreaterThanOrEqual(target - TOLERANCE);
   const restedAt = await restingScrollY(page);
   expect(restedAt - openedAt, "the page did not scroll on past where the row was opened (too short?)").toBeGreaterThan(200);
+  expect(restedAt, "the page rests below the closed page's foot, so closing the row must move it").toBeLessThanOrEqual(closedFoot);
   await expect(page.locator(`[id="${ITEM_ID}-view"]`)).toBeVisible();
   await expect(page).toHaveURL(new RegExp(`/home\\?item=${ITEM_ID}$`));
 
@@ -349,7 +357,7 @@ test("a row opened part-way down, then scrolled further, one press on the north 
    reader's own scroll and close the drawer just opened). Same setup as the test
    above. */
 for (const key of /** @type {const} */ (["Space", "Enter"])) {
-  test(`${key} on the focused north star, with a row opened part-way down and the page scrolled further, opens the drawer and it stays open, the page where it was`, { tag: ["@quarantine"] }, async ({ page }) => {
+  test(`${key} on the focused north star, with a row opened part-way down and the page scrolled further, opens the drawer and it stays open, the page where it was`, async ({ page }) => {
     const restedAt = await homeWithRowOpenedThenScrolledOn(page);
 
     await pressNorthStarOnce(page, restedAt, key);
