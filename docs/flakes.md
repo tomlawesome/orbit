@@ -20,11 +20,6 @@ test's own name, which does not move with the shard.
 
 - 2026-11-15 · !1325 dev 13eec37c · pipeline 4228 / fast (job 51590) · timed out at the 5s default on a loaded runner; retried as job 51647. First sighting.
 
-## src/cli/orbit.mail-sending-status.test.ts "source=imported, imported from the environment: one line, exit 0" and "source=ui after an import ...: imported-from-environment stays true"
-
-- 2026-11-15 · local, chore/next-4 on 9c7361cf plus the #1848 W-F1 change (About page apk links only) · full `npx vitest run` on the loaded shared host · the first took 5.4 s; the second got its one expected line printed twice. A re-run of the file passed. First sighting.
-- 2026-11-15 · local, chore/next-5 on 0397b513 plus the #1848 O-F1 change (repair.sh only) · full `npx vitest run` on the loaded shared host · both timed out at 5 s. The file alone passed 3 runs of 3. Second sighting.
-
 ## tests/integration/imap-attachment-processing.test.ts "records discard purge intent before an injected storage failure and retries safely"
 
 - 2026-11-15 · local, chore/next-4 at 33e1669d plus the #1848 A-F2 change (sender clock only) · all mail and imap integration files together on a loaded shared host · `Test timed out in 15000ms`. A re-run of the file passed 15/15. First sighting.

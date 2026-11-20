@@ -1,4 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { PROCESS_TEST_TIMEOUT_MS } from "../../scripts/process-budget.mjs";
+
+// Each test re-imports the whole CLI after vi.resetModules(); on a loaded
+// runner that import alone can pass the 5 s default, so these get the same
+// budget as the other CLI tests (docs/flakes.md, third sighting).
+vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 // `orbit mail-sending-status` (#1817), written from the issue's specification
 // alone, before the change. Run inside the app container by install.sh --update
