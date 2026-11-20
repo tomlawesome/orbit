@@ -1121,7 +1121,7 @@
            buttons already say the fields save alone, and a member's copy
            prints as plain values (the .member rules in household.css), which
            says read-only without a caption. -->
-      {#if identityProblem}<p class="problem">not saved — {identityProblem}</p>{/if}
+      <p class="problem" role="alert">{#if identityProblem}not saved — {identityProblem}{/if}</p>
     </div>
 
     <!-- ── sections: one list, replaced whole. OWNER-ONLY (2b) ─────────────
@@ -1186,12 +1186,10 @@
         <div class="savebar">
           <button class="btn" onclick={saveSections}>save</button>
         </div>
-        {#if saidSections}
-          <p class="said show">saved</p>
-        {/if}
+        <p class="said" class:show={saidSections} role="status">{#if saidSections}saved{/if}</p>
         <p class="moved" class:show={sectionSaid} role="status">{sectionSaid}</p>
-        {#if sectionsProblem}<p class="problem">not saved — {sectionsProblem}</p>{/if}
-        {#each Object.entries(colourProblems) as [id, text] (id)}<p class="problem">{text}</p>{/each}
+        <p class="problem" role="alert">{#if sectionsProblem}not saved — {sectionsProblem}{/if}</p>
+        <div role="alert">{#each Object.entries(colourProblems) as [id, text] (id)}<p class="problem">{text}</p>{/each}</div>
         <!-- round 2 (#481): one button under one list says the list saves
              whole, and the × that only exists on empty rows says "hidden,
              never removed". The open question — choosing a mark for a NEW
@@ -1239,10 +1237,8 @@
           {/if}
         {/each}
       </div>
-      {#if saidLeft}
-        <p class="said show">you’ve left {saidLeft} · it’s a label in your sky again, and you can ask to rejoin</p>
-      {/if}
-      {#if membersProblem}<p class="problem">{membersProblem}</p>{/if}
+      <p class="said" class:show={saidLeft} role="status">{#if saidLeft}you’ve left {saidLeft} · it’s a label in your sky again, and you can ask to rejoin{/if}</p>
+      <p class="problem" role="alert">{#if membersProblem}{membersProblem}{/if}</p>
 
       {#if v.canManage}
         <!-- §11 + 2g: the owner decides who comes in, and this is the ONLY
@@ -1264,9 +1260,7 @@
                 <button onclick={() => decide(request, "decline")}>decline</button>
               </div>
             {/each}
-            {#if saidJoin}
-              <p class="said show">{saidJoin} is in</p>
-            {/if}
+            <p class="said" class:show={saidJoin} role="status">{#if saidJoin}{saidJoin} is in{/if}</p>
           </div>
         {/if}
 
@@ -1314,7 +1308,7 @@
                 {armed === `inv:${invitation.id}` ? "tap again to withdraw" : "withdraw"}</button>
             </div>
           {/each}
-          {#if saidInvite}<p class="said show">{saidInvite}</p>{/if}
+          <p class="said" class:show={saidInvite} role="status">{#if saidInvite}{saidInvite}{/if}</p>
           <p class="note top">
             the link admits only someone signed in with <b>this exact address</b>
           </p>
@@ -1347,9 +1341,7 @@
           </div>
           <!-- kept: a consequence, said at the moment of the act -->
           <p class="note">you stay a member and keep everything you added</p>
-          {#if saidHandover}
-            <p class="said show">{saidHandover} owns {v.name} now · you’re a member</p>
-          {/if}
+          <p class="said" class:show={saidHandover} role="status">{#if saidHandover}{saidHandover} owns {v.name} now · you’re a member{/if}</p>
         </div>
       {:else}
         <!-- §11's "who sees what" (#481): a member sees who has been invited
@@ -1423,13 +1415,11 @@
             </div>
           </div>
         {/if}
-        {#if saidDoom}
-          <p class="said show">
-            requested · {v.name} stops now, and is gone for good in {daysWords(v.retention?.recoveryDays)} ·
-            an instance admin can turn this back until then
-          </p>
-        {/if}
-        {#if doomProblem}<p class="problem">not requested — {doomProblem}</p>{/if}
+        <p class="said" class:show={saidDoom} role="status">
+          {#if saidDoom}requested · {v.name} stops now, and is gone for good in {daysWords(v.retention?.recoveryDays)} ·
+          an instance admin can turn this back until then{/if}
+        </p>
+        <p class="problem" role="alert">{#if doomProblem}not requested — {doomProblem}{/if}</p>
       </div>
     {/if}
 

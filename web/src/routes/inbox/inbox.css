@@ -91,10 +91,13 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .inbox-page .receipt .actions button.yes{border-color:var(--accent);color:var(--accent-text)}
 /* #1398: each decision is one line, like Dismiss, whatever its label. */
 .inbox-page .receipt .actions button{white-space:nowrap}
+.inbox-page :is(.receipt .actions,.failed) button[aria-disabled="true"]{opacity:.5;cursor:default}
 .inbox-page .receipt .actions a{font:0.6875rem var(--mono);color:var(--ink-mid);text-decoration:none;margin-left:auto}
 .inbox-page .receipt .actions a:hover{color:var(--accent-text)}
 .inbox-page .twotap{font:0.65625rem var(--mono);color:var(--ink-quiet)}
 .inbox-page .mail-problem{margin-top:10px;font:0.6875rem var(--mono);color:var(--warm-text)}
+/* a live region stays in the page, empty: no gap until it speaks */
+.inbox-page .mail-problem:empty{margin:0}
 
 /* still reading: the only honest thing to show is that we are reading */
 .inbox-page .reading{display:flex;align-items:center;gap:13px;border:1px dashed var(--line-soft);

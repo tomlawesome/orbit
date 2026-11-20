@@ -4,6 +4,7 @@ import { gotoCreate, tabTo } from "../../../tests/e2e/support/keyboard";
 import { focusHeld, liveRegionFor } from "../../../tests/e2e/support/signed-in";
 import { SETTLE } from "../../../tests/e2e/support/settle";
 import { APP, onPhone } from "./a11y-support.js";
+import { guardedRoute } from "./workspace-writes.js";
 import { INTERNAL_ERROR, SUGGESTION, rememberMailDecisions } from "./mail-support.js";
 import { pickImportance } from "./importance-support.js";
 
@@ -38,8 +39,8 @@ import { pickImportance } from "./importance-support.js";
  *   focus      when the failure is shown, focus has not fallen back to <body>
  *              -- where a screen reader loses its place and a keyboard reader
  *              has to find their way back.
- * Where the product falls short, the test is `test.fail` with the defect named,
- * never a loosened check.
+ * Where the product falls short, mark the test `test.fail` with the defect
+ * named, never a loosened check.
  *
  * Each journey starts from the fixture app's own state: /create, the fixture
  * inbox's approvable "Home insurance renewal" receipt, and Harlow Home's
@@ -55,8 +56,6 @@ import { pickImportance } from "./importance-support.js";
  */
 test.use({ baseURL: APP, serviceWorkers: "block" });
 
-const isFirefox = () => test.info().project.use.browserName === "firefox";
-const isDeskWebkit = () => test.info().project.name === "rig-webkit-desktop";
 const isPocket = () => onPhone(test.info());
 
 /** Focus on `selector` by keyboard: already there, or Tab onward to it.
@@ -75,38 +74,10 @@ const shownText = (page, words) => page.getByText(words).filter({ visible: true 
  *   name: string,
  *   words: RegExp,
  *   fire: (page: Page) => Promise<() => Promise<void>>,
- *   announceDefect?: () => string | undefined,
- *   focusDefect?: () => string | undefined,
- *   focusFixme?: () => string | undefined,
  * }} Journey
  * `words` is what the failure says, as the reader sees it; `fire` drives up to
- * the failing act, fires it, and returns the keyboard retry. `announceDefect`
- * and `focusDefect` name a defect the check expects to fail on; `focusFixme` is
- * a reason the focus check cannot report either way on this project (#1233).
+ * the failing act, fires it, and returns the keyboard retry.
  */
-
-/* The defect common to three journeys: the button that was pressed disables
-   itself (or is swapped for a disabled copy) while the request is out, and a
-   focused control that becomes disabled loses focus to <body>. When the
-   failure comes back the button is live again, but focus is not on it. */
-const FOCUS_LOST_TO_DISABLED_BUTTON = (/** @type {string} */ where) =>
-  `DEFECT (#1178): ${where} disables the pressed button while the request is out, so focus falls back to <body> `
-  + "and the failure leaves the reader nowhere -- keep focus on the control (aria-disabled, not disabled) or move it to the message";
-
-/* #1183: on Firefox that defect is a race, not a certainty. Firefox sometimes
-   keeps focus on the pressed button while it is disabled and sometimes drops it
-   to <body>, run to run on the same code, so test.fail would pass or fail by
-   chance: every check that expects the defect is fixme on Firefox until #1178's
-   fix makes it deterministic; Chromium still proves the defect every run. */
-const FOCUS_DEFECT_RACES_ON_FIREFOX =
-  "DEFECT (#1178), timing-dependent on Firefox: the pressed button, disabled while its request is out, sometimes "
-  + "keeps focus and sometimes drops it to <body>, so this check cannot report either way until the button keeps focus";
-
-/* #1219: the same race on desktop WebKit (a timing-dependent expected failure
-   is fixme, never fail: owner, 2026-10-05, #1196). */
-const FOCUS_DEFECT_RACES_ON_DESKTOP_WEBKIT =
-  "DEFECT (#1178), timing-dependent on desktop Safari (#1219): the pressed button, disabled while its request is out, "
-  + "sometimes keeps focus and sometimes drops it to <body>, so this check cannot report either way until the button keeps focus";
 
 /* ── online-workspace policy ───────────────────────────────────────────── */
 
@@ -226,14 +197,6 @@ const drawerApproval = {
       await expect(page.locator(act)).toHaveCount(0, { timeout: SETTLE });
     };
   },
-  /* #1233: desktop WebKit kept focus on the amend card's button, as it keeps it
-     on the create card (#1192) -- and the create card's check on desktop WebKit
-     then raced (#1219). One observation is not a certainty either way, so on
-     desktop WebKit this check is fixme; the phone and the other engines keep
-     their marks. The phone's row puts focus on its own face when the act
-     returns (Row.svelte run), so focus is never dropped there. */
-  focusDefect: () => (isPocket() ? undefined : FOCUS_LOST_TO_DISABLED_BUTTON("the desk suggestion drawer's Add to orbit")),
-  focusFixme: () => (isDeskWebkit() ? FOCUS_DEFECT_RACES_ON_DESKTOP_WEBKIT : undefined),
 };
 
 /** @type {Journey} */
@@ -260,20 +223,6 @@ const inboxApproval = {
       await expect(page.locator(act)).toHaveCount(0, { timeout: SETTLE });
     };
   },
-  announceDefect: () =>
-    isPocket()
-      ? undefined
-      : "DEFECT (#1178): the desk /inbox draws an approve or dismiss failure as a plain <div class=\"mail-problem\"> "
-        + "(web/src/routes/inbox/+page.svelte) with no role=\"alert\" or live region, so a screen reader is never told",
-  /* Desktop Safari keeps focus on the disabled button here, as every WebKit
-     does on /create; the pocket keeps its mark. A traced local desktop WebKit
-     run (#1235) dropped it to <body> -- so on desktop WebKit this one is the
-     same race the item view has, not a certainty either way: fixme there. */
-  focusDefect: () =>
-    isDeskWebkit()
-      ? undefined
-      : FOCUS_LOST_TO_DISABLED_BUTTON(isPocket() ? "the pocket inbox's ReviewCard" : "the desk /inbox row's Add to orbit"),
-  focusFixme: () => (isDeskWebkit() ? FOCUS_DEFECT_RACES_ON_DESKTOP_WEBKIT : undefined),
 };
 
 /* ── signed-in lifecycle ───────────────────────────────────────────────── */
@@ -332,44 +281,45 @@ const householdDeletion = {
       await expect(shownText(page, /requested · .*gone for good in 30 days/)).toBeVisible({ timeout: SETTLE });
     };
   },
-  announceDefect: () =>
-    isPocket()
-      ? undefined
-      : "DEFECT (#1178): the desk household page draws a failed deletion request as a plain <p class=\"problem\"> "
-        + "(web/src/routes/household/[id]/+page.svelte, the danger line; its identity, sections and members "
-        + "problems likewise) with no role=\"alert\", and the success line has no role=\"status\" either",
 };
+
+/**
+ * How a failure message is announced: "focus" when focus is ON the message,
+ * otherwise what `liveRegionFor` finds (a live region around it, or "none" /
+ * "absent"). A focused element is read out by a screen reader (WAI-ARIA APG,
+ * "Moving focus to an error", WCAG G83 / ARIA19 practice), so a message that
+ * has focus needs no live-region ancestor; one focus does not move to still
+ * does. The phone ReviewCard moves focus to its message; the desk's lines do
+ * not, and stay in an always-present alert.
+ * @param {Page} page @param {RegExp} words
+ */
+async function announcedAs(page, words) {
+  const focused = await page.evaluate(({ source, flags }) => {
+    const el = document.activeElement;
+    if (!el || el === document.body || el === document.documentElement) return false;
+    const rect = el.getBoundingClientRect();
+    const shown = (rect.width > 0 || rect.height > 0) && getComputedStyle(el).visibility !== "hidden";
+    return shown && new RegExp(source, flags).test(el.textContent ?? "");
+  }, { source: words.source, flags: words.flags });
+  return focused ? "focus" : liveRegionFor(page, words);
+}
 
 const JOURNEYS = [createOffline, drawerApproval, inboxApproval, householdDeletion];
 
 for (const journey of JOURNEYS) {
   test(`${journey.name} is announced, and the act can be repeated by keyboard`, async ({ page }) => {
-    const defect = journey.announceDefect?.();
     test.setTimeout(60_000);
     const retry = await journey.fire(page);
     /* End states, as the focus check below (#1313, #1447): the failure is
-       waited for, and so is the live region that carries it. Both run for
-       every journey, known defect or not (T-F5, #1671): a missing failure
-       message or a retry that does not land fails the test. Only the
-       live-region line is the known failing one. */
+       waited for, and so is the live region that carries it. */
     await expect(shownText(page, journey.words), `${journey.name}: the failure is shown`).toBeVisible({ timeout: SETTLE });
-    const inLiveRegion = await expect
-      .poll(() => liveRegionFor(page, journey.words), { message: `${journey.name}: the failure is in a live region`, timeout: defect ? 3_000 : SETTLE })
-      .not.toMatch(/^(none|absent)$/)
-      .then(() => true, (error) => {
-        if (!defect) throw error;
-        return false;
-      });
+    await expect
+      .poll(() => announcedAs(page, journey.words), { message: `${journey.name}: the failure is announced (focus on it, or in a live region)`, timeout: SETTLE })
+      .not.toMatch(/^(none|absent)$/);
     await retry();
-    /* A known defect is the one failing check, named: when the product is fixed this fails, to take the mark off. */
-    if (defect) expect(inLiveRegion, `${journey.name}: ${defect} -- the live region now carries it; remove announceDefect`).toBe(false);
   });
 
   test(`${journey.name} leaves focus where the reader was`, async ({ page }) => {
-    const defect = journey.focusDefect?.();
-    test.fixme(Boolean(journey.focusFixme?.()), journey.focusFixme?.());
-    test.fixme(Boolean(defect) && isFirefox(), FOCUS_DEFECT_RACES_ON_FIREFOX);
-    test.fail(Boolean(defect), defect);
     /* each focusHeld read now waits for a paint, seconds apart on a loaded
        WebKit (#1705), so the poll and the test get room for several reads */
     test.setTimeout(120_000);
@@ -384,6 +334,181 @@ for (const journey of JOURNEYS) {
       .not.toMatch(/^(body|moving)$/);
   });
 }
+
+/* #1182: while a decision is out, every decision control does nothing. Each
+   test holds the approval request open (`page.route` waiting on a promise),
+   presses again every way the reader can, and counts the decision requests
+   that left the page: exactly one. The buttons are aria-disabled, never
+   `disabled`, so a focused one keeps focus. */
+test.describe("a decision in flight ignores every press (#1182)", () => {
+  /** Holds the one approval open until `release()`; counts decision requests as
+   *  the page sends them (an approval, or a dismissal's DELETE).
+   * @param {Page} page */
+  async function holdApproval(page) {
+    /** @type {string[]} */
+    const sent = [];
+    /** Reads of the inbox list since the approval was let go: one, for the
+     *  approval that landed. (The approval's own request is shared by every
+     *  press while it is out, workspace.js approvalsInFlight, so a second press
+     *  that got through a missing guard shows here, as a second re-read.)
+     *  @type {string[]} */
+    const rereads = [];
+    let released = false;
+    page.on("request", (request) => {
+      const { pathname } = new URL(request.url());
+      if (released && request.method() === "GET" && pathname.endsWith("/api/imap-inbox")) rereads.push(pathname);
+      if (request.method() === "POST" && pathname.endsWith("/api/reviewed-intake/approve")) sent.push("approve");
+      if (request.method() === "DELETE" && pathname.includes("/api/imap-inbox/")) sent.push(`dismiss ${pathname.split("/").pop()}`);
+    });
+    await rememberMailDecisions(page);
+    /** @type {() => void} */
+    let release = () => {};
+    const gate = new Promise((resolve) => { release = () => resolve(undefined); });
+    await page.route("**/api/reviewed-intake/approve", guardedRoute(async (route) => {
+      await gate;
+      await route.fallback();
+    }));
+    return { sent, rereads, release: () => { released = true; release(); } };
+  }
+
+  /* A request that a press wrongly starts leaves after the page's own reads
+     (assign, review: a few round trips on the fixture server); this is how
+     long "nothing was sent" is watched for. */
+  const NOTHING_FOLLOWS = 1_000;
+
+  /** A forced press, which Playwright otherwise refuses on an aria-disabled
+   *  button. If the press itself removes the control (a guard that is gone and
+   *  a decision that landed), that is for the checks below to report, not a
+   *  wait to time out on.
+   * @param {import("@playwright/test").Locator} control */
+  const press = (control) => control.click({ force: true, timeout: 3_000 }).catch(() => undefined);
+
+  /** @param {import("@playwright/test").Locator} buttons @param {string} message */
+  async function allHeld(buttons, message) {
+    const count = await buttons.count();
+    expect(count, `${message}: there are buttons to check`).toBeGreaterThan(0);
+    for (let i = 0; i < count; i += 1) {
+      await expect(buttons.nth(i), `${message} (#${i})`).toHaveAttribute("aria-disabled", "true", { timeout: SETTLE });
+    }
+  }
+
+  test("desk /inbox: a press, an Enter, or another receipt's buttons send nothing while an approval is out", async ({ page }) => {
+    test.skip(isPocket(), "the desk's inbox");
+    test.setTimeout(60_000);
+    const { sent, release } = await holdApproval(page);
+    try {
+      await page.goto("/inbox");
+      const yes = page.locator(".receipt .actions button.yes");
+      const dismiss = page.locator(".receipt .actions button:not(.yes)");
+      const remove = page.locator(".failed button");
+      await expect(yes).toBeVisible({ timeout: SETTLE });
+      await expect(remove, "the failed message that can be removed is the other receipt").toHaveCount(1);
+      /* Enter arms, Enter fires: one approval is out. */
+      await yes.focus();
+      await page.keyboard.press("Enter");
+      await page.keyboard.press("Enter");
+      await expect.poll(() => sent.length, { timeout: SETTLE }).toBe(1);
+      await allHeld(page.locator(".receipt .actions button, .failed button"), "inbox: every receipt's decision buttons are held while one is out");
+
+      /* again, by click (twice, as a two-tap act asks) and by Enter */
+      await press(yes);
+      await press(yes);
+      await yes.focus();
+      await page.keyboard.press("Enter");
+      await page.keyboard.press("Enter");
+      /* a different receipt's buttons */
+      await press(dismiss);
+      await press(dismiss);
+      await press(remove);
+      await press(remove);
+      await page.keyboard.press("Enter");
+            await page.waitForTimeout(NOTHING_FOLLOWS);
+      expect.soft(sent, "exactly one decision request was sent").toEqual(["approve"]);
+      await expect(yes).toHaveAttribute("aria-disabled", "true");
+    } finally {
+      release();
+    }
+    /* the one approval lands once it is let go */
+    await expect(page.locator(".receipt .actions button.yes")).toHaveCount(0, { timeout: SETTLE });
+    expect(sent).toEqual(["approve"]);
+  });
+
+  test("home drawer: approve, dismiss and review & amend do nothing while an approval is out", async ({ page }) => {
+    test.skip(isPocket(), "the desk's drawer");
+    test.setTimeout(60_000);
+    const { sent, rereads, release } = await holdApproval(page);
+    try {
+      await page.goto(`/home?item=${SUGGESTION.id}`);
+      const view = page.locator(`[id="${SUGGESTION.id}-view"]`);
+      const yes = view.locator(".actions button.yes");
+      const dismiss = view.locator(".actions button:not(.yes)");
+      const amend = view.locator(".ivamend");
+      await expect(yes).toBeEnabled({ timeout: SETTLE });
+      await yes.focus();
+      await page.keyboard.press("Enter");
+      await page.keyboard.press("Enter");
+      await expect.poll(() => sent.length, { timeout: SETTLE }).toBe(1);
+      await allHeld(view.locator(".actions button, .ivamend"), "drawer: approve, dismiss and review & amend are held");
+
+      await press(yes);
+      await press(yes);
+      await yes.focus();
+      await page.keyboard.press("Enter");
+      await page.keyboard.press("Enter");
+      await press(dismiss);
+      await press(dismiss);
+      await press(amend);
+      await amend.focus({ timeout: 3_000 }).catch(() => undefined);
+      await page.keyboard.press("Enter");
+      await page.waitForTimeout(NOTHING_FOLLOWS);
+      expect.soft(sent, "exactly one decision request was sent").toEqual(["approve"]);
+      await expect.soft(page.getByRole("group", { name: /^Amending/ }), "review & amend did not open").toHaveCount(0);
+      await expect(view.locator(".actions button.yes")).toHaveAttribute("aria-disabled", "true");
+    } finally {
+      release();
+    }
+    await expect(page.locator(`[id="${SUGGESTION.id}-view"] .actions button.yes`)).toHaveCount(0, { timeout: SETTLE });
+    expect(sent).toEqual(["approve"]);
+    await page.waitForTimeout(NOTHING_FOLLOWS);
+    expect(rereads, "the approval that landed was followed by one re-read of the inbox").toHaveLength(1);
+  });
+
+  test("phone /inbox: the review card's buttons and review & amend do nothing while an approval is out", async ({ page }) => {
+    test.skip(!isPocket(), "the phone's review card");
+    test.setTimeout(60_000);
+    const { sent, release } = await holdApproval(page);
+    try {
+      await page.goto("/inbox");
+      const card = page.locator(".pki-card").filter({ visible: true }).first();
+      const yes = card.locator(".rv-yes");
+      const amend = card.locator(".rv-amend");
+      await expect(yes).toBeVisible({ timeout: SETTLE });
+      /* the pill arms on the first tap, fires on the second */
+      await press(yes);
+      await press(yes);
+      await expect.poll(() => sent.length, { timeout: SETTLE }).toBe(1);
+      /* while it is out the pills are held (disabled) and review & amend is aria-disabled */
+      await expect(card.locator(".rv-acts button")).toHaveCount(2);
+      for (const pill of await card.locator(".rv-acts button").all()) await expect(pill).toBeDisabled();
+      await expect(amend).toHaveAttribute("aria-disabled", "true", { timeout: SETTLE });
+
+      for (const pill of await card.locator(".rv-acts button").all()) {
+        await press(pill);
+        await press(pill);
+      }
+      await press(amend);
+      await amend.focus({ timeout: 3_000 }).catch(() => undefined);
+      await page.keyboard.press("Enter");
+      await page.waitForTimeout(NOTHING_FOLLOWS);
+      expect.soft(sent, "exactly one decision request was sent").toEqual(["approve"]);
+      await expect.soft(page.getByRole("dialog"), "review & amend did not open").toHaveCount(0);
+    } finally {
+      release();
+    }
+    await expect(page.locator(".pki-card .rv-yes")).toHaveCount(0, { timeout: SETTLE });
+    expect(sent).toEqual(["approve"]);
+  });
+});
 
 /* #1705: proof that focusHeld can fail. It must not return before a painted
    frame has run, or a focus lost inside a requestAnimationFrame callback is
