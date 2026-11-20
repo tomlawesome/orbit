@@ -1076,10 +1076,10 @@ set -Eeuo pipefail
 # The private recovery directory's path, the staging directory's path, and
 # every path this script touches during execution are never printed, on
 # STDOUT, in any line, under any mode — the enum-only stdout discipline that
-# governs `--check`/`--plan` holds identically under `--execute`. The one
-# deliberate exception is the dangerous batch's own checkpoint bundle path,
-# which is printed as human guidance on STDERR — see "EXECUTE MODE
-# (--execute --dangerous)" below.
+# governs `--check`/`--plan` holds identically under `--execute`. Human
+# guidance on STDERR does name paths: the dangerous batch's checkpoint
+# bundle path (see "EXECUTE MODE (--execute --dangerous)" below), and a
+# recovery folder whose removal failed (#1915 O-S1), among others.
 
 # ============================================================================
 # EXECUTE MODE (--execute --dangerous) — issue #261 SLICE 5, STAGE TWO
@@ -1629,8 +1629,8 @@ cd "$repo_dir"
 #   - removes this run's own private recovery directory if one was opened,
 #     so an interrupted run never leaves an orphaned mode-700 copy of live
 #     secrets behind forever (the same removal cleanup_recovery_dir already
-#     performs at the end of every normal run); its path is still never
-#     printed, preserving the "Privacy" contract above;
+#     performs at the end of every normal run); its path is never printed
+#     on stdout ("Privacy" above), only on stderr if the removal fails;
 #   - if rotate-database-credential's steps were in flight, prints the same
 #     step-failure recovery guidance (checkpoint bundle location, and the
 #     staged new-credential path once step 2 has run) the synchronous
@@ -7137,8 +7137,9 @@ execute_dangerous_batch() {
 
   if [[ "${#dangerous_entries[@]}" -eq 0 ]]; then
     printf 'dangerous result=empty done=0 failed=0 reason=none\n'
-    # #1915 O-F8/O-F10: nothing to confirm, so clear as the safe batch would.
-    remove_leftover_discards
+    # #1915 O-F8/O-F10: nothing to confirm here, so clear as the safe batch
+    # would, unless the operator declined that batch (guarantees 33 and 56).
+    [[ "$safe_batch_exit_code" == 1 ]] || remove_leftover_discards
     return 0
   fi
 
@@ -7371,10 +7372,13 @@ run_safe_batch() {
 # ADR-0014 amendment 2026-11-15). Called once per --execute run, after that
 # run's own full re-diagnosis; --check and --plan never call it. $1 is 1 only
 # when that re-diagnosis reported `diagnosis result=healthy` (no credential
-# finding, services ready) and no action in this run failed — "Orbit
-# started" is never enough. $2 (optional) names why the run stopped early:
-# `version-unsupported` gives a next step that names the version problem,
-# since re-running --execute would refuse the same way.
+# finding, services ready), it could check Docker (docker_available, #1874
+# O-S2), and no action in this run failed — "Orbit started" is never
+# enough. $2 (optional) names why the checkpoint is kept:
+# `version-unsupported` (the run stopped early) gives a next step that names
+# the version problem, since re-running --execute would refuse the same way;
+# `docker-unchecked` (healthy, but Docker could not be checked) says so and
+# gives the Docker next step.
 #
 # Only $run_checkpoint_dirs is considered: the `.orbit-repair-checkpoint.*`
 # entries that existed when this run started (snapshot_run_checkpoints) plus

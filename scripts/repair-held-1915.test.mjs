@@ -45,6 +45,18 @@ describe("#1915 O-F8 / O-F10: --dangerous with nothing to do still clears leftov
     expect(result.stderr).toContain("which an earlier repair run left part removed");
   });
 
+  it("--safe-only --dangerous, the operator declines the safe batch and the dangerous set is empty: the discard is kept", () => {
+    const targetDir = makeFixture();
+    // A safe action is on the table, so the confirmation is really asked.
+    chmodSync(join(targetDir, ".orbit-secrets", "postgres-password"), 0o644);
+    leftoverDiscard(targetDir);
+    const result = runOwner(targetDir, { shims: privShims(targetDir, { root: false }), state: { ...RUNNING }, args: ["--execute", "--safe-only", "--dangerous"], input: "\n", capSeconds: 60 });
+    expect(result.stdout, result.stderr).toContain("execution result=declined");
+    expect(result.stdout, result.stderr).toContain("dangerous result=empty");
+    expect(names(targetDir, ".orbit-repair-discard."), "a declined run removed the leftover discard folder").toEqual([".orbit-repair-discard.abc123"]);
+    expect(result.stderr).not.toContain("which an earlier repair run left part removed");
+  });
+
   it("the same run without --dangerous removes it (control)", () => {
     const targetDir = makeFixture();
     leftoverDiscard(targetDir);
