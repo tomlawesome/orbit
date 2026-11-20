@@ -11,8 +11,6 @@ test's own name, which does not move with the shard.
 
 - 2026-11-15 · local, chore/next-4 on 5b3cdc20 plus the #1848 D-F8 change (sidecar-freshness-issue.sh only) · load average 47-52 · 54 tests in 15 files hit their deadlines (`runRepair`/`runInstall` child killed, `Test timed out`, one 54 ms > 50 ms timer check): scripts/install.{readiness,renamed-folder,rollback,update-profile,update-retire-smtp,interrupts-journal}, scripts/repair-{preconditions-1804,restore-guard,retire-smtp-1817,start-services}, scripts/ci/{import-door,upgrade-versions}, scripts/gitlab-ci-lanes, scripts/web-build-stamp, src/server/portable-archive-container. The 15 files re-run with 4 workers passed 740/740. First sighting.
 - 2026-11-15 · local, chore/next-4 on 26da27ce plus the #1848 SEC-D-S4 change (github-await-handoff.sh only) · full `npx vitest run`, load average about 40 · 9 tests in 6 files timed out (check-svelte-server-parse child deadline, `Hook timed out`, `Test timed out`): scripts/check-svelte-server-parse, scripts/web-build-stamp, tests/unit/administration-{failed-card,mail-settings}-screens, tests/unit/v19-mail-sender-check, tests/unit/v19-tour-chapter-the-item. Re-run with 4 workers: 178/178. Second sighting.
-- 2026-11-20 · !1431 c13324bc · pipeline 4885 / fast (job 58706) · full 907-file fast suite took 1507 s on gitlab-runners-01 (907 s on !1428 job 58647 the same day); two unrelated tests timed out at 5 s: tests/unit/v19-mail-sender-rows-1650 (#1650 desk sign-in rows) and scripts/repair-owner-writes-1872 (rotate-credential stalled step). Retried as job 58725 (1239 s), passed. Third sighting.
-- 2026-11-20 · !1431 59fea886 · pipeline 4891 / fast (job 58764) · 1343 s; src/lib/backup-restore-cli.test.ts (#1316 recent stage database) timed out. Retry job 58816 · 1491 s; scripts/repair-owner-writes-1875 (owner rename stall) and src/lib/auth/http.test.ts (#1405 missing key 503) failed. Retry job 58914 passed. The slowdown was spread across subprocess-heavy files (median 1.2-1.4x per file against job 58647); the change touched only scripts/test-backup-restore.sh, which no fast test runs. Unrelated !1433 failed the same way (jobs 58758, 58884). Past the threshold: the agent-infra issue is with the owner.
 
 ## tests/integration/portable-archive-review-lease.test.ts "ruling 1: the heartbeat runs while one long document is being staged ... lease_renewed_at moves forward ..." (and the two ruling 9 tests after it, as a knock-on)
 
@@ -514,3 +512,11 @@ timeout on this one case rather than a global raise.
 ## scripts/repair-owner-lows-1873.test.mjs "#1873 X5: ... > restore-compose-file: an owner child that ignores TERM ends the action as timed out within the limit plus grace" (:461, #1928)
 
 - 2026-11-20 · !1428 at aee70e43 (batch-b 09ee759c merged in; !1428 touches no repair file) · pipeline 4872 / fast (job 58535) · `expected 20598 to be less than 20000` at :461 (BUDGET_MS). The file passed 38/38 locally on the same tree; retried as job 58620. First sighting. Load only, no code fault (#1928): the case normally takes 14.9-15.4 s, about 5 s under the budget; the budget is left for the owner.
+
+## tests/unit/v19-mail-sender-rows-1650.test.mjs "#1650: the desk lists the extra addresses > keeps the sign-in rows as they were, and draws no extra row when there is only the sign-in address"
+
+- 2026-11-20 · !1431 c13324bc · pipeline 4885 / fast (job 58706) · timed out at the 5 s default (5118 ms) in a 1507 s run on a loaded runner; the change touched only scripts/test-backup-restore.sh. Retried as job 58725, passed. First sighting.
+
+## scripts/repair-owner-writes-1872.test.mjs "#1872 V7: ... > rotate-credential: a stalled owner step ends as timed out within the limit plus grace, no lock held, nothing left"
+
+- 2026-11-20 · !1431 c13324bc · pipeline 4885 / fast (job 58706) · failed in the same loaded 1507 s run; the change touched only scripts/test-backup-restore.sh. Retried as job 58725, passed. First sighting.
