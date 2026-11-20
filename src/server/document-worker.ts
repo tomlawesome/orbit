@@ -18,6 +18,7 @@ import { workerState } from "@/server/document-maintenance/worker-state";
 import { claimScannerRecoveryJobs, failScannerRecoveryJob, processScannerRecoveryJob } from "@/server/document-maintenance/scan-recovery";
 import { expireScannerRecoveryStages, purgePendingScannerStages } from "@/server/document-maintenance/staging-purge";
 import { purgeExpiredRejectedDocuments } from "@/server/document-maintenance/rejected-purge";
+import { settleStuckMailTransfers } from "@/server/mail-in/staged-transfer";
 import { runScannerHealthCheck, SCANNER_HEALTH_CHECK_INTERVAL_MS } from "@/server/document-maintenance/scanner-health";
 import { getDocumentConfig } from "@/server/documents/config";
 import { pingClamAv } from "@/server/documents/scanner";
@@ -66,6 +67,8 @@ export async function runDocumentMaintenanceCycle(): Promise<void> {
   const scanner = await scannerReachableNow();
   // #1419: nothing held is rejected for age while the scanner cannot be reached.
   await expireScannerRecoveryStages({ scannerReachable: scanner.reachable });
+  /* #1811 item 1: mail transfers left stuck before #1398, a batch a cycle. */
+  await settleStuckMailTransfers();
   await scannerHealthCheckIfDue(scanner);
   await purgePendingScannerStages();
   /* #1786: refused uploads go after their retention, once their staged bytes have. */
