@@ -1121,7 +1121,7 @@
            buttons already say the fields save alone, and a member's copy
            prints as plain values (the .member rules in household.css), which
            says read-only without a caption. -->
-      {#if identityProblem}<p class="problem">not saved — {identityProblem}</p>{/if}
+      {#if identityProblem}<p class="problem" role="alert">not saved — {identityProblem}</p>{/if}
     </div>
 
     <!-- ── sections: one list, replaced whole. OWNER-ONLY (2b) ─────────────
@@ -1187,11 +1187,11 @@
           <button class="btn" onclick={saveSections}>save</button>
         </div>
         {#if saidSections}
-          <p class="said show">saved</p>
+          <p class="said show" role="status">saved</p>
         {/if}
         <p class="moved" class:show={sectionSaid} role="status">{sectionSaid}</p>
-        {#if sectionsProblem}<p class="problem">not saved — {sectionsProblem}</p>{/if}
-        {#each Object.entries(colourProblems) as [id, text] (id)}<p class="problem">{text}</p>{/each}
+        {#if sectionsProblem}<p class="problem" role="alert">not saved — {sectionsProblem}</p>{/if}
+        {#each Object.entries(colourProblems) as [id, text] (id)}<p class="problem" role="alert">{text}</p>{/each}
         <!-- round 2 (#481): one button under one list says the list saves
              whole, and the × that only exists on empty rows says "hidden,
              never removed". The open question — choosing a mark for a NEW
@@ -1240,9 +1240,9 @@
         {/each}
       </div>
       {#if saidLeft}
-        <p class="said show">you’ve left {saidLeft} · it’s a label in your sky again, and you can ask to rejoin</p>
+        <p class="said show" role="status">you’ve left {saidLeft} · it’s a label in your sky again, and you can ask to rejoin</p>
       {/if}
-      {#if membersProblem}<p class="problem">{membersProblem}</p>{/if}
+      {#if membersProblem}<p class="problem" role="alert">{membersProblem}</p>{/if}
 
       {#if v.canManage}
         <!-- §11 + 2g: the owner decides who comes in, and this is the ONLY
@@ -1265,7 +1265,7 @@
               </div>
             {/each}
             {#if saidJoin}
-              <p class="said show">{saidJoin} is in</p>
+              <p class="said show" role="status">{saidJoin} is in</p>
             {/if}
           </div>
         {/if}
@@ -1314,7 +1314,7 @@
                 {armed === `inv:${invitation.id}` ? "tap again to withdraw" : "withdraw"}</button>
             </div>
           {/each}
-          {#if saidInvite}<p class="said show">{saidInvite}</p>{/if}
+          {#if saidInvite}<p class="said show" role="status">{saidInvite}</p>{/if}
           <p class="note top">
             the link admits only someone signed in with <b>this exact address</b>
           </p>
@@ -1348,7 +1348,7 @@
           <!-- kept: a consequence, said at the moment of the act -->
           <p class="note">you stay a member and keep everything you added</p>
           {#if saidHandover}
-            <p class="said show">{saidHandover} owns {v.name} now · you’re a member</p>
+            <p class="said show" role="status">{saidHandover} owns {v.name} now · you’re a member</p>
           {/if}
         </div>
       {:else}
@@ -1424,12 +1424,12 @@
           </div>
         {/if}
         {#if saidDoom}
-          <p class="said show">
+          <p class="said show" role="status">
             requested · {v.name} stops now, and is gone for good in {daysWords(v.retention?.recoveryDays)} ·
             an instance admin can turn this back until then
           </p>
         {/if}
-        {#if doomProblem}<p class="problem">not requested — {doomProblem}</p>{/if}
+        {#if doomProblem}<p class="problem" role="alert">not requested — {doomProblem}</p>{/if}
       </div>
     {/if}
 

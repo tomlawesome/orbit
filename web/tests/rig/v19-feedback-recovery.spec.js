@@ -75,13 +75,12 @@ const shownText = (page, words) => page.getByText(words).filter({ visible: true 
  *   name: string,
  *   words: RegExp,
  *   fire: (page: Page) => Promise<() => Promise<void>>,
- *   announceDefect?: () => string | undefined,
  *   focusDefect?: () => string | undefined,
  *   focusFixme?: () => string | undefined,
  * }} Journey
  * `words` is what the failure says, as the reader sees it; `fire` drives up to
- * the failing act, fires it, and returns the keyboard retry. `announceDefect`
- * and `focusDefect` name a defect the check expects to fail on; `focusFixme` is
+ * the failing act, fires it, and returns the keyboard retry. `focusDefect`
+ * names a defect the check expects to fail on; `focusFixme` is
  * a reason the focus check cannot report either way on this project (#1233).
  */
 
@@ -327,37 +326,21 @@ const householdDeletion = {
       await expect(shownText(page, /requested · .*gone for good in 30 days/)).toBeVisible({ timeout: SETTLE });
     };
   },
-  announceDefect: () =>
-    isPocket()
-      ? undefined
-      : "DEFECT (#1178): the desk household page draws a failed deletion request as a plain <p class=\"problem\"> "
-        + "(web/src/routes/household/[id]/+page.svelte, the danger line; its identity, sections and members "
-        + "problems likewise) with no role=\"alert\", and the success line has no role=\"status\" either",
 };
 
 const JOURNEYS = [createOffline, drawerApproval, inboxApproval, householdDeletion];
 
 for (const journey of JOURNEYS) {
   test(`${journey.name} is announced, and the act can be repeated by keyboard`, async ({ page }) => {
-    const defect = journey.announceDefect?.();
     test.setTimeout(60_000);
     const retry = await journey.fire(page);
     /* End states, as the focus check below (#1313, #1447): the failure is
-       waited for, and so is the live region that carries it. Both run for
-       every journey, known defect or not (T-F5, #1671): a missing failure
-       message or a retry that does not land fails the test. Only the
-       live-region line is the known failing one. */
+       waited for, and so is the live region that carries it. */
     await expect(shownText(page, journey.words), `${journey.name}: the failure is shown`).toBeVisible({ timeout: SETTLE });
-    const inLiveRegion = await expect
-      .poll(() => liveRegionFor(page, journey.words), { message: `${journey.name}: the failure is in a live region`, timeout: defect ? 3_000 : SETTLE })
-      .not.toMatch(/^(none|absent)$/)
-      .then(() => true, (error) => {
-        if (!defect) throw error;
-        return false;
-      });
+    await expect
+      .poll(() => liveRegionFor(page, journey.words), { message: `${journey.name}: the failure is in a live region`, timeout: SETTLE })
+      .not.toMatch(/^(none|absent)$/);
     await retry();
-    /* A known defect is the one failing check, named: when the product is fixed this fails, to take the mark off. */
-    if (defect) expect(inLiveRegion, `${journey.name}: ${defect} -- the live region now carries it; remove announceDefect`).toBe(false);
   });
 
   test(`${journey.name} leaves focus where the reader was`, async ({ page }) => {
