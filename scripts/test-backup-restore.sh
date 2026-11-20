@@ -1057,6 +1057,7 @@ expect_restore_acceptance() {
   assert_fixture_present
   assert_staging_fixture_present
   assert_credential_fixture_present
+  check_real_document "after the ${label} restore"
   insert_post_backup_session_fixture
 }
 
@@ -1124,6 +1125,9 @@ test_restore_during_maintenance() {
   # Idempotent by design, so an operator who is unsure may simply run it again.
   bash scripts/end-maintenance.sh >/dev/null
   [[ "$(maintenance_active)" == 'f' ]] || fail 'Re-running the recovery path did not leave Orbit open.'
+  # Downloads are closed while maintenance is on, so the restore made during
+  # it is checked once the instance is open again.
+  check_real_document 'after the restore during maintenance'
 
   rm -f -- "$maintenance_backup_path"
   maintenance_backup_path=""
@@ -1173,6 +1177,7 @@ test_restore_removes_post_backup_table() {
     fail 'A table created after the backup survived the restore; the database is not as the backup had it.'
   }
   assert_fixture_present
+  check_real_document 'after the restore that removes a later table'
 }
 
 test_local_key_rejections() {
@@ -1526,5 +1531,5 @@ fixtures_removed=1
 
 printf 'Orbit backup test: staged correspondence, rollback, interruption recovery, key handling, restore during maintenance, document/crypto round trip, and the authentication-data revocation boundary passed.\n'
 if [[ "$real_document" == 1 ]]; then
-  printf 'Orbit backup test: a real document uploaded through the app decrypted to its original bytes after every restore and after the recovery-bundle import.\n'
+  printf 'Orbit backup test: a real document uploaded through the app decrypted to its original bytes after every restore the drill expects to succeed and after the recovery-bundle import.\n'
 fi
