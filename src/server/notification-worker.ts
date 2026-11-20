@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { isIP } from "node:net";
+import { lookup as dnsLookup, type LookupAddress } from "node:dns";
+import { Agent as HttpsAgent } from "node:https";
+import { isIP, type LookupFunction } from "node:net";
 import nodemailer from "nodemailer";
 import webPush from "web-push";
 import { and, eq, gte, inArray, isNull, lt, or, sql } from "drizzle-orm";
@@ -18,7 +20,7 @@ import {
   users,
 } from "@/db/schema";
 import { householdOwnerLockKey } from "@/lib/auth/authority-locks";
-import { asOperationalReason, log, type OperationalReason } from "@/lib/logger";
+import { asOperationalReason, log, operationalDetail, type OperationalReason } from "@/lib/logger";
 import {
   DEFAULT_ENABLED_CHANNELS,
   DEFAULT_FINAL_WARNING_DAYS,
@@ -189,6 +191,46 @@ function isRevokedPushStatus(statusCode: number | undefined): boolean {
 }
 
 /**
+ * The push connection's resolved address fell in a blocked range (#1929 part
+ * 2). Fixed text on purpose: it never carries the hostname, the address or
+ * the endpoint URL, so it is safe wherever an error ends up.
+ */
+export class BlockedPushEndpointError extends Error {
+  readonly code = "EPUSH_ENDPOINT_BLOCKED" as const;
+
+  constructor() {
+    super("push endpoint resolved to a blocked address");
+    this.name = "BlockedPushEndpointError";
+  }
+}
+
+function isBlockedPushEndpointError(error: unknown): boolean {
+  return (error as ProviderErrorDetails | undefined)?.code === "EPUSH_ENDPOINT_BLOCKED";
+}
+
+/**
+ * The one revocation rule for both `sendPush` callers (#1929 part 2): the
+ * push service says the subscription is gone (401/403/404/410), or its
+ * endpoint resolved to a blocked address. Either way it will never succeed,
+ * so it is revoked rather than counted as a transient failure. A blocked
+ * address also logs one warn line naming only the subscription id.
+ */
+export function isRevokedPushFailure(error: unknown, subscriptionId: string): boolean {
+  if (isBlockedPushEndpointError(error)) {
+    log.warn({
+      event: "delivery.push",
+      state: "blocked",
+      reason: "push_endpoint_blocked",
+      action: "none",
+      detail: operationalDetail`subscription=${subscriptionId}`,
+    });
+    return true;
+  }
+  const statusCode = (error as ProviderErrorDetails | undefined)?.statusCode;
+  return isRevokedPushStatus(typeof statusCode === "number" ? statusCode : undefined);
+}
+
+/**
  * Maps provider failures to the administrator-safe vocabulary before they are
  * persisted. Provider messages can contain addresses, hosts, or credentials.
  */
@@ -211,7 +253,7 @@ export function categorizeProviderError(channel: "email" | "web_push", error: un
   // 401/403 is what a push service answers for a subscription made with a
   // different VAPID key (a recovered host generates a new pair): it will never
   // succeed, so it is gone, not transient.
-  if (isRevokedPushStatus(statusCode)) return "push_unsubscribed";
+  if (isRevokedPushStatus(statusCode) || code === "EPUSH_ENDPOINT_BLOCKED") return "push_unsubscribed";
   if (["ECONNREFUSED", "ECONNRESET", "ENETUNREACH", "ENOTFOUND", "ETIMEDOUT", "EHOSTUNREACH"].includes(code)
     || (statusCode !== undefined && statusCode >= 500)) {
     return "push_unavailable";
@@ -805,7 +847,35 @@ async function claimDeliveries(
 /** Exported for the fast suite (#1151 SR2-R4): the one place real `nodemailer`
  *  and `web-push` calls are built, and therefore the one place their
  *  outbound timeout can be pinned without a live provider. */
+/**
+ * The connect-time address check for push (#1929 part 2, OWASP SSRF second
+ * layer): the socket's own lookup, so the addresses checked are the addresses
+ * connected to, with no rebinding window. Node's options (`all`, `hints`,
+ * `family`) pass through unchanged. One blocked address refuses the whole
+ * connection; Orbit never connects to the "good" subset.
+ */
+const blockedAddressFilteringLookup: LookupFunction = (hostname, options, callback) => {
+  dnsLookup(hostname, options, (error: NodeJS.ErrnoException | null, address: string | LookupAddress[], family?: number) => {
+    if (error) {
+      callback(error, undefined as never);
+      return;
+    }
+    const addresses = Array.isArray(address) ? address : [{ address, family: family ?? 0 }];
+    if (addresses.some((entry) => isBlockedPushAddress(entry.address))) {
+      callback(new BlockedPushEndpointError(), undefined as never);
+      return;
+    }
+    if (Array.isArray(address)) callback(null, address);
+    else callback(null, address, family);
+  });
+};
+
 export function createDefaultNotificationProviders(config: NotificationWorkerConfig): NotificationProviders {
+  /* One agent per providers object, default keepAlive (off), so every
+     connection goes through the lookup again. No servername,
+     rejectUnauthorized or checkServerIdentity: TLS still verifies against
+     the endpoint's hostname. */
+  const pushAgent = new HttpsAgent({ lookup: blockedAddressFilteringLookup });
   let transporter: ReturnType<typeof nodemailer.createTransport> | undefined;
   if (config.vapidSubject && config.vapidPublicKey && config.vapidPrivateKey) {
     webPush.setVapidDetails(config.vapidSubject, config.vapidPublicKey, config.vapidPrivateKey);
@@ -846,6 +916,7 @@ export function createDefaultNotificationProviders(config: NotificationWorkerCon
       // ever resolves.
       await webPush.sendNotification(notification.target, JSON.stringify(notification.payload), {
         timeout: NOTIFICATION_PROVIDER_TIMEOUT_MS,
+        agent: pushAgent,
       });
     },
   };
@@ -1241,8 +1312,7 @@ async function deliverClaimed(
                 });
                 delivered = true;
               } catch (error) {
-                const statusCode = (error as { statusCode?: number }).statusCode;
-                if (isRevokedPushStatus(statusCode)) {
+                if (isRevokedPushFailure(error, subscription.id)) {
                   await transaction.update(pushSubscriptions).set({ revokedAt: now })
                     .where(and(eq(pushSubscriptions.id, subscription.id), isNull(pushSubscriptions.revokedAt)));
                   continue;

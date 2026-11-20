@@ -532,3 +532,11 @@ timeout on this one case rather than a global raise.
 ## scripts/installer-ui.test.mjs "installer text prompts with double-width characters (#1885) > shows exactly the stored value after right arrow across a wide character on a repainting terminal"
 
 - 2026-11-20 · !1433 f1ddf6952 · pipeline 4902 / fast (job 58884) · output ended before `VALUE=a中Xb` was printed. Passed in pipeline 4890 and locally on the same test code. First sighting.
+
+## tests/unit/v19-mail-sender-rows-1650.test.mjs "#1650: the desk lists the extra addresses > keeps the sign-in rows as they were, and draws no extra row when there is only the sign-in address"
+
+- 2026-11-20 · !1431 c13324bc · pipeline 4885 / fast (job 58706) · timed out at the 5 s default (5118 ms) in a 1507 s run on a loaded runner; the change touched only scripts/test-backup-restore.sh. Retried as job 58725, passed. First sighting.
+
+## scripts/repair-owner-writes-1872.test.mjs "#1872 V7: ... > rotate-credential: a stalled owner step ends as timed out within the limit plus grace, no lock held, nothing left"
+
+- 2026-11-20 · !1431 c13324bc · pipeline 4885 / fast (job 58706) · failed in the same loaded 1507 s run; the change touched only scripts/test-backup-restore.sh. Retried as job 58725, passed. First sighting.
