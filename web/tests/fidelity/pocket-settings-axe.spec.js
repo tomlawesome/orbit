@@ -1,9 +1,8 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
-import { settle } from "./pocket-states.js";
+import { APP, settle } from "./pocket-states.js";
 
 /* Same app the fidelity gate photographs (playwright.config.js webServer). */
-const APP = process.env.FIDELITY_APP ?? "http://127.0.0.1:4173";
 
 /*
  * SETTINGS ON A PHONE, AXE-CHECKED (#1137): the fixture harness's own

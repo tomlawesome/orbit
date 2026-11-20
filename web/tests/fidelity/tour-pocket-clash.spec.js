@@ -1,8 +1,8 @@
 import { expect, test } from "@playwright/test";
 
 import { installFilmEnded } from "./film-ended.js";
+import { APP } from "./pocket-states.js";
 
-const APP = process.env.FIDELITY_APP ?? "http://127.0.0.1:4173";
 
 /*
  * THE CLASH SAMPLER (#1083, owner's acceptance on round 8 question 1a).

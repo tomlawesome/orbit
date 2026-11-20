@@ -1,8 +1,7 @@
 import { expect, test } from "@playwright/test";
-import { SIGNED_IN, openRow, settle } from "./pocket-states.js";
+import { APP, SIGNED_IN, openRow, settle } from "./pocket-states.js";
 
 /* Same app the fidelity gate photographs (playwright.config.js webServer). */
-const APP = process.env.FIDELITY_APP ?? "http://127.0.0.1:4173";
 
 /*
  * ADMINISTRATION ON A PHONE (#1123, proposal §2.12 and §2.11; owner decisions
