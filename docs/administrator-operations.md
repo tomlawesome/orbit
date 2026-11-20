@@ -1299,12 +1299,15 @@ tells you which one you are in:
 
 The checkpoint holds the old password, which opens nothing once the rotation
 has landed. repair.sh removes it in the same run, after that run's full
-re-check comes back clean (`diagnosis result=healthy` and no step failed), and
-says so in one stderr line (`... checkpoint <path> ... was removed`). If the
+re-check comes back clean (`diagnosis result=healthy`, no step failed, and
+the re-check could check Docker), and says so in one stderr line (`... checkpoint <path> ... was removed`). If the
 re-check is not clean it keeps the checkpoint, names it (`... checkpoint
 <path> was kept ...`) and tells you to re-run `repair.sh --execute` once the
 re-check's findings are fixed; the first later run whose own re-check is
-clean removes it. If the run stopped because repair refuses the deployment's
+clean removes it. If the re-check is healthy but could not check Docker
+(`docker-unavailable`), the checkpoint is kept too, since nothing confirmed
+the rotated password works; it tells you to make the docker CLI and daemon
+reachable and run repair again. If the run stopped because repair refuses the deployment's
 version (exit 6, version unsupported), the checkpoint is kept and the next
 step it prints is to fix the version first (reinstall, or set `.env-orbit` to
 an Orbit release; see [ADR-0016](adr/0016-release-identity-and-installer-era-boundary.md));
