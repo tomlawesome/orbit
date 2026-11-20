@@ -514,6 +514,26 @@ timeout on this one case rather than a global raise.
 
 - 2026-11-20 · !1428 at aee70e43 (batch-b 09ee759c merged in; !1428 touches no repair file) · pipeline 4872 / fast (job 58535) · `expected 20598 to be less than 20000` at :461 (BUDGET_MS). The file passed 38/38 locally on the same tree; retried as job 58620. First sighting. Load only, no code fault (#1928): the case normally takes 14.9-15.4 s, about 5 s under the budget; the budget is left for the owner.
 
+## scripts/pty-deadline.test.mjs "pty deadline reporting > re-arms the idle deadline on every chunk, so a slow but live child is not killed"
+
+- 2026-11-20 · !1433 602b02c06 · pipeline 4890 / fast (job 58758) · the pty child printed nothing for 300 ms on a loaded runner and was killed. Passed in pipeline 4902 on the same test code. First sighting.
+
+## scripts/install-undo-copy-1848.test.mjs "#1874 O-R2 install.sh prune: Ctrl-C at the undo-copy prompt > restores echo on the terminal"
+
+- 2026-11-20 · !1433 602b02c06 · pipeline 4890 / fast (job 58758) · timed out with only the fake banner printed. Passed in pipeline 4902 on the same test code. First sighting.
+
+## scripts/repair-owner-writes-1875.test.mjs "#1875 W1: update-config renames the staged password as the owner, under the #1858 limits > an owner rename that stalls is timed out ..."
+
+- 2026-11-20 · !1433 602b02c06 · pipeline 4890 / fast (job 58758) · "the rename never went through setpriv: expected [] to not deeply equal []". Passed in pipeline 4902 on the same test code. First sighting.
+
+## scripts/ci/batch-intake-ci.test.mjs "every other pipeline is as it is without the batch-intake rule (#1720) > scheduleInstallBootstrap: same pipeline, same jobs, same verdicts"
+
+- 2026-11-20 · !1433 602b02c06 · pipeline 4890 / fast (job 58758) · `Test timed out in 5000ms` on a loaded runner. Passed in pipeline 4902 on the same test code. First sighting.
+
+## scripts/installer-ui.test.mjs "installer text prompts with double-width characters (#1885) > shows exactly the stored value after right arrow across a wide character on a repainting terminal"
+
+- 2026-11-20 · !1433 f1ddf6952 · pipeline 4902 / fast (job 58884) · output ended before `VALUE=a中Xb` was printed. Passed in pipeline 4890 and locally on the same test code. First sighting.
+
 ## tests/unit/v19-mail-sender-rows-1650.test.mjs "#1650: the desk lists the extra addresses > keeps the sign-in rows as they were, and draws no extra row when there is only the sign-in address"
 
 - 2026-11-20 · !1431 c13324bc · pipeline 4885 / fast (job 58706) · timed out at the 5 s default (5118 ms) in a 1507 s run on a loaded runner; the change touched only scripts/test-backup-restore.sh. Retried as job 58725, passed. First sighting.
@@ -529,3 +549,27 @@ timeout on this one case rather than a global raise.
 ## classify (CI job) "fails at its last step with exit 1 and no message"
 
 - 2026-11-20 · !1439 7b273238 · pipeline 4965 / classify (job 59524) · the step after `fast_checks: stands on job 59091` exited 1 with nothing printed. Retried as job 59552, passed. First sighting.
+
+## scripts/check-svelte-server-parse.test.mjs "the client output check (#1267) > passes every component in web/src today"
+
+- 2026-11-20 · !1433 80582f500 · pipeline 4912 / fast (job 58965) · the check was killed at its 30 s deadline without exiting on a loaded runner. Passed in the retry (job 59031). First sighting.
+
+## scripts/repair-owner-limits-1858.test.mjs "#1858 T1, T2, T5: ... > the write step (smtp_owner_write, root reads its stdout and stderr): a child ..."
+
+- 2026-11-20 · !1433 80582f500 · pipeline 4912 / fast (job 58965) · "repair was still running after the test's own cap" after the step timed out at 2 s as designed. Passed in the retry (job 59031). First sighting.
+
+## scripts/repair-signal-1919.test.mjs "#1919: ... > TERM to the group, 20 times in a row (the race is repeated, bounded): the copy is gone every time"
+
+- 2026-11-20 · !1433 80582f500 · pipeline 4912 / fast (job 58965) · `Test timed out in 45000ms` on a loaded runner. Passed in the retry (job 59031). First sighting.
+
+## src/lib/backup-restore-cli.test.ts "runBackup > O2-R3: a SIGTERM while the adapter is dumping leaves the .orbit-backup.* scratch in place, and the next runBackup removes it"
+
+- 2026-11-20 · !1433 80582f500 · pipeline 4912 / fast retry (job 59031) · `Test timed out in 5000ms`. Passed in job 58965 on the same code. First sighting.
+
+## scripts/repair-restore-lock-1902.test.mjs "#1902 L1: the compose-restore lock does not lapse silently > as root, a restore whose steps outlast the owner step limit still holds the scratch-file lock ..."
+
+- 2026-11-20 · !1433 5ec1733ff · pipeline 4928 / fast (job 59118) · "the lock lapsed silently (probes: [], status 4)" after the mv step timed out at 3 s on a loaded runner. Passed in pipelines 4890, 4902 and 4912 on the same test code. First sighting.
+
+## scripts/ci/job-inputs.test.mjs (a case timed out at the 5 s default)
+
+- 2026-11-20 · local, ci/1927-backup-drill-nightly at 77299f33 (.gitlab-ci.yml and its tests) · the 37 files that read .gitlab-ci.yml, on the loaded shared host · one case timed out at 5 s; a re-run passed. First sighting.

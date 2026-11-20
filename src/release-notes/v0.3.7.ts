@@ -1,10 +1,10 @@
 import type { ReleaseNotes } from "./index";
 
-// What v0.3.7 tells people (docs/releasing.md); wording approved by the owner, 121a.
+// What v0.3.7 tells people (docs/releasing.md); wording approved by the owner, 121a; the Importance entry corrected by the owner, 54b (#1926).
 export const notes: ReleaseNotes = {
   version: "v0.3.7",
   forEveryone: [
-    { lead: "Importance", text: "Every item now has an importance, low, medium or high, and its planet's colour shows it; Orbit offers once to set it on the items you already have." },
+    { lead: "Importance", text: "Every item now has an importance, low, normal or high, and you can have its planet's size show importance instead of cost." },
     { lead: "Key date and repeat", text: "An item has no type any more: its schedule follows from its key date and its repeat." },
     { lead: "Orbit's own choosers", text: "Add's date, repeat and reminder choices are Orbit's own, the same on desk and phone." },
     { lead: "Distance from the sun", text: "Planets sit on a log scale, so the next few weeks get more room, and you choose whether distance follows the key date or your warning date." },

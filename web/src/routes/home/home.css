@@ -409,7 +409,7 @@
   .itemview .ivfull:hover{color:var(--accent-text)}
   /* #1319: a suggestion's `review & amend →` is a button, in the link's register */
   .itemview button.ivfull{background:none;border:0;padding:0;cursor:pointer}
-  .itemview button.ivfull:disabled{opacity:.5;cursor:default}
+  .itemview button.ivfull:disabled,.itemview button.ivfull[aria-disabled="true"]{opacity:.5;cursor:default}
   svg text{font-family:var(--mono)}
 
   .drawer{position:fixed;top:0;bottom:0;z-index:10;width:290px;
