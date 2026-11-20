@@ -1647,6 +1647,7 @@ cleanup() {
   [[ -z "${compose_image_tmp:-}" ]] || rm -f -- "$compose_image_tmp" 2>/dev/null || true
   [[ -z "${compose_live_tmp:-}" ]] || rm -f -- "$compose_live_tmp" 2>/dev/null || true
   [[ -z "${checkpoint_bundle_copy:-}" ]] || rm -f -- "$checkpoint_bundle_copy" 2>/dev/null || true
+  [[ -z "${smtp_producer_tmp:-}" ]] || rm -f -- "$smtp_producer_tmp" 2>/dev/null || true
   # #1848 FR-S1b: the owner's temporary names (#1873 X1: root chose them),
   # held while they exist,
   # removed as the folder's owner (#1848 FIX-S1).
@@ -5607,15 +5608,16 @@ owner_temp_suffix() {
 # a time-out included (a stopped, stalled, TERM-proof or flooding owner
 # step), root removes it as the owner. Nothing is left behind.
 #
-# #1858: root's reads are bounded. <producer> feeds the owner through a
-# `cat` bounded by $owner_step_timeout plus the grace, so an owner that stops
-# reading can't hold it; what the owner prints back is read through
+# #1858: root's reads are bounded. <producer> feeds the owner from a file
+# root collected first (#1935), so an owner that stops reading can't hold
+# root; what the owner prints back is read through
 # `head -c 4097` under the same bound, refused over 4096 bytes, and must be
 # exactly the chosen name. The reader's own status follows it as a last line
 # only root writes.
 smtp_write_status=0
+smtp_producer_tmp=""
 smtp_owner_write() {
-  local folder="$1" template="$2" mode="$3" target="$4" name suffix said="" status=0 out reader bound problem
+  local folder="$1" template="$2" mode="$3" target="$4" name suffix said="" status=0 produced=0 out reader bound problem
   shift 4
   smtp_step_tmp=""
   smtp_write_status=1
@@ -5624,9 +5626,23 @@ smtp_owner_write() {
   name="$folder/${template%XXXXXX}$suffix"
   smtp_step_tmp="$name"
   bound="$((owner_step_timeout + owner_step_grace))"
-  out="$("$@" | LC_ALL=C timeout -k 1 "$bound" cat |
-    as_folder_owner --pipe bash -c "$smtp_owner_write_script" smtp-owner-write "$name" "$folder" "$template" "$mode" |
+  # #1935: the owner step's limit times only the owner's write. Root collects
+  # <producer>'s bytes first, bounded by its own limit, into a mode-600 file
+  # of its own outside the folder (removed on every path, the EXIT trap's
+  # too), and only then starts the owner step, fed from that file. As with
+  # the pipe it replaces, the producer's failure is the step's status only
+  # when the owner's side succeeded.
+  smtp_producer_tmp="$(mktemp "${TMPDIR:-/tmp}/orbit-repair-producer.XXXXXX")" || {
+    smtp_producer_tmp=""
+    smtp_step_tmp=""
+    return 1
+  }
+  ("$@") >"$smtp_producer_tmp" || produced=$?
+  out="$(as_folder_owner --pipe bash -c "$smtp_owner_write_script" smtp-owner-write "$name" "$folder" "$template" "$mode" <"$smtp_producer_tmp" |
     { LC_ALL=C timeout -k 1 "$bound" head -c 4097; printf '\n%s' "$?"; })" || status=$?
+  rm -f -- "$smtp_producer_tmp" || true
+  smtp_producer_tmp=""
+  [[ "$status" != 0 ]] || status="$produced"
   reader="${out##*$'\n'}"
   said="${out%$'\n'*}"
   while [[ "$said" == *$'\n' ]]; do said="${said%$'\n'}"; done
