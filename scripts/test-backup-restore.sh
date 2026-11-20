@@ -47,6 +47,10 @@
 #
 # Usage: scripts/test-backup-restore.sh [--own-stack]
 #
+# In CI the GitLab job `backup_drill` (.gitlab-ci.yml, #1927) runs this with
+# --own-stack, nightly only, on the privileged orbit-build runner; a failure
+# fails the nightly pipeline and `nightly_report` files it.
+#
 # Ownership (#1241, #1273). By default this drill does NOT bring up a stack of
 # its own: it runs against the deployment that ORBIT_ENV_FILE (default
 # .env-orbit) names, in CI the disposable container-validation one. The rest

@@ -229,11 +229,11 @@ trap __orbit_lock_swap DEBUG
       const { targetDir, state, env, flag, opened, path } = swapped("fifo", mode);
       const shims = privShims(targetDir, shimOptions);
       try {
-        const result = runOwner(targetDir, { shims, state, env, capSeconds: 12 });
+        const result = runOwner(targetDir, { shims, state, env, capSeconds: 60 });
         expect(existsSync(flag), "the swap did not happen, so the test proves nothing").toBe(true);
         expect(result.hung, "repair blocked opening the FIFO").toBe(false);
         // The spec's 5 s, timed on the open alone (swap to return, from the hook), so host load on repair's start-up
-        // and its other checks cannot fail it; `hung` (the 12 s cap on the whole run) stays the backstop.
+        // and its other checks cannot fail it; `hung` (the 60 s cap on the whole run, a hang guard only, #1933 77a) stays the backstop.
         expect(openMs(flag, opened), "repair waited on the lock").toBeLessThan(5_000);
         expect(result.stdout).not.toContain(start.done);
         expect(result.status).not.toBe(0);
@@ -249,7 +249,7 @@ trap __orbit_lock_swap DEBUG
       const { targetDir, state, env, flag } = swapped("link", mode);
       const shims = privShims(targetDir, shimOptions);
       try {
-        const result = runOwner(targetDir, { shims, state, env, capSeconds: 12 });
+        const result = runOwner(targetDir, { shims, state, env, capSeconds: 60 });
         expect(existsSync(flag), "the swap did not happen, so the test proves nothing").toBe(true);
         expect(result.hung).toBe(false);
         expect(result.stdout, "repair followed a swapped link and took the lock").not.toContain(start.done);
@@ -265,10 +265,9 @@ trap __orbit_lock_swap DEBUG
     const { targetDir, state, env, flag, path } = swapped("fifo", 0o600);
     const shims = privShims(targetDir);
     try {
-      const result = runOwner(targetDir, { shims, state, env, capSeconds: 12 });
+      const result = runOwner(targetDir, { shims, state, env, capSeconds: 60 });
       expect(existsSync(flag)).toBe(true);
       expect(result.hung).toBe(false);
-      expect(result.ms).toBeLessThan(10_000);
       expect(result.stdout).not.toContain(start.done);
       expect(lockLine(result), result.stderr.slice(0, 1500)).toBe(true);
     } finally {

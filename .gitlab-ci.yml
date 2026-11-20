@@ -13,12 +13,12 @@
 #
 # Three things are deliberately deferred, not forgotten:
 #
-#   1. The four steps of the old workflow's anchor that are neither inline
+#   1. Three steps of the old workflow's anchor that are neither inline
 #      shell nor a scripts/ci script: `scripts/preview-lane-preflight.sh`,
-#      `scripts/test-install-acceptance.sh`, `scripts/test-malware-scanner.sh`
-#      and `scripts/test-backup-restore.sh`. Each is a long-running suite of
-#      its own rather than a validation step, and each wants a lane here
-#      instead of a line in an existing job.
+#      `scripts/test-install-acceptance.sh` and `scripts/test-malware-scanner.sh`.
+#      Each is a long-running suite of its own rather than a validation step,
+#      and each wants a lane here instead of a line in an existing job. (The
+#      fourth, the backup/restore drill, is the nightly `backup_drill` job, #1927.)
 #   2. Provenance and SBOM attestation for operators. GitLab CE has no
 #      equivalent of actions/attest, so `publish-from-gitlab.yml` on GitHub
 #      still owns the operator-facing provenance/SBOM attestations over the GHCR digest.
@@ -2799,6 +2799,43 @@ pocket_measure_filing:
       [ -e pocket-measure.missed ] || { echo "pocket_measure_filing: no miss to file"; exit 0; }
       node scripts/ci/nightly-browsers.mjs tap-floor pocket-measure.log
       echo "pocket_measure_filing: screens under the pocket floors, filed as a Low (#1616; non-blocking)"
+
+# The real-stack backup/restore drill (#1927, owner decision 72a): the old
+# workflow's `scripts/test-backup-restore.sh` step, run with `--own-stack` so it
+# builds an image from this checkout and installs a throwaway deployment of its
+# own (the borrowed-stack path needs the container-validation deployment, which
+# nothing here starts). Nightly only, on the schedule `.nightly_browsers`
+# describes, and never in a merge request or push pipeline. It is not allowed to
+# fail and sits in `acceptance`, before `maintenance`, so a red drill fails the
+# night and `nightly_report` files it like the other nightly checks.
+#
+# The in-job daemon rather than the dind service, as for `smoke`: the drill
+# publishes the app and a local registry on 127.0.0.1 and bind-mounts a
+# `mktemp -d` deployment directory, neither of which a dind service can reach.
+# 45m: the image build alone is "several minutes" (the script says so; the
+# `build_image` job gets 20m), then the install, and every restore scenario
+# waits up to 45 s for health.
+backup_drill:
+  stage: acceptance
+  extends: [.privileged_runner, .browser_suite]
+  timeout: 45m
+  interruptible: false
+  rules:
+    - !reference [.dev-landing, job_rule]
+    - !reference [.backmerge-skip, job_rule]
+    - *batch_intake_skip
+    - *nightly_browsers
+  needs: *needs_gated
+  script:
+    - *reach_helpers
+    - orbit_lane_admits backup_drill || exit 0
+    - *docker_in_job
+    - *resource_peak
+    - bash scripts/test-backup-restore.sh --own-stack
+  after_script:
+    # The drill removes its own stack on exit; this stops the daemon and
+    # deletes its store, which outlives the job on /builds (#823).
+    - *docker_in_job_teardown
 
 # The old workflow runs `pnpm test:integration`, which starts its own disposable
 # PostgreSQL container and reaches it on a published loopback port. That is not

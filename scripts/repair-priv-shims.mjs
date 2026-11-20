@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { expect } from "vitest";
 
 import { scratchDir } from "./repair-test-harness.mjs";
 
@@ -75,21 +76,65 @@ exec '__REAL__' "\${args[@]}"
 // within ~40 s) and logs the pids it leaves, for privShims().cleanup().
 // Except run-then-stop, a variant never runs the command it was asked to, so it leaves nothing in the folder.
 //   stop        SIGSTOPs itself
-//   ignore-term ignores TERM and waits (at most 40 s)
+//   ignore-term ignores TERM (it logs it, stallBody) and waits (at most 40 s)
 //   grandchild  leaves a background process (25 s) holding stdout and stderr, and exits 0
 //   run-then-stop  runs the command it was asked to (as the owner), then SIGSTOPs itself: the step made its
 //               change and then timed out (#1872 V10)
 //   run-then-ignore-term  runs the command it was asked to, then ignores TERM and waits (at most 40 s) (#1873)
 //   run-then-flood  runs the command it was asked to (its output discarded), then writes 8 MiB to stdout and exits 1 (#1873)
 //   flood       writes 8 MiB (no newline) to stdout and to stderr, and exits 1
-function variantSnippet(variant, pidLog) {
+/**
+ * The shell of a stalled owner child (#1933): `stop` SIGSTOPs itself, `ignore-term` waits out at most 40 s and
+ * ignores TERM. Each logs its pid to `pidLog` and, to `sigLog`, "<pid> TERM" when TERM reaches it and "<pid>
+ * ran-out" when it ended on its own after its 40 s. A stopped child exits on the TERM (it arrives with CONT); a
+ * TERM-proof one logs the TERM, keeps waiting and can only end by KILL. stalledSteps() reads the two logs.
+ */
+export function stallBody(kind, pidLog, sigLog) {
+  if (kind === "stop") return `echo $$ >> '${pidLog}'; trap 'echo "$$ TERM" >> '"'"'${sigLog}'"'"'; exit 1' TERM; kill -STOP $$`;
+  if (kind === "ignore-term") return `echo $$ >> '${pidLog}'; trap 'echo "$$ TERM" >> '"'"'${sigLog}'"'"'' TERM; for _i in $(seq 1 40); do sleep 1; done; echo "$$ ran-out" >> '${sigLog}'`;
+  throw new Error(`unknown stall ${kind}`);
+}
+
+/** Each stalled child logged in `pidLog`/`sigLog` (stallBody): whether TERM reached it, whether it ran out its own wait, and whether it still runs. */
+export function stalledSteps(pidLog, sigLog) {
+  const read = (file) => (existsSync(file) ? readFileSync(file, "utf8").split("\n").filter(Boolean) : []);
+  const signals = read(sigLog);
+  return read(pidLog).map((pid) => ({ pid, term: signals.includes(`${pid} TERM`), ranOut: signals.includes(`${pid} ran-out`), alive: running(pid) }));
+}
+
+function running(pid) {
+  try {
+    return readFileSync(`/proc/${pid}/stat`, "utf8").split(") ").at(-1)[0] !== "Z";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * #1933 (owner 77a): what a stalled owner step must show, in place of a time budget. Every child the shim stalled
+ * received TERM, did not end on its own (so a TERM-proof one was ended by KILL), and was gone when repair returned;
+ * and repair printed the line that the step timed out after `limitSeconds` s and was stopped.
+ */
+export function expectStalledStepsEnded(steps, result, limitSeconds) {
+  expect(steps.length, "no owner child stalled, so the test proves nothing").toBeGreaterThan(0);
+  for (const step of steps) {
+    expect(step.term, `the stalled owner child ${step.pid} never received TERM`).toBe(true);
+    expect(step.ranOut, `the stalled owner child ${step.pid} ended on its own instead of being stopped`).toBe(false);
+    expect(step.alive, `the stalled owner child ${step.pid} was still running after repair returned`).toBe(false);
+  }
+  const lines = result.stderr.split("\n").filter((line) => line.startsWith("Orbit repair:"));
+  expect(lines.some((line) => line.includes(`timed out after ${limitSeconds} s and was stopped`)), `no line says a step timed out after ${limitSeconds} s and was stopped:\n${result.stderr.slice(0, 1500)}`).toBe(true);
+}
+
+function variantSnippet(variant, pidLog, sigLog) {
   if (!variant) return "";
+  const runFirst = `while [[ $# -gt 0 && "$1" != -- ]]; do shift; done; shift; ( export ORBIT_TEST_PRIVDROP=1; "$@" ) >/dev/null 2>&1`;
   const body = {
-    stop: `echo $$ >> '${pidLog}'; kill -STOP $$; exit 1`,
-    "ignore-term": `echo $$ >> '${pidLog}'; trap '' TERM; for _i in $(seq 1 40); do sleep 1; done; exit 1`,
+    stop: `${stallBody("stop", pidLog, sigLog)}; exit 1`,
+    "ignore-term": `${stallBody("ignore-term", pidLog, sigLog)}; exit 1`,
     grandchild: `sleep 25 & echo $! >> '${pidLog}'; exit 0`,
-    "run-then-stop": `args=("$@"); while [[ $# -gt 0 && "$1" != -- ]]; do shift; done; shift; ( export ORBIT_TEST_PRIVDROP=1; "$@" ) >/dev/null 2>&1; echo $$ >> '${pidLog}'; kill -STOP $$; exit 1`,
-    "run-then-ignore-term": `args=("$@"); while [[ $# -gt 0 && "$1" != -- ]]; do shift; done; shift; ( export ORBIT_TEST_PRIVDROP=1; "$@" ) >/dev/null 2>&1; echo $$ >> '${pidLog}'; trap '' TERM; for _i in $(seq 1 40); do sleep 1; done; exit 1`,
+    "run-then-stop": `${runFirst}; ${stallBody("stop", pidLog, sigLog)}; exit 1`,
+    "run-then-ignore-term": `${runFirst}; ${stallBody("ignore-term", pidLog, sigLog)}; exit 1`,
     "run-then-flood": `while [[ $# -gt 0 && "$1" != -- ]]; do shift; done; shift; ( export ORBIT_TEST_PRIVDROP=1; "$@" ) >/dev/null 2>&1; head -c 8388608 /dev/zero | tr '\\0' a; exit 1`,
     flood: `head -c 8388608 /dev/zero | tr '\\0' a; head -c 8388608 /dev/zero | tr '\\0' a >&2; exit 1`,
   }[variant.kind];
@@ -116,6 +161,7 @@ export function privShims(targetDir, { root = true, setpriv = true, setprivFail 
   const envLog = join(dir, "env.log");
   const idLog = join(dir, "id.log");
   const pidLog = join(dir, "pids.log");
+  const sigLog = join(dir, "signals.log");
   const write = (name, body) => {
     writeFileSync(join(dir, name), `#!/usr/bin/env bash\n${body}`);
     chmodSync(join(dir, name), 0o755);
@@ -132,7 +178,7 @@ ok=0
 [[ " $* " == *" --reuid=${UID} "* && " $* " == *" --regid=${dbGid} "* && " $* " == *" --no-new-privs "* ]] && ok=1
 if [[ $ok -ne 1 ]]; then printf 'BAD %s\\n' "$*" >> '${privLog}'; exit 99; fi
 case "$*" in ${setprivFail ?? "__never__"}) exit 1;; esac
-${variantSnippet(variant, pidLog)}
+${variantSnippet(variant, pidLog, sigLog)}
 while [[ $# -gt 0 && "$1" != -- ]]; do shift; done
 shift
 export ORBIT_TEST_PRIVDROP=1
@@ -189,6 +235,8 @@ exec "$@"
     envRecords: () => read(envLog).map((line) => { const [tool, marker, leak, ids, names] = line.split("|"); return { tool, marker, leak: Number(leak), ids, names: names.trim().split(/\s+/u).filter(Boolean), line }; }),
     idStdin: () => read(idLog),
     children,
+    /** The children a stop or ignore-term variant stalled (stalledSteps); for a grandchild variant, meaningless. */
+    stalledSteps: () => stalledSteps(pidLog, sigLog),
     /** Kills every process a misbehaving setpriv variant left behind (pids it logged). */
     cleanup: () => {
       for (const pid of read(pidLog)) spawnSync("kill", ["-KILL", pid], { stdio: "ignore" });
