@@ -442,15 +442,95 @@ function isPrivateOrReservedIPv4(address: string): boolean {
   return false;
 }
 
-/** True for IPv6 addresses reserved for loopback, link-local, or unique-local use. */
-function isPrivateOrReservedIPv6(address: string): boolean {
-  const normalized = address.toLowerCase();
-  if (normalized === "::1" || normalized === "::") return true;
-  if (/^f[cd][0-9a-f]{2}:/.test(normalized)) return true;
-  if (/^fe[89ab][0-9a-f]:/.test(normalized)) return true;
-  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(normalized);
-  if (mapped) return isPrivateOrReservedIPv4(mapped[1]);
+/**
+ * Parses a textual IPv6 address (optionally with a trailing dotted IPv4
+ * part, no zone id) into its 16 bytes, or undefined when it is not one
+ * node:net accepts. Parse-then-range-check is the OWASP SSRF-prevention
+ * pattern: every spelling of an address (hex or dotted mapped forms,
+ * compressed or not) reduces to the same bytes before any range test.
+ */
+function parseIPv6Bytes(address: string): Uint8Array | undefined {
+  if (isIP(address) !== 6 || address.includes("%")) return undefined;
+  let text = address.toLowerCase();
+  const tail: number[] = [];
+  const dotted = /^(.*:)(\d+\.\d+\.\d+\.\d+)$/.exec(text);
+  if (dotted) {
+    if (isIP(dotted[2]) !== 4) return undefined;
+    tail.push(...dotted[2].split(".").map(Number));
+    // Keep a trailing "::" intact; otherwise drop the separator before the IPv4 part.
+    text = dotted[1].endsWith("::") ? dotted[1] : dotted[1].slice(0, -1);
+  }
+  const groupsNeeded = 8 - tail.length / 2;
+  const halves = text.split("::");
+  if (halves.length > 2) return undefined;
+  const toGroups = (part: string): string[] => (part === "" ? [] : part.split(":"));
+  const head = toGroups(halves[0]);
+  const rest = halves.length === 2 ? toGroups(halves[1]) : [];
+  const fill = groupsNeeded - head.length - rest.length;
+  if (halves.length === 2 ? fill < 0 : fill !== 0) return undefined;
+  const groups = [...head, ...Array<string>(fill).fill("0"), ...rest];
+  const bytes = new Uint8Array(16);
+  for (const [index, group] of groups.entries()) {
+    if (!/^[0-9a-f]{1,4}$/.test(group)) return undefined;
+    const value = Number.parseInt(group, 16);
+    bytes[index * 2] = value >> 8;
+    bytes[index * 2 + 1] = value & 0xff;
+  }
+  bytes.set(tail, 12);
+  return bytes;
+}
+
+function embeddedIPv4(bytes: Uint8Array, offset: number): string {
+  return Array.from(bytes.subarray(offset, offset + 4)).join(".");
+}
+
+/**
+ * True for IPv6 bytes that are not plain global unicast, or that embed an
+ * IPv4 address which is itself private or reserved (#1929 part 1).
+ */
+function isBlockedIPv6Bytes(bytes: Uint8Array): boolean {
+  const word = (index: number): number => (bytes[index * 2] << 8) | bytes[index * 2 + 1];
+  const zeroUpTo = (byteCount: number): boolean => bytes.subarray(0, byteCount).every((byte) => byte === 0);
+  // ::/96 covers unspecified ::, loopback ::1 and IPv4-compatible ::a.b.c.d.
+  if (zeroUpTo(12)) return true;
+  // IPv4-mapped ::ffff:0:0/96.
+  if (zeroUpTo(10) && word(5) === 0xffff) return isPrivateOrReservedIPv4(embeddedIPv4(bytes, 12));
+  // NAT64 well-known prefix 64:ff9b::/96.
+  if (word(0) === 0x64 && word(1) === 0xff9b && word(2) === 0 && word(3) === 0 && word(4) === 0 && word(5) === 0) {
+    return isPrivateOrReservedIPv4(embeddedIPv4(bytes, 12));
+  }
+  // NAT64 local-use 64:ff9b:1::/48.
+  if (word(0) === 0x64 && word(1) === 0xff9b && word(2) === 1) return true;
+  // 6to4 2002::/16 embeds an IPv4 address in bytes 2-5.
+  if (word(0) === 0x2002) return isPrivateOrReservedIPv4(embeddedIPv4(bytes, 2));
+  // Teredo 2001::/32 and documentation 2001:db8::/32.
+  if (word(0) === 0x2001 && (word(1) === 0 || word(1) === 0xdb8)) return true;
+  // Discard-only 100::/64.
+  if (word(0) === 0x100 && word(1) === 0 && word(2) === 0 && word(3) === 0) return true;
+  // Unique-local fc00::/7.
+  if ((bytes[0] & 0xfe) === 0xfc) return true;
+  // Link-local fe80::/10 and deprecated site-local fec0::/10.
+  if (bytes[0] === 0xfe && (bytes[1] & 0xc0) === 0x80) return true;
+  if (bytes[0] === 0xfe && (bytes[1] & 0xc0) === 0xc0) return true;
+  // Multicast ff00::/8.
+  if (bytes[0] === 0xff) return true;
   return false;
+}
+
+/**
+ * True when an IP address string (IPv4 or IPv6, no brackets) must not be the
+ * target of an outbound push request: private, reserved, loopback,
+ * link-local, multicast, documentation, or an IPv6 form embedding such an
+ * IPv4 address. Anything that does not parse as an address fails closed.
+ * Exported so the outbound DNS lookup hook can check resolved addresses with
+ * the same predicate.
+ */
+export function isBlockedPushAddress(address: string): boolean {
+  const version = isIP(address);
+  if (version === 4) return isPrivateOrReservedIPv4(address);
+  if (version !== 6) return true;
+  const bytes = parseIPv6Bytes(address);
+  return bytes === undefined || isBlockedIPv6Bytes(bytes);
 }
 
 /**
@@ -479,9 +559,7 @@ export function isAllowedPushEndpoint(endpoint: string): boolean {
   const hostname = url.hostname.toLowerCase();
   const addressCandidate = hostname.startsWith("[") && hostname.endsWith("]") ? hostname.slice(1, -1) : hostname;
   if (hostname === "localhost" || hostname.endsWith(".localhost")) return false;
-  const ipVersion = isIP(addressCandidate);
-  if (ipVersion === 4) return !isPrivateOrReservedIPv4(addressCandidate);
-  if (ipVersion === 6) return !isPrivateOrReservedIPv6(addressCandidate);
+  if (isIP(addressCandidate) !== 0) return !isBlockedPushAddress(addressCandidate);
   return true;
 }
 

@@ -163,6 +163,26 @@ function readFileNoFollow(path: string): Buffer {
   }
 }
 
+/**
+ * Reads a secret key file through one O_NOFOLLOW descriptor, refusing unless
+ * that descriptor is a regular file with mode exactly 0600 — the rule
+ * `.env-orbit` gets in deployment-readiness.ts (#1351). The mode is checked
+ * with fstat on the descriptor that is then read, so no file swap can slip
+ * between the check and the read. O_NONBLOCK keeps a FIFO planted at the
+ * path from blocking the open; it is then refused as not a regular file.
+ * Returns undefined when the file is not a 0600 regular file.
+ */
+function readOwnerOnlyRegularFileNoFollow(path: string): Buffer | undefined {
+  const descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  try {
+    const stat = fstatSync(descriptor);
+    if (!stat.isFile() || (stat.mode & 0o777) !== 0o600) return undefined;
+    return readFileSync(descriptor);
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
 /** Single-descriptor regular-file-size check (open O_NOFOLLOW + fstat), never a separate lstat-then-stat pair. */
 function regularFileSizeNoFollow(path: string): number | undefined {
   let descriptor: number;
@@ -1320,17 +1340,20 @@ export class RestoreRun {
       return;
     }
     const source = this.rollbackDocumentKekFile ?? this.paths.documentKekFile;
+    const notOwnerOnly = `checkpoint/key failed; the document key file ${source} must be a regular file with mode 0600 (owner read/write only); fix it and run the import again.`;
     if (!isRegularNonSymlinkFile(source)) {
-      refuse("checkpoint-key-invalid", "checkpoint/key failed; the current document key could not be checkpointed safely.");
+      refuse("checkpoint-key-invalid", notOwnerOnly);
     }
-    let content: string;
+    let raw: Buffer | undefined;
     try {
-      content = readFileNoFollow(source)
-        .toString("utf8")
-        .replace(/[\r\n]+$/, "");
+      raw = readOwnerOnlyRegularFileNoFollow(source);
     } catch {
       refuse("checkpoint-key-invalid", "checkpoint/key failed; the current document key could not be checkpointed safely.");
     }
+    if (raw === undefined) {
+      refuse("checkpoint-key-invalid", notOwnerOnly);
+    }
+    const content = raw.toString("utf8").replace(/[\r\n]+$/, "");
     if (!isValidDocumentKekHex(content)) {
       refuse("checkpoint-key-invalid", "checkpoint/key failed; the current document key could not be checkpointed safely.");
     }
