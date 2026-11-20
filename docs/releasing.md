@@ -1061,10 +1061,12 @@ protected (the jobs only ever run on a protected ref):
   job create the tag through the API; a lower role or a `read_api`-only scope
   cannot.
 
-Promotion to `preview` does not wait on the nightly browser run: the
-push to `preview` runs the full browser set on the commit being promoted, and
-that run is the promotion proof; the `dev -> preview` merge request runs the
-quick checks only. `ORBIT_REUSE_TOKEN`
+Promotion to `preview` does not wait on the nightly browser run, and does not
+run the full browser set either (owner answer 125, #1763): the push to
+`preview` runs smoke, the kept journeys and `screens_chromium`, and that run is
+the promotion proof. `rig_chromium`, `rig_firefox`, `rig_webkit` and
+`film_webkit` run in the nightly browser pipeline only. The `dev -> preview`
+merge request runs the quick checks only. `ORBIT_REUSE_TOKEN`
 (read-only, unprotected, masked, environment scope `ci-read-tokens`, so only the
 jobs that read it receive it -- see "Who starts a pipeline, and where it runs"
 in `docs/quality-strategy.md`) is still read by the jobs that look up earlier
