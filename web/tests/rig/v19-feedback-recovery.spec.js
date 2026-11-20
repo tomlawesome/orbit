@@ -260,11 +260,6 @@ const inboxApproval = {
       await expect(page.locator(act)).toHaveCount(0, { timeout: SETTLE });
     };
   },
-  announceDefect: () =>
-    isPocket()
-      ? undefined
-      : "DEFECT (#1178): the desk /inbox draws an approve or dismiss failure as a plain <div class=\"mail-problem\"> "
-        + "(web/src/routes/inbox/+page.svelte) with no role=\"alert\" or live region, so a screen reader is never told",
   /* Desktop Safari keeps focus on the disabled button here, as every WebKit
      does on /create; the pocket keeps its mark. A traced local desktop WebKit
      run (#1235) dropped it to <body> -- so on desktop WebKit this one is the
