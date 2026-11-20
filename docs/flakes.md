@@ -537,6 +537,6 @@ timeout on this one case rather than a global raise.
 
 - 2026-11-19 · !1409 a44b60f8 · pipeline 4800 / upgrade_cell: [latest-3, all-keys] (job 57816) · the old installer's identity phase failed `reason=image-registry`, then "Could not download the release manifest for channel v0.3.7", step=install assertion=install-exited-0. The retry, job 57965, passed on the same commit. First sighting.
 
-## scripts/repair-root-left-1897.test.mjs "#1897 T1: ... > a find that stalls is timed out: 'cannot check', never 'same', within the step limit plus grace" (:97)
+## scripts/repair-owner-lows-1873.test.mjs "#1873 X5: ... > restore-compose-file: an owner child that ignores TERM ends the action as timed out within the limit plus grace" (:461, #1928)
 
-- 2026-11-20 · !1428 at ecb06829 (batch-b fa16f885 merged in; !1428 touches no repair file) · pipeline 4857 / fast (job 58414) · `the tree-mode find never went through setpriv: expected [] to not deeply equal []` at :102. The file passed 3 runs of 3 locally on the same tree, and passed in !1427's pipeline 4841 (f8505411); retried as job 58493. First sighting.
+- 2026-11-20 · !1428 at aee70e43 (batch-b 09ee759c merged in; !1428 touches no repair file) · pipeline 4872 / fast (job 58535) · `expected 20598 to be less than 20000` at :461 (BUDGET_MS). The file passed 38/38 locally on the same tree; retried as job 58620. First sighting. Load only, no code fault (#1928): the case normally takes 14.9-15.4 s, about 5 s under the budget; the budget is left for the owner.
