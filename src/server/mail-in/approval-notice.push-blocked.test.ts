@@ -176,6 +176,7 @@ describe("#1929 part 2: a blocked push address in the approval notice", () => {
     const warns = (log.warn as unknown as { mock: { calls: unknown[][] } }).mock.calls
       .filter((call) => JSON.stringify(call).includes("push_endpoint_blocked"));
     expect(warns).toHaveLength(1);
+    expect(warns[0]![0]).toMatchObject({ reason: "push_endpoint_blocked" });
     expect(JSON.stringify(warns[0])).toContain(subA.id);
 
     const everything = JSON.stringify([logged, noticeUpdates(ops), revocations(ops).map((op) => op.args.set)]);

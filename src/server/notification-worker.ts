@@ -220,9 +220,9 @@ export function isRevokedPushFailure(error: unknown, subscriptionId: string): bo
     log.warn({
       event: "delivery.push",
       state: "blocked",
-      reason: "push_unsubscribed",
+      reason: "push_endpoint_blocked",
       action: "none",
-      detail: operationalDetail`push_endpoint_blocked subscription=${subscriptionId}`,
+      detail: operationalDetail`subscription=${subscriptionId}`,
     });
     return true;
   }
