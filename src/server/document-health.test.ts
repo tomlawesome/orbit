@@ -54,6 +54,7 @@ describe("administrator document-health redaction", () => {
         damagedValues: 2,
         damagedItems: 1,
         damagedReceipts: 1,
+        damagedDocuments: 1,
         damagedRows: [{ table: "items", column: "notes", rowId: "synthetic-row-id", householdId: "synthetic-household-id" }],
       },
     } as unknown as DocumentHealth;
@@ -66,6 +67,7 @@ describe("administrator document-health redaction", () => {
       damagedValues: 2,
       damagedItems: 1,
       damagedReceipts: 1,
+      damagedDocuments: 1,
     });
     expect(JSON.stringify(publicHealth)).not.toContain("synthetic-row-id");
     expect(JSON.stringify(publicHealth)).not.toContain("synthetic-household-id");
@@ -87,6 +89,7 @@ describe("administrator document-health redaction", () => {
       damagedValues: 0,
       damagedItems: 0,
       damagedReceipts: 0,
+      damagedDocuments: 0,
     });
   });
 

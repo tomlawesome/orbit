@@ -50,6 +50,7 @@ export const CONTRACT_PRECONDITIONS: readonly ContractPrecondition[] = [
     pendingSql: "SELECT count(*) FROM documents WHERE content_sha256 IS NOT NULL",
     remedy: [
       `Orbit is still moving documents under the household key. The running version finishes this in the background, about ${BACKFILL_DOCUMENTS_PER_MINUTE} documents a minute.`,
+      "A value Orbit cannot read is reported on the administrator diagnostics and cleared by the same background work, so the count only ever falls.",
       "Leave Orbit running and run the update again later.",
       "If Orbit is locked because its household key is missing, restore the key and let Orbit run before updating.",
     ],
