@@ -512,3 +512,23 @@ timeout on this one case rather than a global raise.
 ## scripts/repair-owner-lows-1873.test.mjs "#1873 X5: ... > restore-compose-file: an owner child that ignores TERM ends the action as timed out within the limit plus grace" (:461, #1928)
 
 - 2026-11-20 · !1428 at aee70e43 (batch-b 09ee759c merged in; !1428 touches no repair file) · pipeline 4872 / fast (job 58535) · `expected 20598 to be less than 20000` at :461 (BUDGET_MS). The file passed 38/38 locally on the same tree; retried as job 58620. First sighting. Load only, no code fault (#1928): the case normally takes 14.9-15.4 s, about 5 s under the budget; the budget is left for the owner.
+
+## scripts/pty-deadline.test.mjs "pty deadline reporting > re-arms the idle deadline on every chunk, so a slow but live child is not killed"
+
+- 2026-11-20 · !1433 602b02c06 · pipeline 4890 / fast (job 58758) · the pty child printed nothing for 300 ms on a loaded runner and was killed. Passed in pipeline 4902 on the same test code. First sighting.
+
+## scripts/install-undo-copy-1848.test.mjs "#1874 O-R2 install.sh prune: Ctrl-C at the undo-copy prompt > restores echo on the terminal"
+
+- 2026-11-20 · !1433 602b02c06 · pipeline 4890 / fast (job 58758) · timed out with only the fake banner printed. Passed in pipeline 4902 on the same test code. First sighting.
+
+## scripts/repair-owner-writes-1875.test.mjs "#1875 W1: update-config renames the staged password as the owner, under the #1858 limits > an owner rename that stalls is timed out ..."
+
+- 2026-11-20 · !1433 602b02c06 · pipeline 4890 / fast (job 58758) · "the rename never went through setpriv: expected [] to not deeply equal []". Passed in pipeline 4902 on the same test code. First sighting.
+
+## scripts/ci/batch-intake-ci.test.mjs "every other pipeline is as it is without the batch-intake rule (#1720) > scheduleInstallBootstrap: same pipeline, same jobs, same verdicts"
+
+- 2026-11-20 · !1433 602b02c06 · pipeline 4890 / fast (job 58758) · `Test timed out in 5000ms` on a loaded runner. Passed in pipeline 4902 on the same test code. First sighting.
+
+## scripts/installer-ui.test.mjs "installer text prompts with double-width characters (#1885) > shows exactly the stored value after right arrow across a wide character on a repainting terminal"
+
+- 2026-11-20 · !1433 f1ddf6952 · pipeline 4902 / fast (job 58884) · output ended before `VALUE=a中Xb` was printed. Passed in pipeline 4890 and locally on the same test code. First sighting.
