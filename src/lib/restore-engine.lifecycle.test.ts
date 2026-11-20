@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync as realSpawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -660,6 +661,54 @@ describe("preflightValidateBundle (restore.sh:334-353, guarantees #7-10)", () =>
     expect(() => preflightValidateBundle({ adapter, databaseDumpPath, stagedDocumentsRoot, stagingId: "preflight-test-2" })).toThrow(RestoreEngineRefusal);
     // Live documents are completely untouched by a preflight-only check.
     expect(readFileSync(join(liveDocumentsRoot, "objects", ORIGINAL_KEY.slice(0, 2), ORIGINAL_KEY.slice(2, 4), `${ORIGINAL_KEY}.bin`))).toHaveLength(10);
+  });
+});
+
+describe("#1351 checkpoint reads the live document KEK only from a 0600 regular file", () => {
+  function attemptCheckpoint(): { run: RestoreRun | undefined; thrown: unknown } {
+    const liveDocumentsRoot = join(sandbox, "live-documents");
+    buildDocumentTree(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const adapter = new FakeRestoreAdapter(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const workDir = mkdtempSync(join(sandbox, "work-"));
+    let run: RestoreRun | undefined;
+    try {
+      run = RestoreRun.prepare({ adapter, paths, workDir });
+      run.createCheckpoint();
+    } catch (error) {
+      return { run, thrown: error };
+    }
+    return { run, thrown: undefined };
+  }
+
+  function expectRefusedWithNoKeyCheckpoint(): void {
+    const { run, thrown } = attemptCheckpoint();
+    expect(thrown).toBeInstanceOf(RestoreEngineRefusal);
+    expect(run === undefined || !existsSync(join(run.checkpointDirectory, "document-kek"))).toBe(true);
+    run?.dispose();
+  }
+
+  it("control: a 0600 regular key file is checkpointed", () => {
+    const { run, thrown } = attemptCheckpoint();
+    expect(thrown).toBeUndefined();
+    expect(readFileSync(join(run!.checkpointDirectory, "document-kek"), "utf8")).toBe(`${LIVE_KEK}\n`);
+    run!.dispose();
+  });
+
+  it("refuses a 0644 key file and writes no checkpoint key", () => {
+    chmodSync(documentKekFile, 0o644);
+    expectRefusedWithNoKeyCheckpoint();
+  });
+
+  it("refuses a key path that is a FIFO and writes no checkpoint key", () => {
+    rmSync(documentKekFile);
+    realSpawnSync("mkfifo", ["-m", "600", documentKekFile]);
+    expectRefusedWithNoKeyCheckpoint();
+  });
+
+  it("refuses a key path that is a directory and writes no checkpoint key", () => {
+    rmSync(documentKekFile);
+    mkdirSync(documentKekFile, { mode: 0o700 });
+    expectRefusedWithNoKeyCheckpoint();
   });
 });
 
