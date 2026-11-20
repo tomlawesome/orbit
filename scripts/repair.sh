@@ -4771,24 +4771,14 @@ restore_transaction_fail() {
 readonly engine_lock_path=".orbit-engine.lock"
 readonly engine_lock_stale_seconds=600
 engine_lock_problem=""
-# #1915 O-S3: the lock was there at the first check, so an open that created
-# one means the engine removed its lock in between (an install just
-# finished); the engine's next exclusive create would wait ten minutes on
-# that empty file. Removed again when the descriptor is still that path's
-# empty file with one link, which only repair's open can have made. Only
-# here, never in own_created_lock: the backup/restore lock is meant to be
-# created. The run is still refused: the state moved during the check.
-engine_lock_remove_created() {
-  local fd="$1" got now
-  got="$(stat -L -c '%d:%i %F %h' -- "/dev/fd/$fd" 2>/dev/null)" || got=""
-  now="$(stat -c '%d:%i' -- "$engine_lock_path" 2>/dev/null)" || now=""
-  if [[ -n "$got" && -n "$now" && "$got" == "$now regular empty file 1" ]] &&
-    as_folder_owner rm -f -- "$engine_lock_path"; then
-    printf "Orbit repair: the engine lock %s vanished while repair was checking it (an install or update just finished) and repair's open created an empty one in its place; repair removed that file again, so no install waits on it; run repair again.\n" "$engine_lock_path" >&2
-    return 0
-  fi
-  lock_own_problem+="; repair's open created that empty lock and could not remove it; if no install or update is running, remove $engine_lock_path yourself, or the engine waits up to 10 minutes on it"
-}
+# #1915 O-S3 (re-ruled, note 66800): the lock was there at the first check,
+# so an open that sees another file means the lock changed in between (an
+# install or update just started or finished). Repair never removes the
+# file: an install's fresh lock looks the same as an empty one repair's open
+# created (same inode, empty, one link), and removing it could let two
+# installs write at once. own_created_lock fixes its mode and owner, the run
+# refuses as unwritable, and the refusal tells the operator what to check;
+# the engine's own stale rule clears an empty lock after ten minutes.
 engine_lock_idle() {
   local fd="" mtime now status=0 before opened
   engine_lock_problem=""
@@ -4809,7 +4799,7 @@ engine_lock_idle() {
     if [[ -z "$fd" || -z "$before" || "$opened" != "$before" ]]; then
       if [[ -n "$fd" && "$opened" != "$before" ]]; then
         own_created_lock "$fd" "$engine_lock_path"
-        engine_lock_remove_created "$fd"
+        [[ -z "$before" ]] || lock_own_problem+="; the lock changed while repair was checking it (an install or update just started or finished), so the file now there may be an empty one repair's open created; if no install or update is running and $engine_lock_path is empty, remove it yourself, or the next install waits up to 10 minutes on it"
       fi
       [[ -z "$fd" ]] || exec {fd}<&-
       engine_lock_problem=unwritable

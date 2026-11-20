@@ -1,5 +1,4 @@
-import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
@@ -222,27 +221,9 @@ describe("#1915 SEC-O3: remove_leftover_discards' 'was kept' line cleans the nam
   });
 });
 
-// --- O-S3 (ruling, note 66727): engine_lock_idle removes the empty lock its own open created ---------------------------
+// --- O-S3: the engine lock cases moved to repair-lock-race-1915.test.mjs (re-ruled, note 66800) -------------------------
 
-describe("#1915 O-S3: an engine lock that vanishes before repair's open is not left behind empty", () => {
-  const STAGING = ".orbit-install-staging.abc123";
-  const MANAGED = ["docker-compose.yml", "docker-compose.mail.yml", ".env-orbit.example", "config/tika-config.json", "scripts/configure.sh", "scripts/installer-ui.sh", "scripts/backup.sh", "scripts/restore.sh", "scripts/repair.sh", "update.sh", ".env-orbit", ".orbit-secrets", ".orbit-files"];
-  const VANISHED = "Orbit repair: the engine lock .orbit-engine.lock vanished while repair was checking it (an install or update just finished) and repair's open created an empty one in its place; repair removed that file again, so no install waits on it; run repair again.";
-
-  function engineFolder() {
-    const targetDir = makeFixture();
-    const original = join(targetDir, STAGING, "rollback", "original");
-    mkdirSync(original, { recursive: true, mode: 0o700 });
-    for (const dir of [join(targetDir, STAGING), join(targetDir, STAGING, "rollback"), original]) chmodSync(dir, 0o700);
-    const present = MANAGED.filter((path) => existsSync(join(targetDir, path)));
-    const copied = spawnSync("cp", ["-a", "--parents", ...present, original], { cwd: targetDir, encoding: "utf8" });
-    if (copied.status !== 0) throw new Error(copied.stderr);
-    const path = join(targetDir, ".orbit-engine.lock");
-    writeFileSync(path, "", { mode: 0o600 });
-    utimesSync(path, new Date("2020-01-01T00:00:00Z"), new Date("2020-01-01T00:00:00Z"));
-    return { targetDir, path };
-  }
-
+describe("#1915 O-S3: the backup/restore lock a repair open creates is kept", () => {
   /** BASH_ENV hook (the #1899 seam): just before `exec {fd}<` inside `fn`, removes the lock; the flag file records it. */
   function removeHook(path, fn) {
     const hook = scratchDir("orbit-1915-hook-");
@@ -262,26 +243,6 @@ trap __orbit_lock_remove DEBUG
 `,
     );
     return { env: { BASH_ENV: join(hook, "env.sh") }, flag };
-  }
-
-  for (const [who, opts] of [["not root", { root: false, setpriv: false, getent: "fail" }], ["simulated root", {}]]) {
-    it(`${who}: the created empty lock is removed, the run refuses as unwritable, and the vanished line is printed`, () => {
-      const { targetDir, path } = engineFolder();
-      const hook = removeHook(path, "engine_lock_idle");
-      const shims = privShims(targetDir, { extraTools: ["diff", "sha256sum"], ...opts });
-      try {
-        const result = runOwner(targetDir, { shims, state: { ...RUNNING }, args: ["--execute", "--safe-only"], capSeconds: 40, env: hook.env });
-        expect(existsSync(hook.flag), "the removal did not happen, so the test proves nothing").toBe(true);
-        expect(result.hung).toBe(false);
-        expect(existsSync(path), "the empty lock repair's open created is still there").toBe(false);
-        expect(result.stderr.split("\n"), result.stderr.slice(0, 1500)).toContain(VANISHED);
-        expect(orbitLines(result).some((line) => line.includes("refusing restore-transaction") && line.includes("could not be opened for writing")), "not refused as unwritable").toBe(true);
-        expect(result.status).not.toBe(0);
-        expect(existsSync(join(targetDir, STAGING)), "the staging folder was removed").toBe(true);
-      } finally {
-        shims.cleanup();
-      }
-    });
   }
 
   it("pin: the backup/restore lock a repair open creates is kept (own_created_lock, creating is intended), no vanished line", () => {
