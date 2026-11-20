@@ -193,6 +193,8 @@ describe("pipeline lanes", () => {
     // needs no dotenv artifact and so needs no wait for one.
     expect(guardedJobs().map(({ name }) => name).sort()).toEqual([
       "acceptance",
+      // #1927: nightly only; stops on the lane the idle/yielding nightly sets.
+      "backup_drill",
       "base_image",
       "build_image",
       // ADR-0031 #3: builds the pinned launcher, but needs nothing from
@@ -1033,7 +1035,7 @@ describe("browser jobs by event (#1412)", () => {
     }
     const everyJob = jobs.filter(([, block]) => /^ {2}stage: /mu.test(block)).map(([name]) => name);
     const started = everyJob.filter((name) => jobVerdict(name, events.nightly) !== "never");
-    expect(started.sort()).toEqual([...BROWSER_JOBS, ...NIGHTLY_SUPPORT_JOBS, "pocket_measure", "pocket_measure_filing", "nightly_report", "browser_report"].sort());
+    expect(started.sort()).toEqual([...BROWSER_JOBS, ...NIGHTLY_SUPPORT_JOBS, "pocket_measure", "pocket_measure_filing", "nightly_report", "browser_report", "backup_drill"].sort());
     // The alarm waits for a failure; it does not run on a green night, so a
     // green night never needs its token. A tap-floor miss is filed by
     // pocket_measure_filing, which installs nothing (#1616, D-SEC2).
