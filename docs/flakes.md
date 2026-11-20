@@ -20,11 +20,13 @@ test's own name, which does not move with the shard.
 
 - 2026-11-15 · !1325 dev 13eec37c · pipeline 4228 / fast (job 51590) · timed out at the 5s default on a loaded runner; retried as job 51647. First sighting.
 
-## src/cli/orbit.mail-sending-status.test.ts "source=imported, imported from the environment: one line, exit 0" and "source=ui after an import ...: imported-from-environment stays true" (#1937)
+## scripts/web-playwright-config.test.mjs "web/playwright.config.js rig projects > has the five rig projects"
 
-- 2026-11-15 · local, chore/next-4 on 9c7361cf plus the #1848 W-F1 change (About page apk links only) · full `npx vitest run` on the loaded shared host · the first took 5.4 s; the second got its one expected line printed twice. A re-run of the file passed. First sighting.
-- 2026-11-15 · local, chore/next-5 on 0397b513 plus the #1848 O-F1 change (repair.sh only) · full `npx vitest run` on the loaded shared host · both timed out at 5 s. The file alone passed 3 runs of 3. Second sighting.
-- 2026-11-20 · !1438 c535ff40 (repair.sh and its tests only) · pipeline 4970 / fast (job 59587) · the first timed out at 5 s (7813 ms); the second got its line twice. Third sighting: #1937.
+- 2026-11-20 · !1438 7a4f3b1b · pipeline 4984 / fast (job 59774) · `Test timed out in 5000ms` in a 1429 s run on a loaded runner; the change touches none of it. First sighting.
+
+## tests/unit/v19-tour-chapter-the-item.test.mjs "the chapter played for real > a jump mid-chapter puts everything back, the row too — clear(), the same law unread() gives unwear()" and "... > leaves the real DOM exactly as it found it once the film is cleared"
+
+- 2026-11-20 · !1438 7a4f3b1b · pipeline 4984 / fast (job 59774) · both `Test timed out in 5000ms` in a 1429 s run on a loaded runner; the change touches none of it. First sighting.
 
 ## tests/integration/imap-attachment-processing.test.ts "records discard purge intent before an injected storage failure and retries safely"
 
