@@ -20,10 +20,11 @@ test's own name, which does not move with the shard.
 
 - 2026-11-15 · !1325 dev 13eec37c · pipeline 4228 / fast (job 51590) · timed out at the 5s default on a loaded runner; retried as job 51647. First sighting.
 
-## src/cli/orbit.mail-sending-status.test.ts "source=imported, imported from the environment: one line, exit 0" and "source=ui after an import ...: imported-from-environment stays true"
+## src/cli/orbit.mail-sending-status.test.ts "source=imported, imported from the environment: one line, exit 0" and "source=ui after an import ...: imported-from-environment stays true" (#1937)
 
 - 2026-11-15 · local, chore/next-4 on 9c7361cf plus the #1848 W-F1 change (About page apk links only) · full `npx vitest run` on the loaded shared host · the first took 5.4 s; the second got its one expected line printed twice. A re-run of the file passed. First sighting.
 - 2026-11-15 · local, chore/next-5 on 0397b513 plus the #1848 O-F1 change (repair.sh only) · full `npx vitest run` on the loaded shared host · both timed out at 5 s. The file alone passed 3 runs of 3. Second sighting.
+- 2026-11-20 · !1438 c535ff40 (repair.sh and its tests only) · pipeline 4970 / fast (job 59587) · the first timed out at 5 s (7813 ms); the second got its line twice. Third sighting: #1937.
 
 ## tests/integration/imap-attachment-processing.test.ts "records discard purge intent before an injected storage failure and retries safely"
 
@@ -520,3 +521,11 @@ timeout on this one case rather than a global raise.
 ## scripts/repair-owner-writes-1872.test.mjs "#1872 V7: ... > rotate-credential: a stalled owner step ends as timed out within the limit plus grace, no lock held, nothing left"
 
 - 2026-11-20 · !1431 c13324bc · pipeline 4885 / fast (job 58706) · failed in the same loaded 1507 s run; the change touched only scripts/test-backup-restore.sh. Retried as job 58725, passed. First sighting.
+
+## scripts/pty-deadline.test.mjs "pty deadline reporting > re-arms the idle deadline on every chunk, so a slow but live child is not killed"
+
+- 2026-11-20 · !1438 c535ff40 (repair.sh and its tests only) · pipeline 4970 / fast (job 59587) · the child printed step-1 to step-3, then went 300 ms without output on a loaded runner and was killed. First sighting.
+
+## classify (CI job) "fails at its last step with exit 1 and no message"
+
+- 2026-11-20 · !1439 7b273238 · pipeline 4965 / classify (job 59524) · the step after `fast_checks: stands on job 59091` exited 1 with nothing printed. Retried as job 59552, passed. First sighting.
