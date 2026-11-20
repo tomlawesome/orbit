@@ -316,8 +316,9 @@ that could drift.
   honest by tests and the catalogue until engine convergence.
 - Repair never deletes recovery material it created for the operator, with
   one exception: the credential checkpoint, removed after a clean full
-  re-check in the same run (amendment 2026-11-15). A checkpoint whose
-  re-check is not clean is kept until a later clean run removes it.
+  re-check in the same run (amendment 2026-11-15), one that could check
+  Docker (addendum 2026-11-19). A checkpoint whose re-check is not clean is
+  kept until a later clean run removes it.
 - Schema-class diagnosis depends on the application's stable
   `reason=database_mismatch`/`database_below_floor` log vocabulary — a
   cross-layer contract that now must be kept like any other. (Note,
@@ -534,3 +535,11 @@ will not open that way, is not a regular file at the stat just before the
 open, or opens as anything but that same file, is never taken as idle; restore-transaction refuses, saying the lock "could
 not be opened for writing".
 #1899 (note 64000): `<>` creates a lock that vanished between the stat and the open, and no shell open avoids that (the stat's identity is the device, inode and change time, so a lock recreated on a reused inode number is still told apart, #1906), so the file is kept (a lock file is never deleted, which would split holders across two inodes) and made the owner's: empty, mode 0600 and, as root, chowned to the deployment folder's owner; the action still refuses, and a failed chown is named in the refusal.
+
+*Addendum 2026-11-19 (#1874 O-S2, amends the 2026-11-15 amendment's "clean"):*
+a clean re-check also needs Docker checked. `docker-unavailable` is info
+severity, so a re-check that never reached Docker can still read
+`diagnosis result=healthy`, yet nothing in it confirmed the rotated password
+works. Such a run keeps the checkpoint, says Docker could not be checked,
+and gives the next step (make the docker CLI and daemon reachable, then run
+repair again); the first later run whose re-check is clean removes it.
