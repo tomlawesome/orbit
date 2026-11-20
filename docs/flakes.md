@@ -481,12 +481,6 @@ timeout on this one case rather than a global raise.
 - 2026-11-12 · chore/v039-batch-b-ci d92e92b6 (Dockerfile pin and JSON policy only, nowhere near the PDF sandbox) · pipeline 4032 / fast (job 49856) · "§1.5 line 16: a child still in flight after the test: expected 1 to be +0"; the retried job 49859 passed. First sighting.
 - 2026-11-18 · !1371 batch-a 5a2828af (the batch-a dev gate fix: an exceptions file and coverage floors, nowhere near the PDF sandbox) · pipeline 4550 / fast (job 54979) · the timing check: "expected 87.98 to be less than or equal to 86.68" (ms, the 2x-solo bound); the retried job 55050 passed. Second sighting.
 
-## github-await-handoff.sh, a flaky GitHub › counts a successful read as a reset (scripts/ci/github-await-handoff.test.mjs) (#1940)
-
-- 2026-11-15 · local, chore/next-4 on the dev merge plus the #1846 change (docs and the guarantees test only) · full `npx vitest run`, load average about 30 · `Test timed out in 30000ms`; the file re-run twice passed 53/53. First sighting.
-- 2026-11-20 · !1441 68d651e2f · pipeline 4980 / fast retry (job 59854) · the script was killed on its deadline after "GitHub could not be read (1 of 3 in a row)". Passed in job 59718 on the same code. Second sighting.
-- 2026-11-20 · !1441 68d651e2f · pipeline 4980 / fast retry (job 59988) · killed on its deadline again. Passed in job 59718 on the same code. Third sighting.
-
 ## src/server/documents/pdf-structure-sandbox-poppler.test.ts "D5: a background draw holding its one slot does not delay a view draw (within 2x its solo time)"
 
 - 2026-11-15 · fix/1834-undo-copies 605f583e (a one-line install.sh change since cb70f4e1, nowhere near the PDF sandbox) · pipeline 4220 / fast (job 51469) · failed at 1293 ms in a job that hit the 20-minute limit on a loaded runner; it passed in pipeline 4212 / fast (job 51358) on cb70f4e1. A wall-clock assertion. First sighting.
