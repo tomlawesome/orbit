@@ -5,8 +5,8 @@
   const uid = $props.id();
   /* The pressed pill is swapped for a disabled copy while the act is out, so
      when the failure comes back focus has fallen to <body>: move it to the
-     message (#1182). The message itself carries no role; the always-present
-     empty alert wrapper around it is the live region the rig's check needs. */
+     message (#1182). The message has no live-region role: focus on it is the
+     announcement, so it is read once. */
   /** @type {HTMLElement | undefined} */
   let problemLine = $state();
   $effect(() => {
@@ -148,7 +148,7 @@
                  name="Dismiss {title}" onfire={ondismiss} />
     {/if}
   </div>
-  <div role="alert">{#if problem}<p class="p-error" tabindex="-1" bind:this={problemLine}>{problem}</p>{/if}</div>
+  {#if problem}<p class="p-error" tabindex="-1" bind:this={problemLine}>{problem}</p>{/if}
   {#if !locked && !held}
     <button class="rv-amend" aria-disabled={busy ? "true" : undefined} onclick={() => !busy && onamend()}>review &amp; amend →</button>
   {/if}
