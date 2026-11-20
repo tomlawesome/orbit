@@ -5,7 +5,8 @@
   const uid = $props.id();
   /* The pressed pill is swapped for a disabled copy while the act is out, so
      when the failure comes back focus has fallen to <body>: move it to the
-     message (#1182), which the live region also announces. */
+     message (#1182). The message itself carries no role; the always-present
+     empty alert wrapper around it is the live region the rig's check needs. */
   /** @type {HTMLElement | undefined} */
   let problemLine = $state();
   $effect(() => {
@@ -147,9 +148,9 @@
                  name="Dismiss {title}" onfire={ondismiss} />
     {/if}
   </div>
-  {#if problem}<p class="p-error" role="alert" tabindex="-1" bind:this={problemLine}>{problem}</p>{/if}
+  <div role="alert">{#if problem}<p class="p-error" tabindex="-1" bind:this={problemLine}>{problem}</p>{/if}</div>
   {#if !locked && !held}
-    <button class="rv-amend" disabled={Boolean(busy)} onclick={onamend}>review &amp; amend →</button>
+    <button class="rv-amend" aria-disabled={busy ? "true" : undefined} onclick={() => !busy && onamend()}>review &amp; amend →</button>
   {/if}
   {@render after?.()}
 </article>
@@ -217,7 +218,7 @@
   .rv-amend{display:flex;align-items:center;justify-content:center;width:100%;min-height:var(--p-hit);margin-top:4px;
     appearance:none;border:0;background:none;padding:0;cursor:pointer;
     font:var(--p-type-meta)/1.2 var(--mono);color:var(--accent-text);letter-spacing:.02em}
-  .rv-amend:disabled{opacity:.5}
+  .rv-amend:disabled,.rv-amend[aria-disabled="true"]{opacity:.5}
   .rv-amend:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;border-radius:8px}
   @media (prefers-reduced-motion:reduce){ .rv-touch::after{animation:none} }
 </style>

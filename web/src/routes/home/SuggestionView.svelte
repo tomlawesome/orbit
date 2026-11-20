@@ -152,7 +152,7 @@
   <div class="ivfoot">
     <button class="ivcopy" onclick={onCopyAddress}>{copied ? "link copied" : "copy link"}</button>
     {#if decidable && !locked && !amending}
-      <button type="button" class="ivfull ivamend" disabled={busy} onclick={acts.onamend}>review &amp; amend →</button>
+      <button type="button" class="ivfull ivamend" aria-disabled={busy ? "true" : undefined} onclick={() => !busy && acts.onamend?.()}>review &amp; amend →</button>
     {/if}
   </div>
 </div>
