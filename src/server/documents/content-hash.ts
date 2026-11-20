@@ -11,6 +11,14 @@
  * household, or under a locked key -- answers no hash at all, never a guess:
  * every caller treats that as "cannot verify", so it is never a match.
  *
+ * A plain value is answered as it stands. One that is not a SHA-256 (64
+ * lowercase hex characters) is never written by Orbit and can never equal a
+ * real digest, so it is not left for a reader to trust: the maintenance
+ * backfills report it, record it as damage for the administrator card, and
+ * clear it (ruling #1779 note 67344). The row then answers
+ * `content_hash_missing`, the same "cannot verify" every caller already
+ * handles.
+ *
  * The same shape serves a held mail-in attachment (#1778): its hash is sealed
  * in `imap_ingestion_attachments.content_sha256_sealed`, column key
  * `ATTACHMENT_CONTENT_HASH_COLUMN`, bound to the attachment id, under the

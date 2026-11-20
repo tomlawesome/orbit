@@ -363,7 +363,7 @@ describe("the backfill seals only a real hash and survives rows it cannot use (#
     ["an empty value", ""],
     ["a short value", "abc123"],
     ["upper-case hex", "A".repeat(64)],
-  ])("leaves %s as it was, and no other row in the batch is blocked", async (_name, odd) => {
+  ])("clears %s with nothing sealed or indexed for it, and no other row in the batch is blocked (#1931)", async (_name, odd) => {
     const fixture = await createIntegrationFixture("sealed-backfill-odd-value");
     await drainAll();
     const oddRow = await plantLegacy(fixture, "first", odd);
@@ -372,8 +372,9 @@ describe("the backfill seals only a real hash and survives rows it cannot use (#
     try {
       for (let call = 0; call < 10; call += 1) await backfillDocumentContentIndexes(1);
       const row = await columnsOf(oddRow);
-      expect(row.plain, "the plain column is unchanged").toBe(odd);
+      expect(row.plain, "the plain column is cleared").toBeNull();
       expect(row.sealed, "nothing is sealed for it").toBeNull();
+      expect(row.contentIndex, "nothing is indexed for it").toBeNull();
       for (const [position, id] of valid.entries()) {
         await expectSealedTo(id, sha256(`odd neighbour ${position}`));
         expect((await columnsOf(id)).plain).toBeNull();

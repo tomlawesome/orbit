@@ -22,12 +22,19 @@
  * index simply does not match it. The dropping of the plain column is a
  * later release (#1779).
  *
- * Only a value that is a SHA-256 (64 lowercase hex characters) is sealed and
- * cleared. Any other plain value, and a seal that will not open, is damage:
- * it is left exactly as it is, reported once per process, and counts toward
- * the batch like any other row. The work list is paged by row id with a
- * cursor kept between cycles, so damaged rows are passed in turn rather than
- * read first on every cycle, and no exclusion list of rows grows.
+ * Only a value that is a SHA-256 (64 lowercase hex characters) is sealed.
+ * Any other plain value is damage (ruling #1779 note 67344): no product path
+ * writes one, and every reader compares it with a real digest it can never
+ * equal, yet a plain value is trusted as genuine. So it is reported once per
+ * process, recorded as a damage sighting for the administrator card, and then
+ * cleared in an UPDATE guarded on the value read, with no seal and no index
+ * written from it. The row becomes "content hash missing", the fail-closed
+ * state its readers already handle, and the clearing counts as a fix. A seal
+ * that will not open is damage too, but is left exactly as it is (note
+ * 55193) and reported once. Every row looked at counts toward the batch. The
+ * work list is paged by row id with a cursor kept between cycles, so damaged
+ * rows are passed in turn rather than read first on every cycle, and no
+ * exclusion list of rows grows.
  */
 import { and, asc, eq, gt, isNotNull, isNull, not, notInArray, type SQL } from "drizzle-orm";
 import { getDb } from "@/db";
@@ -100,8 +107,13 @@ async function fixRow(metadata: MetadataCipher, row: WorkRow): Promise<number> {
     return updated.length;
   }
   if (!SHA256_HEX.test(plain)) {
-    reportDamageOnce(row.id, "holds a plain value that is not a SHA-256");
-    return 0;
+    /* Damage: reported, then cleared, guarded on the value read. Nothing is
+       sealed or indexed from it; the row is left "content hash missing". */
+    reportDamageOnce(row.id, "held a plain value that is not a SHA-256 and it was cleared");
+    const cleared = await getDb().update(documents).set({ contentSha256: null })
+      .where(and(eq(documents.id, row.id), eq(documents.contentSha256, plain)))
+      .returning({ id: documents.id });
+    return cleared.length;
   }
   /* Guarded on what was read: the plain value, and a blind index still
      missing if one is being written, so neither is ever overwritten. */
