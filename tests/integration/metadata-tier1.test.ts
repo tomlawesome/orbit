@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it } from "vitest";
+import { seedAttachment, seedReceipt } from "./support/imap-attachment-hash";
 import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { imapIngestionMessages, items, metadataDamageSightings, metadataKeys } from "@/db/schema";
+import { documents, imapIngestionMessages, items, metadataDamageSightings, metadataKeys } from "@/db/schema";
 import { readWorkspace, applyWorkspaceCommand } from "@/server/workspace-repository";
 import { assignImapReceiptHousehold } from "@/server/mail-in/imap-inbox";
 import { queueApprovalNotice } from "@/server/mail-in/approval-notice";
@@ -13,6 +14,7 @@ import { openMetadataReader } from "@/server/metadata/fields";
 import { loadMetadataKey, resetMetadataKeyCacheForTests, resolveMetadataKey } from "@/server/metadata/keys";
 import { getDocumentHealth } from "@/server/document-health";
 import {
+  countMetadataDamage,
   flushMetadataDamageSightings,
   resetMetadataDamageSightingsForTests,
 } from "@/server/metadata/damage-sightings";
@@ -702,5 +704,37 @@ describe("damaged values are countable for an administrator (#941)", () => {
     }
 
     expect(await lockedReceipts() - before).toBe(1);
+  });
+});
+
+describe("the administrator count includes cleared content hashes (#1931)", () => {
+  it("counts a sighting on a document and one on a mail-in attachment once each, and drops each when its row is deleted, with no sweep", async () => {
+    const fixture = await createIntegrationFixture("tier1-damage-content-hash");
+    await getDb().delete(metadataDamageSightings);
+    resetMetadataDamageSightingsForTests();
+    const baseline = await countMetadataDamage();
+    expect(baseline.values).toBe(0);
+
+    const documentId = randomUUID();
+    await getDb().insert(documents).values({
+      id: documentId, householdId: fixture.household.id, itemId: fixture.item.id, displayName: "cleared.pdf", mediaType: "application/pdf",
+      sizeBytes: 10, lifecycle: "available", scanStatus: "clean",
+    });
+    const receiptId = await seedReceipt({ userId: fixture.users.member.id, householdId: fixture.household.id });
+    const attachmentId = await seedAttachment(receiptId, { sha256: "0".repeat(64) });
+    await getDb().insert(metadataDamageSightings).values([
+      { tableName: "documents", columnName: "content_sha256", rowId: documentId },
+      { tableName: "imap_ingestion_attachments", columnName: "content_sha256", rowId: attachmentId },
+    ]);
+
+    expect((await countMetadataDamage()).values, "both cleared rows are counted, once each").toBe(2);
+    expect((await getDocumentHealth()).metadata.damagedValues).toBe(2);
+
+    await getDb().execute(sql`delete from documents where id = ${documentId}`);
+    expect((await countMetadataDamage()).values, "deleting the document drops its sighting from the count").toBe(1);
+
+    await getDb().execute(sql`delete from imap_ingestion_messages where id = ${receiptId}`);
+    expect((await countMetadataDamage()).values, "deleting the receipt cascades to the attachment and drops it").toBe(0);
+    expect((await getDocumentHealth()).metadata.damagedValues).toBe(0);
   });
 });

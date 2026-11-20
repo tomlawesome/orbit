@@ -2,7 +2,8 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
-import { documents, imapIngestionAttachments, imapIngestionMessages, metadataKeys } from "@/db/schema";
+import { documents, imapIngestionAttachments, imapIngestionMessages, metadataDamageSightings, metadataKeys } from "@/db/schema";
+import { flushMetadataDamageSightings, resetMetadataDamageSightingsForTests } from "@/server/metadata/damage-sightings";
 import { deriveDocumentKeyId, getDocumentConfig, resetDocumentConfigForTests } from "@/server/documents/config";
 import { runKekRotationToCompletion, type RotationKeys } from "@/server/documents/rewrap-worker";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
@@ -415,6 +416,82 @@ describe("the backfill seals only a real hash and survives rows it cannot use (#
       warn.mockRestore();
       await getDb().execute(sql`delete from documents where id in ${damaged}`);
     }
+  });
+});
+
+describe("the backfill reports and clears a plain value that is not a SHA-256 (#1931)", () => {
+  it("reports 'not-a-hash' once, clears plain, sealed and index, seals the rows behind it, and never reports or touches it again", async () => {
+    const fixture = await createIntegrationFixture("sealed-backfill-clear-odd");
+    await drainAll();
+    await getDb().delete(metadataDamageSightings);
+    resetMetadataDamageSightingsForTests();
+    const oddRow = `0${randomUUID().slice(1)}`;
+    await getDb().insert(documents).values({
+      id: oddRow, householdId: fixture.household.id, itemId: fixture.item.id, displayName: "odd.pdf", mediaType: "application/pdf",
+      sizeBytes: 10, contentSha256: "not-a-hash", lifecycle: "available", scanStatus: "clean",
+    });
+    const valid = [] as string[];
+    for (let n = 0; n < 3; n += 1) valid.push(await plantLegacy(fixture, "first", sha256(`clear odd neighbour ${n}`)));
+    const warn = vi.spyOn(log, "warn");
+    const reports = () => warn.mock.calls.filter(([entry]) => (entry as { event?: string }).event === "metadata.integrity" && JSON.stringify(entry).includes(oddRow)).length;
+    try {
+      let fixed = 0;
+      for (let call = 0; call < 10; call += 1) fixed += await backfillDocumentContentIndexes(1);
+      const row = await columnsOf(oddRow);
+      expect(row.plain, "the plain column is cleared").toBeNull();
+      expect(row.sealed, "no seal of garbage").toBeNull();
+      expect(row.contentIndex, "no index of garbage").toBeNull();
+      expect(fixed, "the clearing counts as a fix: the odd row and the three behind it").toBeGreaterThanOrEqual(4);
+      for (const [position, id] of valid.entries()) {
+        await expectSealedTo(id, sha256(`clear odd neighbour ${position}`));
+        expect((await columnsOf(id)).plain).toBeNull();
+      }
+      await flushMetadataDamageSightings();
+      const sightings = await getDb().select().from(metadataDamageSightings).where(eq(metadataDamageSightings.rowId, oddRow));
+      expect(sightings, "one damage sighting").toHaveLength(1);
+      expect(sightings[0]).toMatchObject({ tableName: "documents", columnName: "content_sha256" });
+      expect(reports(), "reported once").toBe(1);
+      const settled = await getDb().execute(sql`select to_jsonb(documents) as row from documents where id = ${oddRow}`);
+      await backfillDocumentContentIndexes();
+      await backfillDocumentContentIndexes();
+      expect(reports(), "not reported again").toBe(1);
+      expect(await getDb().execute(sql`select to_jsonb(documents) as row from documents where id = ${oddRow}`), "and not touched").toEqual(settled);
+    } finally {
+      warn.mockRestore();
+      await getDb().execute(sql`delete from documents where id = ${oddRow}`);
+    }
+  });
+
+  it("leaves a damaged plain value alone when it changed between the read and the write", async () => {
+    const fixture = await createIntegrationFixture("sealed-backfill-clear-guard");
+    await drainAll();
+    const newSha = sha256("clear guard new");
+    const id = await plantLegacy(fixture, "first", "not-a-hash");
+    let locked!: () => void;
+    const lockTaken = new Promise<void>((resolve) => { locked = resolve; });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const holder = getDb().transaction(async (transaction) => {
+      await transaction.execute(sql`select 1 from documents where id = ${id} for update`);
+      locked();
+      await gate;
+      await transaction.execute(sql`update documents set content_sha256 = ${newSha} where id = ${id}`);
+    });
+    await lockTaken;
+    const running = backfillDocumentContentIndexes();
+    for (let waited = 0; waited < 3_000; waited += 50) {
+      const rows = await getDb().execute<{ n: number }>(sql`select count(*)::int as n from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock'`);
+      if (Number(rows[0]!.n) > 0) break;
+      await sleep(50);
+    }
+    release();
+    await holder;
+    await running;
+    const mid = await columnsOf(id);
+    if (mid.sealed !== null) await expectSealedTo(id, newSha);
+    else expect(mid.plain, "the changed value is untouched by the clear").toBe(newSha);
+    await drainAll();
+    await expectSealedTo(id, newSha);
   });
 });
 
