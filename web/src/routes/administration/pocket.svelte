@@ -1232,10 +1232,11 @@
         the steps.</p>
     {:else if reading?.id === "damaged" && view?.metadata}
       <p class="p-prose ad-sheet-say">{view.metadata.damagedValues} values have failed their integrity check and can’t be
-        recovered — notes or references on {view.metadata.damagedItems} items, and {view.metadata.damagedReceipts} mail-in
-        messages. Each occurrence is in the logs with its row and column. Overwriting a damaged value repairs the record; a
-        damaged mail-in message can be re-forwarded. Counted as they’re encountered, so the number can grow as items are
-        opened.</p>
+        recovered — notes or references on {view.metadata.damagedItems} items, {view.metadata.damagedReceipts} mail-in
+        messages, and the fingerprints of {view.metadata.damagedDocuments} documents. Each occurrence is in the logs with its
+        row and column. Overwriting a damaged value repairs the record; a damaged mail-in message can be re-forwarded; a
+        damaged document is repaired by removing it and attaching it again. Counted as they’re encountered, so the number can
+        grow as items are opened.</p>
     {:else if reading?.id === "bundle"}
       <p class="p-prose ad-sheet-say">If the encryption key is ever lost with no recovery bundle to recover it, every
         document, all encrypted metadata, and — once account addresses are encrypted — every stored address are gone for

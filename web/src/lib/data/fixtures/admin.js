@@ -86,6 +86,7 @@ export const ADMIN_DOCUMENT_HEALTH_FIXTURE = {
       damagedValues: 0,
       damagedItems: 0,
       damagedReceipts: 0,
+      damagedDocuments: 0,
     },
   },
 };
