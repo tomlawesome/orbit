@@ -508,3 +508,7 @@ timeout on this one case rather than a global raise.
 ## upgrade_cell: [latest-3, all-keys] "Could not download the release manifest for channel v0.3.7" (image-registry)
 
 - 2026-11-19 · !1409 a44b60f8 · pipeline 4800 / upgrade_cell: [latest-3, all-keys] (job 57816) · the old installer's identity phase failed `reason=image-registry`, then "Could not download the release manifest for channel v0.3.7", step=install assertion=install-exited-0. The retry, job 57965, passed on the same commit. First sighting.
+
+## scripts/repair-root-left-1897.test.mjs "#1897 T1: ... > a find that stalls is timed out: 'cannot check', never 'same', within the step limit plus grace" (:97)
+
+- 2026-11-20 · !1428 at ecb06829 (batch-b fa16f885 merged in; !1428 touches no repair file) · pipeline 4857 / fast (job 58414) · `the tree-mode find never went through setpriv: expected [] to not deeply equal []` at :102. The file passed 3 runs of 3 locally on the same tree, and passed in !1427's pipeline 4841 (f8505411); retried as job 58493. First sighting.
