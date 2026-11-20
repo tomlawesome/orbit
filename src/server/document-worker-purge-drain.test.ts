@@ -57,6 +57,7 @@ vi.mock("@/server/document-maintenance/storage-reconciliation", () => ({
 vi.mock("@/server/document-maintenance/content-index-backfill", () => ({ backfillDocumentContentIndexes: m.none }));
 vi.mock("@/server/document-maintenance/imap-attachment-hash-backfill", () => ({ backfillImapAttachmentHashes: m.none }));
 vi.mock("@/server/document-maintenance/preview-jobs", () => ({ startPreviewWorker: vi.fn() }));
+vi.mock("@/server/mail-in/staged-transfer", () => ({ settleStuckMailTransfers: m.none }));
 
 import { getDocumentWorkerHealth, runDocumentMaintenanceCycle, startDocumentWorker } from "./document-worker";
 import { workerState } from "./document-maintenance/worker-state";
