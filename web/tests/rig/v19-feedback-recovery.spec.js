@@ -38,8 +38,8 @@ import { pickImportance } from "./importance-support.js";
  *   focus      when the failure is shown, focus has not fallen back to <body>
  *              -- where a screen reader loses its place and a keyboard reader
  *              has to find their way back.
- * Where the product falls short, the test is `test.fail` with the defect named,
- * never a loosened check.
+ * Where the product falls short, mark the test `test.fail` with the defect
+ * named, never a loosened check.
  *
  * Each journey starts from the fixture app's own state: /create, the fixture
  * inbox's approvable "Home insurance renewal" receipt, and Harlow Home's
@@ -55,8 +55,6 @@ import { pickImportance } from "./importance-support.js";
  */
 test.use({ baseURL: APP, serviceWorkers: "block" });
 
-const isFirefox = () => test.info().project.use.browserName === "firefox";
-const isDeskWebkit = () => test.info().project.name === "rig-webkit-desktop";
 const isPocket = () => onPhone(test.info());
 
 /** Focus on `selector` by keyboard: already there, or Tab onward to it.
@@ -75,37 +73,10 @@ const shownText = (page, words) => page.getByText(words).filter({ visible: true 
  *   name: string,
  *   words: RegExp,
  *   fire: (page: Page) => Promise<() => Promise<void>>,
- *   focusDefect?: () => string | undefined,
- *   focusFixme?: () => string | undefined,
  * }} Journey
  * `words` is what the failure says, as the reader sees it; `fire` drives up to
- * the failing act, fires it, and returns the keyboard retry. `focusDefect`
- * names a defect the check expects to fail on; `focusFixme` is
- * a reason the focus check cannot report either way on this project (#1233).
+ * the failing act, fires it, and returns the keyboard retry.
  */
-
-/* The defect common to three journeys: the button that was pressed disables
-   itself (or is swapped for a disabled copy) while the request is out, and a
-   focused control that becomes disabled loses focus to <body>. When the
-   failure comes back the button is live again, but focus is not on it. */
-const FOCUS_LOST_TO_DISABLED_BUTTON = (/** @type {string} */ where) =>
-  `DEFECT (#1178): ${where} disables the pressed button while the request is out, so focus falls back to <body> `
-  + "and the failure leaves the reader nowhere -- keep focus on the control (aria-disabled, not disabled) or move it to the message";
-
-/* #1183: on Firefox that defect is a race, not a certainty. Firefox sometimes
-   keeps focus on the pressed button while it is disabled and sometimes drops it
-   to <body>, run to run on the same code, so test.fail would pass or fail by
-   chance: every check that expects the defect is fixme on Firefox until #1178's
-   fix makes it deterministic; Chromium still proves the defect every run. */
-const FOCUS_DEFECT_RACES_ON_FIREFOX =
-  "DEFECT (#1178), timing-dependent on Firefox: the pressed button, disabled while its request is out, sometimes "
-  + "keeps focus and sometimes drops it to <body>, so this check cannot report either way until the button keeps focus";
-
-/* #1219: the same race on desktop WebKit (a timing-dependent expected failure
-   is fixme, never fail: owner, 2026-10-05, #1196). */
-const FOCUS_DEFECT_RACES_ON_DESKTOP_WEBKIT =
-  "DEFECT (#1178), timing-dependent on desktop Safari (#1219): the pressed button, disabled while its request is out, "
-  + "sometimes keeps focus and sometimes drops it to <body>, so this check cannot report either way until the button keeps focus";
 
 /* ── online-workspace policy ───────────────────────────────────────────── */
 
@@ -225,14 +196,6 @@ const drawerApproval = {
       await expect(page.locator(act)).toHaveCount(0, { timeout: SETTLE });
     };
   },
-  /* #1233: desktop WebKit kept focus on the amend card's button, as it keeps it
-     on the create card (#1192) -- and the create card's check on desktop WebKit
-     then raced (#1219). One observation is not a certainty either way, so on
-     desktop WebKit this check is fixme; the phone and the other engines keep
-     their marks. The phone's row puts focus on its own face when the act
-     returns (Row.svelte run), so focus is never dropped there. */
-  focusDefect: () => (isPocket() ? undefined : FOCUS_LOST_TO_DISABLED_BUTTON("the desk suggestion drawer's Add to orbit")),
-  focusFixme: () => (isDeskWebkit() ? FOCUS_DEFECT_RACES_ON_DESKTOP_WEBKIT : undefined),
 };
 
 /** @type {Journey} */
@@ -259,15 +222,6 @@ const inboxApproval = {
       await expect(page.locator(act)).toHaveCount(0, { timeout: SETTLE });
     };
   },
-  /* Desktop Safari keeps focus on the disabled button here, as every WebKit
-     does on /create; the pocket keeps its mark. A traced local desktop WebKit
-     run (#1235) dropped it to <body> -- so on desktop WebKit this one is the
-     same race the item view has, not a certainty either way: fixme there. */
-  focusDefect: () =>
-    isDeskWebkit()
-      ? undefined
-      : FOCUS_LOST_TO_DISABLED_BUTTON(isPocket() ? "the pocket inbox's ReviewCard" : "the desk /inbox row's Add to orbit"),
-  focusFixme: () => (isDeskWebkit() ? FOCUS_DEFECT_RACES_ON_DESKTOP_WEBKIT : undefined),
 };
 
 /* ── signed-in lifecycle ───────────────────────────────────────────────── */
@@ -344,10 +298,6 @@ for (const journey of JOURNEYS) {
   });
 
   test(`${journey.name} leaves focus where the reader was`, async ({ page }) => {
-    const defect = journey.focusDefect?.();
-    test.fixme(Boolean(journey.focusFixme?.()), journey.focusFixme?.());
-    test.fixme(Boolean(defect) && isFirefox(), FOCUS_DEFECT_RACES_ON_FIREFOX);
-    test.fail(Boolean(defect), defect);
     /* each focusHeld read now waits for a paint, seconds apart on a loaded
        WebKit (#1705), so the poll and the test get room for several reads */
     test.setTimeout(120_000);

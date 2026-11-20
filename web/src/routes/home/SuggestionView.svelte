@@ -138,10 +138,10 @@
          second fires. One operation id per receipt makes the write
          idempotent under any retry (home's tapReceipt). -->
     <div class="actions" role="group" aria-label="Decide">
-      <button class="yes" disabled={busy || locked} onclick={() => onReceiptTap(suggestion, "approve")}>
+      <button class="yes" disabled={locked} aria-disabled={busy ? "true" : undefined} onclick={() => !busy && onReceiptTap(suggestion, "approve")}>
         {armed.id === row.id && armed.act === "approve" ? "tap again to approve" : "Add to orbit"}
       </button>
-      <button disabled={busy} onclick={() => onReceiptTap(suggestion, "dismiss")}>
+      <button aria-disabled={busy ? "true" : undefined} onclick={() => !busy && onReceiptTap(suggestion, "dismiss")}>
         {armed.id === row.id && armed.act === "dismiss" ? "tap again to dismiss" : "Dismiss"}
       </button>
     </div>

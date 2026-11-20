@@ -73,6 +73,10 @@
    * @param {HTMLElement | null} button
    */
   async function tap(receipt, act, button) {
+    /* A press while a decision is out is ignored. The buttons are aria-disabled,
+       never `disabled`: a focused control that becomes disabled drops focus to
+       <body>, and a failure that then shows leaves the reader nowhere (#1182). */
+    if (busy) return;
     problem = null;
     /* #1650: held mail cannot be added; its control is shaded, and a press that
        reaches here anyway sends nothing. */
@@ -218,11 +222,11 @@
               {#if heldForSenderCheck(receipt)}
                 <button class="yes" disabled>Add to orbit</button>
               {:else}
-              <button class="yes" disabled={busy === receipt.id || locked(receipt)} onclick={(event) => tap(receipt, "approve", event.currentTarget)}>
+              <button class="yes" disabled={locked(receipt)} aria-disabled={busy === receipt.id ? "true" : undefined} onclick={(event) => tap(receipt, "approve", event.currentTarget)}>
                 {#if flagged}{isArmed(receipt, "approve") ? "tap again to add" : without}{:else}{isArmed(receipt, "approve") ? "tap again to approve" : "Add to orbit"}{/if}
               </button>
               {/if}
-              <button disabled={busy === receipt.id} onclick={(event) => tap(receipt, "dismiss", event.currentTarget)}>
+              <button aria-disabled={busy === receipt.id ? "true" : undefined} onclick={(event) => tap(receipt, "dismiss", event.currentTarget)}>
                 {#if flagged}{isArmed(receipt, "dismiss") ? "tap again to discard" : "Discard everything"}{:else}{isArmed(receipt, "dismiss") ? "tap again to dismiss" : "Dismiss"}{/if}
               </button>
               <span class="twotap">— both ask twice</span>
@@ -273,7 +277,7 @@
               {/if}
             </div>
             {#if failure.canDiscard}
-              <button disabled={busy === failure.id} onclick={(event) => tap(failure, "dismiss", event.currentTarget)}>
+              <button aria-disabled={busy === failure.id ? "true" : undefined} onclick={(event) => tap(failure, "dismiss", event.currentTarget)}>
                 {isArmed(failure, "dismiss") ? "tap again to remove" : "remove"}
               </button>
             {/if}
