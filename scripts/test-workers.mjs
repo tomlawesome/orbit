@@ -34,11 +34,10 @@ function quotaCpus(cpuMax, cpus) {
   return Math.min(cpus, Math.max(1, Math.floor(quota / period)));
 }
 
-export function testWorkers({
-  env = process.env,
-  cpus = os.availableParallelism(),
-  cpuMax = readCpuMax(),
-} = {}) {
+export function testWorkers(options = {}) {
+  const { env = process.env, cpus = os.availableParallelism() } = options;
+  // An explicit `cpuMax: undefined` means "no quota file"; only an absent key reads the real one.
+  const cpuMax = Object.hasOwn(options, "cpuMax") ? options.cpuMax : readCpuMax();
   const override = env.ORBIT_TEST_WORKERS;
   if (override !== undefined) {
     const n = overridePattern.test(override) ? Number(override) : Number.NaN;
