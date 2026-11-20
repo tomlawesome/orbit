@@ -626,6 +626,7 @@ describe("damaged values are countable for an administrator (#941)", () => {
       damagedValues: 1,
       damagedItems: 1,
       damagedReceipts: 0,
+      damagedDocuments: 0,
     });
 
     // Overwriting is the repair (ADR-0024), so the count goes with it. The
