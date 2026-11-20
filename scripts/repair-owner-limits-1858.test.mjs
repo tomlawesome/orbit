@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import { ACTIONS, mailFolder, runOwner } from "./repair-owner-fixtures.mjs";
-import { privShims, realTool } from "./repair-priv-shims.mjs";
+import { expectStalledStepsEnded, privShims, realTool } from "./repair-priv-shims.mjs";
 import { scratchDir, treeSnapshot } from "./repair-test-harness.mjs";
 
 // #1858 (spec: note 61727, T1-T5): run as root in a folder another user owns, every child repair runs as that
@@ -17,11 +17,15 @@ import { scratchDir, treeSnapshot } from "./repair-test-harness.mjs";
 
 vi.setConfig({ testTimeout: 90_000 });
 
-const LIMIT = { ORBIT_REPAIR_OWNER_STEP_TIMEOUT: "2" };
-// The limit (2 s) plus the kill grace (5 s) plus a slow host's start-up; the spec's own budget is limit + grace.
-const BUDGET_MS = 15_000;
-// The ignore-TERM and grandchild cases take about 11 s; 40 s keeps a loaded runner from flaking them.
-const SLOW_BUDGET_MS = 40_000;
+// #1933 (owner 77a): a stall case is judged by its events (the stalled child got TERM and, if it ignores TERM,
+// KILL; the timed-out line; the status; nothing left), not by how long repair took. STALL_CAP is the one cap per
+// case, there only to catch a real hang (the default 25 s cap was overrun by a loaded runner). 5 s, not 2: the
+// limit is every owner step's, and at 2 s a step that does not stall could overrun on a loaded runner (#1928).
+// Cases that stall nothing run under the default limit, or (the control) a long one.
+const STALL_SECONDS = 5;
+const LIMIT = { ORBIT_REPAIR_OWNER_STEP_TIMEOUT: String(STALL_SECONDS) };
+const LONG_LIMIT = { ORBIT_REPAIR_OWNER_STEP_TIMEOUT: "30" };
+const STALL_CAP = 60;
 const LOCK = ["backups", ".orbit-backup-restore.lock"];
 const MAIL_DONE = "execute action=retire-smtp-lines resolves=smtp-lines-retirable result=done";
 
@@ -39,9 +43,8 @@ const lockFree = (targetDir) => !existsSync(join(targetDir, ...LOCK)) || spawnSy
 const orbitLines = (result) => result.stderr.split("\n").filter((line) => line.startsWith("Orbit repair:"));
 
 /** The common outcome of every limit: bounded, named, nothing left, lock free. */
-function expectBounded(result, targetDir, before, reason, shims, budgetMs = BUDGET_MS) {
+function expectBounded(result, targetDir, before, reason, shims) {
   expect(result.hung, `repair was still running after the test's own cap:\n${result.stderr.slice(0, 600)}`).toBe(false);
-  expect(result.ms, "repair outlived the step limit plus the kill grace").toBeLessThan(budgetMs);
   expect(result.stdout).not.toContain(MAIL_DONE);
   expect(result.status).not.toBe(0);
   const named = orbitLines(result).filter((line) => reason.test(line));
@@ -65,14 +68,15 @@ describe("#1858 T1, T2, T5: a stopped, TERM-proof or pipe-holding owner child en
       ["ignore-term", /timed out/iu],
       ["grandchild", /timed out/iu],
     ]) {
-      it(`${what}: a child that ${kind === "stop" ? "stops itself (SIGSTOP)" : kind === "ignore-term" ? "ignores TERM" : "leaves a grandchild holding the pipe"} is refused as timed out within the limit plus grace`, () => {
+      it(`${what}: a child that ${kind === "stop" ? "stops itself (SIGSTOP)" : kind === "ignore-term" ? "ignores TERM" : "leaves a grandchild holding the pipe"} is refused as timed out; a stalled child gets TERM (and KILL if it ignores TERM) and is gone`, () => {
         const targetDir = folder(vehicle);
         const shims = privShims(targetDir, { variant: { kind, match: vehicle.match } });
         const before = treeSnapshot(targetDir);
         try {
-          const result = runOwner(targetDir, { shims, state: { db: "running", app: "running" }, env: LIMIT });
+          const result = runOwner(targetDir, { shims, state: { db: "running", app: "running" }, env: LIMIT, capSeconds: STALL_CAP });
           expect(shims.setprivCalls().length, "no owner child was started").toBeGreaterThan(0);
-          expectBounded(result, targetDir, before, reason, shims, kind === "stop" ? BUDGET_MS : SLOW_BUDGET_MS);
+          if (kind !== "grandchild") expectStalledStepsEnded(shims.stalledSteps(), result, STALL_SECONDS);
+          expectBounded(result, targetDir, before, reason, shims);
         } finally {
           shims.cleanup();
         }
@@ -80,12 +84,12 @@ describe("#1858 T1, T2, T5: a stopped, TERM-proof or pipe-holding owner child en
     }
   }
 
-  it("the write step: a child that floods its name output is refused as too large within the limit, and nothing is left", () => {
+  it("the write step: a child that floods its name output is refused as too large, and nothing is left", () => {
     const targetDir = folder({ prepared: true });
     const shims = privShims(targetDir, { variant: { kind: "flood", match: "*smtp-owner-write*" } });
     const before = treeSnapshot(targetDir);
     try {
-      const result = runOwner(targetDir, { shims, state: { db: "running", app: "running" }, env: LIMIT });
+      const result = runOwner(targetDir, { shims, state: { db: "running", app: "running" } });
       expect(shims.setprivCalls().length, "no owner child was started").toBeGreaterThan(0);
       expectBounded(result, targetDir, before, /too large|capped|4096/iu, shims);
     } finally {
@@ -96,7 +100,7 @@ describe("#1858 T1, T2, T5: a stopped, TERM-proof or pipe-holding owner child en
   it("control: with a well-behaved owner, the step limit changes nothing", () => {
     const targetDir = folder({ prepared: true });
     const shims = privShims(targetDir);
-    const result = runOwner(targetDir, { shims, state: { db: "running", app: "running" }, env: LIMIT });
+    const result = runOwner(targetDir, { shims, state: { db: "running", app: "running" }, env: LONG_LIMIT });
     expect(result.stdout, result.stderr).toContain(MAIL_DONE);
   });
 });
@@ -141,7 +145,6 @@ describe("#1858 T4: root reads only a regular file, at most 1 MiB, in time", () 
     try {
       const result = runOwner(targetDir, { shims, state: { db: "running", app: "running" }, env: { ...LIMIT, PATH: `${statDir}:${shims.env.PATH}` } });
       expect(result.hung, "root blocked on the FIFO").toBe(false);
-      expect(result.ms).toBeLessThan(BUDGET_MS);
       expect(result.stdout).not.toContain(MAIL_DONE);
       expect(orbitLines(result).some((line) => /not a regular file/iu.test(line)), `no line says 'not a regular file':\n${result.stderr.slice(0, 1500)}`).toBe(true);
       expect(treeSnapshot(targetDir).split("\n").filter((line) => !line.startsWith("./docker-compose.mail.yml ")).join("\n")).toBe(before);
@@ -165,7 +168,7 @@ describe("#1858 T4: root reads only a regular file, at most 1 MiB, in time", () 
     expect(readFileSync(overlay).length).toBeGreaterThan(1024 * 1024);
     const shims = privShims(targetDir);
     const before = treeSnapshot(targetDir);
-    const result = runOwner(targetDir, { shims, state: { db: "running", app: "running" }, env: LIMIT });
+    const result = runOwner(targetDir, { shims, state: { db: "running", app: "running" } });
     expectBounded(result, targetDir, before, /too large/iu, shims);
   });
 
@@ -178,9 +181,8 @@ describe("#1858 T4: root reads only a regular file, at most 1 MiB, in time", () 
     const before = treeSnapshot(targetDir);
     const envBefore = readFileSync(join(targetDir, ".env-orbit"));
     try {
-      const result = runOwner(targetDir, { shims, state, env: LIMIT });
+      const result = runOwner(targetDir, { shims, state });
       expect(result.hung).toBe(false);
-      expect(result.ms).toBeLessThan(BUDGET_MS);
       expect(result.stdout).toContain("execute action=restore-transaction resolves=configuration-migration-interrupted result=failed");
       expect(orbitLines(result).some((line) => /too large/iu.test(line)), `no line says 'too large':\n${result.stderr.slice(0, 1500)}`).toBe(true);
       expect(readFileSync(join(targetDir, ".env-orbit")).equals(envBefore)).toBe(true);

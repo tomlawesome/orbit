@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import { mailFolder, runOwner } from "./repair-owner-fixtures.mjs";
-import { privShims, realTool } from "./repair-priv-shims.mjs";
+import { expectStalledStepsEnded, privShims, realTool } from "./repair-priv-shims.mjs";
 import { makeFixture, scratchDir } from "./repair-test-harness.mjs";
 
 // #1887 (spec R1-R4): run as root in a folder another user owns, the directory branch of
@@ -15,8 +15,11 @@ import { makeFixture, scratchDir } from "./repair-test-harness.mjs";
 
 vi.setConfig({ testTimeout: 90_000 });
 
-const LIMIT = { ORBIT_REPAIR_OWNER_STEP_TIMEOUT: "2" };
-const BUDGET_MS = 30_000;
+// #1933 (owner 77a): a stall case is judged by its events, not by how long repair took; restore()'s 40 s cap only
+// catches a real hang. 5 s, not 2: the limit is every owner step's, and at 2 s a step that does not stall could
+// overrun on a loaded runner (#1928). The flood case stalls nothing and runs under the default limit.
+const STALL_SECONDS = 5;
+const LIMIT = { ORBIT_REPAIR_OWNER_STEP_TIMEOUT: String(STALL_SECONDS) };
 const RUNNING = { db: "running", app: "running" };
 const SAME_LINE = /would change nothing/u;
 const MAIL_DONE = "execute action=retire-smtp-lines resolves=smtp-lines-retirable result=done";
@@ -66,20 +69,19 @@ describe("#1887 R1: the directory compare runs diff -r as the owner, under the o
     const shims = shimsFor(folder.targetDir);
     const result = restore(shims, folder, { env: LIMIT });
     expect(result.hung, "root blocked on a FIFO").toBe(false);
-    expect(result.ms).toBeLessThan(BUDGET_MS);
     expect(result.stderr, "a tree holding a FIFO was compared as the same").not.toMatch(SAME_LINE);
     expect(rootCalls(shims, "diff"), "root ran diff over the owner's tree").toEqual([]);
   });
 
   for (const [kind, reason] of [["stop", /timed out/iu], ["flood", /./u]]) {
-    it(`a diff that ${kind === "stop" ? "stalls is timed out" : "floods its output fails"}: 'cannot check', never 'same', bounded, root runs no diff`, () => {
+    it(`a diff that ${kind === "stop" ? "stalls gets TERM and is timed out" : "floods its output fails"}: 'cannot check', never 'same', root runs no diff`, () => {
       const folder = identicalFolder();
       const shims = shimsFor(folder.targetDir, { variant: { kind, match: '*" -- diff "*' } });
       try {
-        const result = restore(shims, folder, { env: LIMIT });
+        const result = restore(shims, folder, kind === "stop" ? { env: LIMIT } : {});
         expect(setprivNaming(shims, DIFF_AS_OWNER), "diff -r never went through setpriv").not.toEqual([]);
         expect(result.hung, "repair was still running after the test's own cap").toBe(false);
-        expect(result.ms, "repair outlived the step limit plus the kill grace").toBeLessThan(BUDGET_MS);
+        if (kind === "stop") expectStalledStepsEnded(shims.stalledSteps(), result, STALL_SECONDS);
         expect(result.stderr, "a diff that did not finish was compared as the same").not.toMatch(SAME_LINE);
         expect(orbitLines(result).some((line) => reason.test(line)), `no 'Orbit repair:' line ${reason}:\n${result.stderr.slice(0, 1200)}`).toBe(true);
         expect(rootCalls(shims, "diff"), "root ran diff over the owner's tree").toEqual([]);
@@ -199,7 +201,7 @@ describe("#1887 R2: smtp_env_sum reads .env-orbit through the bounded read and d
       const shims = shimsFor(targetDir);
       const result = run(shims, targetDir, { env: { PATH: `${swapGrep(targetDir, kind)}:${shims.env.PATH}` }, capSeconds: 30 });
       expect(result.hung, "root blocked on .env-orbit").toBe(false);
-      expect(result.ms).toBeLessThan(BUDGET_MS);
+      expect(orbitLines(result).filter((line) => /timed out/iu.test(line)), "root blocked until a step limit stopped it").toEqual([]);
       expect(result.stdout, "the swapped file was retired").not.toContain(MAIL_DONE);
       expect(rootCalls(shims, "cksum"), "root ran cksum on the swapped .env-orbit").toEqual([]);
       expect(orbitLines(result).some((line) => /not a regular file|not read|refused/u.test(line)), `no refusal line:\n${result.stderr.slice(0, 1200)}`).toBe(true);
