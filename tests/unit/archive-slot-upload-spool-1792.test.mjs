@@ -526,6 +526,8 @@ describe("L4: the slot is exclusive during processing, and spooled requests wait
 
     const waiting = track(whole(PREVIEW, "owner-2", HOUSEHOLD_B));
     await until(() => mocks.spoolPortableArchiveUpload.mock.calls.length === 2, "owner-2's preview is spooling");
+    // Queue order is the order the spools finish: owner-4 starts only once owner-2's spool is done and it is waiting for the slot.
+    await until(() => spoolsFinished === 2, "owner-2's spool is finished", 20_000);
     await settle();
     const later = track(whole(PREVIEW, "owner-4", HOUSEHOLD_D));
     await until(() => mocks.spoolPortableArchiveUpload.mock.calls.length === 3, "owner-4's preview is spooling");
