@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import { ACTIONS, IMAGE_COMPOSE, composeFolder, runOwner } from "./repair-owner-fixtures.mjs";
-import { privShims, realTool } from "./repair-priv-shims.mjs";
+import { expectStalledStepsEnded, privShims, realTool, stallBody } from "./repair-priv-shims.mjs";
 import { composeUpCalls, scratchDir, treeSnapshot } from "./repair-test-harness.mjs";
 
 // #1873 (spec: note on the issue, X1-X5): the Low gaps the inline review of the #1857/#1858 owner-write fix found.
@@ -20,9 +20,13 @@ import { composeUpCalls, scratchDir, treeSnapshot } from "./repair-test-harness.
 
 vi.setConfig({ testTimeout: 90_000 });
 
-const LIMIT = { ORBIT_REPAIR_OWNER_STEP_TIMEOUT: "2" };
-// The limit (2 s) plus the kill grace (5 s) plus a loaded host's start-up.
-const BUDGET_MS = 30_000;
+// #1933 (owner 77a): a stall case is judged by its events (the stalled child got TERM and, if it ignores TERM,
+// KILL; the timed-out lines; the status; nothing left), not by how long repair took. STALL_CAP is the one cap per
+// case, there only to catch a real hang. 5 s, not 2: the limit is every owner step's, and at 2 s a step that does
+// not stall could overrun on a loaded runner (#1928). Cases that stall nothing run under the default limit.
+const STALL_SECONDS = 5;
+const LIMIT = { ORBIT_REPAIR_OWNER_STEP_TIMEOUT: String(STALL_SECONDS) };
+const STALL_CAP = 60;
 const LOCK = ["backups", ".orbit-backup-restore.lock"];
 const REAL_FAILED = (action) => action.done.replace("result=done", "result=failed");
 /** Owner steps that time out per action when the shim stalls every owner child. restore-compose-file is 2: the write and its owner-run rm cleanup both stall. */
@@ -58,11 +62,8 @@ const VEHICLES = {
 function catHang(kind) {
   const dir = scratchDir("orbit-lows-cat-");
   const pids = join(dir, "pids.log");
-  const body =
-    kind === "stop"
-      ? `kill -STOP $$`
-      : `trap '' TERM; for _i in $(seq 1 40); do sleep 1; done`;
-  writeFileSync(join(dir, "cat"), `#!/usr/bin/env bash\nif [[ "\${ORBIT_TEST_PRIVDROP:-0}" == 1 ]]; then echo $$ >> '${pids}'; ${body}; exit 1; fi\nexec '${realTool("cat")}' "$@"\n`);
+  const signals = join(dir, "signals.log");
+  writeFileSync(join(dir, "cat"), `#!/usr/bin/env bash\nif [[ "\${ORBIT_TEST_PRIVDROP:-0}" == 1 ]]; then ${stallBody(kind, pids, signals)}; exit 1; fi\nexec '${realTool("cat")}' "$@"\n`);
   chmodSync(join(dir, "cat"), 0o755);
   return {
     dir,
@@ -72,10 +73,9 @@ function catHang(kind) {
   };
 }
 
-/** The common outcome of a stopped owner step: bounded, named, nothing left behind. */
-function expectStopped(result, targetDir, action, reason, budgetMs = BUDGET_MS, expectedTimedOut = 1) {
+/** The common outcome of a stopped owner step: not hung, named, nothing left behind. */
+function expectStopped(result, targetDir, action, reason, expectedTimedOut = 1) {
   expect(result.hung, `repair was still running after the test's own cap:\n${result.stderr.slice(0, 600)}`).toBe(false);
-  expect(result.ms, "repair outlived the step limit plus the kill grace").toBeLessThan(budgetMs);
   expect(result.stdout).not.toContain(action.done);
   expect(result.status).not.toBe(0);
   expect(orbitLines(result).some((line) => reason.test(line)), `no 'Orbit repair:' line gives the reason ${reason}:\n${result.stderr.slice(0, 1500)}`).toBe(true);
@@ -89,14 +89,17 @@ describe("#1873 X1/X5: a stopped, TERM-proof or flooding owner step leaves no te
       ["stop", "stops itself (SIGSTOP) while it writes", /timed out/iu],
       ["ignore-term", "ignores TERM while it writes", /timed out/iu],
     ]) {
-      it(`${what}: an owner child that ${label} is ended within the limit plus grace and its temp file removed`, () => {
+      it(`${what}: an owner child that ${label} is stopped as timed out and its temp file removed`, () => {
         const { targetDir, state, fakeBin } = vehicle.make();
         const hang = catHang(kind);
         const shims = privShims(targetDir);
         try {
-          const result = runOwner(targetDir, { shims, state, fakeBin, env: { ...LIMIT, PATH: `${hang.dir}:${shims.env.PATH}` }, capSeconds: 40 });
+          const result = runOwner(targetDir, { shims, state, fakeBin, env: { ...LIMIT, PATH: `${hang.dir}:${shims.env.PATH}` }, capSeconds: STALL_CAP });
           expect(shims.setprivCalls().length, "no owner child was started").toBeGreaterThan(0);
           expectStopped(result, targetDir, vehicle.action, reason);
+          // The stalled `cat` is a child of the owner step, not the step timeout signals, so only the step's own
+          // timed-out line (with the limit it was given) is asserted here; the setpriv cases below check the signals.
+          expect(timedOutLines(result).some((line) => line.includes(`timed out after ${STALL_SECONDS} s and was stopped`)), result.stderr.slice(0, 1500)).toBe(true);
         } finally {
           hang.cleanup();
           shims.cleanup();
@@ -113,9 +116,11 @@ describe("#1873 X1/X5: a stopped, TERM-proof or flooding owner step leaves no te
         const { targetDir, state, fakeBin } = vehicle.make();
         const shims = privShims(targetDir, { variant: { kind, match: "*smtp-owner-write*" } });
         try {
-          const result = runOwner(targetDir, { shims, state, fakeBin, env: LIMIT, capSeconds: 40 });
+          const stalls = kind !== "run-then-flood";
+          const result = runOwner(targetDir, { shims, state, fakeBin, ...(stalls ? { env: LIMIT } : {}), capSeconds: STALL_CAP });
           expect(shims.setprivCalls().length, "no owner child was started").toBeGreaterThan(0);
           expectStopped(result, targetDir, vehicle.action, reason);
+          if (stalls) expectStalledStepsEnded(shims.stalledSteps(), result, STALL_SECONDS);
         } finally {
           shims.cleanup();
         }
@@ -225,9 +230,10 @@ describe("#1873 X2: a rename that timed out but landed is done", () => {
     const { targetDir, state, fakeBin } = compose.make();
     const shims = privShims(targetDir, { variant: { kind: "run-then-stop", match: "*mv*-nT*" } });
     try {
-      const result = runOwner(targetDir, { shims, state, fakeBin, env: LIMIT, capSeconds: 40 });
+      const result = runOwner(targetDir, { shims, state, fakeBin, env: LIMIT, capSeconds: STALL_CAP });
       expect(shims.setprivCalls().some((line) => /mv\s+-nT/u.test(line)), `the owner's mv was never run:\n${shims.setprivCalls().join("\n")}`).toBe(true);
       expect(result.hung, result.stderr.slice(0, 600)).toBe(false);
+      expectStalledStepsEnded(shims.stalledSteps(), result, STALL_SECONDS);
       expect(result.stdout, `the landed restore was reported failed:\n${result.stderr.slice(0, 1500)}`).not.toContain(REAL_FAILED(compose));
       expect(result.stdout, result.stderr.slice(0, 1500)).toContain(compose.done);
       expect(readFileSync(join(targetDir, "docker-compose.yml")).equals(IMAGE_COMPOSE)).toBe(true);
@@ -241,9 +247,10 @@ describe("#1873 X2: a rename that timed out but landed is done", () => {
     const { targetDir, state, fakeBin } = compose.make();
     const shims = privShims(targetDir, { variant: { kind: "stop", match: "*mv*-nT*" } });
     try {
-      const result = runOwner(targetDir, { shims, state, fakeBin, env: LIMIT, capSeconds: 40 });
+      const result = runOwner(targetDir, { shims, state, fakeBin, env: LIMIT, capSeconds: STALL_CAP });
       expect(shims.setprivCalls().some((line) => /mv\s+-nT/u.test(line)), "the owner's mv was never run").toBe(true);
       expect(result.hung, result.stderr.slice(0, 600)).toBe(false);
+      expectStalledStepsEnded(shims.stalledSteps(), result, STALL_SECONDS);
       expect(result.stdout).not.toContain(compose.done);
       expect(result.stdout).toContain(REAL_FAILED(compose));
       expect(existsSync(join(targetDir, "docker-compose.yml"))).toBe(false);
@@ -309,7 +316,7 @@ trap __orbit_lock_swap DEBUG
         const result = runOwner(targetDir, { shims, state, env, capSeconds: 30 });
         expect(existsSync(flag), "the swap did not happen, so the test proves nothing").toBe(true);
         expect(result.hung, "repair blocked opening the FIFO").toBe(false);
-        expect(result.ms, "repair waited on the lock").toBeLessThan(25_000);
+        expect(orbitLines(result).filter((line) => /timed out/iu.test(line)), "root blocked until a step limit stopped it").toEqual([]);
         expect(result.stdout).not.toContain(start.done);
         expect(orbitLines(result).some((line) => /the lock at .*can't be read/u.test(line)), `no lock refusal line:\n${result.stderr.slice(0, 1500)}`).toBe(true);
         expect(composeUpCalls(result)).toEqual([]);
@@ -346,8 +353,8 @@ trap __orbit_lock_swap DEBUG
       const shims = privShims(targetDir, shimOptions);
       try {
         const result = runOwner(targetDir, { shims, state, capSeconds: 30 });
-        expect(result.hung).toBe(false);
-        expect(result.ms).toBeLessThan(25_000);
+        expect(result.hung, "repair blocked opening the FIFO").toBe(false);
+        expect(orbitLines(result).filter((line) => /timed out/iu.test(line)), "root blocked until a step limit stopped it").toEqual([]);
         expect(result.stdout).not.toContain(start.done);
         expect(orbitLines(result).some((line) => /the lock at .*can't be read/u.test(line)), result.stderr.slice(0, 1500)).toBe(true);
       } finally {
@@ -455,15 +462,15 @@ describe("#1873 X5: the #1858 stall test covers every owner action, not only ret
       ["stop", "stops itself (SIGSTOP)"],
       ["ignore-term", "ignores TERM"],
     ]) {
-      it(`${name}: an owner child that ${label} ends the action as timed out within the limit plus grace, nothing left`, () => {
+      it(`${name}: an owner child that ${label} gets TERM (and KILL if it ignores TERM) and ends the action as timed out, nothing left`, () => {
         const { targetDir, state, fakeBin } = action.make();
         const shims = privShims(targetDir, { variant: { kind } });
         const before = treeSnapshot(targetDir);
         try {
-          const result = runOwner(targetDir, { shims, state, fakeBin, env: LIMIT, capSeconds: 40 });
+          const result = runOwner(targetDir, { shims, state, fakeBin, env: LIMIT, capSeconds: STALL_CAP });
           expect(shims.setprivCalls().length, "no owner child was started").toBeGreaterThan(0);
           expect(result.hung, result.stderr.slice(0, 600)).toBe(false);
-          expect(result.ms).toBeLessThan(BUDGET_MS);
+          expectStalledStepsEnded(shims.stalledSteps(), result, STALL_SECONDS);
           expect(result.stdout).not.toContain(action.done);
           expect(result.status).not.toBe(0);
           expect(orbitLines(result).some((line) => /timed out/iu.test(line)), `no 'timed out' line:\n${result.stderr.slice(0, 1500)}`).toBe(true);

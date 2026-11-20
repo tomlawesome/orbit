@@ -22,14 +22,15 @@ describe("#1902 L1: the compose-restore lock does not lapse silently", () => {
     const { targetDir, state, fakeBin } = compose.make();
     const shimDir = scratchDir("orbit-1902-slow-");
     const log = join(shimDir, "lock.log");
-    // Limit 3 s; the owner's sync (2.5 s) and then mv (2.5 s) each fit the limit, together they do not. The mv shim
+    // Limit 10 s; the owner's sync (6 s) and then mv (6 s) each fit the limit, together they do not. The mv shim
     // tries a non-blocking flock on the scratch file after its own wait, i.e. well past the limit: "held" means the
-    // lock is still taken by the restore, "free" means it lapsed.
+    // lock is still taken by the restore, "free" means it lapsed. #1933: it was 3 s with 2.5 s waits, and a loaded
+    // runner pushed the mv past its limit before the probe ran; each step now has 4 s of room.
     const slow = (tool, check) => {
       writeFileSync(join(shimDir, tool), [
         "#!/usr/bin/env bash",
         'if [[ "${ORBIT_TEST_PRIVDROP:-0}" == 1 && "$*" == *.repair.* ]]; then',
-        "  sleep 2.5",
+        "  sleep 6",
         check ? `  f=""; for a in "$@"; do [[ "$a" == *.docker-compose.yml.repair.* ]] && f="$a"; done` : "",
         check ? `  if '${realTool("flock")}' -n "$f" true 2>/dev/null; then echo free >> '${log}'; else echo held >> '${log}'; fi` : "",
         "fi",
@@ -42,7 +43,7 @@ describe("#1902 L1: the compose-restore lock does not lapse silently", () => {
     slow("mv", true);
     const shims = privShims(targetDir);
     try {
-      const result = runOwner(targetDir, { shims, state, fakeBin, env: { ORBIT_REPAIR_OWNER_STEP_TIMEOUT: "3", PATH: `${shimDir}:${shims.env.PATH}` }, capSeconds: 60 });
+      const result = runOwner(targetDir, { shims, state, fakeBin, env: { ORBIT_REPAIR_OWNER_STEP_TIMEOUT: "10", PATH: `${shimDir}:${shims.env.PATH}` }, capSeconds: 60 });
       expect(result.hung, result.stderr.slice(0, 600)).toBe(false);
       const seen = existsSync(log) ? readFileSync(log, "utf8").split("\n").filter(Boolean) : [];
       const held = seen.length > 0 && seen.every((line) => line === "held");
