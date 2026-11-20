@@ -3,8 +3,8 @@ import { expect, test } from "@playwright/test";
 import { THEME_PACKS } from "../../src/lib/theme.js";
 import { installFilmEnded } from "./film-ended.js";
 import { finiteMotionSettled } from "./finite-motion.js";
+import { APP } from "./pocket-states.js";
 
-const APP = process.env.FIDELITY_APP ?? "http://127.0.0.1:4173";
 
 /*
  * THE POCKET FILM IN WEBKIT (#1174).

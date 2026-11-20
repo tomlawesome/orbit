@@ -14,6 +14,7 @@ import pixelmatch from "pixelmatch";
 // there is no `@type`/`@typedef` spelling that fixes a missing module declaration.
 import { PNG } from "pngjs";
 import { settled } from "./settled.js";
+import { APP } from "./pocket-states.js";
 
 /** @typedef {{ width: number, height: number, data: Buffer }} PngImage */
 
@@ -29,7 +30,6 @@ const artifacts = resolve(here, "../../test-results/fidelity");
  * own pair rather than silently reusing, or fighting over, somebody else's.
  * Unset, nothing about this file's behaviour changes.
  */
-const APP = process.env.FIDELITY_APP ?? "http://127.0.0.1:4173";
 const MOCKUPS = process.env.FIDELITY_MOCKUPS ?? "http://127.0.0.1:5174";
 
 /**

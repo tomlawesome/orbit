@@ -1,9 +1,8 @@
 import { mkdirSync } from "node:fs";
 import { expect, test } from "@playwright/test";
-import { settle } from "./pocket-states.js";
+import { APP, settle } from "./pocket-states.js";
 
 /* Same app the fidelity gate photographs (playwright.config.js webServer). */
-const APP = process.env.FIDELITY_APP ?? "http://127.0.0.1:4173";
 /* Set to a directory to keep review screenshots of the kit's parts. */
 const SHOTS = process.env.KIT_SHOTS ?? "";
 if (SHOTS) mkdirSync(SHOTS, { recursive: true });
