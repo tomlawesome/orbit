@@ -16,7 +16,6 @@ vi.setConfig({ testTimeout: 120_000 });
 
 const PASSPHRASE = "correct-horse-battery-staple";
 const LIMIT = { ORBIT_REPAIR_OWNER_STEP_TIMEOUT: "2" };
-const LOCK = ["backups", ".orbit-backup-restore.lock"];
 const EXTRA = ["cp", "install", "touch", "ln", "tee"];
 const HEX = /^[0-9a-f]{64}$/u;
 const ORIGINAL = `${"a".repeat(64)}\n`;
