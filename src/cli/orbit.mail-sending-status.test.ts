@@ -1,10 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { PROCESS_TEST_TIMEOUT_MS } from "../../scripts/process-budget.mjs";
-
-// Each test re-imports the whole CLI after vi.resetModules(); on a loaded
-// runner that import alone can pass the 5 s default, so these get the same
-// budget as the other CLI tests (docs/flakes.md, third sighting).
-vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 // `orbit mail-sending-status` (#1817), written from the issue's specification
 // alone, before the change. Run inside the app container by install.sh --update
@@ -56,23 +50,51 @@ vi.mock("../db", async (importOriginal) => {
 let stdout = "";
 let stderr = "";
 let exitStatus: number | undefined;
-let exited = false;
+/** Resolves when the current case's CLI calls process.exit, its last act on every path (#1937). */
+let finished: Promise<void> = Promise.resolve();
+let finish: () => void = () => {};
+/** The current case's CLI run, if it started one; afterEach waits for it so its output can never reach the next case. */
+let running: Promise<unknown> | undefined;
 const originalArgv = process.argv;
 const originalContext = process.env.ORBIT_ENGINE_CONTEXT;
+
+// #1937: the first, cold import transforms the CLI's whole module graph, which
+// took over 5 s on a loaded runner and timed the first case out. Pay it once
+// here: load the CLI with no command (it prints its usage and calls
+// process.exit, both stubbed) and the two modules mail-sending-status loads,
+// so each case's import after vi.resetModules only re-evaluates them.
+beforeAll(async () => {
+  const exit = vi.spyOn(process, "exit").mockImplementation((() => undefined as never) as never);
+  const out = vi.spyOn(process.stdout, "write").mockImplementation((() => true) as never);
+  const err = vi.spyOn(process.stderr, "write").mockImplementation((() => true) as never);
+  process.argv = ["node", "orbit"];
+  try {
+    await Promise.all([import("./orbit"), import("../server/mail-in/sending-settings"), import("../db")]);
+  } finally {
+    exit.mockRestore();
+    out.mockRestore();
+    err.mockRestore();
+    process.argv = originalArgv;
+    process.exitCode = undefined;
+  }
+});
 
 beforeEach(() => {
   stdout = "";
   stderr = "";
   exitStatus = undefined;
-  exited = false;
+  running = undefined;
+  finished = new Promise((resolve) => {
+    finish = resolve;
+  });
   database.source = null;
   database.imported = false;
   database.failure = null;
   database.closed = 0;
   vi.resetModules();
   vi.spyOn(process, "exit").mockImplementation(((status?: number) => {
-    exited = true;
     exitStatus = status;
+    finish();
     return undefined as never;
   }) as never);
   vi.spyOn(process.stdout, "write").mockImplementation(((chunk: string | Uint8Array) => {
@@ -87,7 +109,10 @@ beforeEach(() => {
   process.exitCode = undefined;
 });
 
-afterEach(() => {
+afterEach(async () => {
+  // A case that failed early still waits here for its CLI to finish, under
+  // the hook limit, before the captures are released.
+  if (running) await running.catch(() => {});
   vi.restoreAllMocks();
   process.argv = originalArgv;
   process.exitCode = undefined;
@@ -95,16 +120,15 @@ afterEach(() => {
   else process.env.ORBIT_ENGINE_CONTEXT = originalContext;
 });
 
-/** Runs the CLI with `args`, waits for it to finish (it answers asynchronously) and returns what it did. */
+/**
+ * Runs the CLI with `args` and waits for its answer: process.exit, which every
+ * path of mail-sending-status and the usage refusal ends with. No clock of its
+ * own; the test limit caps a CLI that never answers (#1937).
+ */
 async function runCli(args: string[]): Promise<{ status: number; stdout: string; stderr: string }> {
   process.argv = ["node", "orbit", ...args];
-  await import("./orbit");
-  const deadline = Date.now() + 3000;
-  while (Date.now() < deadline && !exited && stdout === "" && database.closed === 0) {
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-  // Let a trailing exit or database close settle.
-  await new Promise((resolve) => setTimeout(resolve, 50));
+  running = import("./orbit").then(() => finished);
+  await running;
   const status = exitStatus ?? (typeof process.exitCode === "number" ? process.exitCode : 0);
   return { status, stdout, stderr };
 }

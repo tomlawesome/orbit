@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { runOwner } from "./repair-owner-fixtures.mjs";
-import { privShims, realTool } from "./repair-priv-shims.mjs";
+import { expectStalledStepsEnded, privShims, realTool } from "./repair-priv-shims.mjs";
 import { makeFixture, scratchDir } from "./repair-test-harness.mjs";
 
 // #1897 (spec: note 63862 on the issue, T1-T3; T4, the docs, is not tested), written from the spec alone, on the
@@ -21,9 +21,11 @@ vi.setConfig({ testTimeout: 90_000 });
 const isRoot = process.getuid?.() === 0;
 // #1928: the limit applies to every owner step, not only the find. At 2 s an earlier owner step (the checksum or
 // the owner `diff -r`) could overrun on a loaded runner and end the check before the find ran. 5 s leaves those
-// steps room; the stalled find still times out at 5 s plus the kill grace, well inside BUDGET_MS.
-const LIMIT = { ORBIT_REPAIR_OWNER_STEP_TIMEOUT: "5" };
-const BUDGET_MS = 30_000;
+// steps room. #1933 (owner 77a): the stalled find is judged by its events (TERM reached it, it is gone, the
+// timed-out line), not by how long repair took; restore()'s 40 s cap only catches a real hang. The flood case
+// stalls nothing and runs under the default limit.
+const STALL_SECONDS = 5;
+const LIMIT = { ORBIT_REPAIR_OWNER_STEP_TIMEOUT: String(STALL_SECONDS) };
 const RUNNING = { db: "running", app: "running" };
 const SAME_LINE = /would change nothing/u;
 const UNWRITABLE = /could not be opened for writing/u;
@@ -97,14 +99,14 @@ describe("#1897 T1: as root, the tree-mode listing of the owner's live tree runs
   });
 
   for (const [kind, reason] of [["stop", /timed out/iu], ["flood", /too large \(over 1 MiB\)/u]]) {
-    it(`a find that ${kind === "stop" ? "stalls is timed out" : "floods its output fails"}: 'cannot check', never 'same', within the step limit plus grace`, () => {
+    it(`a find that ${kind === "stop" ? "stalls gets TERM and is timed out" : "floods its output fails"}: 'cannot check', never 'same'`, () => {
       const folder = identicalFolder();
       const shims = shimsFor(folder.targetDir, { variant: { kind, match: "*find*" } });
       try {
-        const result = restore(shims, folder, { env: LIMIT });
+        const result = restore(shims, folder, kind === "stop" ? { env: LIMIT } : {});
         expect(setprivNaming(shims, /find/u), `the tree-mode find never went through setpriv:\n${result.stderr.slice(0, 1200)}`).not.toEqual([]);
         expect(result.hung, "repair was still running after the test's own cap").toBe(false);
-        expect(result.ms, "repair outlived the step limit plus the kill grace").toBeLessThan(BUDGET_MS);
+        if (kind === "stop") expectStalledStepsEnded(shims.stalledSteps(), result, STALL_SECONDS);
         expect(result.stderr, "a listing that did not finish was compared as the same").not.toMatch(SAME_LINE);
         expect(orbitLines(result).some((line) => reason.test(line)), `no 'Orbit repair:' line ${reason}:\n${result.stderr.slice(0, 1200)}`).toBe(true);
       } finally {
