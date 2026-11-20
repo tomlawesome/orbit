@@ -117,6 +117,7 @@ describe("admin reads in fixture mode (#1697)", () => {
       damagedValues: 0,
       damagedItems: 0,
       damagedReceipts: 0,
+      damagedDocuments: 0,
     });
     expect(body.health.quota).toEqual({ usedBytes: expect.any(Number), limitBytes: expect.any(Number) });
     expect(body.health.worker).toHaveProperty("running");

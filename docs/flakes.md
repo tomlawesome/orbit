@@ -556,3 +556,7 @@ timeout on this one case rather than a global raise.
 ## src/lib/backup-restore-cli.test.ts "runBackup > O2-R3: a SIGTERM while the adapter is dumping leaves the .orbit-backup.* scratch in place, and the next runBackup removes it"
 
 - 2026-11-20 · !1433 80582f500 · pipeline 4912 / fast retry (job 59031) · `Test timed out in 5000ms`. Passed in job 58965 on the same code. First sighting.
+
+## scripts/repair-restore-lock-1902.test.mjs "#1902 L1: the compose-restore lock does not lapse silently > as root, a restore whose steps outlast the owner step limit still holds the scratch-file lock ..."
+
+- 2026-11-20 · !1433 5ec1733ff · pipeline 4928 / fast (job 59118) · "the lock lapsed silently (probes: [], status 4)" after the mv step timed out at 3 s on a loaded runner. Passed in pipelines 4890, 4902 and 4912 on the same test code. First sighting.
