@@ -22,7 +22,7 @@ import { asOperationalReason, log } from "@/lib/logger";
 import { appHost, householdLine, renderMail } from "@/server/invitations/mail";
 import { metadataCryptoAvailable } from "@/server/metadata/keys";
 import { openInstanceMetadataReader, openMetadataReader, type MetadataCipher, type MetadataExecutor } from "@/server/metadata/fields";
-import { isAllowedPushEndpoint, type NotificationProviders, type NotificationWorkerConfig } from "@/server/notification-worker";
+import { isAllowedPushEndpoint, isRevokedPushFailure, type NotificationProviders, type NotificationWorkerConfig } from "@/server/notification-worker";
 
 export const APPROVAL_NOTICE_ENTITY = "reviewed_intake_notice";
 const TITLE_COLUMN = "audit_log.approval_notice" as const;
@@ -516,8 +516,7 @@ async function sendPush(subscriptions: PushTarget[], providers: NotificationProv
       });
       delivered = true;
     } catch (error) {
-      const statusCode = (error as { statusCode?: number }).statusCode;
-      if (statusCode === 404 || statusCode === 410) revoked.push(subscription.id);
+      if (isRevokedPushFailure(error, subscription.id)) revoked.push(subscription.id);
       else transient = true;
     }
   }
