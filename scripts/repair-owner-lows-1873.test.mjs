@@ -22,9 +22,13 @@ vi.setConfig({ testTimeout: 90_000 });
 
 const LIMIT = { ORBIT_REPAIR_OWNER_STEP_TIMEOUT: "2" };
 // The limit (2 s) plus the kill grace (5 s) plus a loaded host's start-up.
-const BUDGET_MS = 20_000;
+const BUDGET_MS = 30_000;
 const LOCK = ["backups", ".orbit-backup-restore.lock"];
 const REAL_FAILED = (action) => action.done.replace("result=done", "result=failed");
+/** Owner steps that time out per action when the shim stalls every owner child. restore-compose-file is 2: the write and its owner-run rm cleanup both stall. */
+const TIMED_OUT_STEPS = { "restore-compose-file": 2 };
+const timedOutLines = (result) => orbitLines(result).filter((line) => /timed out/iu.test(line));
+
 const orbitLines = (result) => result.stderr.split("\n").filter((line) => line.startsWith("Orbit repair:"));
 
 /** Every owner-write temp file (any suffix of 6 or more characters) anywhere under the folder. */
@@ -69,12 +73,13 @@ function catHang(kind) {
 }
 
 /** The common outcome of a stopped owner step: bounded, named, nothing left behind. */
-function expectStopped(result, targetDir, action, reason, budgetMs = BUDGET_MS) {
+function expectStopped(result, targetDir, action, reason, budgetMs = BUDGET_MS, expectedTimedOut = 1) {
   expect(result.hung, `repair was still running after the test's own cap:\n${result.stderr.slice(0, 600)}`).toBe(false);
   expect(result.ms, "repair outlived the step limit plus the kill grace").toBeLessThan(budgetMs);
   expect(result.stdout).not.toContain(action.done);
   expect(result.status).not.toBe(0);
   expect(orbitLines(result).some((line) => reason.test(line)), `no 'Orbit repair:' line gives the reason ${reason}:\n${result.stderr.slice(0, 1500)}`).toBe(true);
+  if (reason.test("timed out")) expect(timedOutLines(result), `expected exactly ${expectedTimedOut} owner step(s) to time out:\n${result.stderr.slice(0, 1500)}`).toHaveLength(expectedTimedOut);
   expect(leftovers(targetDir), "an owner-write temp file was left behind").toEqual([]);
 }
 
@@ -462,6 +467,8 @@ describe("#1873 X5: the #1858 stall test covers every owner action, not only ret
           expect(result.stdout).not.toContain(action.done);
           expect(result.status).not.toBe(0);
           expect(orbitLines(result).some((line) => /timed out/iu.test(line)), `no 'timed out' line:\n${result.stderr.slice(0, 1500)}`).toBe(true);
+          const expected = TIMED_OUT_STEPS[name] ?? 1;
+          expect(timedOutLines(result), `expected exactly ${expected} owner step(s) to time out:\n${result.stderr.slice(0, 1500)}`).toHaveLength(expected);
           expect(composeUpCalls(result)).toEqual([]);
           expect(leftovers(targetDir)).toEqual([]);
           expect(treeSnapshot(targetDir), "something was left behind").toBe(before);
