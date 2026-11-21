@@ -1,5 +1,4 @@
 import { readFileSync } from "node:fs";
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { startColourPick, settleColourPick } from "../../web/src/lib/section-colours.js";

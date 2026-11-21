@@ -153,18 +153,18 @@ describe("#1919: a group signal in the recovery-copy window leaves no recovery c
     });
   }
 
-  // The race (a second TERM landing while the EXIT trap runs) has to be repeated to show itself: bounded at 20 runs.
-  it("TERM to the group, 20 times in a row (the race is repeated, bounded): the copy is gone every time", async () => {
-    const leftovers = [];
-    for (let i = 0; i < 20; i += 1) {
+  // The race (a second TERM landing while the EXIT trap runs) has to be repeated to show itself: bounded at 20 runs,
+  // each its own test with the standard guard (#1946, owner 84a), so a loaded runner times out one run, not all 20.
+  it.each(Array.from({ length: 20 }, (_, i) => i + 1))(
+    "TERM to the group, run %i of 20 (the race is repeated, bounded): exit 143, the copy is gone",
+    async () => {
       const r = startRun({ windowSeconds: 3 });
       await r.atWindow();
       process.kill(-r.pgid, "SIGTERM");
-      const status = await done(r);
-      if (status !== 143 || recoveryCopies(r.targetDir).length > 0) leftovers.push(`run ${i + 1}: status ${status}, copies ${recoveryCopies(r.targetDir).join(",") || "none"}`);
-    }
-    expect(leftovers, "runs that were interrupted by TERM and did not end cleanly").toEqual([]);
-  });
+      expect(await done(r), "exit status of the interrupted run").toBe(143);
+      expect(recoveryCopies(r.targetDir), "a private recovery copy was left behind").toEqual([]);
+    },
+  );
 });
 
 describe("#1919: a signal to one process of the run", () => {
