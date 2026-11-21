@@ -494,6 +494,11 @@ export const signInApprovals = pgTable("sign_in_approvals", {
   clientAddress: text("client_address"),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   consumedAt: timestamp("consumed_at", { withTimezone: true }),
+  /* When this approval's spend minted a session, written in the session's own
+     transaction (#1943 SEC-H1), so a session exists exactly when this is set.
+     A spent approval that carries it never becomes a change-password hold on
+     replay, whenever a refusal's mark commits. */
+  sessionMintedAt: timestamp("session_minted_at", { withTimezone: true }),
   outcome: text("outcome"),
   decidedAt: timestamp("decided_at", { withTimezone: true }),
   /* The send limits of ADR-0027 §8, counted where they cannot be forgotten by

@@ -1,0 +1,1 @@
+ALTER TABLE "sign_in_approvals" ADD COLUMN "session_minted_at" timestamp with time zone;
