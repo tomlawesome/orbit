@@ -32,6 +32,11 @@ const ENTRY = /^(\S+)\s+(\S+)\s+(\S+)(?:\s+(\S+))?/;
 const DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
 // Today in UTC; QUARANTINE_TODAY (YYYY-MM-DD) overrides the clock for tests.
 const today = process.env.QUARANTINE_TODAY || new Date().toISOString().slice(0, 10);
+const todayMs = new Date(`${today}T00:00:00Z`).getTime();
+if (!DATE.test(today) || Number.isNaN(todayMs) || new Date(todayMs).toISOString().slice(0, 10) !== today) {
+  console.error(`quarantine list: QUARANTINE_TODAY "${today}" must be a real date as YYYY-MM-DD`);
+  process.exit(2);
+}
 const ISSUES = /^#\d+(,#\d+)*$/;
 
 function specFiles(dir) {

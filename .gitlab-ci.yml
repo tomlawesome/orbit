@@ -2689,7 +2689,7 @@ browser_report:
       PLAYWRIGHT_HTML_OPEN=never PLAYWRIGHT_JUNIT_OUTPUT_NAME=junit.xml PLAYWRIGHT_JSON_OUTPUT_NAME=report.json pnpm exec playwright merge-reports --reporter html,junit,json ./blob-report
       cd ..
       # A pass on retry is flaky (#1744): list it in flaky.txt. Exit 1 is a test that failed every try, which the rig jobs already report; only exit 2 (no usable report) fails this job.
-      rc=0; node scripts/ci/rig-flaky-report.mjs web/report.json flaky.txt || rc=$?
+      rc=0; node scripts/ci/rig-flaky-report.mjs web/report.json flaky.txt web/junit.xml || rc=$?
       if [ "$rc" -gt 1 ]; then exit "$rc"; fi
   artifacts:
     name: orbit-browser-report
