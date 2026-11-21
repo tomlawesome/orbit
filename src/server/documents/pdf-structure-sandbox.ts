@@ -1189,3 +1189,8 @@ export function lastPdfSandboxChildPidForTests(): number | undefined {
 export function pdfStructureSandboxInFlightForTests(): number {
   return inFlight;
 }
+
+/** Draws waiting for a slot in the view pool (not yet started). */
+export function pdfStructureSandboxViewWaitingForTests(): number {
+  return pools.view.waiting.length;
+}

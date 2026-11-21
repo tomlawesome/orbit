@@ -495,6 +495,13 @@ describe("§1.5 line 14 and D5: three slot pools, with stand-in tools", () => {
     expect(sandbox.pdfStructureSandboxInFlightForTests()).toBeGreaterThanOrEqual(count);
   }
 
+  /** Waits for `count` view draws to be queued for a slot; the bound is a hang guard only. */
+  async function untilViewWaiting(count: number): Promise<void> {
+    const deadline = Date.now() + 2_000;
+    while (sandbox.pdfStructureSandboxViewWaitingForTests() < count && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(sandbox.pdfStructureSandboxViewWaitingForTests(), "the second render never queued behind the first").toBeGreaterThanOrEqual(count);
+  }
+
   it("line 14: with check 1 / view 1, a render holding the view slot does not delay a structure check (the check completes while the render is still held)", async () => {
     const release = join(directory, "release-line14");
     const tools = poolTools(release);
@@ -517,7 +524,11 @@ describe("§1.5 line 14 and D5: three slot pools, with stand-in tools", () => {
     const first = render(fileOf("synthetic.pdf"), 2, 10_000, "view");
     await untilInFlight(1);
     const second = render(fileOf("synthetic.pdf"), 2, 10_000, "view");
-    // Both renders wait on the one release; a queue shows as the second starting only after the first ends.
+    // The first render holds the one view slot on the release file. Do not release it until the
+    // second is seen waiting for that slot: without a queue it would never wait, and this fails
+    // after the hang guard rather than passing on how fast the stand-ins happen to run.
+    await untilViewWaiting(1);
+    expect(sandbox.pdfStructureSandboxInFlightForTests(), "only the first render has started").toBe(1);
     writeFileSync(release, "");
     const [one, two] = await Promise.all([first, second]);
     expect(one.outcome).toBe("drawn");
