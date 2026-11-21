@@ -12,13 +12,14 @@ import { clockOf, dayMonth, localZone, plural } from "$lib/format.js";
 /** What the `sender check` row says, the tone it is drawn in, and the button that goes with it.
  *  @param {import("$lib/data/workspace.js").RelaySender} sender
  *  @param {number} [now]
- *  @returns {{ says: string, tone: "ok" | "warm", button: string | null }} */
+ *  @returns {{ says: string, tone: "ok" | "warm", button: string | null, link?: { text: string, href: string } }} */
 export function checkRow(sender, now = Date.now()) {
   /* Read before the other three (#1681, design note 52496): the address is
      checked, but the member's mail service did not sign their last forward,
-     so Orbit could not keep it. Theirs to act on, so warm; nothing to press. */
+     so Orbit could not keep it. Theirs to act on, so warm; nothing to press.
+     "see why" goes to /inbox: the inbox cannot target one row (#1727 W-S1, gap recorded). */
   if (sender.verified && sender.lastForwardSigned === false) {
-    return { says: "checked · but your last forward wasn't signed, so it wasn't kept", tone: "warm", button: null };
+    return { says: "checked · your last forward wasn't signed, so it wasn't kept", tone: "warm", button: null, link: { text: "see why", href: "/inbox" } };
   }
   if (sender.verified) return { says: "checked", tone: "ok", button: null };
   /* Lapsed is a link with an expiry in the past, whatever `verificationPending` says. */
