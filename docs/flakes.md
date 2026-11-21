@@ -584,3 +584,7 @@ timeout on this one case rather than a global raise.
 ## tests/unit/pocket-inbox.test.mjs "the inbox on a phone, mounted > #1584 web-wr9-3: an amendment the engine replayed says so, not 'added', and the sheet closes"
 
 - 2026-11-21 · !1445 ee011d95c · pipeline 5061 / fast (job 60610) · the send button's aria-disabled stayed 'true' past vi.waitFor's 1 s, in a 1463 s full run on a loaded runner. Passed in jobs 60143, 60215, 60270 and 60418, and locally at ee011d95c six times at once (#1944). First sighting.
+
+## scripts/repair.test.mjs "scripts/repair.sh --execute --dangerous: regenerate-secret (#530 slice) > a permissions change on the secrets directory during the approval window fails the step cleanly: reason=step-failed, exit 4, secret still absent and recoverable on retry"
+
+- 2026-11-21 · !1450 692921fe0 · pipeline 5077 / fast (job 60776) · `Timed out waiting for stderr predicate`, then spawnRepair killed the child after 20 s without output, at the `type 'regenerate'` prompt, in a 1523 s full run on a loaded runner. The change touches none of repair.sh. Passed in job 60770 (pipeline 5076, same batch-a base) and locally. First sighting.

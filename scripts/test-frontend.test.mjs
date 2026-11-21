@@ -121,7 +121,7 @@ function quarantineRoot({ listed }) {
     copyFileSync(fileURLToPath(new URL(`./${name}`, import.meta.url)), join(root, "scripts", name));
   }
   writeFileSync(join(root, "tests", "e2e", "x.spec.ts"), 'test("a thing", { tag: "@quarantine" }, async () => {});\n');
-  if (listed) writeFileSync(join(root, "tests", "quarantine.txt"), "tests/e2e/x.spec.ts 1 #1\n");
+  if (listed) writeFileSync(join(root, "tests", "quarantine.txt"), "tests/e2e/x.spec.ts 1 #1 2099-01-01\n");
   return join(root, "scripts", "test-frontend.sh");
 }
 

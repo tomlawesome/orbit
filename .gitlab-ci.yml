@@ -2686,12 +2686,18 @@ browser_report:
       # merge-reports needs only the Playwright package, not the postinstall scripts of the rest; the same lighter install as the rest of this file that skips them
       pnpm install --frozen-lockfile --ignore-scripts
       cd web
-      PLAYWRIGHT_HTML_OPEN=never PLAYWRIGHT_JUNIT_OUTPUT_NAME=junit.xml pnpm exec playwright merge-reports --reporter html,junit ./blob-report
+      PLAYWRIGHT_HTML_OPEN=never PLAYWRIGHT_JUNIT_OUTPUT_NAME=junit.xml PLAYWRIGHT_JSON_OUTPUT_NAME=report.json pnpm exec playwright merge-reports --reporter html,junit,json ./blob-report
+      cd ..
+      # A pass on retry is flaky (#1744): list it in flaky.txt. Exit 1 is a test that failed every try, which the rig jobs already report; only exit 2 (no usable report) fails this job.
+      rc=0; node scripts/ci/rig-flaky-report.mjs web/report.json flaky.txt web/junit.xml || rc=$?
+      if [ "$rc" -gt 1 ]; then exit "$rc"; fi
   artifacts:
     name: orbit-browser-report
     paths:
       - web/playwright-report/
       - web/junit.xml
+      - web/report.json
+      - flaky.txt
     reports:
       junit: web/junit.xml
     expire_in: 14 days
