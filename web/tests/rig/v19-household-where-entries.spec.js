@@ -207,6 +207,40 @@ test.describe("desk", () => {
     await expect(page.getByRole("button", { name: "Remove Home" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Remove section" })).toHaveCount(0);
   });
+
+  test("an arrow checks a tile but places nothing: Esc drops it, Enter lands it (#1494)", async ({ page }, testInfo) => {
+    await openHousehold(page, testInfo);
+    const drop = page.getByRole("button", { name: `Remove ${GOING.name}` });
+    const chooser = page.getByRole("dialog", { name: `Choose where ${GOING.entries} entries go` });
+    const tiles = chooser.getByRole("radiogroup", { name: "sections" });
+    const destination = tiles.getByRole("radio", { name: new RegExp(DESTINATION.name) });
+    /* The tiles are Home, Devices, Services, Dates & renewals: two steps right of Home. */
+    const walkToDestination = async () => {
+      await tiles.getByRole("radio", { name: /Home/ }).focus();
+      await page.keyboard.press("ArrowRight");
+      await page.keyboard.press("ArrowRight");
+      await expect(destination, "the arrows reached the destination").toBeFocused();
+      await expect(destination, "selection follows focus: the tile reached is checked").toHaveAttribute("aria-checked", "true");
+      await expect(chooser, "an arrow does not close the card").toBeVisible();
+      await expect(page.getByRole("status").filter({ hasText: "removed" }), "an arrow places nothing").toHaveCount(0);
+    };
+
+    await drop.click();
+    await walkToDestination();
+    await page.keyboard.press("Escape");
+    await expect(chooser).toBeHidden();
+    await expect(page.getByRole("button", { name: `Remove ${GOING.name}` })).toBeVisible();
+    await expect(rowOf(page, DESTINATION.name).locator(".used")).toHaveText("0 entries");
+    await expect(page.getByRole("status").filter({ hasText: "removed" })).toHaveCount(0);
+
+    await drop.click();
+    await walkToDestination();
+    await page.keyboard.press("Enter");
+    await expect(chooser).toBeHidden();
+    await expect(page.getByRole("status").filter({ hasText: `${GOING.name} removed` })).toHaveText(WORDS);
+    await expect(rowOf(page, DESTINATION.name).locator(".used")).toHaveText(`${GOING.entries} entries`);
+    await quiet(page);
+  });
 });
 
 /* ── the phone ──────────────────────────────────────────────────────────── */
@@ -282,6 +316,45 @@ test.describe("phone", () => {
     await expect(rowOf(page, DESTINATION.name)).toContainText(`${GOING.entries} entries`);
     await expect(rowOf(page, GOING.name)).toHaveCount(0);
     await expect(rowOf(page, "Devices")).toContainText("hidden");
+    await quiet(page);
+  });
+
+  test("an arrow checks a tile but places nothing: Esc drops it, Enter lands it (#1494)", async ({ page }, testInfo) => {
+    await openHousehold(page, testInfo);
+    const face = rowOf(page, GOING.name).locator("[data-row-face]");
+    const sheet = page.getByRole("dialog", { name: new RegExp(`where ${GOING.entries} entries go`) });
+    const tiles = sheet.getByRole("radiogroup", { name: "sections" });
+    const destination = tiles.getByRole("radio", { name: new RegExp(DESTINATION.name) });
+    const open = async () => {
+      await face.click();
+      await page.getByRole("button", { name: `Remove ${GOING.name}` }).click();
+      await expect(sheet).toBeVisible();
+    };
+    /* The tiles are Home, Devices, Services, Dates & renewals: two steps right of Home. */
+    const walkToDestination = async () => {
+      await tiles.getByRole("radio", { name: /Home/ }).focus();
+      await page.keyboard.press("ArrowRight");
+      await page.keyboard.press("ArrowRight");
+      await expect(destination, "the arrows reached the destination").toBeFocused();
+      await expect(destination, "selection follows focus: the tile reached is checked").toHaveAttribute("aria-checked", "true");
+      await expect(sheet, "an arrow does not close the sheet").toBeVisible();
+      await expect(page.getByRole("status").filter({ hasText: "removed" }), "an arrow places nothing").toHaveCount(0);
+    };
+
+    await open();
+    await walkToDestination();
+    await page.keyboard.press("Escape");
+    await expect(sheet).toBeHidden();
+    await expect(rowOf(page, GOING.name)).toContainText(`${GOING.entries} entries`);
+    await expect(rowOf(page, DESTINATION.name)).toContainText("0 entries");
+    await expect(page.getByRole("status").filter({ hasText: "removed" })).toHaveCount(0);
+
+    await open();
+    await walkToDestination();
+    await page.keyboard.press("Enter");
+    await expect(sheet).toBeHidden();
+    await expect(page.getByRole("status").filter({ hasText: `${GOING.name} removed` })).toHaveText(WORDS);
+    await expect(rowOf(page, DESTINATION.name)).toContainText(`${GOING.entries} entries`);
     await quiet(page);
   });
 });

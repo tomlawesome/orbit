@@ -345,6 +345,28 @@ test("add: the picked importance goes on the item the page saves", async ({ page
   await expect.poll(() => savedImportance(page, command.item.id), { timeout: RIG_EXPECT_MS }).toBe("high");
 });
 
+test("add: an arrow on the desk importance tiles sets the field (selection follows focus, #1494)", async ({ page }, testInfo) => {
+  const phone = onPhone(testInfo);
+  test.skip(phone, "the desk's radio tiles; the phone's importance row is chips");
+  await fillExceptImportance(page, phone, "Importance by arrow");
+  const level = (/** @type {"low" | "normal" | "high"} */ name) => importanceControl(page, name);
+  await expect(addButton(page, phone)).toHaveAttribute("aria-disabled", "true");
+  /* none is chosen, so the first tile is the group's one Tab stop */
+  await level("low").focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(level("normal"), "ArrowRight focuses the next tile").toBeFocused();
+  await expect(level("normal"), "ArrowRight checks the tile it reaches").toHaveAttribute("aria-checked", "true");
+  await expect(level("low")).toHaveAttribute("aria-checked", "false");
+  await expect(addButton(page, phone), "the arrow set the field, so Add is on").not.toHaveAttribute("aria-disabled", "true");
+  await page.keyboard.press("End");
+  await expect(level("high")).toBeFocused();
+  await expect(level("high"), "End checks the last tile").toHaveAttribute("aria-checked", "true");
+  await expect(level("normal")).toHaveAttribute("aria-checked", "false");
+  await page.keyboard.press("Home");
+  await expect(level("low")).toBeFocused();
+  await expect(level("low"), "Home checks the first tile").toHaveAttribute("aria-checked", "true");
+});
+
 /* ── Audit Lows that touch these files ───────────────────────────────────── */
 
 test("phone remove pill (audit Low): 'not this one' hands focus to the add-a-document button, not the page", async ({ page }, testInfo) => {

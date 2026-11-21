@@ -10,10 +10,15 @@
    * colour (a document's own kind) wears the accent, as the calendar's
    * chosen day does.
    *
-   * A radio group: one tile in the tab order (the chosen one); left and
-   * right walk the tiles in order, wrapping, up and down move a row, Home
-   * and End the ends. Arrows move focus only — a pick closes the card, so
-   * it waits for Enter, Space or a press.
+   * A radio group (WAI-ARIA APG radio pattern, #1494): one tile in the tab
+   * order (the chosen one); left and right walk the tiles in order, wrapping;
+   * up and down move a row, or step on where there is no row that way; Home
+   * and End the ends. Selection follows focus: every move checks the tile it
+   * lands on and hands it to `onpick`. A press, Enter or Space also calls
+   * `oncommit`, which is how a host that closes on a pick (the chooser card,
+   * the household pick sheet) tells a landed choice from a walked one — those
+   * hosts stage arrow checks and commit on `oncommit`; Settings applies and
+   * saves on every `onpick`.
    *
    * A choice may carry a `disc`, a diameter in px: the planet it would draw
    * (round 6 P's importance tiles), in the colour of the group's own
@@ -25,11 +30,12 @@
    *   label: string,
    *   cols: number,
    *   onpick: (value: string) => void,
+   *   oncommit?: (value: string) => void,
    *   required?: boolean,
    * }} Props
    */
   /** @type {Props} */
-  let { choices, value, label, cols, onpick, required = false } = $props();
+  let { choices, value, label, cols, onpick, oncommit, required = false } = $props();
 
   /** The tile in the tab order: the chosen one, else the first. It follows
       `value` when the parent changes it after mount (settings learns the
@@ -43,12 +49,13 @@
     const n = choices.length;
     const to = event.key === "Home" ? 0 : event.key === "End" ? n - 1
       : event.key === "ArrowLeft" ? (i - 1 + n) % n : event.key === "ArrowRight" ? (i + 1) % n
-      : event.key === "ArrowUp" ? (i - cols >= 0 ? i - cols : i)
-      : event.key === "ArrowDown" ? (i + cols < n ? i + cols : i) : null;
+      : event.key === "ArrowUp" ? (i - cols >= 0 ? i - cols : (i - 1 + n) % n)
+      : event.key === "ArrowDown" ? (i + cols < n ? i + cols : (i + 1) % n) : null;
     if (to === null) return;
     event.preventDefault();
     active = to;
     /** @type {HTMLButtonElement | undefined} */ (group?.querySelectorAll("[role=radio]")[to])?.focus({ preventScroll: true });
+    onpick(choices[to].value);
   }
 </script>
 
@@ -56,7 +63,7 @@
   {#each choices as choice, i (choice.value)}
     <button type="button" class="tile" role="radio" aria-checked={choice.value === value}
             data-opt={choice.colour ?? undefined} tabindex={i === active ? 0 : -1}
-            onclick={() => onpick(choice.value)} onkeydown={(e) => walk(e, i)} onfocus={() => (active = i)}>
+            onclick={() => { onpick(choice.value); oncommit?.(choice.value); }} onkeydown={(e) => walk(e, i)} onfocus={() => (active = i)}>
       {#if choice.disc}<span class="disc-box"><span class="disc" style:width="{choice.disc}px" style:height="{choice.disc}px"></span></span>{/if}
       <b style:font-size={choice.size}>{choice.words}</b>
       {#if choice.note}<small>{choice.note}</small>{/if}

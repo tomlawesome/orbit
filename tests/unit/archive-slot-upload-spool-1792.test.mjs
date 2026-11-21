@@ -52,6 +52,7 @@ const mocks = vi.hoisted(() => ({
   importPortableArchive: vi.fn(),
   previewPortableImport: vi.fn(),
   spoolPortableArchiveUpload: vi.fn(),
+  slotWaitCalls: /** @type {number[]} */ ([]),
   realSpool: /** @type {undefined | ((file: ReadableStream<Uint8Array>, declaredBytes: number) => Promise<unknown>)} */ (undefined),
 }));
 
@@ -69,6 +70,11 @@ vi.mock("orbit/server/maintenance", () => ({
 vi.mock("orbit/server/key-state", async (importOriginal) => ({ ...(await importOriginal()), getKeyState: mocks.getKeyState }));
 vi.mock("orbit/server/upload-limit", () => ({ readEffectiveUploadLimit: async () => 50 * MIB }));
 vi.mock("orbit/lib/auth/recent-auth", () => ({ requireRecentAuthentication: mocks.requireRecentAuthentication }));
+// Counts each request's ask for the slot. A request that finds the slot held joins the queue inside that same call, so the count tells the test who is queued.
+vi.mock("../../web/src/lib/server/archive-slot.js", async (importOriginal) => {
+  const real = await importOriginal();
+  return { ...real, awaitArchiveSlot: (...args) => { mocks.slotWaitCalls.push(mocks.slotWaitCalls.length + 1); return real.awaitArchiveSlot(...args); } };
+});
 vi.mock("orbit/server/portable-archive-repository", async (importOriginal) => {
   const real = await importOriginal();
   mocks.realSpool = real.spoolPortableArchiveUpload;
@@ -161,7 +167,8 @@ beforeEach(() => {
   delete process.env.ORBIT_FIXTURES;
   delete process.env.ORBIT_ARCHIVE_SLOT_WAIT_MS;
   rmSync(join(documentsRoot, "portable-archives"), { recursive: true, force: true });
-  for (const [name, mock] of Object.entries(mocks)) if (name !== "realSpool") mock.mockReset();
+  mocks.slotWaitCalls.length = 0;
+  for (const [name, mock] of Object.entries(mocks)) if (name !== "realSpool" && name !== "slotWaitCalls") mock.mockReset();
   mocks.getKeyState.mockReturnValue({ verdict: "usable", heldKeyId: "a".repeat(24) });
   mocks.readEffectiveMaintenance.mockResolvedValue({ effectivelyActive: false, expectedEndAt: null });
   mocks.assertOutsideMaintenance.mockResolvedValue(undefined);
@@ -525,10 +532,10 @@ describe("L4: the slot is exclusive during processing, and spooled requests wait
     await until(() => engineCalls.length === 1 && slot.archiveSlotHeld(), "owner-1's import is processing");
 
     const waiting = track(whole(PREVIEW, "owner-2", HOUSEHOLD_B));
-    await until(() => mocks.spoolPortableArchiveUpload.mock.calls.length === 2, "owner-2's preview is spooling");
-    await settle();
+    // A request joins the queue when its spool has finished and it asks for the slot: wait for that ask (the slot is held, so the ask queues it), not for the spool to start.
+    await until(() => mocks.slotWaitCalls.length === 2, "owner-2's preview is queued for the slot");
     const later = track(whole(PREVIEW, "owner-4", HOUSEHOLD_D));
-    await until(() => mocks.spoolPortableArchiveUpload.mock.calls.length === 3, "owner-4's preview is spooling");
+    await until(() => mocks.slotWaitCalls.length === 3, "owner-4's preview is queued for the slot");
 
     await advance(5 * 60_000, 10_000);
     expect(waiting.settled, "after 5 minutes owner-2's preview is still waiting").toBe(false);

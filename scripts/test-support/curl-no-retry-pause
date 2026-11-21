@@ -1,0 +1,27 @@
+#!/bin/sh
+# A curl for tests that keeps the caller's --retry N (same number of attempts,
+# retried only on HTTP 5xx and 429, as curl does) and takes out the pause
+# between them: --retry-delay is dropped. Real curl cannot do that: its delay
+# of 0 means exponential backoff (1 s, 2 s, ...), and it ignores Retry-After
+# when --retry-delay is given (#1940). REAL_CURL names the real binary.
+retries=0
+n=$#
+while [ "$n" -gt 0 ]; do
+  a=$1; shift; n=$((n - 1))
+  case $a in
+    --retry) retries=$1; shift; n=$((n - 1)) ;;
+    --retry-delay) shift; n=$((n - 1)) ;;
+    *) set -- "$@" "$a" ;;
+  esac
+done
+err="$(mktemp)"
+trap 'rm -f "$err"' EXIT
+attempt=0
+while :; do
+  attempt=$((attempt + 1))
+  "$REAL_CURL" "$@" 2> "$err"
+  rc=$?
+  if [ "$rc" -eq 22 ] && [ "$attempt" -le "$retries" ] && grep -Eq 'error: (5[0-9][0-9]|429)' "$err"; then continue; fi
+  cat "$err" >&2
+  exit "$rc"
+done
