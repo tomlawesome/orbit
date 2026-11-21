@@ -60,6 +60,7 @@ test's own name, which does not move with the shard.
 ## tests/unit/auth-pending-login-session-callback.test.mjs "passes session creation as collectSignInApproval's own mint callback, not a separate call"
 
 - 2026-11-04 · batch/v037-1 a5d0141f · local `pnpm exec vitest run --coverage`, shared host at load 35-65 · timed out at the 5s default (6.5s); the file's first test pays for the cold, instrumented import. Failed again run alone with two other files, then passed run alone (5/5). First sighting.
+- 2026-11-20 · !1441 68d651e2f · pipeline 4980 / fast retry (job 59988) · timed out at 5 s, with "never calls createSession outside the callback" in the same file failing after it. Passed in jobs 59718 and 59854.
 
 ## tests/unit/portable-archive-download-route.test.mjs "answers 200 with the stream's bytes, Content-Length equal to sizeBytes, and the unchanged headers"
 
@@ -268,7 +269,6 @@ timeout on this one case rather than a global raise.
 ## v19-create.spec.ts:1022 "the desk's lane offers 'not this one' while it is still reading, and pressing it closes the lane" — desktop-webkit
 
 - 2026-10-16 · a08de7a1 (!1069, v0.3 security batch) · pipeline 2650 / smoke_webkit (job 36591), desktop-webkit · failed once, passed on retry. First sighting; an issue on the third.
-
 
 ## validation.test.ts "structural document classification > classifies unsupported %PDF-1.7 ... as unsupported_structure"
 
@@ -483,10 +483,6 @@ timeout on this one case rather than a global raise.
 - 2026-11-12 · chore/v039-batch-b-ci d92e92b6 (Dockerfile pin and JSON policy only, nowhere near the PDF sandbox) · pipeline 4032 / fast (job 49856) · "§1.5 line 16: a child still in flight after the test: expected 1 to be +0"; the retried job 49859 passed. First sighting.
 - 2026-11-18 · !1371 batch-a 5a2828af (the batch-a dev gate fix: an exceptions file and coverage floors, nowhere near the PDF sandbox) · pipeline 4550 / fast (job 54979) · the timing check: "expected 87.98 to be less than or equal to 86.68" (ms, the 2x-solo bound); the retried job 55050 passed. Second sighting.
 
-## github-await-handoff.sh, a flaky GitHub › counts a successful read as a reset (scripts/ci/github-await-handoff.test.mjs)
-
-- 2026-11-15 · local, chore/next-4 on the dev merge plus the #1846 change (docs and the guarantees test only) · full `npx vitest run`, load average about 30 · `Test timed out in 30000ms`; the file re-run twice passed 53/53. First sighting.
-
 ## src/server/documents/pdf-structure-sandbox-poppler.test.ts "D5: a background draw holding its one slot does not delay a view draw (within 2x its solo time)"
 
 - 2026-11-15 · fix/1834-undo-copies 605f583e (a one-line install.sh change since cb70f4e1, nowhere near the PDF sandbox) · pipeline 4220 / fast (job 51469) · failed at 1293 ms in a job that hit the 20-minute limit on a loaded runner; it passed in pipeline 4212 / fast (job 51358) on cb70f4e1. A wall-clock assertion. First sighting.
@@ -506,10 +502,6 @@ timeout on this one case rather than a global raise.
 ## upgrade_cell: [latest-3, all-keys] "Could not download the release manifest for channel v0.3.7" (image-registry)
 
 - 2026-11-19 · !1409 a44b60f8 · pipeline 4800 / upgrade_cell: [latest-3, all-keys] (job 57816) · the old installer's identity phase failed `reason=image-registry`, then "Could not download the release manifest for channel v0.3.7", step=install assertion=install-exited-0. The retry, job 57965, passed on the same commit. First sighting.
-
-## scripts/pty-deadline.test.mjs "pty deadline reporting > re-arms the idle deadline on every chunk, so a slow but live child is not killed"
-
-- 2026-11-20 · !1433 602b02c06 · pipeline 4890 / fast (job 58758) · the pty child printed nothing for 300 ms on a loaded runner and was killed. Passed in pipeline 4902 on the same test code. First sighting.
 
 ## scripts/install-undo-copy-1848.test.mjs "#1874 O-R2 install.sh prune: Ctrl-C at the undo-copy prompt > restores echo on the terminal"
 
@@ -531,10 +523,6 @@ timeout on this one case rather than a global raise.
 
 - 2026-11-20 · !1431 c13324bc · pipeline 4885 / fast (job 58706) · failed in the same loaded 1507 s run; the change touched only scripts/test-backup-restore.sh. Retried as job 58725, passed. First sighting.
 
-## scripts/pty-deadline.test.mjs "pty deadline reporting > re-arms the idle deadline on every chunk, so a slow but live child is not killed"
-
-- 2026-11-20 · !1438 c535ff40 (repair.sh and its tests only) · pipeline 4970 / fast (job 59587) · the child printed step-1 to step-3, then went 300 ms without output on a loaded runner and was killed. First sighting.
-
 ## classify (CI job) "fails at its last step with exit 1 and no message"
 
 - 2026-11-20 · !1439 7b273238 · pipeline 4965 / classify (job 59524) · the step after `fast_checks: stands on job 59091` exited 1 with nothing printed. Retried as job 59552, passed. First sighting.
@@ -546,6 +534,7 @@ timeout on this one case rather than a global raise.
 ## scripts/repair-signal-1919.test.mjs "#1919: ... > TERM to the group, 20 times in a row (the race is repeated, bounded): the copy is gone every time"
 
 - 2026-11-20 · !1433 80582f500 · pipeline 4912 / fast (job 58965) · `Test timed out in 45000ms` on a loaded runner. Passed in the retry (job 59031). First sighting.
+- 2026-11-20 · !1433 eb548d90a · pipeline 4944 / fast (job 59284) · `Test timed out in 45000ms` again. Passed in the retries (jobs 59336, 59391). Second sighting.
 
 ## src/lib/backup-restore-cli.test.ts "runBackup > O2-R3: a SIGTERM while the adapter is dumping leaves the .orbit-backup.* scratch in place, and the next runBackup removes it"
 
@@ -554,3 +543,36 @@ timeout on this one case rather than a global raise.
 ## scripts/ci/job-inputs.test.mjs (a case timed out at the 5 s default)
 
 - 2026-11-20 · local, ci/1927-backup-drill-nightly at 77299f33 (.gitlab-ci.yml and its tests) · the 37 files that read .gitlab-ci.yml, on the loaded shared host · one case timed out at 5 s; a re-run passed. First sighting.
+
+## scripts/repair-owner-writes-1872.test.mjs "#1872 V7: each owner step is time- and size-bounded; a failure releases the lock and leaves nothing root made > restore-transaction (mv): an owner ..."
+
+- 2026-11-20 · !1433 eb548d90a · pipeline 4944 / fast (job 59284) · "a temp file or folder was left behind: expected [ '.orbit-repair-recovery.…' ] to deeply equal []". Passed in the retries (jobs 59336, 59391). Possibly a cleanup race, not load; Orbit is having it diagnosed. First sighting.
+
+## tests/unit/admin-alert-repeat-1810.test.ts "the alert footer says the rule for its kind (#1810 A-F8) > scanner_unavailable html / text: the scanner sentence, not the per-fault one"
+
+- 2026-11-20 · !1433 eb548d90a · pipeline 4944 / fast retry (job 59336) · the html case timed out at 5 s and the text case then saw the mail sender called twice, not once. The file passed 3 of 3 locally and in job 59391. First sighting.
+- 2026-11-20 · !1441 68d651e2f · pipeline 4980 / fast retry (job 59988) · the same pair: html timed out at 5 s, text then saw the sender called twice. Second sighting.
+
+## tests/unit/v19-tour-chapter-done.test.mjs "the chapter played for real > played on from chapter 8, closes the drawer chapter 8 opened and leaves home exactly as it found it"
+
+- 2026-11-20 · !1441 68d651e2f · pipeline 4980 / fast (job 59718) · took 5652 ms against the 5 s limit; locally 1.5 to 1.8 s, 3 of 3 passed. Passed in the retry (job 59854). First sighting.
+
+## scripts/repair-lock-rw-1890.test.mjs "#1890 L1: no open of the lock waits, read-only lock or not > a lock the user can only read (0444): swapped for a link to a regular file between the lstat and the open, the link is not followed"
+
+- 2026-11-20 · !1441 68d651e2f · pipeline 4980 / fast retry (job 59854) · "expected true to be false". Passed in job 59718 on the same code. First sighting.
+
+## tests/unit/about-page-load.test.mjs "the About page load reads the library list once per build (#1465) > does not read the library list again on a second visit"
+
+- 2026-11-20 · !1441 68d651e2f · pipeline 4980 / fast retry (job 59854) · `Test timed out in 5000ms`. Passed in job 59718 on the same code. First sighting.
+
+## tests/unit/about-prebuilt-libraries.test.mjs "the About page load reads the list built with the image (#1575) > returns exactly the prebuilt list, with no fetch and no grouping"
+
+- 2026-11-20 · !1441 68d651e2f · pipeline 4980 / fast retry (job 59854) · `Test timed out in 5000ms`. Passed in job 59718 on the same code. First sighting.
+
+## tests/unit/admin-alert-wording-1800.test.ts "the undo-failed alert wording (#1800) > html: carries the lede verbatim and nothing after it" and "html: carries the new Orbit did fact and not the old one"
+
+- 2026-11-20 · !1441 68d651e2f · pipeline 4980 / fast retry (job 59988) · timed out at 5 s. Passed in jobs 59718 and 59854 on the same code. First sighting.
+
+## tests/unit/admin-mailbox-fetch-now-route-1651.test.mjs "POST /api/admin/mailbox fetch_now > runs the engine for the caller's own id ..." and "passes the refusal already_running back as the outcome"
+
+- 2026-11-20 · !1441 68d651e2f · pipeline 4980 / fast retry (job 59988) · timed out at 5 s. Passed in jobs 59718 and 59854 on the same code. First sighting.
