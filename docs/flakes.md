@@ -588,3 +588,11 @@ timeout on this one case rather than a global raise.
 ## scripts/repair.test.mjs "scripts/repair.sh --execute --dangerous: regenerate-secret (#530 slice) > a permissions change on the secrets directory during the approval window fails the step cleanly: reason=step-failed, exit 4, secret still absent and recoverable on retry"
 
 - 2026-11-21 · !1450 692921fe0 · pipeline 5077 / fast (job 60776) · `Timed out waiting for stderr predicate`, then spawnRepair killed the child after 20 s without output, at the `type 'regenerate'` prompt, in a 1523 s full run on a loaded runner. The change touches none of repair.sh. Passed in job 60770 (pipeline 5076, same batch-a base) and locally. First sighting.
+
+## scripts/repair-retire-privdrop-1848.test.mjs "#1848 FIX-S1 addendum 2, item 3: the group is U's own, not the folder's > with the folder in U's own group, the calls are the same shape (U's gid, --init-groups, no --clear-groups)"
+
+- 2026-11-21 · !1454 51b164933 · pipeline 5109 / fast (job 61066) · the repair diagnosed the retirable SMTP lines but executed nothing (`execution result=empty done=0`), so the expected `execute action=retire-smtp-lines ... result=done` line was missing, in a 1557 s full run on a loaded runner (8.4 s for the test). Passed 3 of 3 locally on unchanged code straight after. First sighting.
+
+## scripts/repair.test.mjs "scripts/repair.sh --export-diagnostics (issue #531, ADR-0014 decision 10) > tolerates --plain in either order around --export-diagnostics"
+
+- 2026-11-21 · !1454 51b164933 · pipeline 5109 / fast (job 61066) · the two runs' output differed: the first reported `finding class=docker-unavailable` (checked=19 skipped=1), the second did not (checked=20), so the docker probe answered differently between two runs a moment apart, in the same 1557 s loaded run (7.2 s for the test). Passed 3 of 3 locally on unchanged code straight after. First sighting.
