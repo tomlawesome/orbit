@@ -25,7 +25,8 @@ if (REUSE && process.env.TEST_WORKER_INDEX === undefined) {
 const RIG_WORKERS = Number(process.env.ORBIT_RIG_WORKERS) || Math.max(2, Math.floor(os.cpus().length / 2));
 /* Every rig project shares these: its own folder, tests that never touch one
    another's state, so they run in parallel. */
-const rig = { testDir: "./tests/rig", fullyParallel: true, workers: RIG_WORKERS };
+/* A rig test that fails retries once in CI and, if it then passes, is reported as flaky (#1744, owner decision 124b). */
+const rig = { testDir: "./tests/rig", fullyParallel: true, workers: RIG_WORKERS, retries: process.env.CI ? 1 : 0 };
 /* The browser CI jobs shard with Playwright's own --shard, set from the
    variables GitLab's `parallel:` gives each job (#1546). GitLab sets the total
    to 1 for a job without `parallel:`, and a local run has neither, so only a
