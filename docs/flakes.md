@@ -584,3 +584,7 @@ timeout on this one case rather than a global raise.
 ## tests/unit/pocket-inbox.test.mjs "the inbox on a phone, mounted > #1584 web-wr9-3: an amendment the engine replayed says so, not 'added', and the sheet closes"
 
 - 2026-11-21 · !1445 ee011d95c · pipeline 5061 / fast (job 60610) · the send button's aria-disabled stayed 'true' past vi.waitFor's 1 s, in a 1463 s full run on a loaded runner. Passed in jobs 60143, 60215, 60270 and 60418, and locally at ee011d95c six times at once (#1944). First sighting.
+
+## scripts/ci/carry-previous-release.test.mjs "sign_evidence still running: a bounded wait on an in-flight dependency (#1607 note 48548, item 3) > a sign_evidence that stays preparing past the poll cap fails, saying it is still running and to run this job again"
+
+- 2026-11-21 · !1447 8264fee23 · pipeline 5072 / fast (job 60738) · the child was killed at its 30 s deadline without exiting, in a 1446 s full run on a loaded runner. The audit fixes don't touch this script or its test. Passed locally at 8264fee23 (377/377), and in job 60610 on the same script. First sighting.
