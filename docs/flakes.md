@@ -355,6 +355,10 @@ timeout on this one case rather than a global raise.
 
 - 2026-11-01 · 6299c4fa (`deps/1565-sveltekit-3`, #1565; the SvelteKit 3 upgrade, not touching the arrival journey) · browser e2e run on this branch · failed, then passed on a rerun of unchanged code. First sighting.
 
+## tests/unit/archive-slot.test.mjs "an upload that drips for a long time (#1390) > is never cut while it keeps moving, however long it takes, and the slot stays held until the caller releases it"
+
+- 2026-11-21 · local, fix/1943-audit-h-held on 1c35745f (nothing near the archive slot) · full `npx vitest run` with 8 workers, 1668 s on a shared host · the stall timer fired (`The archive failed to upload`, archive-slot.js:314) while the drip was still moving. The file alone passed right after. First sighting.
+
 ## archive-slot.spec.ts:171 "while one archive upload is in progress a second is refused at once, and goes through after it ends" — mobile-webkit
 
 - 2026-11-01 · 6299c4fa (`deps/1565-sveltekit-3`, #1565; the SvelteKit 3 upgrade) · browser e2e run on this branch · failed, then passed on a rerun of unchanged code. First sighting.
