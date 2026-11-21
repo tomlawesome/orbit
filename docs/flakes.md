@@ -588,3 +588,7 @@ timeout on this one case rather than a global raise.
 ## scripts/ci/carry-previous-release.test.mjs "sign_evidence still running: a bounded wait on an in-flight dependency (#1607 note 48548, item 3) > a sign_evidence that stays preparing past the poll cap fails, saying it is still running and to run this job again"
 
 - 2026-11-21 · !1447 8264fee23 · pipeline 5072 / fast (job 60738) · the child was killed at its 30 s deadline without exiting, in a 1446 s full run on a loaded runner. The audit fixes don't touch this script or its test. Passed locally at 8264fee23 (377/377), and in job 60610 on the same script. First sighting.
+
+## scripts/install.update-prune-undo-copies.test.mjs "install.sh --plain --update: nothing to prune (#1834 slice 5) > prints nothing about old copies when there is no orbit-install-backups folder, with or without the flag"
+
+- 2026-11-21 · !1447 cf420ec53 · pipeline 5080 / fast (job 60786) · `install.sh --update` exited 1 instead of 0, in a 1390 s full run on a loaded runner; the test doesn't print the child's stderr, so the cause is not shown. The audit fixes don't touch install.sh or this test. Passed locally at cf420ec53 three times in a row. First sighting.
