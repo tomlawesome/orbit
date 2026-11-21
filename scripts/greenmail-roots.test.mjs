@@ -2,36 +2,40 @@ import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 
-import { failOnProcessDeadline, processGuard } from "./process-budget.mjs";
+import { failOnProcessDeadline, processGuard, PROCESS_TEST_TIMEOUT_MS } from "./process-budget.mjs";
 
 /*
  * #1489: the acceptance stack's GreenMail sidecar must not trust the leaked
  * emSign and COMODO roots. tests/greenmail/Dockerfile derives from the pinned
  * upstream image and removes them from the Java store and the system bundle.
  *
- * Needs a real Docker daemon (it builds and runs images), so the `fast` lane
+ * Needs a real Docker daemon (it runs the images), so the `fast` lane
  * excludes this file (ORBIT_TEST_SKIP_DOCKER in vitest.config.ts) and
  * `fast_docker` runs it.
  *
- * ORBIT_GREENMAIL_ROOTS_IMAGE points the same checks at an existing image
- * instead of building tests/greenmail; run against the upstream image they
- * must fail. The control test below keeps that honest in every run: it
- * asserts the detector finds the blocked roots in the upstream image.
+ * The image is built before the tests run, never inside them, so every
+ * spawn here keeps the standard process budget (scripts/process-budget.mjs):
+ * fast_docker builds it in its script, as the acceptance jobs build
+ * orbit-dkim-dns, and scripts/test-backend.sh builds it first locally. Where
+ * the image is missing, the tests fail in CI and say how to build it;
+ * outside CI they skip and say so, like popplerIt.
  *
- * A build is a real process that pulls nothing (the base is already local or
- * mirrored) but can be slow on a busy runner, so it gets its own larger
- * deadline, and the file's verdict sits above it.
+ * ORBIT_GREENMAIL_ROOTS_IMAGE points the same checks at another image; run
+ * against the upstream image they must fail. The control test below keeps
+ * that honest in every run: it asserts the detector finds the blocked roots
+ * in the upstream image.
  */
-const BUILD_DEADLINE_MS = 180_000;
-vi.setConfig({ testTimeout: BUILD_DEADLINE_MS + 30_000, hookTimeout: BUILD_DEADLINE_MS + 30_000 });
+vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS, hookTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const policy = JSON.parse(readFileSync(join(repoRoot, ".github/supply-chain-policy.json"), "utf8"));
 const upstreamImage = JSON.stringify(policy)
   .match(/greenmail\/standalone:[0-9.]+@sha256:[0-9a-f]{64}/u)?.[0];
-const derivedTag = `orbit-greenmail-roots-test:${process.pid}`;
+/** The tag fast_docker and scripts/test-backend.sh build tests/greenmail as. */
+export const GREENMAIL_ROOTS_TAG = "orbit-greenmail-roots:local";
+const BUILD_HINT = `build it first: docker build -t ${GREENMAIL_ROOTS_TAG} tests/greenmail (fast_docker and scripts/test-backend.sh do)`;
 
 // The blocked set, by certificate subject (never by alias or file name):
 // every emSign root (O=eMudhra) and COMODO AAA / ECC / RSA. COMODO AAA's
@@ -42,10 +46,10 @@ const BLOCKED = [
 ];
 const isBlocked = (subject) => BLOCKED.some((re) => re.test(subject));
 
-function docker(args, timeout = processGuard.timeout) {
+function docker(args) {
   const result = spawnSync("docker", args, {
     encoding: "utf8",
-    timeout,
+    timeout: processGuard.timeout,
     killSignal: "SIGKILL",
     maxBuffer: 16 * 1024 * 1024,
   });
@@ -83,30 +87,23 @@ function inspectImage(image) {
   };
 }
 
-let image = process.env.ORBIT_GREENMAIL_ROOTS_IMAGE;
-let built = false;
+const image = process.env.ORBIT_GREENMAIL_ROOTS_IMAGE || GREENMAIL_ROOTS_TAG;
+const present = (ref) => docker(["image", "inspect", ref, "--format", "{{.Id}}"]).status === 0;
+const HAS_IMAGE = present(image);
+const SKIP = !HAS_IMAGE && !process.env.CI;
+const NEEDS_IMAGE = HAS_IMAGE ? "" : process.env.CI ? ` (FAILS: ${image} missing in CI)` : ` (SKIPPED: ${image} not built; ${BUILD_HINT})`;
 let derived;
 let upstream;
 
 beforeAll(() => {
+  if (SKIP) return;
   expect(upstreamImage, "policy lists the pinned GreenMail reference").toBeTruthy();
-  if (!image) {
-    const build = docker(["build", "--quiet", "-t", derivedTag, join(repoRoot, "tests/greenmail")], BUILD_DEADLINE_MS);
-    if (build.status !== 0) {
-      throw new Error(`docker build tests/greenmail failed (${build.status}): ${build.stderr || build.stdout}`);
-    }
-    image = derivedTag;
-    built = true;
-  }
+  if (!HAS_IMAGE) throw new Error(`${image} is missing in CI; ${BUILD_HINT}`);
   derived = inspectImage(image);
   upstream = inspectImage(upstreamImage);
 });
 
-afterAll(() => {
-  if (built) docker(["image", "rm", "-f", derivedTag]);
-});
-
-describe("GreenMail sidecar image (#1489)", () => {
+describe.skipIf(SKIP)(`GreenMail sidecar image (#1489)${NEEDS_IMAGE}`, () => {
   it("control: the upstream image does trust the blocked roots, so the detector can see them", () => {
     expect(upstream.blockedJava.length).toBeGreaterThanOrEqual(6);
     expect(upstream.blockedSystem.length).toBeGreaterThan(0);

@@ -1728,6 +1728,9 @@ fast_docker:
     # -- and node:22-bookworm carries every one of them except jq (pipeline
     # 1021). *docker_cli has just run `apt-get update`, so this is one package.
     - apt-get install -y -qq --no-install-recommends jq
+    # greenmail-roots.test.mjs (#1489) reads this image by tag and never builds
+    # it, so every spawn there keeps the standard process budget.
+    - docker build -q -t orbit-greenmail-roots:local tests/greenmail
     - pnpm install --frozen-lockfile
     - *drop_to_node
     # app-memory-limit-contract.test.mjs (#1429) and test-bed-compose.test.mjs
@@ -3398,7 +3401,7 @@ smoke:
     - *stack_diagnostics_on_failure
     # The old workflow builds the disposable OIDC provider as a step of its own,
     # before the stack starts. Not extracted, because it is one command.
-    - docker compose --env-file .env-orbit $COMPOSE_FILES build orbit-oidc orbit-dkim-dns
+    - docker compose --env-file .env-orbit $COMPOSE_FILES build orbit-oidc orbit-dkim-dns orbit-greenmail
     - bash scripts/ci/start-acceptance-stack.sh
     - bash scripts/ci/verify-health-endpoint.sh
     - |
@@ -3533,7 +3536,7 @@ smoke_webkit:
     - *stack_diagnostics_on_failure
     # The old workflow builds the disposable OIDC provider as a step of its own,
     # before the stack starts. Not extracted, because it is one command.
-    - docker compose --env-file .env-orbit $COMPOSE_FILES build orbit-oidc orbit-dkim-dns
+    - docker compose --env-file .env-orbit $COMPOSE_FILES build orbit-oidc orbit-dkim-dns orbit-greenmail
     - bash scripts/ci/start-acceptance-stack.sh
     - bash scripts/ci/verify-health-endpoint.sh
     - |
@@ -3632,7 +3635,7 @@ smoke_webkit_mobile:
     - *stack_diagnostics_on_failure
     # The old workflow builds the disposable OIDC provider as a step of its own,
     # before the stack starts. Not extracted, because it is one command.
-    - docker compose --env-file .env-orbit $COMPOSE_FILES build orbit-oidc orbit-dkim-dns
+    - docker compose --env-file .env-orbit $COMPOSE_FILES build orbit-oidc orbit-dkim-dns orbit-greenmail
     - bash scripts/ci/start-acceptance-stack.sh
     - bash scripts/ci/verify-health-endpoint.sh
     - |
