@@ -263,7 +263,7 @@ describe(`page draws are pdftoppm ${NEEDS_POPPLER}`, () => {
     expect(dark / area).toBeGreaterThan(0.01);
   }, 20_000);
 
-  popplerIt("§1.5 line 6: the 600 dpi colour A4 scan (DCT, 4960x7016) draws inside the production budget, child peak RSS under 64 MiB", async () => {
+  popplerIt("§1.5 line 6: the 600 dpi colour A4 scan (DCT, 4960x7016) draws, child peak RSS under 64 MiB (time reported, not asserted)", async () => {
     const file = stash("scan-600.pdf", colourScanPdf(600));
     const started = Date.now();
     const { result, peakBytes } = await peakChildMemory(() => render(file, 1, HANG_GUARD_MS));
