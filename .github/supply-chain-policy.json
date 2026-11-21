@@ -708,9 +708,9 @@
     {
       "reference": "greenmail/standalone:2.1.15@sha256:309ba544ea482e5d4265d09921cdab07c8dad2cc4481d715c9b8ff5d3f0a149f",
       "locations": [
-        "compose/docker-compose.acceptance.yml"
+        "tests/greenmail/Dockerfile"
       ],
-      "reason": "Throwaway mail server for the acceptance stack; never part of a deployment. In a compose file Renovate's docker-compose manager proposes updates for; not watched by sidecar-pins."
+      "reason": "Throwaway mail server for the acceptance stack; never part of a deployment. The base of tests/greenmail/Dockerfile, which drops the leaked eMudhra roots (#1489); a Dockerfile FROM Renovate's dockerfile manager proposes updates for; not watched by sidecar-pins."
     },
     {
       "reference": "nginx:alpine@sha256:060849a174666c53439dc7cecbf8f67e225c7cbfb1a44ca97915d9a172a81e6d",
