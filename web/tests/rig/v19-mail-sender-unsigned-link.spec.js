@@ -4,7 +4,7 @@ import { APP, onPhone, settle } from "./a11y-support.js";
 import { guardedRoute } from "./workspace-writes.js";
 
 /*
- * #1727 W-S1 (owner answer 116a, note 53804), desk and phone: Settings > mail,
+ * #1727 W-S1 (owner answer 116a, note 53804), desk and phone: Settings > mail (the relay tab),
  * the sender check row of a verified sender whose last forward was unsigned
  * reads "checked · your last forward wasn't signed, so it wasn't kept · see why",
  * and "see why" leads to the inbox showing the unsigned failure row.
@@ -58,9 +58,9 @@ test("settings mail: the unsigned-forward row reads the new words and `see why` 
     return route.fulfill({ response, json: body });
   }));
 
-  /* Any `?sender=` the fixture does not know makes the page draw the relay's own
-     sender (+page.svelte, pocket.svelte), which is the one answered above. */
-  await page.goto("/settings/mail?sender=read");
+  /* The relay lives in Settings now (#1509): #mail opens the relay tab on desk and
+     phone, and it draws the relay's own sender, the one answered above. */
+  await page.goto("/settings#mail");
   await settle(page);
 
   const row = page.locator(".kv, .rl-field").filter({ hasText: "sender check" }).filter({ visible: true }).first();
