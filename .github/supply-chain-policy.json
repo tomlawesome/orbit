@@ -464,28 +464,6 @@
       "owner": "Orbit maintainers",
       "expiresOn": "2027-01-04",
       "trackingIssue": 1729,
-      "installedVersion": "2.8.3",
-      "rationale": "Debian/Ubuntu package manager in ollama/ollama:0.40.15; Orbit never runs apt in this container (no entrypoint or command calls it), so the flaw is not reachable. Fixed in 2.8.4ubuntu0.1, but no published image ships it yet (checked 2026-11-13 on 0.40.16, the newest release). Owner granted 7 days and a re-check, 2026-11-05, and 7 more, 2026-11-13 (#1729). Extended 2026-11-18 to 2027-01-04: Ollama 0.40.16 still ships apt 2.8.3 and the rebuilt Tika 4.2.0-full still ships apt 3.2.0 (#1729); owner 23a, 2026-11-18."
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-109518",
-      "package": "libapt-pkg6.0t64",
-      "owner": "Orbit maintainers",
-      "expiresOn": "2027-01-04",
-      "trackingIssue": 1729,
-      "installedVersion": "2.8.3",
-      "rationale": "Debian/Ubuntu package manager in ollama/ollama:0.40.15; Orbit never runs apt in this container (no entrypoint or command calls it), so the flaw is not reachable. Fixed in 2.8.4ubuntu0.1, but no published image ships it yet (checked 2026-11-13 on 0.40.16, the newest release). Owner granted 7 days and a re-check, 2026-11-05, and 7 more, 2026-11-13 (#1729). Extended 2026-11-18 to 2027-01-04: Ollama 0.40.16 still ships apt 2.8.3 and the rebuilt Tika 4.2.0-full still ships apt 3.2.0 (#1729); owner 23a, 2026-11-18."
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-109518",
-      "package": "apt",
-      "owner": "Orbit maintainers",
-      "expiresOn": "2027-01-04",
-      "trackingIssue": 1729,
       "installedVersion": "3.2.0",
       "rationale": "Debian/Ubuntu package manager in apache/tika:4.2.0-full; Orbit never runs apt in this container (no entrypoint or command calls it), so the flaw is not reachable. Fixed in 3.2.1ubuntu0.1, but no published image ships it yet (checked 2026-11-13: no newer release). Owner granted 7 days and a re-check, 2026-11-05, and 7 more, 2026-11-13 (#1729). Extended 2026-11-18 to 2027-01-04: Ollama 0.40.16 still ships apt 2.8.3 and the rebuilt Tika 4.2.0-full still ships apt 3.2.0 (#1729); owner 23a, 2026-11-18."
     },
@@ -509,7 +487,7 @@
       "expiresOn": "2027-01-04",
       "trackingIssue": 1759,
       "installedVersion": "v0.61.0",
-      "rationale": "x/net html parser slows on crafted input, in /usr/bin/ollama in ollama/ollama:0.40.15. Fixed in x/net 0.62.0, but the newest release, 0.40.15, still ships v0.61.0, so no image carries the fix. Orbit runs Ollama only under the optional ai profile, with no internet access and no published port (ADR-0025). Owner decision 2026-11-07, question 137: 14 days. Checked 2026-11-09 on 0.40.15. Extended 2026-11-18 to 2027-01-04: Ollama 0.40.16, the newest release, still has golang.org/x/net v0.61.0 (#1759); owner 24a, 2026-11-18."
+      "rationale": "x/net html parser slows on crafted input, in /usr/bin/ollama in ollama/ollama:0.40.17. Fixed in x/net 0.62.0, but the newest release, 0.40.17, still ships v0.61.0, so no image carries the fix. Orbit runs Ollama only under the optional ai profile, with no internet access and no published port (ADR-0025). Owner decision 2026-11-07, question 137: 14 days. Checked 2026-11-09 on 0.40.15. Extended 2026-11-18 to 2027-01-04: Ollama 0.40.16, the newest release, still has golang.org/x/net v0.61.0 (#1759); owner 24a, 2026-11-18. Checked 2026-11-21 inside 0.40.17, the newest release: still golang.org/x/net v0.61.0."
     },
     {
       "kind": "vulnerability",
@@ -531,7 +509,7 @@
       "expiresOn": "2026-12-03",
       "trackingIssue": 1922,
       "installedVersion": "v1.26.10",
-      "rationale": "CVE-2026-97054 is a Go net/http flaw: an HTTP/1 server that uses MaxBytesReader can panic if its handler reads the body while writing the response header. It is in the Go standard library compiled into /usr/bin/ollama in ollama/ollama:0.40.16. Orbit runs Ollama only under the optional ai profile, on the internal network, with no published port (ADR-0025), so only Orbit's app can reach it and the worst case is a crash and restart. Fixed in Go 1.26.11 and 1.27.4, but no Ollama image ships a build on either yet. Owner 47a, 2026-11-19: 14 days."
+      "rationale": "CVE-2026-97054 is a Go net/http flaw: an HTTP/1 server that uses MaxBytesReader can panic if its handler reads the body while writing the response header. It is in the Go standard library compiled into /usr/bin/ollama in ollama/ollama:0.40.17 (built with go1.26.10, checked 2026-11-21). Orbit runs Ollama only under the optional ai profile, on the internal network, with no published port (ADR-0025), so only Orbit's app can reach it and the worst case is a crash and restart. Fixed in Go 1.26.11 and 1.27.4, but no Ollama image ships a build on either yet. Owner 47a, 2026-11-19: 14 days."
     }
   ],
   "containerImages": [
@@ -609,8 +587,8 @@
     {
       "name": "Apache Tika parser",
       "tag": "apache/tika:4.2.0-full",
-      "reference": "apache/tika:4.2.0-full@sha256:701ce79199164d9347914ebcce6585cbfbcde05553b99944479373612cf28d96",
-      "indexDigest": "sha256:4774eaac44f86cdf648ae7b5a367016eaf6f9052adec31e5cff07cff1a0c6e24",
+      "reference": "apache/tika:4.2.0-full@sha256:22dc5d818413729955c73666f0630e75090b819e21c484ec0a549b2e5837cd02",
+      "indexDigest": "sha256:12a6b0332f1c047dc80489f336ca39fb2332e1810e75cc84e7b07a9b502c1cb0",
       "platform": "linux/amd64",
       "locations": [
         "docker-compose.yml"
@@ -620,14 +598,14 @@
       "license": "Apache-2.0",
       "licenseSource": "https://github.com/apache/tika-docker/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-10-29",
+      "resolvedOn": "2026-11-21",
       "reviewBy": "2027-01-31"
     },
     {
       "name": "Ollama optional local AI service",
-      "tag": "ollama/ollama:0.40.16",
-      "reference": "ollama/ollama:0.40.16@sha256:a372a1c0d1e15b68e9521189785c3ca17795c26c2356f8b1b10122cfb59ed0d7",
-      "indexDigest": "sha256:910d0d8107b538fb0894e63163eb195de0cc7aefcbc666dc62d3b18f71124592",
+      "tag": "ollama/ollama:0.40.17",
+      "reference": "ollama/ollama:0.40.17@sha256:5e5802d3c018ecdee7c7dff32a7e3b10ca9a2c4b3a461392cff97c313c2af0fc",
+      "indexDigest": "sha256:ccc42bcd3d5fcf7ab0d532b300382154e1a4da56fc666bdb313b78ebdd912754",
       "platform": "linux/amd64",
       "locations": [
         "docker-compose.yml"
@@ -637,7 +615,7 @@
       "license": "MIT",
       "licenseSource": "https://github.com/ollama/ollama/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-11-19",
+      "resolvedOn": "2026-11-21",
       "reviewBy": "2026-11-30"
     }
   ],
@@ -739,7 +717,7 @@
       "reason": "Disposable labelled container the repair journeys' hostile-value journey starts; never part of a deployment. Its CI copy (ORBIT_REPAIR_JOURNEYS_CANARY_IMAGE) is a `_IMAGE:` pin Renovate proposes updates for; the script's fallback default is not seen by Renovate and moves by hand with it. Pins the multi-architecture index digest (1.38.0 as of 2026-10-30)."
     },
     {
-      "reference": "apache/tika:${TIKA_VERSION}-full@sha256:701ce79199164d9347914ebcce6585cbfbcde05553b99944479373612cf28d96",
+      "reference": "apache/tika:${TIKA_VERSION}-full@sha256:22dc5d818413729955c73666f0630e75090b819e21c484ec0a549b2e5837cd02",
       "locations": [
         "scripts/extract-bundle/cli.ts"
       ],
