@@ -307,13 +307,13 @@ describe("#1915 O-F1/O-F3 install.sh smtp_discard_copy: the copy marker's tempor
     const IMPORTED = "mail-sending source=imported imported-from-environment=true";
     const NONE = "mail-sending source=none imported-from-environment=false";
     const first = update(targetDir, { FAKE_MAIL_SENDING_STATUS: IMPORTED, FAKE_MAIL_SENDING_STATUS_AFTER_SECRET_GONE: NONE });
-    expect(first.status).toBe(0);
+    expect(first.status, `first update stderr:\n${first.stderr}`).toBe(0);
     const record = readFileSync(join(targetDir, ".orbit-smtp-retirement"), "utf8");
     const copy = record.match(/^copy=(orbit-install-backups\/\S+)$/mu)?.[1];
     expect(copy, record).toBeDefined();
     writeFileSync(join(targetDir, copy, MARKER_LEFTOVER), `copy=${copy}\n`, { mode: 0o600 });
     const second = update(targetDir, { FAKE_MAIL_SENDING_STATUS: IMPORTED });
-    expect(second.status).toBe(0);
+    expect(second.status, `second update stderr:\n${second.stderr}`).toBe(0);
     expect(existsSync(join(targetDir, ".orbit-smtp-retirement"))).toBe(false);
     expect(existsSync(join(targetDir, copy, MARKER_LEFTOVER)), "the marker's temporary file").toBe(false);
     expect(existsSync(join(targetDir, copy)), "the undo folder").toBe(false);
