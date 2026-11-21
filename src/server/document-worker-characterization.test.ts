@@ -547,6 +547,9 @@ describe("runDocumentMaintenanceCycle — phase order", () => {
       "tx:begin",
       "select:document_staging_objects",
       "tx:commit",
+      // 2a. Settle mail transfers stuck behind an ended document (#1932);
+      // none here, so one read and nothing else.
+      "select:imap_ingestion_attachments",
       // The scanner answers. This process has never ended an outage, so its
       // first healthy ping ends any the database holds open (#1810 A-F1,
       // level-triggered reconciliation); later healthy pings write nothing.
