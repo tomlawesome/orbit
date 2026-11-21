@@ -46,12 +46,12 @@ function fixture(files, list) {
   return root;
 }
 
-function run(root) {
+function run(root, extraEnv = {}) {
   const r = spawnSync("node", [script, root], {
     encoding: "utf8",
     timeout: PROCESS_DEADLINE_MS,
     killSignal: "SIGKILL",
-    env: { PATH: process.env.PATH, HOME: process.env.HOME },
+    env: { PATH: process.env.PATH, HOME: process.env.HOME, ...extraEnv },
   });
   return { status: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "", error: r.error };
 }
@@ -76,7 +76,7 @@ describe("check-quarantine", () => {
   it("passes a clean tree and prints the summary", () => {
     const root = fixture(
       { [A]: specA, [B]: specB },
-      `${A} 2 #1085\n${B} 1 #1415\n`,
+      `${A} 2 #1085 2099-01-01\n${B} 1 #1415 2099-01-01\n`,
     );
     const r = run(root);
     expect(r.error).toBeUndefined();
@@ -90,7 +90,7 @@ describe("check-quarantine", () => {
       {
         [A]: `// test("x", { tag: "@quarantine" })\n    // @quarantine again\ntest("y", { tag: "@quarantine" }, () => {});\n`,
       },
-      `${A} 3 #1\n`,
+      `${A} 3 #1 2099-01-01\n`,
     );
     const r = run(root);
     expect(r.status).toBe(0);
@@ -102,7 +102,7 @@ describe("check-quarantine", () => {
       {
         [A]: `/* @quarantine opens a block\n * @quarantine inside it\n   * @quarantine indented\n */\ntest("y", { tag: "@quarantine" }, () => {});\n`,
       },
-      `${A} 4 #1\n`,
+      `${A} 4 #1 2099-01-01\n`,
     );
     const r = run(root);
     expect(r.status).toBe(0);
@@ -121,7 +121,7 @@ describe("check-quarantine", () => {
           ``,
         ].join("\n"),
       },
-      `${A} 5 #1\n`,
+      `${A} 5 #1 2099-01-01\n`,
     );
     const r = run(root);
     expect(r.status).toBe(0);
@@ -130,7 +130,7 @@ describe("check-quarantine", () => {
 
   it("counts each of @quarantined, @quarantine-x and @quarantine_y as one", () => {
     for (const word of ["@quarantined", "@quarantine-x", "@quarantine_y", "@quarantine9"]) {
-      const root = fixture({ [A]: `test("a", { tag: "${word}" }, () => {});\n` }, `${A} 1 #1\n`);
+      const root = fixture({ [A]: `test("a", { tag: "${word}" }, () => {});\n` }, `${A} 1 #1 2099-01-01\n`);
       const r = run(root);
       expect(r.status, word).toBe(0);
       expect(r.stdout.trim(), word).toBe("quarantine list: 1 tags in 1 files, all listed");
@@ -138,7 +138,7 @@ describe("check-quarantine", () => {
   });
 
   it("counts every occurrence on one line", () => {
-    const root = fixture({ [A]: `test("@quarantine a @quarantine", { tag: "@quarantine" }, () => {});\n` }, `${A} 3 #1\n`);
+    const root = fixture({ [A]: `test("@quarantine a @quarantine", { tag: "@quarantine" }, () => {});\n` }, `${A} 3 #1 2099-01-01\n`);
     const r = run(root);
     expect(r.status).toBe(0);
     expect(r.stdout.trim()).toBe("quarantine list: 3 tags in 1 files, all listed");
@@ -152,7 +152,7 @@ describe("check-quarantine", () => {
   it("treats a file with only near-miss tags as having some", () => {
     const root = fixture(
       { [A]: `test("a", { tag: "@quarantined" }, () => {});\ntest("b", { tag: "@quarantine-x" }, () => {});\n` },
-      `${A} 2 #1\n`,
+      `${A} 2 #1 2099-01-01\n`,
     );
     const r = run(root);
     expect(r.status).toBe(0);
@@ -160,14 +160,14 @@ describe("check-quarantine", () => {
   });
 
   it("fails a tagged file that is not on the list", () => {
-    const root = fixture({ [A]: specA, [B]: specB }, `${A} 2 #1085\n`);
+    const root = fixture({ [A]: specA, [B]: specB }, `${A} 2 #1085 2099-01-01\n`);
     const r = run(root);
     expectFails(r, B);
     expect(r.stderr).not.toContain(`${A}`);
   });
 
   it("fails when the listed count is too low, naming both numbers", () => {
-    const root = fixture({ [A]: specA }, `${A} 1 #1085\n`);
+    const root = fixture({ [A]: specA }, `${A} 1 #1085 2099-01-01\n`);
     const r = run(root);
     expectFails(r, A);
     expect(r.stderr).toMatch(/\b1\b/);
@@ -175,7 +175,7 @@ describe("check-quarantine", () => {
   });
 
   it("fails when the listed count is too high, naming both numbers", () => {
-    const root = fixture({ [A]: specA }, `${A} 5 #1085\n`);
+    const root = fixture({ [A]: specA }, `${A} 5 #1085 2099-01-01\n`);
     const r = run(root);
     expectFails(r, A);
     expect(r.stderr).toMatch(/\b5\b/);
@@ -183,7 +183,7 @@ describe("check-quarantine", () => {
   });
 
   it("fails a stale entry for a path that does not exist", () => {
-    const root = fixture({ [A]: specA }, `${A} 2 #1085\ntests/e2e/gone.spec.ts 1 #2\n`);
+    const root = fixture({ [A]: specA }, `${A} 2 #1085 2099-01-01\ntests/e2e/gone.spec.ts 1 #2 2099-01-01\n`);
     const r = run(root);
     expectFails(r, "tests/e2e/gone.spec.ts");
   });
@@ -191,7 +191,7 @@ describe("check-quarantine", () => {
   it("fails a stale entry for a listed file with zero tags", () => {
     const root = fixture(
       { [A]: specA, [B]: `test("clean", async () => {});\n` },
-      `${A} 2 #1085\n${B} 1 #2\n`,
+      `${A} 2 #1085 2099-01-01\n${B} 1 #2 2099-01-01\n`,
     );
     const r = run(root);
     expectFails(r, B);
@@ -218,12 +218,12 @@ describe("check-quarantine", () => {
   });
 
   it("fails a zero count", () => {
-    const root = fixture({ [A]: specA }, `${A} 0 #1085\n`);
+    const root = fixture({ [A]: specA }, `${A} 0 #1085 2099-01-01\n`);
     expectFails(run(root), A, "must be a positive whole number");
   });
 
   it("fails the same path listed twice", () => {
-    const root = fixture({ [A]: specA }, `${A} 2 #1085\n${A} 2 #1415\n`);
+    const root = fixture({ [A]: specA }, `${A} 2 #1085 2099-01-01\n${A} 2 #1415 2099-01-01\n`);
     expectFails(run(root), A);
   });
 
@@ -235,7 +235,7 @@ describe("check-quarantine", () => {
   it("ignores comment and blank lines in the list", () => {
     const root = fixture(
       { [A]: specA },
-      `# reviewed list\n\n   \n# ${A} 99 #9\n${A} 2 #1085\n\n# end\n`,
+      `# reviewed list\n\n   \n# ${A} 99 #9 2099-01-01\n${A} 2 #1085 2099-01-01\n\n# end\n`,
     );
     const r = run(root);
     expect(r.error).toBeUndefined();
@@ -251,7 +251,7 @@ describe("check-quarantine", () => {
         "tests/unit/x.spec.ts": specA,
         "web/src/y.spec.ts": specA,
       },
-      `${A} 2 #1085\n`,
+      `${A} 2 #1085 2099-01-01\n`,
     );
     const r = run(root);
     expect(r.status).toBe(0);
@@ -268,7 +268,7 @@ describe("check-quarantine", () => {
         "tests/e2e/a.spec.ts.snap": specA,
         "web/tests/readme.txt": specA,
       },
-      `${A} 2 #1085\n`,
+      `${A} 2 #1085 2099-01-01\n`,
     );
     const r = run(root);
     expect(r.status).toBe(0);
@@ -278,7 +278,7 @@ describe("check-quarantine", () => {
   it("counts a helper that is not a spec or test file (helper.ts is now scanned)", () => {
     const root = fixture(
       { [A]: specA, "tests/e2e/helper.ts": specA, "web/tests/support.js": specA },
-      `${A} 2 #1085\ntests/e2e/helper.ts 2 #1086\nweb/tests/support.js 2 #1087\n`,
+      `${A} 2 #1085 2099-01-01\ntests/e2e/helper.ts 2 #1086 2099-01-01\nweb/tests/support.js 2 #1087 2099-01-01\n`,
     );
     const r = run(root);
     expect(r.status).toBe(0);
@@ -289,7 +289,7 @@ describe("check-quarantine", () => {
     const helper = "tests/e2e/support/tags.ts";
     const root = fixture(
       { [A]: specA, [helper]: `export const QUARANTINE = "@quarantine";\n` },
-      `${A} 2 #1085\n`,
+      `${A} 2 #1085 2099-01-01\n`,
     );
     const r = run(root);
     expectFails(r, helper);
@@ -298,7 +298,7 @@ describe("check-quarantine", () => {
 
   it("passes a listed helper exporting the tag", () => {
     const helper = "tests/e2e/support/tags.ts";
-    const root = fixture({ [helper]: `export const QUARANTINE = "@quarantine";\n` }, `${helper} 1 #1\n`);
+    const root = fixture({ [helper]: `export const QUARANTINE = "@quarantine";\n` }, `${helper} 1 #1 2099-01-01\n`);
     const r = run(root);
     expect(r.status).toBe(0);
     expect(r.stdout.trim()).toBe("quarantine list: 1 tags in 1 files, all listed");
@@ -307,7 +307,7 @@ describe("check-quarantine", () => {
   it("scans every code extension, not only spec and test files", () => {
     const exts = ["js", "ts", "mjs", "cjs", "jsx", "tsx", "mts", "cts"];
     const files = Object.fromEntries(exts.map((e) => [`web/tests/support/h.${e}`, specB]));
-    const root = fixture(files, exts.map((e, i) => `web/tests/support/h.${e} 1 #${i + 1}`).join("\n") + "\n");
+    const root = fixture(files, exts.map((e, i) => `web/tests/support/h.${e} 1 #${i + 1} 2099-01-01`).join("\n") + "\n");
     const r = run(root);
     expect(r.status).toBe(0);
     expect(r.stdout.trim()).toBe(`quarantine list: ${exts.length} tags in ${exts.length} files, all listed`);
@@ -316,7 +316,7 @@ describe("check-quarantine", () => {
   it("counts @quarantine case-insensitively", () => {
     const root = fixture(
       { [A]: `test("a", { tag: "@QUARANTINE" }, () => {});\ntest("b", { tag: "@Quarantine" }, () => {});\n` },
-      `${A} 2 #1\n`,
+      `${A} 2 #1 2099-01-01\n`,
     );
     const r = run(root);
     expect(r.error).toBeUndefined();
@@ -340,7 +340,7 @@ describe("check-quarantine", () => {
       "a.test.js",
     ];
     const files = Object.fromEntries(names.map((n) => [`tests/e2e/${n}`, specB]));
-    const root = fixture(files, names.map((n, i) => `tests/e2e/${n} 1 #${i + 1}`).join("\n") + "\n");
+    const root = fixture(files, names.map((n, i) => `tests/e2e/${n} 1 #${i + 1} 2099-01-01`).join("\n") + "\n");
     const r = run(root);
     expect(r.status).toBe(0);
     expect(r.stdout.trim()).toBe(`quarantine list: ${names.length} tags in ${names.length} files, all listed`);
@@ -354,7 +354,7 @@ describe("check-quarantine", () => {
   it("scans .spec.js and .spec.mjs files", () => {
     const js = "tests/e2e/c.spec.js";
     const mjs = "web/tests/d.spec.mjs";
-    const root = fixture({ [js]: specB, [mjs]: specB }, `${js} 1 #1\n${mjs} 1 #2\n`);
+    const root = fixture({ [js]: specB, [mjs]: specB }, `${js} 1 #1 2099-01-01\n${mjs} 1 #2 2099-01-01\n`);
     const r = run(root);
     expect(r.status).toBe(0);
     expect(r.stdout.trim()).toBe("quarantine list: 2 tags in 2 files, all listed");
@@ -363,7 +363,7 @@ describe("check-quarantine", () => {
   it("scans nested directories", () => {
     const deep = "tests/e2e/one/two/three/deep.spec.ts";
     const deepWeb = "web/tests/a/b/deep.spec.ts";
-    const root = fixture({ [deep]: specB, [deepWeb]: specB }, `${deep} 1 #1\n${deepWeb} 1 #2\n`);
+    const root = fixture({ [deep]: specB, [deepWeb]: specB }, `${deep} 1 #1 2099-01-01\n${deepWeb} 1 #2 2099-01-01\n`);
     const r = run(root);
     expect(r.status).toBe(0);
     expect(r.stdout.trim()).toBe("quarantine list: 2 tags in 2 files, all listed");
@@ -378,7 +378,7 @@ describe("check-quarantine", () => {
   it("accepts several comma-separated issue refs and trailing free text", () => {
     const root = fixture(
       { [A]: specA },
-      `${A} 2 #1085,#1415 flaky on the shared runner, see thread\n`,
+      `${A} 2 #1085,#1415 2099-01-01 flaky on the shared runner, see thread\n`,
     );
     const r = run(root);
     expect(r.error).toBeUndefined();
@@ -390,7 +390,7 @@ describe("check-quarantine", () => {
     // Four problems: A and B tagged but unlisted, one stale entry, one bad count.
     const root = fixture(
       { [A]: specA, [B]: specB },
-      `tests/e2e/gone.spec.ts 1 #2\ntests/e2e/c.spec.ts two #3\n`,
+      `tests/e2e/gone.spec.ts 1 #2 2099-01-01\ntests/e2e/c.spec.ts two #3\n`,
     );
     const r = run(root);
     expectFails(r, A, B, "tests/e2e/gone.spec.ts", "tests/e2e/c.spec.ts");
@@ -399,5 +399,57 @@ describe("check-quarantine", () => {
     for (const p of [A, B, "tests/e2e/gone.spec.ts", "tests/e2e/c.spec.ts"]) {
       expect(lines.filter((l) => l.includes(p))).toHaveLength(1);
     }
+  });
+});
+
+/*
+ * #1744: an entry is `<path> <tag count> <#issue> <review YYYY-MM-DD> [note]`.
+ * The check refuses an entry with no review date, a malformed one, or one
+ * before today (UTC). A date equal to today is still in date.
+ *
+ * Contract for the builder: the script reads today's UTC date from the env var
+ * QUARANTINE_TODAY (YYYY-MM-DD) when set, and from the clock otherwise. The
+ * cases below that use a fixed past or future year need no env var.
+ */
+describe("check-quarantine review dates (#1744)", () => {
+  const entry = (date) => `${A} 2 #1085${date === undefined ? "" : ` ${date}`}\n`;
+
+  it("refuses an entry with no review date, naming the path", () => {
+    expectFails(run(fixture({ [A]: specA }, entry())), A, "review");
+  });
+
+  it.each(["2026-13-01", "2026-02-30", "26-11-21", "2026/11/21", "21-11-2026", "soon", "2026-1-5"])(
+    "refuses the malformed review date %s",
+    (date) => {
+      expectFails(run(fixture({ [A]: specA }, entry(date))), A, date);
+    },
+  );
+
+  it("refuses a past review date, naming the path and the date", () => {
+    expectFails(run(fixture({ [A]: specA }, entry("2000-01-01"))), A, "2000-01-01");
+  });
+
+  it("accepts a future review date", () => {
+    const r = run(fixture({ [A]: specA }, entry("2099-12-31")));
+    expect(r.error).toBeUndefined();
+    expect(r.status).toBe(0);
+    expect(r.stdout.trim()).toBe("quarantine list: 2 tags in 1 files, all listed");
+  });
+
+  it("accepts several issue refs and a trailing note after the date", () => {
+    const r = run(fixture({ [A]: specA }, `${A} 2 #1085,#1415 2099-12-31 flaky on webkit\n`));
+    expect(r.status).toBe(0);
+  });
+
+  it("accepts a date equal to today and refuses the day before (QUARANTINE_TODAY)", () => {
+    const root = fixture({ [A]: specA }, entry("2030-06-15"));
+    expect(run(root, { QUARANTINE_TODAY: "2030-06-15" }).status).toBe(0);
+    expect(run(root, { QUARANTINE_TODAY: "2030-06-14" }).status).toBe(0);
+    expectFails(run(root, { QUARANTINE_TODAY: "2030-06-16" }), A, "2030-06-15");
+  });
+
+  it("refuses a missing date even when the count and issue are right", () => {
+    const r = run(fixture({ [A]: specA }, entry()), { QUARANTINE_TODAY: "2030-06-15" });
+    expectFails(r, A);
   });
 });
