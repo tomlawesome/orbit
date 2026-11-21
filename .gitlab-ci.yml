@@ -3368,8 +3368,9 @@ supply_chain_image:
 smoke:
   stage: acceptance
   extends: [.privileged_runner, .browser_suite]
-  # 30m + the quarantine run after the gate (capped at 8m, agent-infra#30).
-  timeout: 40m
+  # The suite's own 35m cap + the quarantine run after it (capped at 8m,
+  # agent-infra#30): 43m (#1943 D-F3, owner 83a).
+  timeout: 43m
   needs: *needs_gated_image_checked
   # One heavy pipeline at a time (#1546, owner 1c): a later pipeline's smoke
   # queues behind an earlier one's instead of the two slowing each other.
@@ -3492,11 +3493,12 @@ smoke:
 # reuse key (scripts/ci/job-inputs.json) and artefacts -- so a red here means
 # the same as a red there.
 # Desktop alone now runs 28-31 minutes (pipelines 2640 and 2643, two jobs cut
-# off at 30m before the suite finished), so it gets 45m.
+# off at 30m before the suite finished), so its suite is capped at 40m, and
+# the job gets 48m: that cap + the 8m quarantine run (#1943 D-F3, owner 83a).
 smoke_webkit:
   stage: acceptance
   extends: [.privileged_runner, .browser_suite]
-  timeout: 45m
+  timeout: 48m
   needs: *needs_gated_image_checked
   # One heavy pipeline at a time (#1546, owner 1c): a later pipeline's smoke_webkit
   # queues behind an earlier one's instead of the two slowing each other.
@@ -3595,7 +3597,8 @@ smoke_webkit:
 smoke_webkit_mobile:
   stage: acceptance
   extends: [.privileged_runner, .browser_suite]
-  timeout: 30m
+  # The suite's own 25m cap + the 8m quarantine run (#1943 D-F3, owner 83a).
+  timeout: 33m
   needs: *needs_gated_image_checked
   # One heavy pipeline at a time (#1546, owner 1c): a later pipeline's smoke_webkit_mobile
   # queues behind an earlier one's instead of the two slowing each other.
