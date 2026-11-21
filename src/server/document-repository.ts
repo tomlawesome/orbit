@@ -192,6 +192,12 @@ function stagedUploadHoldMs(config: { scanRecoveryRetentionHours: number }): num
   return Math.max(24, config.scanRecoveryRetentionHours) * 60 * 60 * 1_000;
 }
 
+/** The hold in words for the staged-limit refusal: whole days, rounded up. */
+function stagedHoldWords(config: { scanRecoveryRetentionHours: number }): string {
+  const days = Math.ceil(stagedUploadHoldMs(config) / 86_400_000);
+  return `${days} ${days === 1 ? "day" : "days"}`;
+}
+
 async function requireDocumentAccess(userId: string, documentId: string) {
   // A malformed id must fail the same way an unknown-but-well-formed one
   // does: postgres.js runs with prepare: false, so an invalid uuid literal
@@ -562,7 +568,7 @@ async function reserveDocumentMetadata(input: {
       if (Number(staged) >= STAGED_UPLOADS_PER_MEMBER_LIMIT) {
         throw new AppError(
           "document_staged_limit",
-          `You already have ${STAGED_UPLOADS_PER_MEMBER_LIMIT} uploads waiting to be attached to an item. Add the item they belong to, or wait a day and they are cleared`,
+          `You already have ${STAGED_UPLOADS_PER_MEMBER_LIMIT} uploads waiting to be attached to an item. Add the item they belong to, or wait up to ${stagedHoldWords(config)} and they are cleared`,
           429,
         );
       }
@@ -1350,7 +1356,7 @@ export async function restoreDocument(userId: string, documentId: string): Promi
       if (Number(staged) >= STAGED_UPLOADS_PER_MEMBER_LIMIT) {
         throw new AppError(
           "document_staged_limit",
-          `You already have ${STAGED_UPLOADS_PER_MEMBER_LIMIT} uploads waiting to be attached to an item. Add the item they belong to, or wait a day and they are cleared`,
+          `You already have ${STAGED_UPLOADS_PER_MEMBER_LIMIT} uploads waiting to be attached to an item. Add the item they belong to, or wait up to ${stagedHoldWords(config)} and they are cleared`,
           429,
         );
       }
