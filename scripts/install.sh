@@ -1392,9 +1392,16 @@ prepare_backup_dir() {
 # orbit-install-backups/<stamp>/originals/ inside the folder, never under the
 # home, state or temporary directory. Any other folder is an update or a
 # refusal, and gets no start record.
+#
+# #1943 O-S1: a rollback's aside is ignored only while its original is in the
+# folder. A lone aside means a restore was killed after the original was
+# moved aside, so the folder is not known to be fresh: the run stops before
+# anything is written, naming the aside, every backed-up copy of its original
+# and the step that recovers it. The original is not put back automatically:
+# the aside carries no stamp, so with two dated copies the choice is a guess.
 snapshot_fresh_target() {
-  local saved_options name
-  local -a entries=() originals=()
+  local saved_options name original found
+  local -a entries=() originals=() asides=() copies=()
   saved_options="$(shopt -p nullglob dotglob)" || true
   shopt -s nullglob dotglob
   entries=(*)
@@ -1404,9 +1411,28 @@ snapshot_fresh_target() {
       .env-orbit | .orbit-secrets) originals+=("$name") ;;
       # O-R1: a rollback's aside left by an interrupted restore is the
       # installer's own; it is not an original and is not copied.
-      orbit-install-backups | ..env-orbit.orbit-restore.*.aside | ..orbit-secrets.orbit-restore.*.aside) ;;
+      ..env-orbit.orbit-restore.*.aside | ..orbit-secrets.orbit-restore.*.aside) asides+=("$name") ;;
+      orbit-install-backups) ;;
       *) return 0 ;;
     esac
+  done
+  for name in "${asides[@]}"; do
+    original="${name#.}"
+    original="${original%%.orbit-restore.*}"
+    [[ -e "$original" || -L "$original" ]] && continue
+    saved_options="$(shopt -p nullglob dotglob)" || true
+    shopt -s nullglob dotglob
+    copies=(orbit-install-backups/*/originals/"$original")
+    eval "$saved_options"
+    if ((${#copies[@]} > 0)); then
+      found="$(printf ' %q' "${copies[@]}")"
+      found="Copies of ${original} were found at:${found}."
+    else
+      found="No copy of ${original} was found under orbit-install-backups."
+    fi
+    installer_ui_phase=host
+    installer_ui_component=host
+    fail_with failure abort "$(printf '%q' "$name") is left from an interrupted rollback, and ${original} is not in this folder. ${found} Copy the original back, or remove the aside if you meant an empty folder, then install again. Nothing was changed."
   done
   backup_root="${target_dir}/orbit-install-backups"
   if ! backup_root_is_sane; then
