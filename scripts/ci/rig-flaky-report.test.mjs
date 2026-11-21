@@ -284,10 +284,10 @@ describe("rig-flaky-report", () => {
 
     it("marks only the testcase of the flaky project when two suites share classname and name", () => {
       const name = `door › ${FLAKY}`;
-      const suite = (host, body) =>
+      const suite = (host) =>
         `<testsuite name="${FILE}" hostname="${host}" tests="1" failures="0">\n${tc(name)}\n</testsuite>`;
-      const phone = suite("rig-phone", "");
-      const desktop = suite("rig-desktop", "");
+      const phone = suite("rig-phone");
+      const desktop = suite("rig-desktop");
       const before = `<?xml version="1.0"?>\n<testsuites>\n${desktop}\n${phone}\n</testsuites>\n`;
       const json = report();
       json.suites[0].suites[0].specs[0].tests[0].projectName = "rig-phone";

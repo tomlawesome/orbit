@@ -16,7 +16,7 @@ import { join, relative } from "node:path";
 
 const [input, output, junit] = process.argv.slice(2);
 if (!input || !output) {
-  console.error("usage: rig-flaky-report.mjs <report.json> <out.txt>");
+  console.error("usage: rig-flaky-report.mjs <report.json> <out.txt> [junit.xml]");
   process.exit(2);
 }
 let report;
@@ -74,25 +74,6 @@ for (const f of flaky) {
   );
   lines.push("");
 }
-if (junit && flaky.length > 0) {
-  let xml;
-  try {
-    xml = readFileSync(junit, "utf8");
-    for (const f of flaky) {
-      const names = new Set([f.path, xmlEscape(f.path)]);
-      const files = new Set([f.file, xmlEscape(f.file)]);
-      xml = xml.replace(/<testcase\b[^>]*>/g, (tag) => {
-        const name = /\bname="([^"]*)"/.exec(tag)?.[1];
-        const cls = /\bclassname="([^"]*)"/.exec(tag)?.[1];
-        return names.has(name) && files.has(cls) ? tag.replace(`name="${name}"`, `name="[flaky] ${name}"`) : tag;
-      });
-    }
-    writeFileSync(junit, xml);
-  } catch (e) {
-    console.error(`rig-flaky-report: cannot update ${junit}: ${e.message}`);
-    process.exit(2);
-  }
-}
 const text = `${lines.join("\n")}\n`;
 try {
   writeFileSync(output, text);
@@ -101,4 +82,29 @@ try {
   process.exit(2);
 }
 process.stdout.write(text);
+if (junit && flaky.length > 0) {
+  try {
+    const keys = new Set();
+    for (const f of flaky) {
+      for (const n of new Set([f.path, xmlEscape(f.path)])) {
+        for (const c of new Set([f.file, xmlEscape(f.file)])) keys.add(JSON.stringify([f.project, c, n]));
+      }
+    }
+    let host;
+    const xml = readFileSync(junit, "utf8").replace(/<testsuite\b[^>]*>|<testcase\b[^>]*>/g, (tag) => {
+      if (tag.startsWith("<testsuite")) {
+        host = /\bhostname="([^"]*)"/.exec(tag)?.[1];
+        return tag;
+      }
+      const name = /\bname="([^"]*)"/.exec(tag)?.[1];
+      const cls = /\bclassname="([^"]*)"/.exec(tag)?.[1];
+      // A function replacement keeps `$&` and `$'` in a title literal.
+      return keys.has(JSON.stringify([host, cls, name])) ? tag.replace(`name="${name}"`, () => `name="[flaky] ${name}"`) : tag;
+    });
+    writeFileSync(junit, xml);
+  } catch (e) {
+    console.error(`rig-flaky-report: cannot update ${junit}: ${e.message}`);
+    process.exit(2);
+  }
+}
 process.exit(failed > 0 ? 1 : 0);
