@@ -576,3 +576,11 @@ timeout on this one case rather than a global raise.
 ## tests/unit/admin-mailbox-fetch-now-route-1651.test.mjs "POST /api/admin/mailbox fetch_now > runs the engine for the caller's own id ..." and "passes the refusal already_running back as the outcome"
 
 - 2026-11-20 · !1441 68d651e2f · pipeline 4980 / fast retry (job 59988) · timed out at 5 s. Passed in jobs 59718 and 59854 on the same code. First sighting.
+
+## scripts/install-undo-copy-1848.test.mjs "#1915 O-F1/O-F3 install.sh smtp_discard_copy: the copy marker's temporary file > is removed with the folder once mail sending is confirmed"
+
+- 2026-11-21 · !1445 ee011d95c · pipeline 5061 / fast (job 60610) · the second update exited 1, not 0, in a 1463 s full run on a loaded runner. Passed in jobs 60143, 60215 and 60270, and locally at ee011d95c six times at once (#1944). The assertion now prints the update's stderr. First sighting.
+
+## tests/unit/pocket-inbox.test.mjs "the inbox on a phone, mounted > #1584 web-wr9-3: an amendment the engine replayed says so, not 'added', and the sheet closes"
+
+- 2026-11-21 · !1445 ee011d95c · pipeline 5061 / fast (job 60610) · the send button's aria-disabled stayed 'true' past vi.waitFor's 1 s, in a 1463 s full run on a loaded runner. Passed in jobs 60143, 60215, 60270 and 60418, and locally at ee011d95c six times at once (#1944). First sighting.
