@@ -42,8 +42,10 @@ import {
   type PushNotification,
   isAllowedPushEndpoint,
   isBlockedPushAddress,
+  isRevokedPushFailure,
   NOTIFICATION_PROVIDER_TIMEOUT_MS,
 } from "./notification-worker";
+import { log } from "@/lib/logger";
 
 const ENDPOINT = "https://push.services.example.test/sub/abc123";
 const HIDDEN_HOST = "secret-host.push.example.test";
@@ -223,9 +225,23 @@ describe("item 4: the error", () => {
 });
 
 describe("item 5: classification", () => {
-  it("categorises a BlockedPushEndpointError as push_unsubscribed, like 401/403/404/410", () => {
-    expect(categorizeProviderError("web_push", new BlockedPushEndpointError())).toBe("push_unsubscribed");
+  /* Flipped by #1943 A-R4 (ruling note 68569): a blocked resolver answer is
+     the network, not the push service, so it is transient. */
+  it("categorises a BlockedPushEndpointError as push_unavailable, while 410 stays push_unsubscribed (#1943 A-R4)", () => {
+    expect(categorizeProviderError("web_push", new BlockedPushEndpointError())).toBe("push_unavailable");
     expect(categorizeProviderError("web_push", { statusCode: 410 })).toBe("push_unsubscribed");
+  });
+
+  it("isRevokedPushFailure is false for a BlockedPushEndpointError, still with its one warn line, and true for 410 (#1943 A-R4)", () => {
+    const warn = vi.spyOn(log, "warn").mockImplementation(() => undefined as never);
+    try {
+      expect(isRevokedPushFailure(new BlockedPushEndpointError(), "sub-1943")).toBe(false);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0]![0]).toMatchObject({ reason: "push_endpoint_blocked" });
+      expect(isRevokedPushFailure({ statusCode: 410 }, "sub-1943")).toBe(true);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 
