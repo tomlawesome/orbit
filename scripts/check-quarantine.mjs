@@ -13,6 +13,9 @@
 // the case-blind CLI --grep-invert) are that wide. scripts/test-frontend.sh
 // and web's fidelity scripts run this before the gate.
 //
+// Each entry also carries a review date (YYYY-MM-DD, not before today in UTC;
+// QUARANTINE_TODAY overrides today for tests), so a quarantine cannot go stale (#1744).
+//
 // Usage: node scripts/check-quarantine.mjs [root]   (default: the current directory)
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
@@ -25,7 +28,10 @@ const CODE = /\.(m|c)?[jt]sx?$/;
 // Case-insensitive: web's fidelity scripts filter with --grep-invert, which
 // Playwright matches ignoring case.
 const TAG = /@quarantine/gi;
-const ENTRY = /^(\S+)\s+(\S+)\s+(\S+)/;
+const ENTRY = /^(\S+)\s+(\S+)\s+(\S+)(?:\s+(\S+))?/;
+const DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
+// Today in UTC; QUARANTINE_TODAY (YYYY-MM-DD) overrides the clock for tests.
+const today = process.env.QUARANTINE_TODAY || new Date().toISOString().slice(0, 10);
 const ISSUES = /^#\d+(,#\d+)*$/;
 
 function specFiles(dir) {
@@ -55,10 +61,17 @@ readFileSync(listPath, "utf8").split("\n").forEach((raw, i) => {
   if (!line || line.startsWith("#")) return;
   const where = `${LIST}:${i + 1}`;
   const m = ENTRY.exec(line);
-  if (!m) return problems.push(`${where}: malformed entry "${line}" (expected <path> <count> <#issue>)`);
-  const [, path, count, issues] = m;
+  if (!m) return problems.push(`${where}: malformed entry "${line}" (expected <path> <count> <#issue> <review YYYY-MM-DD>)`);
+  const [, path, count, issues, review] = m;
   if (!/^[1-9]\d*$/.test(count)) return problems.push(`${where}: ${path}: count "${count}" must be a positive whole number`);
   if (!ISSUES.test(issues)) return problems.push(`${where}: ${path}: needs an issue ref like #123, found "${issues}"`);
+  if (review === undefined) return problems.push(`${where}: ${path}: needs a review date (YYYY-MM-DD) after the issue ref`);
+  const d = DATE.exec(review);
+  const real = d && new Date(`${review}T00:00:00Z`);
+  if (!d || Number.isNaN(real.getTime()) || real.toISOString().slice(0, 10) !== review) {
+    return problems.push(`${where}: ${path}: review date "${review}" must be a real date as YYYY-MM-DD`);
+  }
+  if (review < today) return problems.push(`${where}: ${path}: review date ${review} has passed (today is ${today}); review the quarantine and set a new date`);
   if (listed.has(path)) return problems.push(`${where}: ${path} is listed twice`);
   listed.set(path, Number(count));
 });
