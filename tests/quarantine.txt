@@ -4,4 +4,5 @@
 # issue, and scripts/check-quarantine.mjs fails the smoke and fidelity jobs on
 # any tag this list does not account for.
 #
-# <path> <tag count> <issue refs> [note]. docs/flakes.md has the sightings.
+# <path> <tag count> <#issue> <review YYYY-MM-DD> [note]. The review date must not be
+# in the past (UTC); scripts/check-quarantine.mjs fails once it is. docs/flakes.md has the sightings.
