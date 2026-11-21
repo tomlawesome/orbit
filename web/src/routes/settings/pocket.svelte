@@ -729,7 +729,7 @@
                   </div>
                   <div class="rl-field" tabindex="-1" bind:this={checkField}>
                     <span class="rl-label">sender check</span>
-                    <b class:ok={row.tone === "ok"} class:warm={row.tone === "warm"}>{row.says}</b>
+                    <b class:ok={row.tone === "ok"} class:warm={row.tone === "warm"}>{row.says}{#if row.link}&#32;· <a href={resolve("/inbox")}>{row.link.text}</a>{/if}</b>
                   </div>
                 {/if}
                 <!-- The extras stand on their own (#1650 review), rows or not. -->
@@ -1110,6 +1110,7 @@
   .rl-value.quiet{font-weight:400;color:var(--ink-mid)}
   .rl-field b.ok{color:var(--ok-text)}
   .rl-field b.warm{color:var(--warm-text)}
+  .rl-field b a{display:inline-flex;align-items:center;min-height:var(--p-hit);color:inherit;text-decoration:underline}
   .rl-check{margin:16px 0 0}
   /* #1650: an extra address, its state, then its pills; the add input and
      its button stack under the fields. */
