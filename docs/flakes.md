@@ -503,12 +503,6 @@ timeout on this one case rather than a global raise.
 
 - 2026-11-19 · !1409 a44b60f8 · pipeline 4800 / upgrade_cell: [latest-3, all-keys] (job 57816) · the old installer's identity phase failed `reason=image-registry`, then "Could not download the release manifest for channel v0.3.7", step=install assertion=install-exited-0. The retry, job 57965, passed on the same commit. First sighting.
 
-## scripts/pty-deadline.test.mjs "pty deadline reporting > re-arms the idle deadline on every chunk, so a slow but live child is not killed" (#1941)
-
-- 2026-11-20 · !1433 602b02c06 · pipeline 4890 / fast (job 58758) · the pty child printed nothing for 300 ms on a loaded runner and was killed. Passed in pipeline 4902 on the same test code. First sighting.
-- 2026-11-20 · !1438 c535ff40 (repair.sh and its tests only) · pipeline 4970 / fast (job 59587) · the child printed step-1 to step-3, then went 300 ms without output on a loaded runner and was killed. Second sighting.
-- 2026-11-20 · local, fix/1494-tiles at aaeb03729 · full local gate · failed; the file re-run alone passed. Third sighting.
-
 ## scripts/install-undo-copy-1848.test.mjs "#1874 O-R2 install.sh prune: Ctrl-C at the undo-copy prompt > restores echo on the terminal"
 
 - 2026-11-20 · !1433 602b02c06 · pipeline 4890 / fast (job 58758) · timed out with only the fake banner printed. Passed in pipeline 4902 on the same test code. First sighting.
