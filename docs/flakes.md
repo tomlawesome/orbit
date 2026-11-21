@@ -535,6 +535,7 @@ timeout on this one case rather than a global raise.
 
 - 2026-11-20 · !1433 80582f500 · pipeline 4912 / fast (job 58965) · `Test timed out in 45000ms` on a loaded runner. Passed in the retry (job 59031). First sighting.
 - 2026-11-20 · !1433 eb548d90a · pipeline 4944 / fast (job 59284) · `Test timed out in 45000ms` again. Passed in the retries (jobs 59336, 59391). Second sighting.
+- 2026-11-21 · !1447 d04628d28 · pipeline 5089 / fast (job 60850) · `Test timed out in 45000ms` in a 1767 s full run on a loaded runner. The audit fixes don't touch repair.sh or this test. Passed locally at d04628d28 (11/11). Third sighting: #1946.
 
 ## src/lib/backup-restore-cli.test.ts "runBackup > O2-R3: a SIGTERM while the adapter is dumping leaves the .orbit-backup.* scratch in place, and the next runBackup removes it"
 
