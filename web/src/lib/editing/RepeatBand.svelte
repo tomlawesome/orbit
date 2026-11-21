@@ -10,19 +10,23 @@
    * own foot line reads the cell under the pointer or the keys: its words,
    * and the date it would next come round to.
    *
-   * A radio group: one cell in the tab order (the chosen one); every arrow
-   * walks the cells, wrapping, Home and End the ends. Arrows move focus
-   * only — a pick closes the card, so it waits for Enter, Space or a press.
+   * A radio group (WAI-ARIA APG radio pattern, #1494, #1930): one cell in
+   * the tab order (the chosen one); every arrow walks the cells, wrapping,
+   * Home and End the ends. Selection follows focus: every move checks the
+   * cell it lands on and hands it to `onpick`. A press, Enter or Space also
+   * calls `oncommit`; the chooser card stages arrow checks and closes only
+   * on `oncommit` (owner 52a).
    *
    * @typedef {{
    *   choices: import('./item-draft.js').Choice[],
    *   value: string | null,
    *   label: string,
    *   onpick: (value: string) => void,
+   *   oncommit?: (value: string) => void,
    * }} Props
    */
   /** @type {Props} */
-  let { choices, value, label, onpick } = $props();
+  let { choices, value, label, onpick, oncommit } = $props();
 
   /** The cell in the tab order, and the foot's at rest: the chosen one, else the first. */
   let active = $state(untrack(() => Math.max(0, choices.findIndex((c) => c.value === value))));
@@ -45,6 +49,7 @@
     event.preventDefault();
     active = to;
     /** @type {HTMLButtonElement | undefined} */ (group?.querySelectorAll("[role=radio]")[to])?.focus({ preventScroll: true });
+    onpick(choices[to].value);
   }
 
   /** @param {import('./item-draft.js').Choice} choice */
@@ -55,7 +60,7 @@
   {#each choices as choice, i (choice.value)}
     <button type="button" class="cell" role="radio" aria-checked={choice.value === value} aria-label={spoken(choice)}
             tabindex={i === active ? 0 : -1}
-            onclick={() => onpick(choice.value)} onkeydown={(e) => walk(e, i)} onfocus={() => (active = i)}
+            onclick={() => { onpick(choice.value); oncommit?.(choice.value); }} onkeydown={(e) => walk(e, i)} onfocus={() => (active = i)}
             onpointerenter={() => (hover = i)} onpointerleave={() => (hover = null)}>
       <b>{choice.figure ?? choice.words}</b>
       {#if choice.unit}<small>{choice.unit}</small>{/if}

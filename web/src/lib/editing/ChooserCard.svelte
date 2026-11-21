@@ -35,7 +35,7 @@
    *   · "timezone", "currency": a filter over the household's pick-list
    *     (PickList.svelte, #1338; the `ask`'s value is the stored one).
    *
-   * A day, tile, cell or list row pressed (or Enter/Space on it; on a tile an arrow only moves the highlight, #1494) hands its
+   * A day, tile, cell or list row pressed (or Enter/Space on it; on a tile or a period cell an arrow only moves the highlight, #1494, #1930) hands its
    * value to `onpick`: a `YYYY-MM-DD` date, a section id, a type, the
    * period's months as a string, or a zone or currency code. Esc, anywhere while the card stands, calls
    * `onclose` before anything else hears it, so an open chooser takes Esc
@@ -70,8 +70,8 @@
       : ask.key === "reminders" ? "days"
       : "tiles");
 
-  /** The tiles' highlight: arrows stage a check here, a press, Enter or Space
-      lands it through `onpick`, Esc drops it with the card (#1494). Starts from
+  /** The tiles' and the period band's highlight: arrows stage a check here, a press, Enter or Space
+      lands it through `onpick`, Esc drops it with the card (#1494, #1930). Starts from
       the ask's value each time the card opens or its ask changes. */
   let staged = $derived(ask.value);
   /** @param {string} v */
@@ -117,7 +117,7 @@
           <button type="button" class="clear" onclick={onclear}>clear date</button>
         {/if}
       {:else if kind === "band"}
-        <RepeatBand choices={ask.choices} value={ask.value} label={ask.label} {onpick} />
+        <RepeatBand choices={ask.choices} value={staged} label={ask.label} onpick={stage} oncommit={onpick} />
       {:else if kind === "list" && (ask.key === "timezone" || ask.key === "currency")}
         <PickList kind={ask.key} value={ask.value ?? ""} {onpick} />
       {:else if kind === "days"}
