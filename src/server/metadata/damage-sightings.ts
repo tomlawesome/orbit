@@ -79,6 +79,26 @@ export function noteMetadataDamage(column: MetadataColumn, rowId: string): void 
 }
 
 /**
+ * Records a sighting durably, in the caller's own transaction (#1943 A-R2).
+ * For a caller that acts on the damage in the same transaction -- the
+ * maintenance backfills clear a damaged plain value -- so the record and the
+ * act commit together or not at all: record, then clear. Unlike
+ * `noteMetadataDamage` this throws when the row cannot be written, which is
+ * the point: no sighting, no clear.
+ */
+export async function recordMetadataDamage(
+  column: MetadataColumn,
+  rowId: string,
+  executor: MetadataExecutor,
+): Promise<void> {
+  const sighting = sightingOf(column, rowId);
+  await executor.insert(metadataDamageSightings).values(sighting).onConflictDoNothing();
+  const key = keyOf(sighting);
+  pendingCleared.delete(key);
+  recorded.add(key);
+}
+
+/**
  * Records that a value this process had seen damaged now decrypts. Does
  * nothing — no queue entry, no statement — for a value that was never seen
  * damaged here, which is every value on a healthy instance.
