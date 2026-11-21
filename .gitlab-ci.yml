@@ -218,7 +218,7 @@ workflow:
 # validation job. This is the one schedule that must run them, and only the
 # ones the browsers need: `classify`, `fast`, `fast_checks` (it builds the web
 # application the rig serves) and `build_image` (the image the smoke jobs test), then
-# the nine, `pocket_measure` and `browser_report` (#1546), and `nightly_report` last. Nothing else lists
+# the nine, `pocket_measure`, `backup_drill` (#1927) and `browser_report` (#1546), and `nightly_report` last. Nothing else lists
 # it, so no other job starts.
 #
 # The owner creates the schedule (Settings > CI/CD > Schedules); nothing here
@@ -2347,7 +2347,10 @@ flake_check:
 # Two slots cap the nightly at two rig jobs at once (#1921): `rig-slot-webkit`
 # (`rig_webkit`, `film_webkit`) and `rig-slot-chromium` (`rig_chromium`,
 # `rig_firefox`, `screens_chromium`, `pocket_measure`), each a `resource_group`.
-# Shards of one job share its slot, so they run one after another. Two because
+# Shards of one job share its slot, so they run one after another. A
+# `resource_group` serialises the job across every pipeline on the project,
+# not only the nightly, so a rig job in a merge request waits for one running
+# elsewhere. Two because
 # 2 rig jobs plus 2 smoke jobs are 28 of the host's 32 CPUs; three went over.
 # The full tap-floor measurement is not here: it is `pocket_measure`, nightly
 # only (#1616).
@@ -2686,12 +2689,18 @@ browser_report:
       # merge-reports needs only the Playwright package, not the postinstall scripts of the rest; the same lighter install as the rest of this file that skips them
       pnpm install --frozen-lockfile --ignore-scripts
       cd web
-      PLAYWRIGHT_HTML_OPEN=never PLAYWRIGHT_JUNIT_OUTPUT_NAME=junit.xml pnpm exec playwright merge-reports --reporter html,junit ./blob-report
+      PLAYWRIGHT_HTML_OPEN=never PLAYWRIGHT_JUNIT_OUTPUT_NAME=junit.xml PLAYWRIGHT_JSON_OUTPUT_NAME=report.json pnpm exec playwright merge-reports --reporter html,junit,json ./blob-report
+      cd ..
+      # A pass on retry is flaky (#1744): list it in flaky.txt. Exit 1 is a test that failed every try, which the rig jobs already report; only exit 2 (no usable report) fails this job.
+      rc=0; node scripts/ci/rig-flaky-report.mjs web/report.json flaky.txt web/junit.xml || rc=$?
+      if [ "$rc" -gt 1 ]; then exit "$rc"; fi
   artifacts:
     name: orbit-browser-report
     paths:
       - web/playwright-report/
       - web/junit.xml
+      - web/report.json
+      - flaky.txt
     reports:
       junit: web/junit.xml
     expire_in: 14 days

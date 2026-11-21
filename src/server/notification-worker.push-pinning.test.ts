@@ -101,6 +101,12 @@ const BLOCKED: Array<[string, number]> = [
   ["fec0::1", 6],
   ["ff02::1", 6],
   ["::", 6],
+  // #1943 SEC-A1 (CWE-918): the IPv4 documentation ranges (RFC 5737). The
+  // benchmarking range (RFC 2544) follows once this file is on the commit
+  // scan's allow list.
+  ["192.0.2.1", 4],
+  ["198.51.100.1", 4],
+  ["203.0.113.1", 4],
 ];
 // A public IPv4 cannot be written here (the commit scan refuses every IPv4
 // literal outside 127/8 and the documentation ranges, which are reserved), so
@@ -135,6 +141,17 @@ describe("item 1: one address predicate", () => {
     expect(error).toBeInstanceOf(BlockedPushEndpointError);
     expect(addresses).toBeUndefined();
   });
+
+  it.each(BLOCKED.filter(([address, family]) => family === 4 && address !== "127.0.0.1"))(
+    "refuses the IPv4 %s as the resolved address of a hostname (#1943 SEC-A1)",
+    async (address, family) => {
+      const agent = await sendAndCaptureAgent();
+      dnsState.answer = [{ address, family }];
+      const { error, addresses } = await runLookup(agentLookup(agent));
+      expect(error).toBeInstanceOf(BlockedPushEndpointError);
+      expect(addresses).toBeUndefined();
+    },
+  );
 
   it("lets a public resolved address through", async () => {
     const agent = await sendAndCaptureAgent();

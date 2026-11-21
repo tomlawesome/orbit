@@ -12,11 +12,16 @@ import { describe, expect, it } from "vitest";
  * checks the live answer.
  */
 const SOURCE = readFileSync(resolve(import.meta.dirname, "../../src/server/document-repository.ts"), "utf8");
-const WORDS = "`You already have ${STAGED_UPLOADS_PER_MEMBER_LIMIT} uploads waiting to be attached to an item. Add the item they belong to, or wait a day and they are cleared`";
+// #1943 A-F1/A-F3: the wait is the configured hold (stagedUploadHoldMs), not "a day".
+const WORDS = "`You already have ${STAGED_UPLOADS_PER_MEMBER_LIMIT} uploads waiting to be attached to an item. Add the item they belong to, or wait up to ";
 
 describe("#1915 the staged-limit refusal text", () => {
   it("is the ruled text, built from the constant, in both places", () => {
-    expect(SOURCE.split(WORDS).length - 1, "both refusals say exactly the ruled words").toBe(2);
+    expect(SOURCE.split(WORDS).length - 1, "both refusals say the ruled words, up to the wait").toBe(2);
+  });
+
+  it("never hard-codes the wait as \"a day\" (#1943 A-F1/A-F3)", () => {
+    expect(SOURCE).not.toContain("wait a day");
   });
 
   it("has no hand-written 100 and never says delete", () => {
