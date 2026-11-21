@@ -24,12 +24,10 @@ import { afterEach, describe, expect, it } from "vitest";
  *     - <date> · <ref> <sha8> · pipeline <id> / <job> · passed on retry; first try: <first error line>
  *   The spec path is config.projects[].testDir (absolute) joined with the
  *   spec's `file`, made relative to the working directory.
- *   <job> comes from the project: rig-desktop and rig-phone -> rig_chromium,
- *   rig-firefox -> rig_firefox, rig-webkit-* -> rig_webkit (the --project flags
- *   of web/package.json's rig:* scripts, run by .gitlab-ci.yml). With the
- *   result's `shardIndex` (1-based, as --shard) and that job's `parallel:`
- *   read from .gitlab-ci.yml in the working directory, it is "rig_webkit 2/3";
- *   without a shardIndex it is just "rig_webkit".
+ *   <job> comes from the project alone: rig-desktop and rig-phone ->
+ *   rig_chromium, rig-firefox -> rig_firefox, rig-webkit-* -> rig_webkit (the
+ *   --project flags of web/package.json's rig:* scripts). The merged json
+ *   carries no shard, so there is no "2/3" and nothing reads `parallel:`.
  *   Stdout and out.txt hold the same text, a "Flaky (passed on retry)"
  *   section; a flaky test is never printed as passed.
  *   junit.xml, when given, is rewritten in place: each flaky test's <testcase>
@@ -46,7 +44,6 @@ afterEach(() => {
 
 const result = (status, retry, message) => ({
   workerIndex: 0,
-  shardIndex: 2,
   status,
   duration: 10,
   retry,
@@ -138,7 +135,7 @@ function run(json, env = ENV, junit = undefined) {
 
 const HEADING = `## ${REL} "door › ${FLAKY}" [${PROJECT}]`;
 const LINE =
-  "- 2026-11-21 · batch-b 01234567 · pipeline 4321 / rig_webkit 2/3 · passed on retry; first try: Error: expect(locator).toBeVisible()";
+  "- 2026-11-21 · batch-b 01234567 · pipeline 4321 / rig_webkit · passed on retry; first try: Error: expect(locator).toBeVisible()";
 
 describe("rig-flaky-report", () => {
   it("has a script to run", () => {
@@ -214,30 +211,23 @@ describe("rig-flaky-report", () => {
     expect(r.status).toBe(2);
   });
 
-  it("names the job from the project and the shard, not CI_JOB_NAME", () => {
+  it("names the job from the project, not CI_JOB_NAME", () => {
     const r = run(report());
-    expect(r.stdout).toContain("pipeline 4321 / rig_webkit 2/3 ·");
+    expect(r.stdout).toContain("pipeline 4321 / rig_webkit ·");
     expect(r.stdout).not.toContain("browser_report");
-  });
-
-  it("names just the job when the result has no shardIndex", () => {
-    const json = report();
-    delete json.suites[0].suites[0].specs[0].tests[0].results[0].shardIndex;
-    delete json.suites[0].suites[0].specs[0].tests[0].results[1].shardIndex;
-    expect(run(json).stdout).toContain("pipeline 4321 / rig_webkit ·");
+    expect(r.stdout).not.toMatch(/rig_webkit \d/u);
   });
 
   it.each([
-    ["rig-desktop", "rig_chromium 1/2"],
-    ["rig-phone", "rig_chromium 1/2"],
-    ["rig-firefox", "rig_firefox 1/2"],
-    ["rig-webkit-desktop", "rig_webkit 1/3"],
-    ["rig-webkit-phone", "rig_webkit 1/3"],
+    ["rig-desktop", "rig_chromium"],
+    ["rig-phone", "rig_chromium"],
+    ["rig-firefox", "rig_firefox"],
+    ["rig-webkit-desktop", "rig_webkit"],
+    ["rig-webkit-phone", "rig_webkit"],
   ])("maps %s to the job %s", (project, job) => {
     const json = report();
     const t = json.suites[0].suites[0].specs[0].tests[0];
     t.projectName = project;
-    for (const x of t.results) x.shardIndex = 1;
     expect(run(json).stdout).toContain(`pipeline 4321 / ${job} ·`);
   });
 
@@ -246,7 +236,6 @@ describe("rig-flaky-report", () => {
     const specs = json.suites[0].suites[0].specs;
     const other = structuredClone(specs[0]);
     other.tests[0].projectName = "rig-desktop";
-    for (const x of other.tests[0].results) x.shardIndex = 1;
     specs.push(other);
     const lines = run(json).stdout.split("\n");
     expect(lines).toContain(HEADING);
