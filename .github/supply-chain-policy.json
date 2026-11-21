@@ -510,6 +510,28 @@
       "trackingIssue": 1922,
       "installedVersion": "v1.26.10",
       "rationale": "CVE-2026-97054 is a Go net/http flaw: an HTTP/1 server that uses MaxBytesReader can panic if its handler reads the body while writing the response header. It is in the Go standard library compiled into /usr/bin/ollama in ollama/ollama:0.40.17 (built with go1.26.10, checked 2026-11-21). Orbit runs Ollama only under the optional ai profile, on the internal network, with no published port (ADR-0025), so only Orbit's app can reach it and the worst case is a crash and restart. Fixed in Go 1.26.11 and 1.27.4, but no Ollama image ships a build on either yet. Owner 47a, 2026-11-19: 14 days."
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-86144",
+      "package": "libxml2",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-12-05",
+      "trackingIssue": 1948,
+      "installedVersion": "2.13.9-r2",
+      "rationale": "CVE-2026-86144 is a libxml2 flaw, in Alpine's libxml2 2.13.9-r2 in postgres:18-alpine and clamav/clamav:1.5.5. Fixed in Alpine 2.13.9-r3, but neither image has been rebuilt with it: on 2026-11-21 both pinned digests are still the newest upstream builds of their tags (sidecar-pins check). ClamAV reads untrusted files, so this is the one to clear first; remove this entry as soon as a rebuilt image is pinned. Owner 91a, 2026-11-21: 14 days."
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-97054",
+      "package": "stdlib",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-12-05",
+      "trackingIssue": 1948,
+      "installedVersion": "v1.27.3",
+      "rationale": "CVE-2026-97054 is a Go net/http flaw: an HTTP/1 server that uses MaxBytesReader can panic if its handler reads the body while writing the response header. It is in the Go standard library compiled into /usr/bin/pebble in apache/tika:4.2.0-full. The image's entrypoint runs Java (TikaServerCli) directly and never starts pebble, so the flaw is not reachable. Fixed in Go 1.26.11 and 1.27.4, but on 2026-11-21 the pinned digest is still the newest build of 4.2.0-full and no newer Tika release exists. Owner 91a, 2026-11-21: 14 days."
     }
   ],
   "containerImages": [
