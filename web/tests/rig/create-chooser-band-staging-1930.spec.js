@@ -32,7 +32,7 @@ test.describe("desk Add: the repeat band stages in the chooser card (#1930)", ()
     await nameTheEntry(page);
     const value = page.locator("button#f-recur");
     const card = page.getByRole("dialog", { name: /^Choose repeat/i });
-    const stored = await value.innerText();
+    const stored = (await value.textContent()) ?? "";
 
     await value.click();
     await expect(card).toBeVisible();
@@ -63,7 +63,7 @@ test.describe("desk Add: the repeat band stages in the chooser card (#1930)", ()
     await nameTheEntry(page);
     const value = page.locator("button#f-recur");
     const card = page.getByRole("dialog", { name: /^Choose repeat/i });
-    const stored = await value.innerText();
+    const stored = (await value.textContent()) ?? "";
 
     await value.click();
     await card.locator("[role=radio][aria-checked=true]").focus();
