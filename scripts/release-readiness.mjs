@@ -276,7 +276,7 @@ export async function runReadiness({ target, repoDir, lookups }) {
         ? { ok: true, message: "the source branch contains the target branch" }
         : {
             ok: false,
-            message: "the source branch does not contain the target branch, so the semi-linear merge would be refused: merge the open back-merge (or the target) into the source branch first",
+            message: "the source branch does not contain the target branch, so the semi-linear merge would be refused: merge preview into dev first (the preview -> dev back-merge), then promote from the new dev tip",
           },
     "base-image": async () =>
       (await lookups.baseImageCurrent())
