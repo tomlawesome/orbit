@@ -13,12 +13,12 @@
 #
 # Three things are deliberately deferred, not forgotten:
 #
-#   1. The four steps of the old workflow's anchor that are neither inline
+#   1. Three steps of the old workflow's anchor that are neither inline
 #      shell nor a scripts/ci script: `scripts/preview-lane-preflight.sh`,
-#      `scripts/test-install-acceptance.sh`, `scripts/test-malware-scanner.sh`
-#      and `scripts/test-backup-restore.sh`. Each is a long-running suite of
-#      its own rather than a validation step, and each wants a lane here
-#      instead of a line in an existing job.
+#      `scripts/test-install-acceptance.sh` and `scripts/test-malware-scanner.sh`.
+#      Each is a long-running suite of its own rather than a validation step,
+#      and each wants a lane here instead of a line in an existing job. (The
+#      fourth, the backup/restore drill, is the nightly `backup_drill` job, #1927.)
 #   2. Provenance and SBOM attestation for operators. GitLab CE has no
 #      equivalent of actions/attest, so `publish-from-gitlab.yml` on GitHub
 #      still owns the operator-facing provenance/SBOM attestations over the GHCR digest.
@@ -423,7 +423,7 @@ variables:
   # mean the same thing.
   TRIVY_IMAGE: aquasec/trivy@sha256:2e6c00d711ab4ae41d8a30c2c1fd3bd3b62704c177bb120f95012e939edfb3df
   # The digest scripts/test-integration.mjs pins for its disposable database.
-  POSTGRES_IMAGE: postgres:18-alpine@sha256:300ebd02c6d4de9ee27ad7f6855d5d21b4d3a4a5117767c1197d284c635d9736
+  POSTGRES_IMAGE: postgres:18-alpine@sha256:68e33adb18d9962952f00d5e3b8644305e10e375f98dd652bf6ee6a1836314ba
   # scripts/ci/start-installer-registry.sh's disposable loopback registry
   # (acceptance, repair_journeys via its own copy below, and
   # launcher_install_compat all start it). A plain Docker Hub name, which the
@@ -2344,6 +2344,11 @@ flake_check:
 # scripts/ci/job-inputs.json: the shard (`rig_webkit 2/3`) is the unit of
 # reuse evidence. Each shard also writes a blob report that `browser_report`
 # merges.
+# Two slots cap the nightly at two rig jobs at once (#1921): `rig-slot-webkit`
+# (`rig_webkit`, `film_webkit`) and `rig-slot-chromium` (`rig_chromium`,
+# `rig_firefox`, `screens_chromium`, `pocket_measure`), each a `resource_group`.
+# Shards of one job share its slot, so they run one after another. Two because
+# 2 rig jobs plus 2 smoke jobs are 28 of the host's 32 CPUs; three went over.
 # The full tap-floor measurement is not here: it is `pocket_measure`, nightly
 # only (#1616).
 #
@@ -2355,6 +2360,7 @@ flake_check:
 rig_chromium:
   stage: acceptance
   tags: [light]
+  resource_group: rig-slot-chromium
   image:
     name: $PLAYWRIGHT_IMAGE
     pull_policy: if-not-present
@@ -2425,6 +2431,7 @@ rig_chromium:
 rig_firefox:
   stage: acceptance
   tags: [light]
+  resource_group: rig-slot-chromium
   image:
     name: $PLAYWRIGHT_IMAGE
     pull_policy: if-not-present
@@ -2477,6 +2484,7 @@ rig_firefox:
 rig_webkit:
   stage: acceptance
   tags: [light]
+  resource_group: rig-slot-webkit
   image:
     name: $PLAYWRIGHT_IMAGE
     pull_policy: if-not-present
@@ -2529,6 +2537,7 @@ rig_webkit:
 film_webkit:
   stage: acceptance
   tags: [light]
+  resource_group: rig-slot-webkit
   image:
     name: $PLAYWRIGHT_IMAGE
     pull_policy: if-not-present
@@ -2581,6 +2590,7 @@ film_webkit:
 screens_chromium:
   stage: acceptance
   tags: [light]
+  resource_group: rig-slot-chromium
   image:
     name: $PLAYWRIGHT_IMAGE
     pull_policy: if-not-present
@@ -2704,6 +2714,7 @@ browser_report:
 pocket_measure:
   stage: acceptance
   tags: [light]
+  resource_group: rig-slot-chromium
   image:
     name: $PLAYWRIGHT_IMAGE
     pull_policy: if-not-present
@@ -2788,6 +2799,43 @@ pocket_measure_filing:
       [ -e pocket-measure.missed ] || { echo "pocket_measure_filing: no miss to file"; exit 0; }
       node scripts/ci/nightly-browsers.mjs tap-floor pocket-measure.log
       echo "pocket_measure_filing: screens under the pocket floors, filed as a Low (#1616; non-blocking)"
+
+# The real-stack backup/restore drill (#1927, owner decision 72a): the old
+# workflow's `scripts/test-backup-restore.sh` step, run with `--own-stack` so it
+# builds an image from this checkout and installs a throwaway deployment of its
+# own (the borrowed-stack path needs the container-validation deployment, which
+# nothing here starts). Nightly only, on the schedule `.nightly_browsers`
+# describes, and never in a merge request or push pipeline. It is not allowed to
+# fail and sits in `acceptance`, before `maintenance`, so a red drill fails the
+# night and `nightly_report` files it like the other nightly checks.
+#
+# The in-job daemon rather than the dind service, as for `smoke`: the drill
+# publishes the app and a local registry on 127.0.0.1 and bind-mounts a
+# `mktemp -d` deployment directory, neither of which a dind service can reach.
+# 45m: the image build alone is "several minutes" (the script says so; the
+# `build_image` job gets 20m), then the install, and every restore scenario
+# waits up to 45 s for health.
+backup_drill:
+  stage: acceptance
+  extends: [.privileged_runner, .browser_suite]
+  timeout: 45m
+  interruptible: false
+  rules:
+    - !reference [.dev-landing, job_rule]
+    - !reference [.backmerge-skip, job_rule]
+    - *batch_intake_skip
+    - *nightly_browsers
+  needs: *needs_gated
+  script:
+    - *reach_helpers
+    - orbit_lane_admits backup_drill || exit 0
+    - *docker_in_job
+    - *resource_peak
+    - bash scripts/test-backup-restore.sh --own-stack
+  after_script:
+    # The drill removes its own stack on exit; this stops the daemon and
+    # deletes its store, which outlives the job on /builds (#823).
+    - *docker_in_job_teardown
 
 # The old workflow runs `pnpm test:integration`, which starts its own disposable
 # PostgreSQL container and reaches it on a published loopback port. That is not
@@ -3372,7 +3420,8 @@ smoke:
         echo "skipped: no change to the v19 front end or the browser suite; no reuse evidence recorded"
         exit 0
       fi
-    - bash scripts/test-frontend.sh
+    - |
+      timeout -k 30s 35m bash scripts/test-frontend.sh || { rc=$?; if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then echo "smoke: suite exceeded 35m; the runner is starved (#1921)"; fi; exit "$rc"; }
     # Quarantined tests (agent-infra#30): run and reported, never failing the job.
     - |
       timeout -k 30s 8m bash scripts/test-frontend.sh --quarantine || { echo "smoke: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"; touch .quarantine-failed; }
@@ -3504,7 +3553,8 @@ smoke_webkit:
         echo "skipped: no change to the v19 front end or the browser suite; no reuse evidence recorded"
         exit 0
       fi
-    - bash scripts/test-frontend.sh
+    - |
+      timeout -k 30s 40m bash scripts/test-frontend.sh || { rc=$?; if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then echo "smoke_webkit: suite exceeded 40m; the runner is starved (#1921)"; fi; exit "$rc"; }
     # Quarantined tests (agent-infra#30): run and reported, never failing the job.
     - |
       timeout -k 30s 8m bash scripts/test-frontend.sh --quarantine || { echo "smoke_webkit: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"; touch .quarantine-failed; }
@@ -3602,7 +3652,8 @@ smoke_webkit_mobile:
         echo "skipped: no change to the v19 front end or the browser suite; no reuse evidence recorded"
         exit 0
       fi
-    - bash scripts/test-frontend.sh
+    - |
+      timeout -k 30s 25m bash scripts/test-frontend.sh || { rc=$?; if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then echo "smoke_webkit_mobile: suite exceeded 25m; the runner is starved (#1921)"; fi; exit "$rc"; }
     # Quarantined tests (agent-infra#30): run and reported, never failing the job.
     - |
       timeout -k 30s 8m bash scripts/test-frontend.sh --quarantine || { echo "smoke_webkit_mobile: a quarantined test failed (non-blocking, capped at 8 minutes; see the issue named in the test)"; touch .quarantine-failed; }
@@ -3718,7 +3769,7 @@ smoke_local_only:
       echo "local-only profile specs: $specs"
       # Word splitting is the point: $specs is a list of paths.
       # shellcheck disable=SC2086
-      node node_modules/@playwright/test/cli.js test --config tests/e2e/playwright.config.ts $specs
+      timeout -k 30s 25m node node_modules/@playwright/test/cli.js test --config tests/e2e/playwright.config.ts $specs || { rc=$?; if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then echo "smoke_local_only: suite exceeded 25m; the runner is starved (#1921)"; fi; exit "$rc"; }
     - *reuse_evidence
   after_script:
     # No diagnostics here: this shell has no daemon to ask (#1100), so the

@@ -8,9 +8,9 @@
  * document so the two never disagree: a judged failure ends the attachment,
  * anything else releases it back to `stored` for a member retry.
  */
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, isNull, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { imapIngestionAttachments, imapIngestionMessages } from "@/db/schema";
+import { documents, imapIngestionAttachments, imapIngestionMessages } from "@/db/schema";
 import type { MetadataExecutor } from "@/server/metadata/fields";
 import { flagStagingPurgeFailed, purgeHeldImapAttachment } from "./imap-attachment-holding";
 
@@ -39,7 +39,8 @@ export async function settleStagedMailTransfer(
   const held = and(
     eq(imapIngestionAttachments.id, documentId),
     eq(imapIngestionAttachments.status, "assigned"),
-    eq(imapIngestionAttachments.assignedDocumentId, documentId),
+    // A document row that is gone nulls the link (ON DELETE SET NULL): that row is settled too (#1811 item 1).
+    or(eq(imapIngestionAttachments.assignedDocumentId, documentId), isNull(imapIngestionAttachments.assignedDocumentId)),
     eq(imapIngestionAttachments.purgePending, true),
   );
   const [attachment] = await transaction.select({
@@ -98,4 +99,29 @@ export async function settleStagedMailTransferLocked(documentId: string, documen
     return settleStagedMailTransfer(transaction, documentId, documentFailureCode, new Date());
   });
   if (settled?.purgeStorageKey) await purgeRejectedHeldCopy(documentId, settled.purgeStorageKey);
+}
+
+/** Stuck transfers settled per maintenance cycle (#1811 item 1). */
+export const STUCK_MAIL_TRANSFER_BATCH_SIZE = 25;
+
+/**
+ * The backfill for transfers left stuck before #1398 (#1811 ruling, item 1):
+ * an `assigned`/`purgePending` attachment whose document is `rejected`, or
+ * has no row, is settled through the same locked helper an approval retry
+ * uses. A missing document counts as `scan_recovery_expired`, so the row is
+ * released and its held copy stays the retry source. Documents still
+ * `scanning` or `available` are left to the code that serves them.
+ */
+export async function settleStuckMailTransfers(): Promise<void> {
+  const stuck = await getDb().select({ id: imapIngestionAttachments.id, failureCode: documents.failureCode })
+    .from(imapIngestionAttachments)
+    .leftJoin(documents, eq(documents.id, imapIngestionAttachments.assignedDocumentId))
+    .where(and(
+      eq(imapIngestionAttachments.status, "assigned"),
+      eq(imapIngestionAttachments.purgePending, true),
+      or(isNull(documents.id), eq(documents.lifecycle, "rejected")),
+    ))
+    .orderBy(imapIngestionAttachments.id)
+    .limit(STUCK_MAIL_TRANSFER_BATCH_SIZE);
+  for (const row of stuck) await settleStagedMailTransferLocked(row.id, row.failureCode ?? "scan_recovery_expired");
 }

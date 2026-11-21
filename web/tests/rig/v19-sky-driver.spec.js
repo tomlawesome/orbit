@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { APP, RIG_EXPECT_MS, RIG_TEST_MS, onPhone, signedIn } from "./a11y-support.js";
+import { warningHint } from "../../src/lib/data/sky-words.js";
 import { useFixtureScenes } from "../fidelity/pocket-states.js";
 
 /*
@@ -36,7 +37,7 @@ import { useFixtureScenes } from "../fidelity/pocket-states.js";
 test.use({ baseURL: APP });
 test.describe.configure({ timeout: RIG_TEST_MS });
 
-const HINT = "Your first warning is 14 days before, so each planet sits 14 days nearer the sun.";
+const HINT = warningHint(14);
 
 /** @param {import("@playwright/test").Page} page */
 const group = (page) => page.getByRole("group", { name: "Planets sit by" });

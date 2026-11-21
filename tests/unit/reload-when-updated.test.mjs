@@ -279,6 +279,16 @@ describe("the leaving flag is undone when the agreed navigation does not leave (
     expect(undo).not.toHaveBeenCalled();
   });
 
+  it("#1915 T-F2: nothing dirty and an update pending: the reload goes ahead with no discard ask", () => {
+    const ask = vi.fn(() => false);
+    const go = vi.fn();
+    const navigation = nav("https://o.test/create", "https://o.test/home");
+    reloadWhenUpdated(navigation, { current: true }, go, { isDirty: () => false, ask });
+    expect(ask).not.toHaveBeenCalled();
+    expect(navigation.cancel).not.toHaveBeenCalled();
+    expect(go).toHaveBeenCalledWith("https://o.test/home");
+  });
+
   it("the layout resets the flag on a persisted pageshow", () => {
     const layout = readFileSync(new URL("../../web/src/routes/+layout.svelte", import.meta.url), "utf8");
     expect(layout).toMatch(/pageshow/);

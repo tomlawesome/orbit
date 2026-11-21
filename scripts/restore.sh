@@ -158,9 +158,13 @@ require_live_key() {
 }
 
 # A dangling document-key link is neither a key nor its absence: name the link and how to put
-# the key back, never only "the key is missing" (#1536 O-F2, X-F3; #1603 O-S1, ops-2).
+# the key back, never only "the key is missing" (#1536 O-F2, X-F3; #1603 O-S1, ops-2). The two
+# recovery paths pass `recovery`: they put the key back themselves (#1901 O-S2).
 refuse_dangling_key() {
-  [[ ! -L "$secrets_directory/document-kek" || -e "$secrets_directory/document-kek" ]] || fail 'preflight/key failed; .orbit-secrets/document-kek is a link to a file that does not exist, so the key file is missing. Remove the link and restore the document key from your kept copy of the secrets directory: rm .orbit-secrets/document-kek && install -m 0400 /path/to/your/copy/document-kek .orbit-secrets/document-kek, then run again.'
+  if [[ -L "$secrets_directory/document-kek" && ! -e "$secrets_directory/document-kek" ]]; then
+    [[ "${1:-}" != recovery ]] || fail 'preflight/key failed; .orbit-secrets/document-kek is a link to a file that does not exist. This recovery puts the key back itself, so remove the link and run again: rm .orbit-secrets/document-kek, then run again.'
+    fail 'preflight/key failed; .orbit-secrets/document-kek is a link to a file that does not exist, so the key file is missing. Remove the link and restore the document key from your kept copy of the secrets directory: rm .orbit-secrets/document-kek && install -m 0600 /path/to/your/copy/document-kek .orbit-secrets/document-kek, then run again.'
+  fi
 }
 
 # Who owns what the engine writes (#1210 D5, #1258). The one-off runs as the
@@ -323,7 +327,7 @@ require_deployment health
 # A dangling document-key link is neither a key nor its absence: refuse it before Orbit is
 # touched, naming the link and what to do (#1536 O-F2, X-F3). It goes before the generic key
 # check, which follows the link and would only say the key is missing.
-refuse_dangling_key
+if [[ "$recover" == true ]]; then refuse_dangling_key recovery; else refuse_dangling_key; fi
 [[ "$recover" == true ]] || require_live_key
 engine_host_identity
 [[ "$recover" == true ]] || run_engine "$backup_file" restore --preflight /orbit-input/bundle.tar </dev/null || exit $?

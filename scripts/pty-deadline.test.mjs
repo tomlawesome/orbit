@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   PTY_ASYNC_DEADLINE_MS,
@@ -29,13 +29,15 @@ function runUnderPty(command, options = {}) {
  * A spawn-based driver in miniature, wired the way the real ones are: the
  * watchdog is touched on every chunk and consulted on close.
  */
-function driveWithWatchdog(command, { idleMs, ceilingMs }) {
+function driveWithWatchdog(command, { idleMs, ceilingMs, onChunk = () => {}, kickoff = false }) {
   return new Promise((resolve, reject) => {
     const child = spawn("bash", ["-c", command]);
     let stdout = "";
     const watchdog = ptyWatchdog({ label: "driver", idleMs, ceilingMs, kill: () => child.kill("SIGKILL") });
     child.stdout.setEncoding("utf8");
-    child.stdout.on("data", (chunk) => { stdout += chunk; watchdog.touch(); });
+    child.stdout.on("data", (chunk) => { stdout += chunk; watchdog.touch(); onChunk(child); });
+    child.stdin.on("error", () => {});
+    if (kickoff) child.stdin.write("go\n");
     child.on("error", reject);
     child.on("close", (status) => {
       watchdog.stop();
@@ -117,15 +119,34 @@ describe("pty deadline reporting", () => {
   });
 
   it("re-arms the idle deadline on every chunk, so a slow but live child is not killed", async () => {
-    // Prints every 100ms for 600ms: silent stretches shorter than the idle
-    // deadline, a total longer than it.
-    const result = await driveWithWatchdog(
-      "for i in 1 2 3 4 5 6; do echo step-$i; sleep 0.1; done",
-      { idleMs: 300, ceilingMs: 5_000 },
-    );
+    // Neither the child's pace nor the host's load may decide this. The child
+    // prints a chunk only in reply to a line the driver writes, and the
+    // watchdog's timers are fake, so the test moves the clock itself: 100ms of
+    // silence after each chunk (under the 300ms idle deadline), six chunks, 500ms
+    // in all (over it). Real scheduling delays cost real time, never fake time.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let silentMs = 0;
+    try {
+      const result = await driveWithWatchdog(
+        "for i in 1 2 3 4 5 6; do read -r _; echo step-$i; done",
+        {
+          idleMs: 300,
+          ceilingMs: 5_000,
+          kickoff: true,
+          onChunk: (child) => {
+            vi.advanceTimersByTime(100);
+            silentMs += 100;
+            child.stdin.write("go\n");
+          },
+        },
+      );
 
-    expect(result.status).toBe(0);
-    expect(result.stdout).toMatch(/step-6/u);
+      expect(result.status).toBe(0);
+      expect(result.stdout).toMatch(/step-6/u);
+      expect(silentMs).toBeGreaterThan(300);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("keeps the idle deadline inside the ceiling and both inside the test budget", () => {

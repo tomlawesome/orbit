@@ -48,6 +48,7 @@ vi.mock("@/db", () => {
 });
 
 import { auditLog, localCredentials, sessions, signInApprovals } from "@/db/schema";
+import { hashPassword } from "@/lib/auth/password";
 import { completePasswordRenewal, persistSetupToken } from "@/server/local-credentials";
 
 const USER = "00000000-0000-4000-8000-000000000001";
@@ -63,12 +64,38 @@ describe("completePasswordRenewal", () => {
   it.each([
     ["the account has no password", []],
     ["the account is disabled", [{ requiredAt: MARK, disabledAt: new Date() }]],
-    ["the mark was cleared by a saved password", [{ requiredAt: null, disabledAt: null }]],
     ["a later refusal replaced the mark", [{ requiredAt: new Date(MARK.getTime() + 1), disabledAt: null }]],
   ])("answers lapsed and writes nothing when %s", async (_why, rows) => {
     state.answers = [rows];
-    await expect(completePasswordRenewal(USER, MARK, "new-hash")).rejects.toMatchObject({
+    await expect(completePasswordRenewal(USER, MARK, "new-hash", "typed-password")).rejects.toMatchObject({
       code: "password_change_lapsed",
+      status: 400,
+    });
+    expect(state.writes).toEqual([]);
+  });
+
+  it("answers saved and writes nothing when the mark was cleared by a saved password and the typed one is the stored one (#1901)", async () => {
+    state.answers = [[{ requiredAt: null, disabledAt: null, passwordHash: await hashPassword("typed-password-P1-1901") }]];
+    await expect(completePasswordRenewal(USER, MARK, "new-hash", "typed-password-P1-1901")).rejects.toMatchObject({
+      code: "password_change_saved",
+      status: 400,
+    });
+    expect(state.writes).toEqual([]);
+  });
+
+  it("answers lapsed and writes nothing when the mark was cleared elsewhere and the typed password is not the stored one (#1901)", async () => {
+    state.answers = [[{ requiredAt: null, disabledAt: null, passwordHash: await hashPassword("stored-password-P0-1901") }]];
+    await expect(completePasswordRenewal(USER, MARK, "new-hash", "typed-password-P2-1901")).rejects.toMatchObject({
+      code: "password_change_lapsed",
+      status: 400,
+    });
+    expect(state.writes).toEqual([]);
+  });
+
+  it("answers saved and writes nothing when the mark was cleared elsewhere but the typed password matches the stored one (#1901)", async () => {
+    state.answers = [[{ requiredAt: null, disabledAt: null, passwordHash: await hashPassword("stored-password-P0-1901") }]];
+    await expect(completePasswordRenewal(USER, MARK, "new-hash", "stored-password-P0-1901")).rejects.toMatchObject({
+      code: "password_change_saved",
       status: 400,
     });
     expect(state.writes).toEqual([]);
@@ -78,7 +105,7 @@ describe("completePasswordRenewal", () => {
     state.answers = [[{ requiredAt: new Date(MARK.getTime()), disabledAt: null }], [{ userId: USER }]];
     state.deleted = [{ id: "s1" }, { id: "s2" }];
 
-    await expect(completePasswordRenewal(USER, MARK, "new-hash")).resolves.toEqual({ replaced: true, sessionsRevoked: 2 });
+    await expect(completePasswordRenewal(USER, MARK, "new-hash", "typed-password")).resolves.toEqual({ replaced: true, sessionsRevoked: 2 });
 
     const credential = state.writes.find((w) => w.op === "update" && w.table === localCredentials);
     expect(credential?.values).toMatchObject({ passwordHash: "new-hash", passwordChangeRequiredAt: null, failedAttemptCount: 0 });

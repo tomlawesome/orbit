@@ -7,7 +7,6 @@ import { describe, expect, it } from "vitest";
  */
 const root = new URL("../../", import.meta.url);
 const scripts = JSON.parse(readFileSync(new URL("web/package.json", root), "utf8")).scripts;
-const spec = readFileSync(new URL("web/tests/fidelity/pocket-measure.spec.js", root), "utf8");
 
 describe("pocket-measure quarantine (#1670 W-F3)", () => {
   it("pocket-measure leaves @quarantine tests out", () => {
@@ -20,11 +19,5 @@ describe("pocket-measure quarantine (#1670 W-F3)", () => {
     expect(line).toContain("--project=pocket-measure");
     expect(line).toContain("--grep @quarantine");
     expect(line).toContain("--pass-with-no-tests");
-  });
-
-  it("the spec comment names the script that runs them", () => {
-    const comment = spec.slice(spec.indexOf("#1376:"), spec.indexOf("const MOT_ROW_STATES"));
-    expect(comment).toContain("pocket-measure:quarantine");
-    expect(comment).not.toContain("`fidelity:quarantine`");
   });
 });

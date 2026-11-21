@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import { runOwner } from "./repair-owner-fixtures.mjs";
-import { GID, UID, privShims } from "./repair-priv-shims.mjs";
+import { GID, UID, expectStalledStepsEnded, privShims } from "./repair-priv-shims.mjs";
 import { makeFixture, scratchDir, treeSnapshot } from "./repair-test-harness.mjs";
 
 // #1872 (spec V1-V8): run as root in a folder another user owns, the remaining repair actions that write there
@@ -17,9 +17,13 @@ import { makeFixture, scratchDir, treeSnapshot } from "./repair-test-harness.mjs
 vi.setConfig({ testTimeout: 90_000 });
 
 const PASSPHRASE = "correct-horse-battery-staple";
-const LIMIT = { ORBIT_REPAIR_OWNER_STEP_TIMEOUT: "2" };
-// The limit (2 s) plus the kill grace (5 s) plus a slow host's start-up; 40 s keeps a loaded runner from flaking.
-const BUDGET_MS = 40_000;
+// #1933 (owner 77a): a stall case is judged by its events (the stalled child got TERM and is gone, the timed-out
+// line, the status, nothing left), not by how long repair took; run()'s 60 s cap only catches a real hang. The
+// limit is every owner step's, so 5 s (as in #1928) leaves the steps that do not stall room on a loaded runner.
+// The flood cases stall nothing and run under the default limit (note 67569: a 2 s limit also bounded the final
+// rm of the recovery folder, which a loaded runner overran).
+const STALL_SECONDS = 5;
+const LIMIT = { ORBIT_REPAIR_OWNER_STEP_TIMEOUT: String(STALL_SECONDS) };
 const LOCK = ["backups", ".orbit-backup-restore.lock"];
 const EXTRA = ["cp", "install", "touch", "ln", "tee"];
 const ROOT_WRITE_TOOLS = ["mkdir", "mktemp", "chmod", "mv", "cp"];
@@ -401,7 +405,6 @@ describe("#1872 V7: each owner step is time- and size-bounded; a failure release
 
   function expectBounded(name, result, folder, shims, reason) {
     expect(result.hung, `repair was still running after the test's own cap:\n${result.stderr.slice(0, 600)}`).toBe(false);
-    expect(result.ms, "repair outlived the step limit plus the kill grace").toBeLessThan(BUDGET_MS);
     expect(finished(ACTIONS[name], result)).toBe(false);
     expect(result.status).not.toBe(0);
     const named = orbitLines(result).filter((line) => reason.test(line));
@@ -427,13 +430,14 @@ describe("#1872 V7: each owner step is time- and size-bounded; a failure release
     { label: "restore-transaction (mv)", name: "restore-transaction", stall: '*" mv "*', flood: '*" mv "*' },
   ];
   for (const { label, name, stall, flood } of CASES) {
-    it(`${label}: a stalled owner step ends as timed out within the limit plus grace, no lock held, nothing left`, () => {
+    it(`${label}: a stalled owner step gets TERM and ends as timed out, no lock held, nothing left`, () => {
       const folder = prepared(name);
       const shims = shimsFor(folder.targetDir, { variant: { kind: "stop", match: stall } });
       try {
         const result = run(name, shims, folder, { env: LIMIT });
         expect(setprivNaming(shims, /./u).length, "no owner step was started").toBeGreaterThan(0);
         expectBounded(name, result, folder, shims, /timed out/iu);
+        expectStalledStepsEnded(shims.stalledSteps(), result, STALL_SECONDS);
       } finally {
         shims.cleanup();
       }
@@ -443,7 +447,7 @@ describe("#1872 V7: each owner step is time- and size-bounded; a failure release
       const folder = prepared(name);
       const shims = shimsFor(folder.targetDir, { variant: { kind: "flood", match: flood } });
       try {
-        const result = run(name, shims, folder, { env: LIMIT });
+        const result = run(name, shims, folder);
         expect(setprivNaming(shims, /./u).length, "no owner step was started").toBeGreaterThan(0);
         expectBounded(name, result, folder, shims, /Orbit repair:/u);
       } finally {
@@ -504,8 +508,8 @@ describe("#1872 V9: restore-transaction's self-restore keeps the operator's file
         const result = run("restore-transaction", shims, folder, { env: LIMIT });
         expect(shims.setprivCalls().length, "the restore never used setpriv").toBeGreaterThan(0);
         expect(result.hung).toBe(false);
-        expect(result.ms).toBeLessThan(BUDGET_MS);
         expect(orbitLines(result).some((line) => /timed out/u.test(line)), result.stderr.slice(0, 1500)).toBe(true);
+        expectStalledStepsEnded(shims.stalledSteps(), result, STALL_SECONDS);
         survives(folder.targetDir);
         expect(setprivNaming(shims, /\brm\b.* (\.\/)?\.env-orbit$/u), "the self-restore removed an .env-orbit that was never changed").toEqual([]);
         expect(rootWrites(shims)).toEqual([]);
@@ -541,7 +545,7 @@ describe("#1872 V10: a folder made by an owner step that then timed out is not r
     try {
       const result = run("restore-transaction", shims, folder, { env: LIMIT });
       expect(result.hung).toBe(false);
-      expect(result.ms).toBeLessThan(BUDGET_MS);
+      expectStalledStepsEnded(shims.stalledSteps(), result, STALL_SECONDS);
       expect(result.stdout).toContain("execute action=restore-transaction resolves=staging-evidence-present result=failed");
       expect(orbitLines(result).some((line) => /timed out/u.test(line)), result.stderr.slice(0, 1500)).toBe(true);
       expect(mkCalls(shims, /orbit-repair-recovery/u), "the folder was made again under a new name").toHaveLength(1);
@@ -558,7 +562,7 @@ describe("#1872 V10: a folder made by an owner step that then timed out is not r
     try {
       const result = run("credential checkpoint", shims, folder, { env: LIMIT });
       expect(result.hung).toBe(false);
-      expect(result.ms).toBeLessThan(BUDGET_MS);
+      expectStalledStepsEnded(shims.stalledSteps(), result, STALL_SECONDS);
       expect(result.stdout).not.toContain(ACTIONS["credential checkpoint"].done);
       expect(orbitLines(result).some((line) => /timed out/u.test(line)), result.stderr.slice(0, 1500)).toBe(true);
       expect(mkCalls(shims, /orbit-repair-checkpoint/u), "the folder was made again under a new name").toHaveLength(1);

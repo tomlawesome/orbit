@@ -17,7 +17,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
  *   - desk: `#archive-storage-card` shows the three values and who set them
  *     ("the defaults", or "an administrator · defaults 6 h · 2 · 10 GB");
  *   - a failed read shows the `not shown` block with a retry;
- *   - phone: `#ad-archives` holds one row, meta "6 h · 2 per system · 10 GB",
+ *   - phone: `#ad-archives` holds one row, title "6 h · 2 per system", meta "10 GB" (#1913),
  *     which opens the "Exports kept" sheet;
  *   - "use the defaults" sends `{ action: "default" }` with the version read.
  *
@@ -287,7 +287,12 @@ describe("administration phone: the Exports kept row (#1792)", () => {
     const card = pocketCard();
     expect(card, "#ad-archives").not.toBeNull();
     expect(text(card)).toMatch(/Exports kept/u);
-    expect(text(card)).toMatch(/6 h · 2 per system · 10 GB/u);
+    /* #1913: the row's title is the hours and count, its meta the space alone. */
+    const row = /** @type {Element} */ (card?.querySelector("[data-row]"));
+    expect(text(row.querySelector(".title"))).toBe("6 h · 2 per system");
+    expect(text(row.querySelector(".meta"))).toBe("10 GB");
+    expect(text(row.querySelector(".trail"))).toMatch(/^change/u);
+    expect(text(row)).not.toMatch(/Exports kept/u);
     expect(document.getElementById("ad-uploads")?.compareDocumentPosition(/** @type {Node} */ (card)) ?? 0, "after ad-uploads")
       .toBe(Node.DOCUMENT_POSITION_FOLLOWING);
     expect(sheet(), "the sheet is closed until asked").toBeNull();

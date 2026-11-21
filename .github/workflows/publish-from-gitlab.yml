@@ -28,8 +28,10 @@ name: Publish the GitLab-tested image to GHCR
 #      out the newest verified SBOM for the SBOM attestation below;
 #   3. only then are the image and that attestation copied to GHCR, tagged and
 #      attested. Nothing unverified is written to GHCR but a referrer's
-#      config blob and annotations, copied as they are; its layer, the
-#      attestation bundle, is what is verified.
+#      remaining annotations (its bundle content kind and creation time),
+#      copied as they are: its layer, the attestation bundle, is verified,
+#      its config must be the OCI empty descriptor, and its artifactType and
+#      predicate type annotation must match what was verified.
 #
 # The mirror push lands within minutes of the merge while the GitLab pipeline
 # takes the best part of an hour, so the first step waits for the handoff. If
@@ -294,6 +296,26 @@ jobs:
             fetch "${MAX_MANIFEST_BYTES}" "${manifest}" manifest "${THROWAWAY_IMAGE}@${referrer}" || status=$?
             (( status != 2 )) || refuse "its manifest is larger than the 4 MiB manifest limit"
             (( status == 0 )) || refuse "its manifest is unreadable"
+            # The parts crane copies but cosign does not verify (#1848 D-S2),
+            # held to the shape cosign 3.x attaches: the OCI empty descriptor
+            # as config, the bundle artifactType, and a predicate-type
+            # annotation equal to the label it was picked under.
+            shape="$(node -e '
+              let raw = "";
+              process.stdin.on("data", (c) => { raw += c; }).on("end", () => {
+                const m = JSON.parse(raw);
+                const c = m.config ?? {};
+                if (c.mediaType !== "application/vnd.oci.empty.v1+json" ||
+                    c.digest !== "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a" ||
+                    c.size !== 2) return process.stdout.write("its config is not the OCI empty descriptor");
+                if (m.artifactType !== "application/vnd.dev.sigstore.bundle.v0.3+json")
+                  return process.stdout.write("its artifactType is not the sigstore bundle type");
+                if (m.annotations?.["dev.sigstore.bundle.predicateType"] !== process.argv[1])
+                  return process.stdout.write("its predicate type annotation differs from its label");
+                process.stdout.write("ok");
+              });
+            ' -- "${label}" < "${manifest}")" || refuse "its manifest is unreadable"
+            [[ "${shape}" == "ok" ]] || refuse "${shape:-its manifest is unreadable}"
             layer="$(node -e '
               let raw = "";
               process.stdin.on("data", (c) => { raw += c; }).on("end", () => {

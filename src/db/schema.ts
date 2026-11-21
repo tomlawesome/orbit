@@ -482,6 +482,13 @@ export const signInApprovals = pgTable("sign_in_approvals", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   tokenHash: text("token_hash").notNull().unique(),
+  /* The link of the newest resend until that send is confirmed or proven not
+     to have left (#1896, ADR-0027 §8 amendment of 2026-11-18). Written under
+     the lock before the mail goes, so the row resolves both this digest and
+     `tokenHash` while the outcome is unknown: at most two links. A confirmed
+     send moves it into `tokenHash`; a send the mailer proves never left
+     clears it; a maybe-delivered one keeps it. */
+  stagedTokenHash: text("staged_token_hash").unique(),
   claimHash: text("claim_hash").notNull().unique(),
   userAgent: text("user_agent"),
   clientAddress: text("client_address"),
@@ -507,7 +514,8 @@ export const signInApprovals = pgTable("sign_in_approvals", {
  * per hour" counts the sends inside the hour and nothing older (#1604 P-20).
  * A row is written under the per-user lock as a reservation before its mail
  * goes (#1882), and kept whether or not the mail goes: the limit counts
- * attempts, not successes (#1879 ruling, note 64435). The
+ * attempts, not successes (#1879 ruling, note 64435). Only a mail that never
+ * reached the mailer gives its row back (#1915 A-F1). The
  * approval's own send_count and last_sent_at stay what they were; this table
  * is only the hour's tally, swept with the approvals it belongs to.
  */

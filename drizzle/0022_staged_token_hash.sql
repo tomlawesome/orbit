@@ -1,0 +1,2 @@
+ALTER TABLE "sign_in_approvals" ADD COLUMN "staged_token_hash" text;--> statement-breakpoint
+ALTER TABLE "sign_in_approvals" ADD CONSTRAINT "sign_in_approvals_staged_token_hash_unique" UNIQUE("staged_token_hash");

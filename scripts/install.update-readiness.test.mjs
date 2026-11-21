@@ -23,7 +23,7 @@ const TARGET = "v0.3.6";
 const INSTALLED = "v0.3.5";
 const RELEASES = ["v0.3.5", "v0.3.4", "v0.3.3", "v0.3.2"];
 const TERMINAL = "phase=identity component=image state=failed reason=update-readiness action=retry";
-const SKIP_LINE = "Orbit installer: the database is not running, so the update readiness check will run when Orbit starts.";
+const SKIP_LINE = "Orbit installer: the database did not answer its health check, so the update readiness check will run when Orbit starts.";
 const COULD_NOT_CHECK = "Orbit installer: Orbit could not check whether the database is ready for this release; see the lines above.";
 const BLOCKED = "update-preflight: blocked documents.content_sha256 rows=12";
 const REMEDY = "Orbit is still moving documents under the household key; run the update again later.";
@@ -87,6 +87,7 @@ describe("install.sh --update: the update readiness check (#1779, guarantee 69)"
   it("with pg_isready failing, prints the skip line, runs no one-off, and reaches the engine", () => {
     const result = update({}, { FAKE_PROBE_FAIL: "orbit-db" });
     expect(orbitLines(result.stderr)).toContain(SKIP_LINE);
+    expect(result.stderr).not.toContain("the database is not running");
     expect(preflightCalls(result)).toEqual([]);
     expect(result.stdout).not.toContain("reason=update-readiness");
     expect(result.engineRuns).toHaveLength(1);

@@ -305,6 +305,8 @@ export function cardMessageFor(code) {
       return "That is the password that was refused. Choose a different one.";
     case "password_recovery_required":
       return "Somebody else knew this password, so it no longer signs in. Ask an administrator for a new setup link.";
+    case "password_change_saved":
+      return "Your new password is saved. Sign in with it.";
     case "password_change_lapsed":
       return "This sign-in has lapsed before a new password was saved. Sign in again and choose one then.";
     case "sign_in_unavailable":

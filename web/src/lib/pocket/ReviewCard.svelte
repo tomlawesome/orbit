@@ -3,6 +3,17 @@
   import AlreadyHeldRow from "./AlreadyHeldRow.svelte";
   import { RENEW_MAIL, addedDay, dueWords } from "$lib/data/already-held.js";
   const uid = $props.id();
+  /* The pressed pill is swapped for a disabled copy while the act is out, so
+     when the failure comes back focus has fallen to <body>: move it to the
+     message (#1182). The message has no live-region role: focus on it is the
+     announcement, so it is read once. */
+  /** @type {HTMLElement | undefined} */
+  let problemLine = $state();
+  $effect(() => {
+    if (!problemLine) return;
+    const now = document.activeElement;
+    if (!now || now === document.body) problemLine.focus({ preventScroll: true });
+  });
 
   /**
    * A PIECE OF MAIL FOR YOUR REVIEW (#1120, proposal §2.6; round 3 §4,
@@ -137,9 +148,9 @@
                  name="Dismiss {title}" onfire={ondismiss} />
     {/if}
   </div>
-  {#if problem}<p class="p-error" role="alert">{problem}</p>{/if}
+  {#if problem}<p class="p-error" tabindex="-1" bind:this={problemLine}>{problem}</p>{/if}
   {#if !locked && !held}
-    <button class="rv-amend" disabled={Boolean(busy)} onclick={onamend}>review &amp; amend →</button>
+    <button class="rv-amend" aria-disabled={busy ? "true" : undefined} onclick={() => !busy && onamend()}>review &amp; amend →</button>
   {/if}
   {@render after?.()}
 </article>
@@ -207,7 +218,7 @@
   .rv-amend{display:flex;align-items:center;justify-content:center;width:100%;min-height:var(--p-hit);margin-top:4px;
     appearance:none;border:0;background:none;padding:0;cursor:pointer;
     font:var(--p-type-meta)/1.2 var(--mono);color:var(--accent-text);letter-spacing:.02em}
-  .rv-amend:disabled{opacity:.5}
+  .rv-amend:disabled,.rv-amend[aria-disabled="true"]{opacity:.5}
   .rv-amend:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;border-radius:8px}
   @media (prefers-reduced-motion:reduce){ .rv-touch::after{animation:none} }
 </style>

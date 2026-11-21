@@ -298,6 +298,28 @@ describe("notification worker scheduling", () => {
     expect(isAllowedPushEndpoint("not a url")).toBe(false);
   });
 
+  it.each([
+    "https://[::ffff:127.0.0.1]/", "https://[::ffff:7f00:1]/",
+    // Hex mapped forms of private, link-local and shared ranges; the URL parser
+    // turns the dotted form into these, so the dotted loopback above covers that path.
+    "https://[::ffff:a00:5]/", "https://[::ffff:c0a8:10a]/", "https://[::ffff:a9fe:101]/",
+    "https://[::ffff:6440:1]/",
+    "https://[64:ff9b::7f00:1]/", "https://[64:ff9b::a00:5]/",
+    // 6to4 (2002::/16) embedding 0.0.0.0.
+    "https://[2002::]/",
+    "https://[::127.0.0.1]/",
+    "https://[fec0::1]/", "https://[ff02::1]/",
+  ])("#1929 part 1: refuses the non-public IP-literal endpoint %s", (endpoint) => {
+    expect(isAllowedPushEndpoint(endpoint)).toBe(false);
+  });
+
+  it("#1929 part 1 controls: real push services and a public IPv6 literal stay allowed", () => {
+    expect(isAllowedPushEndpoint("https://fcm.googleapis.com/fcm/send/abc")).toBe(true);
+    expect(isAllowedPushEndpoint("https://updates.push.services.mozilla.com/wpush/v2/x")).toBe(true);
+    // 2606::/16 is global unicast (ARIN).
+    expect(isAllowedPushEndpoint("https://[2606::]/")).toBe(true);
+  });
+
   describe("deliveryIsStale", () => {
     const NOW = new Date("2026-09-20T09:00:00.000Z");
     const twoDaysAgo = new Date(NOW.getTime() - 48 * 60 * 60_000);

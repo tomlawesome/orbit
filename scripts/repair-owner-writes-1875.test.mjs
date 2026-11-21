@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import { IMAGE_COMPOSE, composeFolder, runOwner } from "./repair-owner-fixtures.mjs";
-import { privShims, realTool } from "./repair-priv-shims.mjs";
+import { expectStalledStepsEnded, privShims, realTool } from "./repair-priv-shims.mjs";
 import { makeFixture, scratchDir } from "./repair-test-harness.mjs";
 
 // #1875 (spec W1-W5): run as root in a folder another user owns, update-config's rename of the staged password,
@@ -15,8 +15,11 @@ import { makeFixture, scratchDir } from "./repair-test-harness.mjs";
 vi.setConfig({ testTimeout: 90_000 });
 
 const PASSPHRASE = "correct-horse-battery-staple";
-const LIMIT = { ORBIT_REPAIR_OWNER_STEP_TIMEOUT: "2" };
-const BUDGET_MS = 40_000;
+// #1933 (owner 77a): stall cases are judged by events, not by how long repair took; rotate()'s 60 s cap only
+// catches a real hang. 5 s, not 2: the limit is every owner step's, and at 2 s a step before the stalled one could
+// overrun on a loaded runner (the rename was then never reached). Flood cases stall nothing: default limit.
+const STALL_SECONDS = 5;
+const LIMIT = { ORBIT_REPAIR_OWNER_STEP_TIMEOUT: String(STALL_SECONDS) };
 const LOCK = ["backups", ".orbit-backup-restore.lock"];
 const EXTRA = ["cp", "install", "touch", "ln", "tee"];
 const HEX = /^[0-9a-f]{64}$/u;
@@ -54,7 +57,6 @@ function prepared(make) {
 
 function expectBounded(result, folder, reason) {
   expect(result.hung, `repair was still running after the test's own cap:\n${result.stderr.slice(0, 600)}`).toBe(false);
-  expect(result.ms, "repair outlived the step limit plus the kill grace").toBeLessThan(BUDGET_MS);
   const named = orbitLines(result).filter((line) => reason.test(line));
   expect(named, `no 'Orbit repair:' line gives the reason ${reason}:\n${result.stderr.slice(0, 1500)}`).not.toEqual([]);
   expect(named.every((line) => line.length < 5000), "a line over the 4096-byte cap").toBe(true);
@@ -169,9 +171,10 @@ describe("#1875 W1: update-config renames the staged password as the owner, unde
       const folder = prepared(mismatchFolder);
       const shims = shimsFor(folder.targetDir, { variant: { kind, match: RENAME_MATCH } });
       try {
-        const result = rotate(shims, folder, { env: LIMIT });
+        const result = rotate(shims, folder, kind === "stop" ? { env: LIMIT } : {});
         expect(setprivNaming(shims, / -- mv\b.*repair-staged-postgres-password\s+\S*postgres-password$/u), "the rename never went through setpriv").not.toEqual([]);
         expectBounded(result, folder, reason);
+        if (kind === "stop") expectStalledStepsEnded(shims.stalledSteps(), result, STALL_SECONDS);
         expect(result.stdout).not.toContain(DONE);
         expect(existsSync(stagedPath(folder.targetDir)), "the staged file is gone").toBe(true);
         expect(readFileSync(join(folder.targetDir, ".orbit-secrets", "postgres-password"), "utf8")).toBe(ORIGINAL);
@@ -215,9 +218,10 @@ describe("#1875 W2: old credential checkpoints are removed as the owner, under t
       const folder = prepared(mismatchFolder);
       const shims = shimsFor(folder.targetDir, { variant: { kind, match: RM_MATCH } });
       try {
-        const result = rotate(shims, folder, { env: LIMIT });
+        const result = rotate(shims, folder, kind === "stop" ? { env: LIMIT } : {});
         expect(setprivNaming(shims, / -- rm\b.*orbit-repair-checkpoint/u), "the removal never went through setpriv").not.toEqual([]);
         expectBounded(result, folder, reason);
+        if (kind === "stop") expectStalledStepsEnded(shims.stalledSteps(), result, STALL_SECONDS);
         const kept = checkpointsIn(folder.targetDir);
         expect(kept, "the checkpoint was removed anyway").toHaveLength(1);
         expect(orbitLines(result).filter((line) => line.includes(kept[0]) && /kept/u.test(line)), `no line says the checkpoint ${kept[0]} was kept:\n${result.stderr.slice(0, 1500)}`).not.toEqual([]);
@@ -304,7 +308,7 @@ describe("#1875 W3: root compares the folder's files only through the bounded, n
     const shims = shimsFor(folder.targetDir);
     const result = restore(shims, folder, { env: { PATH: `${swapStat(folder.targetDir, "fifo")}:${shims.env.PATH}` } });
     expect(result.hung, "root blocked on a FIFO").toBe(false);
-    expect(result.ms).toBeLessThan(BUDGET_MS);
+    expect(orbitLines(result).filter((line) => /timed out/iu.test(line)), "root blocked until a step limit stopped it").toEqual([]);
     expect(result.stderr).not.toMatch(SAME_LINE);
   });
 
@@ -345,7 +349,7 @@ describe("#1875 W3: root compares the folder's files only through the bounded, n
       const shims = shimsFor(folder.targetDir);
       const result = check(shims, folder, swapDocker(folder, kind));
       expect(result.hung, "root blocked or never finished").toBe(false);
-      expect(result.ms).toBeLessThan(BUDGET_MS);
+      expect(orbitLines(result).filter((line) => /timed out/iu.test(line)), "root blocked until a step limit stopped it").toEqual([]);
       expect(result.stdout.includes(DRIFT) || notRead(result), `the swapped file was compared as the same:\n${result.stdout}\n${result.stderr.slice(0, 800)}`).toBe(true);
     });
   }
@@ -418,7 +422,7 @@ describe("#1875 W4: the checkpoint bundle is mounted from a private copy outside
       const { dir, record } = spy();
       const result = rotate(shims, folder, { fakeBin: dir, env: { PATH: `${swapBundle(kind)}:${shims.env.PATH}` } });
       expect(result.hung, "root blocked on the bundle").toBe(false);
-      expect(result.ms).toBeLessThan(BUDGET_MS);
+      expect(orbitLines(result).filter((line) => /timed out/iu.test(line)), "root blocked until a step limit stopped it").toEqual([]);
       expect(result.stdout, "the swapped bundle passed the check and the rotation finished").not.toContain(DONE);
       expect(orbitLines(result).some((line) => /cannot check|could not check|not a regular file|changed while it was being opened|was not read|failed verification/u.test(line)), `no line says the bundle could not be checked:\n${result.stderr.slice(0, 1200)}`).toBe(true);
       expect(existsSync(record) ? readFileSync(record, "utf8") : "", "docker was still given a mount for the swapped bundle").toBe("");

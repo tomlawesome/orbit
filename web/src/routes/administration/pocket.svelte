@@ -14,7 +14,7 @@
   import { NAME_LIMIT } from "$lib/arrival/stage.js";
   import {
     ALIAS_GRACE_DAYS, JOB_KINDS, JOB_STATES, SETUP_LINK_DAYS, blankMailDraft, providerAsk, daysLeft, probeWords, fetchNowRefusal, fetchNowWords,
-    expired, failedHalvesOf, freshInvite, ingestShort, jobCountsOf, jobMetaOf, jobsOf, lapsesShort, mailDraftOf, exportsKeptShort, megabytes, documentsOwed, storeSize,
+    expired, failedHalvesOf, freshInvite, ingestShort, jobCountsOf, jobMetaOf, jobsOf, lapsesShort, mailDraftOf, exportsKeptTitle, gigabytes, megabytes, documentsOwed, storeSize,
     openFor, plainly, sendWords, shortDay, stamp, systemDotsOf, tellsOf, testMetaOf, testVerdict, versionLine,
     namesOf, notMailedWords, providerHost,
     SENDING_HOW_HREF, SENDING_NOT_SET, blankSendDraft, importSkippedWords, mailboxSubmissionHost, sendDraftOf, sendingOutcomeWords, sendingRowsOf,
@@ -626,8 +626,12 @@
      since this layout's own `resendFor` is a whole Person, not an id.
      `email_address_set` (#1869) is the same: the person and what was typed
      come back from the desk's draft, and the address sheet reopens. */
+  /* #1901 W-F5: the effect below re-runs on every re-read of `view`; a proof is resumed once.
+     Plain (not reactive) on purpose: it is read only to stop the second run. */
+  let resumedProof = false;
   function resumeProvenErrand() {
-    if (!view) return;
+    if (!view || resumedProof) return;
+    resumedProof = true;
     if (provenIntent === "local_user_create") inviteOpen = true;
     if (provenIntent === "system_create") { systemName = ""; systemOpen = true; }
     if (provenIntent === "setup_link_issue" && resumedResendPersonId) {
@@ -650,7 +654,9 @@
       }
     }
   }
-  $effect(() => resumeProvenErrand());
+  $effect(() => {
+    if (!resumedProof) resumeProvenErrand();
+  });
 </script>
 
 <div class="ad-pocket">
@@ -966,8 +972,8 @@
         <section class="p-card ad-card ad-flush" style:--i="5" id="ad-archives" tabindex="-1"
                  aria-labelledby="ad-archives-head" data-ad="archives">
           <div class="ad-cardhead"><h2 class="p-caps" id="ad-archives-head">Exports kept</h2></div>
-          <Row title="Exports kept"
-               meta={exportsKeptShort(view.archiveStorage, " per system")}
+          <Row title={exportsKeptTitle(view.archiveStorage)}
+               meta={gigabytes(view.archiveStorage.maxTotalBytes)}
                trail="change" trailTone="var(--accent-text)" trailName="change the export settings"
                onactivate={openArchiveStorage}>
             {#snippet mark()}<span class="ad-kmark">↓</span>{/snippet}
@@ -1226,10 +1232,11 @@
         the steps.</p>
     {:else if reading?.id === "damaged" && view?.metadata}
       <p class="p-prose ad-sheet-say">{view.metadata.damagedValues} values have failed their integrity check and can’t be
-        recovered — notes or references on {view.metadata.damagedItems} items, and {view.metadata.damagedReceipts} mail-in
-        messages. Each occurrence is in the logs with its row and column. Overwriting a damaged value repairs the record; a
-        damaged mail-in message can be re-forwarded. Counted as they’re encountered, so the number can grow as items are
-        opened.</p>
+        recovered — notes or references on {view.metadata.damagedItems} items, {view.metadata.damagedReceipts} mail-in
+        messages, and the fingerprints of {view.metadata.damagedDocuments} documents. Each occurrence is in the logs with its
+        row and column. Overwriting a damaged value repairs the record; a damaged mail-in message can be re-forwarded; a
+        damaged document is repaired by removing it and attaching it again. Counted as they’re encountered, so the number can
+        grow as items are opened.</p>
     {:else if reading?.id === "bundle"}
       <p class="p-prose ad-sheet-say">If the encryption key is ever lost with no recovery bundle to recover it, every
         document, all encrypted metadata, and — once account addresses are encrypted — every stored address are gone for

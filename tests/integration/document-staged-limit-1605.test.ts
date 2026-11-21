@@ -27,7 +27,8 @@ afterEach(() => {
 
 type Fixture = Awaited<ReturnType<typeof createIntegrationFixture>>;
 type Session = Awaited<ReturnType<Fixture["session"]>>;
-const WORDS = "You already have 100 uploads waiting to be attached to an item. Attach or delete some first";
+/* #1915 W-S1: said from the constant, and never tells the member to delete. */
+const WORDS = `You already have ${STAGED_UPLOADS_PER_MEMBER_LIMIT} uploads waiting to be attached to an item. Add the item they belong to, or wait a day and they are cleared`;
 
 async function stage(fixture: Fixture, session: Session, documentId = randomUUID()) {
   const body = createSyntheticPdf(`staged ${documentId}`);

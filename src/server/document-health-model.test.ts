@@ -33,7 +33,8 @@ vi.mock("@/db", () => {
     };
     return chain;
   }
-  return { getDb: () => ({ select: () => builder() }) };
+  // countMetadataDamage reads attachment sightings through one raw query (#1931).
+  return { getDb: () => ({ select: () => builder(), execute: () => Promise.resolve([{ values: 0, rows: 0 }]) }) };
 });
 
 vi.mock("@/server/document-worker", () => ({

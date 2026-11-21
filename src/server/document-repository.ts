@@ -562,7 +562,7 @@ async function reserveDocumentMetadata(input: {
       if (Number(staged) >= STAGED_UPLOADS_PER_MEMBER_LIMIT) {
         throw new AppError(
           "document_staged_limit",
-          "You already have 100 uploads waiting to be attached to an item. Attach or delete some first",
+          `You already have ${STAGED_UPLOADS_PER_MEMBER_LIMIT} uploads waiting to be attached to an item. Add the item they belong to, or wait a day and they are cleared`,
           429,
         );
       }
@@ -1350,7 +1350,7 @@ export async function restoreDocument(userId: string, documentId: string): Promi
       if (Number(staged) >= STAGED_UPLOADS_PER_MEMBER_LIMIT) {
         throw new AppError(
           "document_staged_limit",
-          "You already have 100 uploads waiting to be attached to an item. Attach or delete some first",
+          `You already have ${STAGED_UPLOADS_PER_MEMBER_LIMIT} uploads waiting to be attached to an item. Add the item they belong to, or wait a day and they are cleared`,
           429,
         );
       }

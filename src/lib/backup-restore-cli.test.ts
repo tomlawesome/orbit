@@ -509,7 +509,9 @@ const adapter = {
   dumpDatabase: (output) => {
     writeFileSync(output, JSON.stringify(reports));
     writeSync(1, "dumping\\n");
-    spawnSync("sleep", ["1"]);
+    // #1933: held until the SIGTERM ends the process (the test kills the group's leftover sleep), so the signal
+    // lands mid-dump however slowly the runner gets to it; a 1 s dump could end first on a loaded runner.
+    spawnSync("sleep", ["30"]);
   },
   pgRestoreListOk: () => true,
   collectDocumentsArchive: (output) => createTar(config.documentsRoot, output, ["."]),
@@ -560,6 +562,11 @@ runBackup({
       });
       child.on("close", (closeStatus, closeSignal) => {
         clearTimeout(deadline);
+        try {
+          process.kill(-child.pid!, "SIGKILL");
+        } catch {
+          // the group is already gone
+        }
         resolvePromise({ stdout: out, stderr: err, killedOnDeadline, status: closeStatus, signal: closeSignal });
       });
     });

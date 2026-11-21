@@ -1,7 +1,6 @@
 import { expect, test } from "@playwright/test";
-import { settle } from "./pocket-states.js";
+import { APP, settle } from "./pocket-states.js";
 
-const APP = process.env.FIDELITY_APP ?? "http://127.0.0.1:4173";
 
 /*
  * THE CREATE DRAWER ON A PHONE (#1263; was the create card's ring, #1175).

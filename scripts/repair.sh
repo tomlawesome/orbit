@@ -911,8 +911,8 @@ set -Eeuo pipefail
 # directory first. The directory is removed at the end of the `--execute`
 # run regardless of outcome: any failed action has already consumed its own
 # backup to self-restore before the action is reported, so nothing is left
-# that a later run could need. Its path is never printed — see "Privacy"
-# below.
+# that a later run could need. Its path is never printed on stdout — see
+# "Privacy" below; stderr names it only when its removal fails (#1915 O-S1).
 #
 # Confirmation model — hybrid approval (owner decision, 2026-08-13)
 # --------------------------------------------------------------------------
@@ -1076,10 +1076,10 @@ set -Eeuo pipefail
 # The private recovery directory's path, the staging directory's path, and
 # every path this script touches during execution are never printed, on
 # STDOUT, in any line, under any mode — the enum-only stdout discipline that
-# governs `--check`/`--plan` holds identically under `--execute`. The one
-# deliberate exception is the dangerous batch's own checkpoint bundle path,
-# which is printed as human guidance on STDERR — see "EXECUTE MODE
-# (--execute --dangerous)" below.
+# governs `--check`/`--plan` holds identically under `--execute`. Human
+# guidance on STDERR does name paths: the dangerous batch's checkpoint
+# bundle path (see "EXECUTE MODE (--execute --dangerous)" below), and a
+# recovery folder whose removal failed (#1915 O-S1), among others.
 
 # ============================================================================
 # EXECUTE MODE (--execute --dangerous) — issue #261 SLICE 5, STAGE TWO
@@ -1231,10 +1231,12 @@ set -Eeuo pipefail
 # diagnosis) as a mode-0600 file. Unlike the stage-one private recovery
 # directory (`cleanup_recovery_dir`, always removed at the end of every
 # `--execute` run), the checkpoint directory outlives the run until a full
-# re-diagnosis comes back clean: `settle_credential_checkpoints` removes it
-# then, in the same run, and otherwise keeps and names it so a later clean
-# `--execute` run removes it (#1834, owner decision 11b; ADR-0014 amendment
-# 2026-11-15). It holds the OLD password, which after the ALTER ROLE opens
+# re-diagnosis comes back clean and that re-diagnosis could check Docker
+# (#1874 O-S2: docker-unavailable is info severity, so without Docker a
+# re-check can read healthy yet never confirm the rotated password works):
+# `settle_credential_checkpoints` removes it then, in the same run, and
+# otherwise keeps and names it so a later clean `--execute` run removes it
+# (#1834, owner decision 11b; ADR-0014 amendment 2026-11-15). It holds the OLD password, which after the ALTER ROLE opens
 # nothing but a volume snapshot the operator took themselves. It stays
 # local-only, per the owner's explicit "no ad-hoc download hosting from a
 # broken box" decision (the recovered app's normal export/download flow is
@@ -1627,8 +1629,8 @@ cd "$repo_dir"
 #   - removes this run's own private recovery directory if one was opened,
 #     so an interrupted run never leaves an orphaned mode-700 copy of live
 #     secrets behind forever (the same removal cleanup_recovery_dir already
-#     performs at the end of every normal run); its path is still never
-#     printed, preserving the "Privacy" contract above;
+#     performs at the end of every normal run); its path is never printed
+#     on stdout ("Privacy" above), only on stderr if the removal fails;
 #   - if rotate-database-credential's steps were in flight, prints the same
 #     step-failure recovery guidance (checkpoint bundle location, and the
 #     staged new-credential path once step 2 has run) the synchronous
@@ -2967,13 +2969,22 @@ ensure_owner_recovery_dir() {
   owner_private_dir owner_recovery_dir ./.orbit-repair-recovery.
 }
 
+# #1915 O-S1: a recovery folder that is still there after the removal is
+# named, so the operator can delete it (it may hold a copy of secrets).
+remove_recovery_folder() {
+  as_folder_owner rm -rf -- "$1" || true
+  if [[ -e "$1" || -L "$1" ]]; then
+    printf 'Orbit repair: the recovery folder %s could not be removed; it may hold copies of the deployment'"'"'s secrets, so delete it yourself.\n' "$(clean_name "$1")" >&2
+  fi
+}
+
 cleanup_recovery_dir() {
   if [[ -n "${owner_recovery_dir:-}" ]]; then
-    as_folder_owner rm -rf -- "$owner_recovery_dir" || true
+    remove_recovery_folder "$owner_recovery_dir"
     owner_recovery_dir=""
   fi
   [[ -n "$recovery_dir" ]] || return 0
-  as_folder_owner rm -rf -- "$recovery_dir" || true
+  remove_recovery_folder "$recovery_dir"
   recovery_dir=""
 }
 
@@ -4760,6 +4771,14 @@ restore_transaction_fail() {
 readonly engine_lock_path=".orbit-engine.lock"
 readonly engine_lock_stale_seconds=600
 engine_lock_problem=""
+# #1915 O-S3 (re-ruled, note 66800): the lock was there at the first check,
+# so an open that sees another file means the lock changed in between (an
+# install or update just started or finished). Repair never removes the
+# file: an install's fresh lock looks the same as an empty one repair's open
+# created (same inode, empty, one link), and removing it could let two
+# installs write at once. own_created_lock fixes its mode and owner, the run
+# refuses as unwritable, and the refusal tells the operator what to check;
+# the engine's own stale rule clears an empty lock after ten minutes.
 engine_lock_idle() {
   local fd="" mtime now status=0 before opened
   engine_lock_problem=""
@@ -4778,7 +4797,10 @@ engine_lock_idle() {
     opened=""
     [[ -z "$fd" ]] || opened="$(stat -L -c '%d:%i %F %.9Z' -- "/dev/fd/$fd" 2>/dev/null)" || opened=""
     if [[ -z "$fd" || -z "$before" || "$opened" != "$before" ]]; then
-      [[ -z "$fd" || "$opened" == "$before" ]] || own_created_lock "$fd" "$engine_lock_path"
+      if [[ -n "$fd" && "$opened" != "$before" ]]; then
+        own_created_lock "$fd" "$engine_lock_path"
+        [[ -z "$before" ]] || lock_own_problem+="; the lock changed while repair was checking it (an install or update just started or finished), so the file now there may be an empty one repair's open created; if no install or update is running and $engine_lock_path is empty, remove it yourself, or the next install waits up to 10 minutes on it"
+      fi
       [[ -z "$fd" ]] || exec {fd}<&-
       engine_lock_problem=unwritable
       return 1
@@ -4882,10 +4904,15 @@ discard_staging_root() {
   local staging_root="$1" discard
   discard=".orbit-repair-discard.${staging_root#.orbit-install-staging.}"
   if [[ -e "$discard" || -L "$discard" ]]; then
-    printf 'Orbit repair: %s could not be removed: %s is in the way of setting it aside; once Orbit is working, remove %s, then run Repair again.\n' "$staging_root" "$discard" "$discard" >&2
+    printf 'Orbit repair: %s could not be removed: %s is in the way of setting it aside; once Orbit is working, remove %s, then run Repair again.\n' "$(clean_name "$staging_root")" "$(clean_name "$discard")" "$(clean_name "$discard")" >&2
     return 1
   fi
-  as_folder_owner mv -n -T -- "$staging_root" "$discard" || return 1
+  # #1915 O-S2: a rename is atomic, so a step stopped after it landed leaves
+  # the staging name gone and the discard name a real folder: that rename is
+  # done (as the compose restore's #1873 X2). Anything else stays failed.
+  if ! as_folder_owner mv -n -T -- "$staging_root" "$discard"; then
+    [[ "$owner_step_problem" == "timed out" ]] || return 1
+  fi
   [[ ! -e "$staging_root" && ! -L "$staging_root" ]] || return 1
   is_real_non_symlink_directory "$discard" || return 1
   as_folder_owner rm -rf -- "$discard"
@@ -4921,7 +4948,7 @@ do_restore_transaction() {
   # refused; anything else falls through to the refusals and the restore.
   if engine_lock_idle && restore_transaction_originals_match_live "$staging_root"; then
     discard_staging_root "$staging_root" || return 1
-    printf 'Orbit repair: removed %s; no install is running and restoring from it would change nothing (every saved file matches the live one).\n' "$staging_root" >&2
+    printf 'Orbit repair: removed %s; no install is running and restoring from it would change nothing (every saved file matches the live one).\n' "$(clean_name "$staging_root")" >&2
     return 0
   fi
   if [[ "$engine_lock_problem" == unwritable ]]; then
@@ -5137,10 +5164,16 @@ do_restore_configuration_rollback() {
   # b1 O-R4 (#1603): flushed before the rename, and the folder after it, both
   # as the owner. Both best effort: a failing sync must not stop the rollback.
   as_folder_owner sync -- "$staged" 2>/dev/null || true
+  # #1915 O-R2: a rename is atomic, so a step stopped after it landed leaves
+  # the staged name gone and .env-orbit a regular file: that restore is done
+  # (as the compose restore's #1873 X2). Anything else stays failed.
   if ! as_folder_owner mv -fT -- "$staged" "$environment_file"; then
-    as_folder_owner rm -f -- "$staged" || true
-    smtp_step_tmp=""
-    return 1
+    if [[ "$owner_step_problem" != "timed out" || -e "$staged" || -L "$staged" ]] ||
+      ! is_regular_non_symlink_file "$environment_file"; then
+      as_folder_owner rm -f -- "$staged" || true
+      smtp_step_tmp=""
+      return 1
+    fi
   fi
   smtp_step_tmp=""
   as_folder_owner sync -- . 2>/dev/null || true
@@ -5380,7 +5413,9 @@ check_folder_owner() {
   elif [[ -z "$smtp_owner_gid" ]]; then
     # #1848 FIX-S1 addendum 2 item 3: the owner's own group, from the user
     # database; addendum 3 item 3: no entry, no getent or a failed lookup.
-    owner_refusal="run as root, it could not look up the deployment folder's owner (uid $smtp_folder_uid) in the user database (getent passwd)"
+    # #1915 O-S4: repair has no way round it (no group for setpriv, and
+    # compose as root leaves root-owned files, #1897), so the way back.
+    owner_refusal="run as root, it could not look up the deployment folder's owner (uid $smtp_folder_uid) in the user database (getent passwd), so it cannot write in the deployment folder as that user; add a user with that uid to the user database (for example: useradd --uid $smtp_folder_uid --no-create-home <name>), then run repair again as root or as that user; do not start or change Orbit as root by hand, which leaves root-owned files in the deployment folder"
   fi
   [[ -z "$owner_refusal" ]]
 }
@@ -5421,6 +5456,12 @@ clean_terminal_text() {
     { if command -v iconv >/dev/null 2>&1; then iconv -c -f UTF-8 -t UTF-8 2>/dev/null || true; else LC_ALL=C tr -d '\200-\377'; fi; } |
     LC_ALL=C sed $'s/\xc2[\x80-\x9f]//g; s/\xe2\x80[\xaa-\xae]//g; s/\xe2\x81[\xa6-\xa9]//g' |
     LC_ALL=C tr -d '\000-\010\013-\037\177'
+}
+
+# clean_name <text>: one name, cleaned as clean_terminal_text does, for a
+# message (#1915 SEC-O3).
+clean_name() {
+  printf '%s' "$1" | clean_terminal_text
 }
 
 # owner_step_timed_out <step> [<limit>]: the #1858 T5 line for a step run as the
@@ -5566,15 +5607,15 @@ owner_temp_suffix() {
 # a time-out included (a stopped, stalled, TERM-proof or flooding owner
 # step), root removes it as the owner. Nothing is left behind.
 #
-# #1858: root's reads are bounded. <producer> feeds the owner through a
-# `cat` bounded by $owner_step_timeout plus the grace, so an owner that stops
-# reading can't hold it; what the owner prints back is read through
+# #1858: root's reads are bounded. <producer> feeds the owner from bytes
+# root collected first (#1935), so an owner that stops reading can't hold
+# root; what the owner prints back is read through
 # `head -c 4097` under the same bound, refused over 4096 bytes, and must be
 # exactly the chosen name. The reader's own status follows it as a last line
 # only root writes.
 smtp_write_status=0
 smtp_owner_write() {
-  local folder="$1" template="$2" mode="$3" target="$4" name suffix said="" status=0 out reader bound problem
+  local folder="$1" template="$2" mode="$3" target="$4" name suffix said="" status=0 produced=0 collected="" out reader bound problem
   shift 4
   smtp_step_tmp=""
   smtp_write_status=1
@@ -5583,9 +5624,18 @@ smtp_owner_write() {
   name="$folder/${template%XXXXXX}$suffix"
   smtp_step_tmp="$name"
   bound="$((owner_step_timeout + owner_step_grace))"
-  out="$("$@" | LC_ALL=C timeout -k 1 "$bound" cat |
+  # #1935: the owner step's limit times only the owner's write. Root collects
+  # <producer>'s bytes first, bounded by its own limit, in memory (base64,
+  # so NUL bytes survive; never in a file, so a secret is never on disk),
+  # and only then starts the owner step, fed the decoded bytes. As with the
+  # pipe it replaces, the producer's failure is the step's status only when
+  # the owner's side succeeded.
+  collected="$(set -o pipefail; ("$@") | base64 -w0)" || produced=$?
+  out="$(printf '%s' "$collected" | base64 -d |
     as_folder_owner --pipe bash -c "$smtp_owner_write_script" smtp-owner-write "$name" "$folder" "$template" "$mode" |
     { LC_ALL=C timeout -k 1 "$bound" head -c 4097; printf '\n%s' "$?"; })" || status=$?
+  collected=""
+  [[ "$status" != 0 ]] || status="$produced"
   reader="${out##*$'\n'}"
   said="${out%$'\n'*}"
   while [[ "$said" == *$'\n' ]]; do said="${said%$'\n'}"; done
@@ -7086,6 +7136,9 @@ execute_dangerous_batch() {
 
   if [[ "${#dangerous_entries[@]}" -eq 0 ]]; then
     printf 'dangerous result=empty done=0 failed=0 reason=none\n'
+    # #1915 O-F8/O-F10: nothing to confirm here, so clear as the safe batch
+    # would, unless the operator declined that batch (guarantees 33 and 56).
+    [[ "$safe_batch_exit_code" == 1 ]] || remove_leftover_discards
     return 0
   fi
 
@@ -7318,10 +7371,13 @@ run_safe_batch() {
 # ADR-0014 amendment 2026-11-15). Called once per --execute run, after that
 # run's own full re-diagnosis; --check and --plan never call it. $1 is 1 only
 # when that re-diagnosis reported `diagnosis result=healthy` (no credential
-# finding, services ready) and no action in this run failed — "Orbit
-# started" is never enough. $2 (optional) names why the run stopped early:
-# `version-unsupported` gives a next step that names the version problem,
-# since re-running --execute would refuse the same way.
+# finding, services ready), it could check Docker (docker_available, #1874
+# O-S2), and no action in this run failed — "Orbit started" is never
+# enough. $2 (optional) names why the checkpoint is kept:
+# `version-unsupported` (the run stopped early) gives a next step that names
+# the version problem, since re-running --execute would refuse the same way;
+# `docker-unchecked` (healthy, but Docker could not be checked) says so and
+# gives the Docker next step.
 #
 # Only $run_checkpoint_dirs is considered: the `.orbit-repair-checkpoint.*`
 # entries that existed when this run started (snapshot_run_checkpoints) plus
@@ -7353,6 +7409,9 @@ settle_credential_checkpoints() {
     fi
     if [[ "$clean" == 1 ]]; then
       printf 'Orbit repair: the credential checkpoint %s was kept: it is not the shape repair created, cannot be read, or could not be removed; check its contents and delete it yourself.\n' "$dir" >&2
+    elif [[ "$reason" == docker-unchecked ]]; then
+      printf 'Orbit repair: the pre-rotation credential checkpoint %s was kept, because this run'"'"'s re-check could not check Docker (docker-unavailable), so it could not confirm the rotated database password works.\n' "$dir" >&2
+      printf 'Orbit repair: next step: ensure the docker CLI is installed and the daemon is reachable, then run repair again; the first run whose re-check is clean removes the checkpoint.\n' >&2
     elif [[ "$reason" == version-unsupported ]]; then
       printf 'Orbit repair: the pre-rotation credential checkpoint %s was kept, because repair refused to act on this deployment'"'"'s version.\n' "$dir" >&2
       printf 'Orbit repair: next step: fix the deployment version first (reinstall or update .env-orbit with an Orbit release, see docs/adr/0016); the first repair run after that whose re-check is clean removes the checkpoint.\n' >&2
@@ -7384,7 +7443,8 @@ is_removable_checkpoint_dir() {
   [[ -r "$1" && -x "$1" ]] || return 1
   for entry in "$1"/* "$1"/.[!.]* "$1"/..?*; do
     [[ -e "$entry" || -L "$entry" ]] || continue
-    [[ "$entry" == "$1/postgres-password.orbkek" ]] || return 1
+    # #1915 O-F11: or the bundle write's temporary file (mktemp's .XXXXXX).
+    [[ "$entry" == "$1/postgres-password.orbkek" || "$entry" == "$1"/postgres-password.orbkek.?????? ]] || return 1
     is_regular_non_symlink_file "$entry" || return 1
   done
   return 0
@@ -7413,10 +7473,10 @@ remove_leftover_discards() {
   refuse_unless_owner_writes discard-cleanup || return 0
   for dir in "${dirs[@]}"; do
     if is_real_non_symlink_directory "$dir" && as_folder_owner rm -rf -- "$dir"; then
-      printf 'Orbit repair: removed %s, which an earlier repair run left part removed.\n' "$dir" >&2
+      printf 'Orbit repair: removed %s, which an earlier repair run left part removed.\n' "$(clean_name "$dir")" >&2
       continue
     fi
-    printf 'Orbit repair: %s was kept: it is not a folder repair made, or could not be removed; check it and delete it yourself.\n' "$dir" >&2
+    printf 'Orbit repair: %s was kept: it is not a folder repair made, or could not be removed; check it and delete it yourself.\n' "$(clean_name "$dir")" >&2
   done
 }
 
@@ -7604,11 +7664,18 @@ execute_repair() {
   run_diagnosis
   print_check_lines
 
-  local recheck_clean=0
+  # #1874 O-S2: docker-unavailable is info severity, so a re-check that
+  # never reached Docker can read healthy; the checkpoint also needs Docker
+  # checked, since only then is the rotated password known to work.
+  local recheck_clean=0 recheck_reason=""
   if [[ "$check_worst" == healthy && "$safe_batch_exit_code" != 4 && "$dangerous_exit_code" != 4 ]]; then
-    recheck_clean=1
+    if [[ "$docker_available" == 1 ]]; then
+      recheck_clean=1
+    else
+      recheck_reason=docker-unchecked
+    fi
   fi
-  settle_credential_checkpoints "$recheck_clean"
+  settle_credential_checkpoints "$recheck_clean" $recheck_reason
 
   # Final exit code — see "EXIT CODES (--execute --dangerous)" above for the
   # full precedence table this implements. A real failure (4) in either

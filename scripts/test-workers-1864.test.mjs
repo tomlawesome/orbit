@@ -67,7 +67,8 @@ describe("vitest.config.ts (#1864)", () => {
     const src = read("vitest.config.ts");
     expect(src).toMatch(/from\s+["']\.\/scripts\/test-workers\.mjs["']/);
     expect(src).toMatch(/testWorkers\(/);
-    expect(src).toMatch(/testTimeout:\s*5_000/);
+    // #1933 81a: 15 s in CI, 5 s locally.
+    expect(src).toMatch(/testTimeout:\s*process\.env\.CI === "true" \? 15_000 : 5_000/);
     expect(src).toMatch(/hookTimeout:\s*10_000/);
   });
 });

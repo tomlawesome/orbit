@@ -114,7 +114,9 @@ previous version was still moving in the background, for example documents
 still being moved under the household key. Then the update stops with
 `update-preflight: blocked documents.content_sha256 rows=<n>` and says how
 many remain. Nothing has changed: leave Orbit running, and it finishes in the
-background, about 200 documents a minute. Run the update again later. If
+background, about 200 documents a minute. A value Orbit cannot read is
+reported on the administrator diagnostics and cleared by the same background
+work, so the count only ever falls. Run the update again later. If
 Orbit is locked because its household key is missing, restore the key and let
 Orbit run first. If the database was not running, the installer cannot ask:
 it says so on one line and goes on. To have it checked, start Orbit before you
