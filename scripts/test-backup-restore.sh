@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Backup/restore acceptance drill. Runs in CI against the container-validation
-# deployment and asserts the operator guarantees
+# Backup/restore acceptance drill. CI runs it nightly with --own-stack (its own
+# throwaway deployment); without the flag it borrows the deployment .env-orbit
+# names. It asserts the operator guarantees
 # below, cited as Part 2 / script #entry in docs/installer-guarantees.md
 # (issue #290 coverage map; the drill predates the catalogue, so citations
 # are mapped per test function rather than per assertion):
