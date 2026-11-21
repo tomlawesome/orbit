@@ -12,28 +12,31 @@ import { afterEach, describe, expect, it } from "vitest";
  * retry, as ready-to-paste docs/flakes.md sightings. Written from the
  * specification alone.
  *
- * CLI the builder follows:
+ *   node scripts/ci/rig-flaky-report.mjs <report.json> <out.txt> [junit.xml]
  *
- *   node scripts/ci/rig-flaky-report.mjs <report.json> <out.txt>
+ *   Run with the repository root as the working directory.
+ *   env  CI_PIPELINE_ID, CI_COMMIT_SHA (first 8 characters shown),
+ *        CI_COMMIT_REF_NAME, REPORT_DATE (YYYY-MM-DD; UTC today when unset).
+ *        CI_JOB_NAME is ignored: in browser_report it names the wrong job.
  *
- *   env  CI_PIPELINE_ID, CI_JOB_NAME, CI_COMMIT_SHA (full; the entry shows its
- *        first 8 characters), CI_COMMIT_REF_NAME, and REPORT_DATE
- *        (YYYY-MM-DD; the clock's UTC date when unset).
- *
- *   stdout  the report. With at least one flaky test it holds the section
- *           "Flaky (passed on retry)" and, under it, one entry per flaky test:
- *
- *             ## <spec file> "<title path>"
- *             - <date> · <ref> <short sha> · pipeline <id> / <job name> · passed on retry; first try: <first error line>
- *
- *           <title path> is the describe titles and the test title joined with
- *           " › ". <first error line> is the first line of the error message of
- *           the first (failed) result. Playwright marks such a test
- *           status "flaky"; a "flaky" test is never listed as passed.
- *   out.txt exactly the same text as stdout (the `flaky.txt` job artifact).
- *   exit    0 when no test failed, flaky ones included; 1 when a test failed
- *           on every try (the job fails, as now); 2 on a missing or unreadable
- *           argument or report.
+ *   Entry, one per flaky test per project (Playwright status "flaky"):
+ *     ## <repo-relative spec path> "<describe › title>" [<project>]
+ *     - <date> · <ref> <sha8> · pipeline <id> / <job> · passed on retry; first try: <first error line>
+ *   The spec path is config.projects[].testDir (absolute) joined with the
+ *   spec's `file`, made relative to the working directory.
+ *   <job> comes from the project: rig-desktop and rig-phone -> rig_chromium,
+ *   rig-firefox -> rig_firefox, rig-webkit-* -> rig_webkit (the --project flags
+ *   of web/package.json's rig:* scripts, run by .gitlab-ci.yml). With the
+ *   result's `shardIndex` (1-based, as --shard) and that job's `parallel:`
+ *   read from .gitlab-ci.yml in the working directory, it is "rig_webkit 2/3";
+ *   without a shardIndex it is just "rig_webkit".
+ *   Stdout and out.txt hold the same text, a "Flaky (passed on retry)"
+ *   section; a flaky test is never printed as passed.
+ *   junit.xml, when given, is rewritten in place: each flaky test's <testcase>
+ *   (matched by classname = spec `file` and name = title path) gets "[flaky] "
+ *   at the start of its name; every other byte is left alone.
+ *   exit 0 no test failed (flaky included); 1 a test failed on every try;
+ *   2 a missing or unreadable argument or report.
  */
 const script = fileURLToPath(new URL("./rig-flaky-report.mjs", import.meta.url));
 const dirs = [];
@@ -43,18 +46,23 @@ afterEach(() => {
 
 const result = (status, retry, message) => ({
   workerIndex: 0,
+  shardIndex: 2,
   status,
   duration: 10,
   retry,
   ...(message ? { error: { message } } : {}),
 });
 
-const FILE = "tests/rig/home.spec.js";
+const ROOT = process.cwd();
+const FILE = "home.spec.js";
+const REL = "web/tests/rig/home.spec.js";
+const TEST_DIR = join(ROOT, "web/tests/rig");
+const PROJECT = "rig-webkit-phone";
 const spec = (title, status, results) => ({
   title,
   ok: status === "expected" || status === "flaky",
   file: FILE,
-  tests: [{ projectName: "rig-webkit-phone", status, results }],
+  tests: [{ projectName: PROJECT, status, results }],
 });
 
 const PASSED = "renders the sky";
@@ -62,7 +70,7 @@ const FLAKY = "opens the door";
 const FAILED = "keeps the pocket";
 
 const report = (extra = []) => ({
-  config: {},
+  config: { projects: [{ name: PROJECT, testDir: TEST_DIR }, { name: "rig-desktop", testDir: TEST_DIR }] },
   suites: [
     {
       title: "home.spec.js",
@@ -93,19 +101,22 @@ const failing = spec(FAILED, "unexpected", [
 
 const ENV = {
   CI_PIPELINE_ID: "4321",
-  CI_JOB_NAME: "rig_webkit 2/3",
+  CI_JOB_NAME: "browser_report",
   CI_COMMIT_SHA: "0123456789abcdef0123456789abcdef01234567",
   CI_COMMIT_REF_NAME: "batch-b",
   REPORT_DATE: "2026-11-21",
 };
 
-function run(json, env = ENV) {
+function run(json, env = ENV, junit = undefined) {
   const dir = mkdtempSync(join(tmpdir(), "rig-flaky-"));
   dirs.push(dir);
   const input = join(dir, "report.json");
   const out = join(dir, "flaky.txt");
   writeFileSync(input, typeof json === "string" ? json : JSON.stringify(json));
-  const r = spawnSync("node", [script, input, out], {
+  const junitPath = join(dir, "junit.xml");
+  if (junit !== undefined) writeFileSync(junitPath, junit);
+  const r = spawnSync("node", [script, input, out, ...(junit !== undefined ? [junitPath] : [])], {
+    cwd: ROOT,
     encoding: "utf8",
     timeout: 30_000,
     env: { PATH: process.env.PATH, HOME: process.env.HOME, ...env },
@@ -116,10 +127,16 @@ function run(json, env = ENV) {
   } catch {
     // not written
   }
-  return { status: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "", error: r.error, file };
+  let xml = null;
+  try {
+    xml = readFileSync(junitPath, "utf8");
+  } catch {
+    // none
+  }
+  return { xml, status: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "", error: r.error, file };
 }
 
-const HEADING = `## ${FILE} "door › ${FLAKY}"`;
+const HEADING = `## ${REL} "door › ${FLAKY}" [${PROJECT}]`;
 const LINE =
   "- 2026-11-21 · batch-b 01234567 · pipeline 4321 / rig_webkit 2/3 · passed on retry; first try: Error: expect(locator).toBeVisible()";
 
@@ -195,5 +212,84 @@ describe("rig-flaky-report", () => {
   it("exits 2 on a report that is not json", () => {
     const r = run("not json");
     expect(r.status).toBe(2);
+  });
+
+  it("names the job from the project and the shard, not CI_JOB_NAME", () => {
+    const r = run(report());
+    expect(r.stdout).toContain("pipeline 4321 / rig_webkit 2/3 ·");
+    expect(r.stdout).not.toContain("browser_report");
+  });
+
+  it("names just the job when the result has no shardIndex", () => {
+    const json = report();
+    delete json.suites[0].suites[0].specs[0].tests[0].results[0].shardIndex;
+    delete json.suites[0].suites[0].specs[0].tests[0].results[1].shardIndex;
+    expect(run(json).stdout).toContain("pipeline 4321 / rig_webkit ·");
+  });
+
+  it.each([
+    ["rig-desktop", "rig_chromium 1/2"],
+    ["rig-phone", "rig_chromium 1/2"],
+    ["rig-firefox", "rig_firefox 1/2"],
+    ["rig-webkit-desktop", "rig_webkit 1/3"],
+    ["rig-webkit-phone", "rig_webkit 1/3"],
+  ])("maps %s to the job %s", (project, job) => {
+    const json = report();
+    const t = json.suites[0].suites[0].specs[0].tests[0];
+    t.projectName = project;
+    for (const x of t.results) x.shardIndex = 1;
+    expect(run(json).stdout).toContain(`pipeline 4321 / ${job} ·`);
+  });
+
+  it("gives one heading per project for the same test", () => {
+    const json = report();
+    const specs = json.suites[0].suites[0].specs;
+    const other = structuredClone(specs[0]);
+    other.tests[0].projectName = "rig-desktop";
+    for (const x of other.tests[0].results) x.shardIndex = 1;
+    specs.push(other);
+    const lines = run(json).stdout.split("\n");
+    expect(lines).toContain(HEADING);
+    expect(lines).toContain(`## ${REL} "door › ${FLAKY}" [rig-desktop]`);
+  });
+
+  describe("junit.xml", () => {
+    const tc = (name, body = "") =>
+      `<testcase name="${name}" classname="${FILE}" time="0.034">${body}</testcase>`;
+    const xml = (cases) =>
+      `<?xml version="1.0" encoding="UTF-8"?>\n<testsuites id="" name="" tests="3" failures="1" skipped="0" errors="0" time="1">\n` +
+      `<testsuite name="${FILE}" timestamp="2026-11-21T10:00:00.000Z" hostname="${PROJECT}" tests="3" failures="1" skipped="0" time="1" errors="0">\n` +
+      cases.join("\n") +
+      `\n</testsuite>\n</testsuites>\n`;
+    const cases = [
+      tc(PASSED),
+      tc(`door › ${FLAKY}`),
+      tc(`door › ${FAILED}`, '<failure message="boom" type="FAILURE">Error: boom</failure>'),
+    ];
+
+    it("prefixes the flaky testcase's name with [flaky] and changes nothing else", () => {
+      const before = xml(cases);
+      const r = run(report([failing]), ENV, before);
+      expect(r.xml).toBe(before.replace(`name="door › ${FLAKY}"`, `name="[flaky] door › ${FLAKY}"`));
+    });
+
+    it("leaves the file as it was when nothing is flaky", () => {
+      const clean = report();
+      clean.suites[0].suites = [];
+      const before = xml(cases);
+      expect(run(clean, ENV, before).xml).toBe(before);
+    });
+
+    it("does not touch a testcase with the same name in another spec file", () => {
+      const other = `<testcase name="door › ${FLAKY}" classname="other.spec.js" time="0.1"></testcase>`;
+      const before = xml([...cases, other]);
+      const r = run(report(), ENV, before);
+      expect(r.xml).toContain(other);
+      expect(r.xml).toContain(`name="[flaky] door › ${FLAKY}" classname="${FILE}"`);
+    });
+
+    it("still exits 0 for flaky-only input", () => {
+      expect(run(report(), ENV, xml(cases)).status).toBe(0);
+    });
   });
 });

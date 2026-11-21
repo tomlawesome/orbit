@@ -441,7 +441,7 @@ describe("check-quarantine review dates (#1744)", () => {
     expect(r.status).toBe(0);
   });
 
-  it("accepts a date equal to today and refuses the day before (QUARANTINE_TODAY)", () => {
+  it("accepts a date equal to today or after it, and refuses one before it (QUARANTINE_TODAY)", () => {
     const root = fixture({ [A]: specA }, entry("2030-06-15"));
     expect(run(root, { QUARANTINE_TODAY: "2030-06-15" }).status).toBe(0);
     expect(run(root, { QUARANTINE_TODAY: "2030-06-14" }).status).toBe(0);
@@ -451,5 +451,12 @@ describe("check-quarantine review dates (#1744)", () => {
   it("refuses a missing date even when the count and issue are right", () => {
     const r = run(fixture({ [A]: specA }, entry()), { QUARANTINE_TODAY: "2030-06-15" });
     expectFails(r, A);
+  });
+
+  it.each(["soon", "2030-13-01", "2030-6-5"])("exits 2 with a message on QUARANTINE_TODAY=%j", (today) => {
+    const r = run(fixture({ [A]: specA }, entry("2099-01-01")), { QUARANTINE_TODAY: today });
+    expect(r.error).toBeUndefined();
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("QUARANTINE_TODAY");
   });
 });
