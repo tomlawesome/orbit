@@ -111,7 +111,8 @@ function run(json, env = ENV, junit = undefined) {
   const out = join(dir, "flaky.txt");
   writeFileSync(input, typeof json === "string" ? json : JSON.stringify(json));
   const junitPath = join(dir, "junit.xml");
-  if (junit !== undefined) writeFileSync(junitPath, junit);
+  // junit: a string is written to the file; null passes a path that does not exist.
+  if (typeof junit === "string") writeFileSync(junitPath, junit);
   const r = spawnSync("node", [script, input, out, ...(junit !== undefined ? [junitPath] : [])], {
     cwd: ROOT,
     encoding: "utf8",
@@ -280,5 +281,42 @@ describe("rig-flaky-report", () => {
     it("still exits 0 for flaky-only input", () => {
       expect(run(report(), ENV, xml(cases)).status).toBe(0);
     });
+
+    it("marks only the testcase of the flaky project when two suites share classname and name", () => {
+      const name = `door › ${FLAKY}`;
+      const suite = (host, body) =>
+        `<testsuite name="${FILE}" hostname="${host}" tests="1" failures="0">\n${tc(name)}\n</testsuite>`;
+      const phone = suite("rig-phone", "");
+      const desktop = suite("rig-desktop", "");
+      const before = `<?xml version="1.0"?>\n<testsuites>\n${desktop}\n${phone}\n</testsuites>\n`;
+      const json = report();
+      json.suites[0].suites[0].specs[0].tests[0].projectName = "rig-phone";
+      const r = run(json, ENV, before);
+      expect(r.xml).toBe(`<?xml version="1.0"?>\n<testsuites>\n${desktop}\n${phone.replace(`name="${name}"`, `name="[flaky] ${name}"`)}\n</testsuites>\n`);
+    });
+
+    it("keeps a title with $& and $' exactly as written", () => {
+      const title = "pays $& and $' and $1 back";
+      const json = report();
+      json.suites[0].suites[0].specs[0].title = title;
+      const name = `door › ${title}`;
+      const before = xml([tc(PASSED), tc(name)]);
+      const r = run(json, ENV, before);
+      expect(r.xml).toBe(before.split(`name="${name}"`).join(`name="[flaky] ${name}"`));
+    });
+
+    it("writes flaky.txt before the junit step: an unreadable junit path exits 2 and the list is already written", () => {
+      const r = run(report(), ENV, null);
+      expect(r.status).toBe(2);
+      expect(r.file).not.toBeNull();
+      expect(r.file).toContain(HEADING);
+      expect(r.file).toContain(LINE);
+    });
+  });
+
+  it("names [junit.xml] in its usage message", () => {
+    const r = spawnSync("node", [script], { encoding: "utf8", cwd: ROOT, timeout: 30_000 });
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("[junit.xml]");
   });
 });
