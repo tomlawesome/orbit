@@ -582,3 +582,15 @@ timeout on this one case rather than a global raise.
 ## scripts/install.update-prune-undo-copies.test.mjs "install.sh --plain --update: nothing to prune (#1834 slice 5) > prints nothing about old copies when there is no orbit-install-backups folder, with or without the flag"
 
 - 2026-11-21 · !1447 cf420ec53 · pipeline 5080 / fast (job 60786) · `install.sh --update` exited 1 instead of 0, in a 1390 s full run on a loaded runner; the test doesn't print the child's stderr, so the cause is not shown. The audit fixes don't touch install.sh or this test. Passed locally at cf420ec53 three times in a row. First sighting.
+
+## src/server/documents/pdf-structure-sandbox-poppler.test.ts "page draws are pdftoppm (real pdftoppm/pdfinfo) > §1.5 line 10: the tiny-step tiling pattern is stopped by the clock (500 ms) with stop timeout ..." (:345)
+
+- 2026-11-21 · !1457 batch-b 1eb93654 · pipeline 5167 / fast (job 61981) · `expected 5194 to be less than 2000` in a 1445 s run on a loaded runner; the change touches none of it. First sighting.
+
+## tests/integration/document-kept-previews.test.ts "pages drawn once and kept, encrypted (#1433 §2.6) (real pdftoppm/pdfinfo) > line 5: a view before the worker ran draws on demand ..." (:277)
+
+- 2026-11-21 · !1457 batch-b 1eb93654 · pipeline 5167 / integration 1/4 (job 61922) · `expected 422 to be 200` on a loaded runner, alongside fast's poppler clock miss above; the change touches none of it. First sighting.
+
+## tests/integration/reviewed-intake-route-retry.test.ts (whole file: Postgres connection ended)
+
+- 2026-11-21 · !1457 batch-b 1eb93654 · pipeline 5167 / integration 2/4 (job 61923) · `write CONNECTION_ENDED postgres:5432` in `delete from "instance_authority"`, then 15 s timeouts and further CONNECTION_ENDED errors in the same file; the change touches none of it. First sighting.
