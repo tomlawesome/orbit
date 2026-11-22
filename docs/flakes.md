@@ -371,11 +371,6 @@ timeout on this one case rather than a global raise.
 
 - 2026-11-01 · fd3ac6cc (+ #1636's uncommitted pipeline-rule change, nothing `scripts/install.sh` reads) · local `scripts/test-backend.sh`, worktree `hotfix-1632`, other sessions' builds on the host · `result.hungAlive` came back true (the hung pull child outlived the signal); the same file passed in the full run before and 12 of 12 alone right after. First sighting.
 
-## check-base-image-current.test.mjs, tests hit the 20s timeout (host)
-
-- 2026-11-02 · 640b8c2b · local `scripts/test-backend.sh`, worktree `v035-audit-ci`, two backend suites and an integration run in parallel on the shared host (load about 40) · 3 tests timed out at 20s; the file passed alone straight after (13 tests). Wall-clock under load. First sighting since #1134's fix.
-- 2026-11-02 · 3748dda7 · local `scripts/test-backend.sh`, worktree `v035-audit-tests`, same parallel runs · tests timed out at 20s (hook 10s); the file passed alone afterwards. Second sighting.
-
 ## web-build-stamp.test.mjs, timeout under load (host)
 
 - 2026-11-02 · 3748dda7 · local `scripts/test-backend.sh`, worktree `v035-audit-tests`, same parallel runs as above · timed out alongside check-base-image-current.test.mjs; passed alone afterwards. First sighting.
@@ -587,3 +582,27 @@ timeout on this one case rather than a global raise.
 ## scripts/install.update-prune-undo-copies.test.mjs "install.sh --plain --update: nothing to prune (#1834 slice 5) > prints nothing about old copies when there is no orbit-install-backups folder, with or without the flag"
 
 - 2026-11-21 · !1447 cf420ec53 · pipeline 5080 / fast (job 60786) · `install.sh --update` exited 1 instead of 0, in a 1390 s full run on a loaded runner; the test doesn't print the child's stderr, so the cause is not shown. The audit fixes don't touch install.sh or this test. Passed locally at cf420ec53 three times in a row. First sighting.
+
+## src/server/documents/pdf-structure-sandbox-poppler.test.ts "page draws are pdftoppm (real pdftoppm/pdfinfo) > §1.5 line 10: the tiny-step tiling pattern is stopped by the clock (500 ms) with stop timeout ..." (:345)
+
+- 2026-11-21 · !1457 batch-b 1eb93654 · pipeline 5167 / fast (job 61981) · `expected 5194 to be less than 2000` in a 1445 s run on a loaded runner; the change touches none of it. First sighting.
+
+## tests/integration/document-kept-previews.test.ts "pages drawn once and kept, encrypted (#1433 §2.6) (real pdftoppm/pdfinfo) > line 5: a view before the worker ran draws on demand ..." (:277)
+
+- 2026-11-21 · !1457 batch-b 1eb93654 · pipeline 5167 / integration 1/4 (job 61922) · `expected 422 to be 200` on a loaded runner, alongside fast's poppler clock miss above; the change touches none of it. First sighting.
+
+## tests/integration/reviewed-intake-route-retry.test.ts (whole file: Postgres connection ended)
+
+- 2026-11-21 · !1457 batch-b 1eb93654 · pipeline 5167 / integration 2/4 (job 61923) · `write CONNECTION_ENDED postgres:5432` in `delete from "instance_authority"`, then 15 s timeouts and further CONNECTION_ENDED errors in the same file; the change touches none of it. First sighting.
+
+## scripts/install.interrupts-journal.test.mjs "B21: dated folder names never collide: an existing name is skipped, never reused or emptied; past -9 the install is refused at the start"
+
+- 2026-11-22 · !1457 batch-b 3d2a694c · pipeline for !1457 / fast (job 62291) · failed after 74 s on a loaded runner, with two other long shell-driven tests in the same run; the change touches none of it. First sighting.
+
+## scripts/repair-retire-smtp-1817.test.mjs "7: a retirement interrupted at step=backed-up is refused while a journal exists, record and secret stay, and a later clean run finishes"
+
+- 2026-11-22 · !1457 batch-b 3d2a694c · pipeline for !1457 / fast (job 62291) · failed after 53 s on a loaded runner; the change touches none of it. First sighting.
+
+## scripts/repair-retire-privdrop-1848.test.mjs "owned by the folder's owner (the shim lies about nothing): not refused"
+
+- 2026-11-22 · !1457 batch-b 3d2a694c · pipeline for !1457 / fast (job 62291) · failed after 33 s on a loaded runner; the change touches none of it. First sighting.
