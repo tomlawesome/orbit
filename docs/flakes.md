@@ -594,3 +594,15 @@ timeout on this one case rather than a global raise.
 ## tests/integration/reviewed-intake-route-retry.test.ts (whole file: Postgres connection ended)
 
 - 2026-11-21 · !1457 batch-b 1eb93654 · pipeline 5167 / integration 2/4 (job 61923) · `write CONNECTION_ENDED postgres:5432` in `delete from "instance_authority"`, then 15 s timeouts and further CONNECTION_ENDED errors in the same file; the change touches none of it. First sighting.
+
+## scripts/install.interrupts-journal.test.mjs "B21: dated folder names never collide: an existing name is skipped, never reused or emptied; past -9 the install is refused at the start"
+
+- 2026-11-22 · !1457 batch-b 3d2a694c · pipeline for !1457 / fast (job 62291) · failed after 74 s on a loaded runner, with two other long shell-driven tests in the same run; the change touches none of it. First sighting.
+
+## scripts/repair-retire-smtp-1817.test.mjs "7: a retirement interrupted at step=backed-up is refused while a journal exists, record and secret stay, and a later clean run finishes"
+
+- 2026-11-22 · !1457 batch-b 3d2a694c · pipeline for !1457 / fast (job 62291) · failed after 53 s on a loaded runner; the change touches none of it. First sighting.
+
+## scripts/repair-retire-privdrop-1848.test.mjs "owned by the folder's owner (the shim lies about nothing): not refused"
+
+- 2026-11-22 · !1457 batch-b 3d2a694c · pipeline for !1457 / fast (job 62291) · failed after 33 s on a loaded runner; the change touches none of it. First sighting.
