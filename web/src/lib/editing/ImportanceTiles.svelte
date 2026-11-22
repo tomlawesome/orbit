@@ -5,12 +5,13 @@
    * the word under it. The one control for the three levels: the Add form's
    * row (desk) and the edit drawer's chooser (desk and phone) both draw it,
    * on the chooser's own Tiles (a radio group, one tile in the tab order,
-   * arrows walk, a press or Enter picks). Nothing is pressed until a level
+   * selection follows focus, Tiles.svelte). Nothing is pressed until a level
    * is chosen, and "not set" is never a fourth tile.
    *
    * @typedef {{
    *   value: string | null,
    *   onpick: (value: string) => void,
+   *   oncommit?: (value: string) => void,
    *   colour?: string | null,
    *   label?: string,
    *   required?: boolean,
@@ -20,11 +21,11 @@
   import { IMPORTANCE_CHOICES } from "./importance.js";
 
   /** @type {Props} */
-  let { value, onpick, colour = null, label = "Importance", required = false } = $props();
+  let { value, onpick, oncommit, colour = null, label = "Importance", required = false } = $props();
 </script>
 
 <div class="imp-tiles" data-opt={colour ?? undefined}>
-  <Tiles choices={[...IMPORTANCE_CHOICES]} {value} {label} cols={3} {onpick} {required} />
+  <Tiles choices={[...IMPORTANCE_CHOICES]} {value} {label} cols={3} {onpick} {oncommit} {required} />
 </div>
 
 <style>

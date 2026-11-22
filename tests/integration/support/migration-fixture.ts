@@ -113,7 +113,8 @@ export const EXPECTED_TABLE_COLUMNS: Record<string, string[]> = {
   local_credentials: ["user_id", "password_hash", "failed_attempt_count", "locked_until", "last_verified_at", "password_changed_at", "password_change_required_at", "created_at", "updated_at"],
   credential_setup_tokens: ["id", "user_id", "token_hash", "purpose", "expires_at", "consumed_at", "created_by_user_id", "created_at"],
   step_up_proofs: ["id", "session_id", "intent", "expires_at", "consumed_at", "created_at"],
-  sign_in_approvals: ["id", "user_id", "token_hash", "claim_hash", "user_agent", "client_address", "expires_at", "consumed_at", "outcome", "decided_at", "send_count", "last_sent_at", "created_at"],
+  // The staged link of a resend whose mail may still arrive (#1896, 0022).
+  sign_in_approvals: ["id", "user_id", "token_hash", "staged_token_hash", "claim_hash", "user_agent", "client_address", "expires_at", "consumed_at", "outcome", "decided_at", "send_count", "last_sent_at", "created_at"],
   sign_in_approval_sends: ["id", "approval_id", "user_id", "sent_at"],
 };
 for (const columns of Object.values(EXPECTED_TABLE_COLUMNS)) columns.sort();
@@ -369,6 +370,7 @@ export const EXPECTED_CONSTRAINTS: Record<string, ExpectedConstraint> = {
   step_up_proofs_session_id_sessions_id_fk: foreign("step_up_proofs", ["session_id"], "sessions", ["id"], "cascade"),
   sign_in_approvals_pkey: primary("sign_in_approvals", ["id"]),
   sign_in_approvals_token_hash_unique: unique("sign_in_approvals", ["token_hash"]),
+  sign_in_approvals_staged_token_hash_unique: unique("sign_in_approvals", ["staged_token_hash"]),
   sign_in_approvals_claim_hash_unique: unique("sign_in_approvals", ["claim_hash"]),
   sign_in_approvals_user_id_users_id_fk: foreign("sign_in_approvals", ["user_id"], "users", ["id"], "cascade"),
   sign_in_approval_sends_pkey: primary("sign_in_approval_sends", ["id"]),

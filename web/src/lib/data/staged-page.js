@@ -52,13 +52,14 @@ const BUSY_DEFAULT_SECONDS = 5;
 
 /**
  * A 503 `document_preview_busy`'s Retry-After in whole seconds, clamped to
- * 1-10; anything else the header says is the default (#1446).
+ * 1-30; anything else the header says is the default (#1446).
  * @param {Response} response
  */
 function busySecondsOf(response) {
   const raw = response.headers?.get("retry-after") ?? "";
   if (!/^[0-9]+$/u.test(raw)) return BUSY_DEFAULT_SECONDS;
-  return Math.min(10, Math.max(1, Number(raw)));
+  // clamped to 1-30; the top must stay at or above DOCUMENT_PREVIEW_BUSY_RETRY_SECONDS (src/server/documents/preview.ts)
+  return Math.min(30, Math.max(1, Number(raw)));
 }
 
 /** The most of a 503's body that is read to find its code; a longer body is not the server's busy answer (#1446). */

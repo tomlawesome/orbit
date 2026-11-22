@@ -81,3 +81,71 @@ describe("section colour picks (#1879 W-R3)", () => {
     expect(line).toMatch(/one\.colour/);
   });
 });
+
+/*
+ * #1915 W-R1: a failed colour save is a refusal only for a 4xx other than 412;
+ * anything else (no answer, 5xx, lost reply) is an unknown outcome, settled on
+ * a re-read. Names chosen by the tests (the fix adds them to section-colours.js):
+ * colourFailureKind(error) -> "refused" | "unknown";
+ * settleUnknownColourPick({ rows, problems, id, colour, stored, reread }) where
+ * reread is "ok" (stored = the re-read colour) or "failed".
+ */
+describe("a colour save that fails: refused or unknown (#1915 W-R1)", () => {
+  const rows = [{ id: "a", name: "Garden", colour: "red" }, { id: "b", name: "Boat", colour: "green" }];
+  const base = { rows, problems: {}, id: "a", colour: "red" };
+
+  it("a 4xx other than 412 is a refusal; 412, 5xx, no status and a lost reply are unknown", async () => {
+    const mod = await import("../../web/src/lib/section-colours.js");
+    expect(typeof mod.colourFailureKind).toBe("function");
+    for (const status of [400, 401, 403, 404, 409, 422, 429, 499]) expect(mod.colourFailureKind({ status })).toBe("refused");
+    for (const status of [412, 500, 502, 503, 504, undefined, 0]) expect(mod.colourFailureKind({ status })).toBe("unknown");
+    expect(mod.colourFailureKind(new TypeError("Failed to fetch"))).toBe("unknown");
+  });
+
+  it("stored equals the pick: saved, no problem, swatch stays", async () => {
+    const { settleUnknownColourPick } = await import("../../web/src/lib/section-colours.js");
+    const out = settleUnknownColourPick({ ...base, problems: { a: "not saved — Garden: x" }, stored: "red", reread: "ok" });
+    expect(out.problems).toEqual({});
+    expect(out.rows.find((r) => r.id === "a").colour).toBe("red");
+  });
+
+  it("stored differs: reverts to the stored colour with the not-confirmed words", async () => {
+    const { settleUnknownColourPick } = await import("../../web/src/lib/section-colours.js");
+    const out = settleUnknownColourPick({ ...base, stored: "blue", reread: "ok" });
+    expect(out.rows.find((r) => r.id === "a").colour).toBe("blue");
+    expect(out.problems.a).toBe("not confirmed — Garden: Orbit could not reach your sections; this is the colour as stored");
+  });
+
+  it("the re-read failed: keeps the picked swatch with the reload words", async () => {
+    const { settleUnknownColourPick } = await import("../../web/src/lib/section-colours.js");
+    const out = settleUnknownColourPick({ ...base, reread: "failed" });
+    expect(out.rows.find((r) => r.id === "a").colour).toBe("red");
+    expect(out.problems.a).toBe("not confirmed — Garden: Orbit could not reach your sections. reload to see the saved colour");
+  });
+
+  it("another section's problem is left alone", async () => {
+    const { settleUnknownColourPick } = await import("../../web/src/lib/section-colours.js");
+    const out = settleUnknownColourPick({ ...base, problems: { b: "not saved — Boat: y" }, stored: "blue", reread: "ok" });
+    expect(out.problems.b).toBe("not saved — Boat: y");
+  });
+});
+
+describe("the household page wires the split (#1915 W-R1)", () => {
+  const page = readFileSync(new URL("../../web/src/routes/household/[id]/+page.svelte", import.meta.url), "utf8");
+  const fn = page.slice(page.indexOf("async function saveColours"));
+  const body = fn.slice(0, fn.indexOf("function addSection"));
+  const catchPart = body.slice(body.indexOf("} catch"));
+
+  it("the catch tells refusals from unknown outcomes and re-reads for the unknown", () => {
+    expect(catchPart).toMatch(/colourFailureKind/);
+    expect(catchPart).toMatch(/settleUnknownColourPick/);
+    expect(catchPart).toMatch(/invalidateAll\(\)/);
+  });
+
+  it("an unconfirmed pick is not dropped from pickedColours before the re-read settles", () => {
+    const drop = catchPart.indexOf("pickedColours.delete");
+    const reread = catchPart.indexOf("invalidateAll()");
+    expect(reread).toBeGreaterThan(-1);
+    expect(drop === -1 || drop > reread || /refused/.test(catchPart.slice(0, drop))).toBe(true);
+  });
+});

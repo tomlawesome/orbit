@@ -319,7 +319,7 @@
         <div class="sublabel">Sending addresses</div>
         {#if row && sender}
           <div class="kv"><span>sending from</span><span>{sender.address}</span></div>
-          <div class="kv"><span>sender check</span><b class={row.tone === "warm" ? "warm" : "on"}>{row.says}</b></div>
+          <div class="kv"><span>sender check</span><b class={row.tone === "warm" ? "warm" : "on"}>{row.says}{#if row.link}&#32;· <a href={resolve("/inbox")}>{row.link.text}</a>{/if}</b></div>
         {/if}
         <!-- The extras stand on their own (#1650 review): a member with no
              readable seeded row still lists, removes and adds them. -->

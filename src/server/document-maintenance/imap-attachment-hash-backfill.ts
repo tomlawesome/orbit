@@ -24,11 +24,15 @@
  * the receipt has left. A row whose household moved since it was read is
  * left for a later cycle.
  *
- * Only a value that is a SHA-256 (64 lowercase hex characters) is sealed and
- * cleared. Any other plain value is damage: left exactly as it is, reported
- * once per process, and counted toward the batch like any other row. The
- * work list is paged by row id with a cursor kept between cycles, so damaged
- * rows are passed in turn rather than read first on every cycle.
+ * Only a value that is a SHA-256 (64 lowercase hex characters) is sealed.
+ * Any other plain value is damage (ruling #1779 note 67344): no product path
+ * writes one, and the per-mail dedupe compares it with a real digest it can
+ * never equal. So it is recorded as a damage sighting for the administrator
+ * card and cleared in one transaction (#1945), under the same share lock and
+ * the same guard on the value read, then reported once per process, with no
+ * seal and no index written from it; the clearing counts as a fix. The work list is paged by
+ * row id with a cursor kept between cycles, so rows are passed in turn
+ * rather than read first on every cycle.
  */
 import { and, asc, eq, gt, isNotNull, isNull, notInArray, or } from "drizzle-orm";
 import { getDb } from "@/db";
@@ -36,7 +40,7 @@ import { imapIngestionAttachments, imapIngestionMessages } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
 import { log, operationalDetail } from "@/lib/logger";
 import { ATTACHMENT_CONTENT_HASH_COLUMN, sealContentHash } from "@/server/documents/content-hash";
-import { noteMetadataDamage } from "@/server/metadata/damage-sightings";
+import { recordMetadataDamage } from "@/server/metadata/damage-sightings";
 import { openReceiptMetadataWriter, requireInstanceMetadataWriter, type MetadataCipher } from "@/server/metadata/fields";
 import { MetadataKeyLockedError } from "@/server/metadata/keys";
 
@@ -48,17 +52,17 @@ let cursor: string | null = null;
 /** Rows already reported as damaged in this process: reported once. */
 const reportedDamage = new Set<string>();
 
-function reportDamageOnce(rowId: string): void {
+/** The once-per-process warning, for a sighting already written. */
+function warnDamageOnce(rowId: string): void {
   if (reportedDamage.has(rowId)) return;
   reportedDamage.add(rowId);
-  noteMetadataDamage(ATTACHMENT_CONTENT_HASH_COLUMN, rowId);
   log.warn({
     event: "metadata.integrity",
     state: "degraded",
     reason: "metadata_integrity_failed",
     impact: "metadata_field_unreadable",
     action: "inspect_admin_diagnostics",
-    detail: operationalDetail`${ATTACHMENT_CONTENT_HASH_COLUMN} row ${rowId} holds a plain value that is not a SHA-256`,
+    detail: operationalDetail`${ATTACHMENT_CONTENT_HASH_COLUMN} row ${rowId} held a plain value that is not a SHA-256 and it was cleared`,
   });
 }
 
@@ -66,21 +70,25 @@ type WorkRow = { id: string; messageId: string; householdId: string | null; plai
 
 /** Fixes one row; returns how many rows it changed (0 or 1). */
 async function fixRow(instance: MetadataCipher, scope: MetadataCipher, row: WorkRow): Promise<number> {
-  if (!SHA256_HEX.test(row.plain)) {
-    reportDamageOnce(row.id);
-    return 0;
-  }
-  const contentIndex = instance.attachmentContentIndex(row.messageId, row.plain);
-  const contentSha256Sealed = sealContentHash(scope, row.id, row.plain, ATTACHMENT_CONTENT_HASH_COLUMN);
-  return getDb().transaction(async (transaction) => {
+  const damaged = !SHA256_HEX.test(row.plain);
+  /* Damage is cleared with nothing sealed or indexed from it. */
+  const written = damaged ? {} : {
+    contentIndex: instance.attachmentContentIndex(row.messageId, row.plain),
+    contentSha256Sealed: sealContentHash(scope, row.id, row.plain, ATTACHMENT_CONTENT_HASH_COLUMN),
+  };
+  /* Damage is recorded, then cleared, in one transaction (#1945), so the
+     value is never gone without its sighting: a sighting that cannot be
+     written rolls the clear back and the error goes to the cycle; the cursor
+     has already passed the row, so a later lap tries it again. */
+  const changed = await getDb().transaction(async (transaction) => {
     const [message] = await transaction.select({ householdId: imapIngestionMessages.householdId }).from(imapIngestionMessages)
       .where(eq(imapIngestionMessages.id, row.messageId)).for("share").limit(1);
     /* Moved since it was read: sealed on a later cycle under the new scope. */
     if (!message || message.householdId !== row.householdId) return 0;
+    if (damaged) await recordMetadataDamage(ATTACHMENT_CONTENT_HASH_COLUMN, row.id, transaction);
     const updated = await transaction.update(imapIngestionAttachments).set({
       contentSha256: null,
-      contentSha256Sealed,
-      contentIndex,
+      ...written,
       updatedAt: new Date(),
     }).where(and(
       eq(imapIngestionAttachments.id, row.id),
@@ -88,6 +96,8 @@ async function fixRow(instance: MetadataCipher, scope: MetadataCipher, row: Work
     )).returning({ id: imapIngestionAttachments.id });
     return updated.length;
   });
+  if (damaged && changed > 0) warnDamageOnce(row.id);
+  return changed;
 }
 
 /** The cipher map key of a receipt scope: a household id, or the instance. */

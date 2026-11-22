@@ -70,6 +70,7 @@ export async function changeMethod(action, { hasPassword, currentPassword, newPa
          does not carry on as if signed in; the door's renew step takes it. */
       if (result.renew) {
         location.assign(renewStepAddress(result.renew.refusedAt, "/settings"));
+        card.busy = false;
         return;
       }
       outcome = result.changed ? "password changed · every other device was signed out" : "password set";

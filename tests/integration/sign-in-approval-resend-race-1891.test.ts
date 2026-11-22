@@ -208,7 +208,10 @@ describe("the same, with a wide gap in the reservation transaction (#1891)", () 
   }, 60_000);
 });
 
-/* A failed send puts the approval back as it was (#1891). */
+/* A failed send puts the approval back as it was (#1891). Since #1896 only a
+   failure the mailer can prove never left does that, so the relay's refusal
+   carries nodemailer's code and the server's numbered reply. */
+const relayRefused = () => Object.assign(new Error("relay refused"), { code: "EENVELOPE", responseCode: 550 });
 const sha = (value: string) => createHash("sha256").update(value, "utf8").digest("hex");
 
 /** A pending approval whose current link is known, last mailed ten minutes ago. */
@@ -242,7 +245,7 @@ describe("a resend whose send fails undoes itself and nothing more (#1891)", () 
       async sendEmail(notification: SmtpNotification) {
         attempted = tokenIn(notification);
         await new Promise((resolve) => setTimeout(resolve, 100));
-        throw new Error("relay refused");
+        throw relayRefused();
       },
     };
 
@@ -262,7 +265,7 @@ describe("a resend whose send fails undoes itself and nothing more (#1891)", () 
   it("the minute runs from the last mail that went, so a retry sends at once", async () => {
     const userId = await account();
     const approval = await pendingWithLink(userId);
-    const failing = { async sendEmail() { throw new Error("relay refused"); } };
+    const failing = { async sendEmail() { throw relayRefused(); } };
 
     await resendSignInApproval(approval.claim, { mailer: failing });
     const retry = await resend(approval.claim);
@@ -283,7 +286,7 @@ describe("a resend whose send fails undoes itself and nothing more (#1891)", () 
       async sendEmail() {
         aInMailer();
         await aGate;
-        throw new Error("relay refused");
+        throw relayRefused();
       },
     };
 

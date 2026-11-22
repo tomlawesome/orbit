@@ -91,3 +91,23 @@ describe("guards: a refused change and a good read keep their shape (pass today)
     expect(card.busy).toBe(false);
   });
 });
+
+describe("a renew leaves the card not busy (#1901 W-R3)", () => {
+  const assign = vi.fn();
+  beforeEach(() => { assign.mockReset(); vi.stubGlobal("location", { assign }); });
+
+  it("password_set that answers renew: the door's renew step is taken and the card is not busy", async () => {
+    ws.writeLocalPassword.mockResolvedValue({ renew: { refusedAt: 1 } });
+    const { card, on } = make();
+    await changeMethod("password_set", { ...typed, hasPassword: false }, on);
+    expect(assign).toHaveBeenCalledTimes(1);
+    expect(card.busy).toBe(false);
+  });
+
+  it("password_change that answers renew: the same", async () => {
+    ws.writeLocalPassword.mockResolvedValue({ renew: { refusedAt: 1 } });
+    const { card, on } = make();
+    await changeMethod("password_change", typed, on);
+    expect(card.busy).toBe(false);
+  });
+});

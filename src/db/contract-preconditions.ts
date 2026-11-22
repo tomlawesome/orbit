@@ -50,8 +50,24 @@ export const CONTRACT_PRECONDITIONS: readonly ContractPrecondition[] = [
     pendingSql: "SELECT count(*) FROM documents WHERE content_sha256 IS NOT NULL",
     remedy: [
       `Orbit is still moving documents under the household key. The running version finishes this in the background, about ${BACKFILL_DOCUMENTS_PER_MINUTE} documents a minute.`,
+      "A value Orbit cannot read is reported on the administrator diagnostics and cleared by the same background work, so the count only ever falls.",
       "Leave Orbit running and run the update again later.",
       "If Orbit is locked because its household key is missing, restore the key and let Orbit run before updating.",
+    ],
+  },
+  {
+    // #1811 ruling (note 67362) item 3. The marker migration that retires the
+    // pre-#1398 settle path ships later (item 6); until a migration carries
+    // this tag the entry is skipped. Its number must be changed to the next
+    // free one when that migration is written.
+    migrationTag: "0023_retire_pre_1398_settle",
+    column: "imap_ingestion_attachments.purge_pending",
+    description: "mail attachments approved during a scanner outage before #1398 whose transfer is not yet settled: assigned and purge pending, with a document scanning, rejected or gone",
+    pendingSql: "SELECT count(*) FROM imap_ingestion_attachments a WHERE a.status = 'assigned' AND a.purge_pending AND (NOT EXISTS (SELECT 1 FROM documents d WHERE d.id = a.assigned_document_id) OR EXISTS (SELECT 1 FROM documents d WHERE d.id = a.assigned_document_id AND d.lifecycle IN ('scanning','rejected')))",
+    remedy: [
+      "Mail approved while the virus scanner was unreachable on an earlier Orbit is still being settled.",
+      "Leave Orbit running with the scanner reachable and run the update again later.",
+      "Such mail settles within the scan recovery window once the scanner answers, or sooner when the member retries or removes it from the inbox.",
     ],
   },
 ];

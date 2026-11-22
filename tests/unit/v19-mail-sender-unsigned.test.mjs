@@ -34,7 +34,9 @@ import { firstClause } from "../../web/src/lib/pocket/words.js";
  */
 
 /** The note's exact words for the row (§2). */
-const UNSIGNED_ROW = "checked · but your last forward wasn't signed, so it wasn't kept";
+const UNSIGNED_WORDS = "checked · your last forward wasn't signed, so it wasn't kept";
+/** ... and the row as drawn, with the link after it (#1727 W-S1, note 53804). */
+const UNSIGNED_ROW = `${UNSIGNED_WORDS} · see why`;
 /** The note's exact words for the failed row (§2), from review-state.ts. */
 const UNSIGNED_MESSAGE = "Orbit could not confirm this came from you, so it was not kept. Your mail service did not sign it (DKIM). Send it again from a service that signs, or ask whoever runs your mail domain to turn signing on.";
 
@@ -229,7 +231,7 @@ function rowValue(/** @type {string} */ label) {
 describe("note 52496: checkRow's fourth state", () => {
   it("verified with lastForwardSigned false: the warm words and no button", async () => {
     const { checkRow } = await import("../../web/src/routes/settings/mail/sender.js");
-    expect(checkRow(verified(false))).toEqual({ says: UNSIGNED_ROW, tone: "warm", button: null });
+    expect(checkRow(verified(false))).toMatchObject({ says: UNSIGNED_WORDS, tone: "warm", button: null });
   });
 
   it.each([

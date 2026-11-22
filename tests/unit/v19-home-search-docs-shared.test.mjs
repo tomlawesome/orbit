@@ -32,8 +32,11 @@ describe("#1151 W1-Q8: one shared loadSearchDocuments helper", () => {
     expect(HOME_PAGE).toMatch(/\bacts\.loadSearchDocuments\(/u);
     expect(POCKET).toMatch(/\bacts\.loadSearchDocuments\(lit\)/u);
     const start = ACTS.indexOf("async function loadSearchDocuments(");
-    const fn = ACTS.slice(start, start + 900);
-    expect(fn).toMatch(/await readSearchDocuments\(\s*\n\s*carrying, readItemDocuments, householdId, \(\) => searchDocumentsFor !== household,[^\n]*\n\s*\);/u);
+    const fn = ACTS.slice(start, start + 1400);
+    /* #1916: the reader may be readItemDocuments itself, or readNoting, which
+       calls it and notes the item read. */
+    expect(fn).toMatch(/const readNoting = async \(h, id\) => \{ const papers = await readItemDocuments\(h, id\);/u);
+    expect(fn).toMatch(/await readSearchDocuments\(\s*\n\s*carrying, (?:readItemDocuments|readNoting), householdId, \(\) => searchDocumentsFor !== household,[^\n]*\n\s*\);/u);
     expect(fn).not.toMatch(/Promise\.all/u);
     expect(fn).not.toMatch(/async function worker\(\)/u);
   });

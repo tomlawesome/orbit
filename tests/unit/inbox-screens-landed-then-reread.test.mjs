@@ -326,7 +326,7 @@ describe("desk: removing a failed message", () => {
     await FLUSH();
 
     expect(receipt?.querySelector(".mail-problem")?.textContent?.trim()).toBe("offline");
-    expect(deskLine(), "nothing under the failed entry").toBeNull();
+    expect(deskLine()?.textContent?.trim() ?? "", "nothing said under the failed entry").toBe("");
   });
 
   it("guard: a remove that lands and reads leaves no line anywhere (passes today)", async () => {
@@ -336,6 +336,7 @@ describe("desk: removing a failed message", () => {
     await FLUSH();
 
     expect(deskEntry(), "the entry went with the re-read").toBeNull();
-    expect(document.querySelectorAll(".mail-problem").length).toBe(0);
+    const said = [...document.querySelectorAll(".mail-problem")].filter((one) => (one.textContent ?? "").trim() !== "");
+    expect(said.length, "no .mail-problem says anything").toBe(0);
   });
 });

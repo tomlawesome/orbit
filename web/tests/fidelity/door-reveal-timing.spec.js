@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { APP } from "./pocket-states.js";
 
 /*
  * THE DOOR'S FIRST LIGHT: ITS ORDER AND OFFSETS (#1253, #1515). Since the
@@ -28,7 +29,6 @@ import { expect, test } from "@playwright/test";
  * `door-timing-firefox`), as before.
  */
 
-const APP = process.env.FIDELITY_APP ?? "http://127.0.0.1:4173";
 
 /* the door as a configured instance with a provider and local sign-in
    shows it (the gate, and the local-login line under it), answered

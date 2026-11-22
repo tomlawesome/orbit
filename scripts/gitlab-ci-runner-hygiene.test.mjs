@@ -34,8 +34,9 @@ describe("in-job Docker daemons clean up after themselves (#823)", () => {
   it("covers the jobs known to start a daemon", () => {
     expect(jobs.map(([name]) => name).sort()).toEqual(
       [
-        "acceptance", "install_bootstrap", "install_bootstrap_latest", "launcher_install_compat", "repair_journeys",
+        "acceptance", "backup_drill", "install_bootstrap", "install_bootstrap_latest", "launcher_install_compat", "repair_journeys",
         "smoke", "smoke_local_only", "smoke_webkit", "smoke_webkit_mobile", "supply_chain_image",
+        // #1927: the nightly backup/restore drill builds and runs its own stack.
         // #1665: the upgrade cells start their own daemon like `acceptance`.
         "upgrade_cell",
         // #1666: the launcher cell runs the old install and the update on its own daemon.

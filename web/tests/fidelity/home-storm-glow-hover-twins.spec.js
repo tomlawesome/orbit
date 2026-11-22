@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
+import { APP } from "./pocket-states.js";
 
 /* Same app the fidelity gate photographs (playwright.config.js webServer). */
-const APP = process.env.FIDELITY_APP ?? "http://127.0.0.1:4173";
 
 /*
  * The dial draws each body twice: the clickable `.body-link` (data-body) and

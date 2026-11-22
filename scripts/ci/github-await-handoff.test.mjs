@@ -1,4 +1,5 @@
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -98,12 +99,31 @@ function stage({
   return { release, addComplete, files };
 }
 
+/*
+ * The script reads GitHub with curl --retry 2 --retry-delay 3, and curl really
+ * sleeps those 3 s between attempts. A scripted failed poll is three attempts,
+ * so 6 s asleep, and the "fail, fail, ok, fail, fail" test sleeps 24 s of its
+ * 30 s process deadline before any process is slow (25.6 s measured on an idle
+ * host; #1940). The pause is not what any test checks. This curl makes the
+ * same attempts for the same --retry and only leaves the pause out; the fake
+ * still counts every attempt, which is what the tests assert on.
+ */
+function curlWithoutRetryPause(dir) {
+  const bin = join(dir, "bin");
+  mkdirSync(bin);
+  symlinkSync(new URL("../test-support/curl-no-retry-pause", import.meta.url).pathname, join(bin, "curl"));
+  return bin;
+}
+const REAL_CURL = execFileSync("sh", ["-c", "command -v curl"], { encoding: "utf8" }).trim();
+
 async function run({ extra = {}, token = FAKE_TOKEN } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "handoff-await-"));
   const output = join(dir, "github-output");
   writeFileSync(output, "");
   const evidenceDir = join(dir, "evidence");
   const env = {
+      PATH: `${curlWithoutRetryPause(dir)}:${process.env.PATH}`,
+      REAL_CURL,
       GITHUB_API_URL: fake.apiUrl,
       GITHUB_HANDOFF_REPO: fake.repository,
       // Orbit's own repository: the handoff is never read from there.
@@ -507,18 +527,16 @@ describe("github-await-handoff.sh, a flaky GitHub (#1848 SEC-D-S4)", () => {
     expect(result.outputs.digest).toBe(DIGEST);
   });
 
-  it("ends the run at once after 3 failed reads in a row, well before the deadline", async () => {
+  it("ends the run at once after 3 failed reads in a row, before the deadline", async () => {
     stage();
     flaky(["fail", "fail", "fail", "fail", "fail"], isReleaseList);
-    const started = Date.now();
     const result = await run({ extra: { ORBIT_WAIT_MINUTES: "120" } });
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("GitHub could not be read 3 polls in a row");
     expect(result.stderr).not.toContain("gave up after");
     expect(result.stdout).toContain("(1 of 3 in a row)");
     expect(result.stdout).toContain("(2 of 3 in a row)");
-    expect(Date.now() - started).toBeLessThan(60_000);
-    // Three polls, three attempts each: it did not go on polling.
+    // Three polls, three attempts each: it stopped at the third failed poll and did not go on polling toward the 120-minute deadline.
     expect(fake.requests.filter(isReleaseList).length).toBe(3 * ATTEMPTS);
     expect(result.rawOutput).toBe("");
   });

@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { isIP } from "node:net";
+import { lookup as dnsLookup, type LookupAddress } from "node:dns";
+import { Agent as HttpsAgent } from "node:https";
+import { isIP, type LookupFunction } from "node:net";
 import nodemailer from "nodemailer";
 import webPush from "web-push";
 import { and, eq, gte, inArray, isNull, lt, or, sql } from "drizzle-orm";
@@ -18,7 +20,7 @@ import {
   users,
 } from "@/db/schema";
 import { householdOwnerLockKey } from "@/lib/auth/authority-locks";
-import { asOperationalReason, log, type OperationalReason } from "@/lib/logger";
+import { asOperationalReason, log, operationalDetail, type OperationalReason } from "@/lib/logger";
 import {
   DEFAULT_ENABLED_CHANNELS,
   DEFAULT_FINAL_WARNING_DAYS,
@@ -189,6 +191,46 @@ function isRevokedPushStatus(statusCode: number | undefined): boolean {
 }
 
 /**
+ * The push connection's resolved address fell in a blocked range (#1929 part
+ * 2). Fixed text on purpose: it never carries the hostname, the address or
+ * the endpoint URL, so it is safe wherever an error ends up.
+ */
+export class BlockedPushEndpointError extends Error {
+  readonly code = "EPUSH_ENDPOINT_BLOCKED" as const;
+
+  constructor() {
+    super("push endpoint resolved to a blocked address");
+    this.name = "BlockedPushEndpointError";
+  }
+}
+
+function isBlockedPushEndpointError(error: unknown): boolean {
+  return (error as ProviderErrorDetails | undefined)?.code === "EPUSH_ENDPOINT_BLOCKED";
+}
+
+/**
+ * The one revocation rule for both `sendPush` callers (#1929 part 2): the
+ * push service says the subscription is gone (401/403/404/410), or its
+ * endpoint resolved to a blocked address. Either way it will never succeed,
+ * so it is revoked rather than counted as a transient failure. A blocked
+ * address also logs one warn line naming only the subscription id.
+ */
+export function isRevokedPushFailure(error: unknown, subscriptionId: string): boolean {
+  if (isBlockedPushEndpointError(error)) {
+    log.warn({
+      event: "delivery.push",
+      state: "blocked",
+      reason: "push_endpoint_blocked",
+      action: "none",
+      detail: operationalDetail`subscription=${subscriptionId}`,
+    });
+    return true;
+  }
+  const statusCode = (error as ProviderErrorDetails | undefined)?.statusCode;
+  return isRevokedPushStatus(typeof statusCode === "number" ? statusCode : undefined);
+}
+
+/**
  * Maps provider failures to the administrator-safe vocabulary before they are
  * persisted. Provider messages can contain addresses, hosts, or credentials.
  */
@@ -211,7 +253,7 @@ export function categorizeProviderError(channel: "email" | "web_push", error: un
   // 401/403 is what a push service answers for a subscription made with a
   // different VAPID key (a recovered host generates a new pair): it will never
   // succeed, so it is gone, not transient.
-  if (isRevokedPushStatus(statusCode)) return "push_unsubscribed";
+  if (isRevokedPushStatus(statusCode) || code === "EPUSH_ENDPOINT_BLOCKED") return "push_unsubscribed";
   if (["ECONNREFUSED", "ECONNRESET", "ENETUNREACH", "ENOTFOUND", "ETIMEDOUT", "EHOSTUNREACH"].includes(code)
     || (statusCode !== undefined && statusCode >= 500)) {
     return "push_unavailable";
@@ -442,15 +484,95 @@ function isPrivateOrReservedIPv4(address: string): boolean {
   return false;
 }
 
-/** True for IPv6 addresses reserved for loopback, link-local, or unique-local use. */
-function isPrivateOrReservedIPv6(address: string): boolean {
-  const normalized = address.toLowerCase();
-  if (normalized === "::1" || normalized === "::") return true;
-  if (/^f[cd][0-9a-f]{2}:/.test(normalized)) return true;
-  if (/^fe[89ab][0-9a-f]:/.test(normalized)) return true;
-  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(normalized);
-  if (mapped) return isPrivateOrReservedIPv4(mapped[1]);
+/**
+ * Parses a textual IPv6 address (optionally with a trailing dotted IPv4
+ * part, no zone id) into its 16 bytes, or undefined when it is not one
+ * node:net accepts. Parse-then-range-check is the OWASP SSRF-prevention
+ * pattern: every spelling of an address (hex or dotted mapped forms,
+ * compressed or not) reduces to the same bytes before any range test.
+ */
+function parseIPv6Bytes(address: string): Uint8Array | undefined {
+  if (isIP(address) !== 6 || address.includes("%")) return undefined;
+  let text = address.toLowerCase();
+  const tail: number[] = [];
+  const dotted = /^(.*:)(\d+\.\d+\.\d+\.\d+)$/.exec(text);
+  if (dotted) {
+    if (isIP(dotted[2]) !== 4) return undefined;
+    tail.push(...dotted[2].split(".").map(Number));
+    // Keep a trailing "::" intact; otherwise drop the separator before the IPv4 part.
+    text = dotted[1].endsWith("::") ? dotted[1] : dotted[1].slice(0, -1);
+  }
+  const groupsNeeded = 8 - tail.length / 2;
+  const halves = text.split("::");
+  if (halves.length > 2) return undefined;
+  const toGroups = (part: string): string[] => (part === "" ? [] : part.split(":"));
+  const head = toGroups(halves[0]);
+  const rest = halves.length === 2 ? toGroups(halves[1]) : [];
+  const fill = groupsNeeded - head.length - rest.length;
+  if (halves.length === 2 ? fill < 0 : fill !== 0) return undefined;
+  const groups = [...head, ...Array<string>(fill).fill("0"), ...rest];
+  const bytes = new Uint8Array(16);
+  for (const [index, group] of groups.entries()) {
+    if (!/^[0-9a-f]{1,4}$/.test(group)) return undefined;
+    const value = Number.parseInt(group, 16);
+    bytes[index * 2] = value >> 8;
+    bytes[index * 2 + 1] = value & 0xff;
+  }
+  bytes.set(tail, 12);
+  return bytes;
+}
+
+function embeddedIPv4(bytes: Uint8Array, offset: number): string {
+  return Array.from(bytes.subarray(offset, offset + 4)).join(".");
+}
+
+/**
+ * True for IPv6 bytes that are not plain global unicast, or that embed an
+ * IPv4 address which is itself private or reserved (#1929 part 1).
+ */
+function isBlockedIPv6Bytes(bytes: Uint8Array): boolean {
+  const word = (index: number): number => (bytes[index * 2] << 8) | bytes[index * 2 + 1];
+  const zeroUpTo = (byteCount: number): boolean => bytes.subarray(0, byteCount).every((byte) => byte === 0);
+  // ::/96 covers unspecified ::, loopback ::1 and IPv4-compatible ::a.b.c.d.
+  if (zeroUpTo(12)) return true;
+  // IPv4-mapped ::ffff:0:0/96.
+  if (zeroUpTo(10) && word(5) === 0xffff) return isPrivateOrReservedIPv4(embeddedIPv4(bytes, 12));
+  // NAT64 well-known prefix 64:ff9b::/96.
+  if (word(0) === 0x64 && word(1) === 0xff9b && word(2) === 0 && word(3) === 0 && word(4) === 0 && word(5) === 0) {
+    return isPrivateOrReservedIPv4(embeddedIPv4(bytes, 12));
+  }
+  // NAT64 local-use 64:ff9b:1::/48.
+  if (word(0) === 0x64 && word(1) === 0xff9b && word(2) === 1) return true;
+  // 6to4 2002::/16 embeds an IPv4 address in bytes 2-5.
+  if (word(0) === 0x2002) return isPrivateOrReservedIPv4(embeddedIPv4(bytes, 2));
+  // Teredo 2001::/32 and documentation 2001:db8::/32.
+  if (word(0) === 0x2001 && (word(1) === 0 || word(1) === 0xdb8)) return true;
+  // Discard-only 100::/64.
+  if (word(0) === 0x100 && word(1) === 0 && word(2) === 0 && word(3) === 0) return true;
+  // Unique-local fc00::/7.
+  if ((bytes[0] & 0xfe) === 0xfc) return true;
+  // Link-local fe80::/10 and deprecated site-local fec0::/10.
+  if (bytes[0] === 0xfe && (bytes[1] & 0xc0) === 0x80) return true;
+  if (bytes[0] === 0xfe && (bytes[1] & 0xc0) === 0xc0) return true;
+  // Multicast ff00::/8.
+  if (bytes[0] === 0xff) return true;
   return false;
+}
+
+/**
+ * True when an IP address string (IPv4 or IPv6, no brackets) must not be the
+ * target of an outbound push request: private, reserved, loopback,
+ * link-local, multicast, documentation, or an IPv6 form embedding such an
+ * IPv4 address. Anything that does not parse as an address fails closed.
+ * Exported so the outbound DNS lookup hook can check resolved addresses with
+ * the same predicate.
+ */
+export function isBlockedPushAddress(address: string): boolean {
+  const version = isIP(address);
+  if (version === 4) return isPrivateOrReservedIPv4(address);
+  if (version !== 6) return true;
+  const bytes = parseIPv6Bytes(address);
+  return bytes === undefined || isBlockedIPv6Bytes(bytes);
 }
 
 /**
@@ -479,9 +601,7 @@ export function isAllowedPushEndpoint(endpoint: string): boolean {
   const hostname = url.hostname.toLowerCase();
   const addressCandidate = hostname.startsWith("[") && hostname.endsWith("]") ? hostname.slice(1, -1) : hostname;
   if (hostname === "localhost" || hostname.endsWith(".localhost")) return false;
-  const ipVersion = isIP(addressCandidate);
-  if (ipVersion === 4) return !isPrivateOrReservedIPv4(addressCandidate);
-  if (ipVersion === 6) return !isPrivateOrReservedIPv6(addressCandidate);
+  if (isIP(addressCandidate) !== 0) return !isBlockedPushAddress(addressCandidate);
   return true;
 }
 
@@ -727,7 +847,35 @@ async function claimDeliveries(
 /** Exported for the fast suite (#1151 SR2-R4): the one place real `nodemailer`
  *  and `web-push` calls are built, and therefore the one place their
  *  outbound timeout can be pinned without a live provider. */
+/**
+ * The connect-time address check for push (#1929 part 2, OWASP SSRF second
+ * layer): the socket's own lookup, so the addresses checked are the addresses
+ * connected to, with no rebinding window. Node's options (`all`, `hints`,
+ * `family`) pass through unchanged. One blocked address refuses the whole
+ * connection; Orbit never connects to the "good" subset.
+ */
+const blockedAddressFilteringLookup: LookupFunction = (hostname, options, callback) => {
+  dnsLookup(hostname, options, (error: NodeJS.ErrnoException | null, address: string | LookupAddress[], family?: number) => {
+    if (error) {
+      callback(error, undefined as never);
+      return;
+    }
+    const addresses = Array.isArray(address) ? address : [{ address, family: family ?? 0 }];
+    if (addresses.some((entry) => isBlockedPushAddress(entry.address))) {
+      callback(new BlockedPushEndpointError(), undefined as never);
+      return;
+    }
+    if (Array.isArray(address)) callback(null, address);
+    else callback(null, address, family);
+  });
+};
+
 export function createDefaultNotificationProviders(config: NotificationWorkerConfig): NotificationProviders {
+  /* One agent per providers object, default keepAlive (off), so every
+     connection goes through the lookup again. No servername,
+     rejectUnauthorized or checkServerIdentity: TLS still verifies against
+     the endpoint's hostname. */
+  const pushAgent = new HttpsAgent({ lookup: blockedAddressFilteringLookup });
   let transporter: ReturnType<typeof nodemailer.createTransport> | undefined;
   if (config.vapidSubject && config.vapidPublicKey && config.vapidPrivateKey) {
     webPush.setVapidDetails(config.vapidSubject, config.vapidPublicKey, config.vapidPrivateKey);
@@ -768,6 +916,7 @@ export function createDefaultNotificationProviders(config: NotificationWorkerCon
       // ever resolves.
       await webPush.sendNotification(notification.target, JSON.stringify(notification.payload), {
         timeout: NOTIFICATION_PROVIDER_TIMEOUT_MS,
+        agent: pushAgent,
       });
     },
   };
@@ -1163,8 +1312,7 @@ async function deliverClaimed(
                 });
                 delivered = true;
               } catch (error) {
-                const statusCode = (error as { statusCode?: number }).statusCode;
-                if (isRevokedPushStatus(statusCode)) {
+                if (isRevokedPushFailure(error, subscription.id)) {
                   await transaction.update(pushSubscriptions).set({ revokedAt: now })
                     .where(and(eq(pushSubscriptions.id, subscription.id), isNull(pushSubscriptions.revokedAt)));
                   continue;

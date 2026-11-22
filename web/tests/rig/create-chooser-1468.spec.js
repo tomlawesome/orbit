@@ -130,13 +130,13 @@ test.describe("desk Add: the chooser card in the lane (#1468, Q)", () => {
     await expect(repeatValue(page)).toContainText(/every 6 months/i);
   });
 
-  test("pressing reminder opens day chips 7, 14, 30, 60 and 90, and several can be chosen at once", async ({ page }) => {
+  test("pressing reminder opens day chips 1, 3, 7, 14, 30, 60 and 90, and several can be chosen at once", async ({ page }) => {
     await gotoCreate(page);
     await nameTheEntry(page);
     await reminderValue(page).click();
     const card = chooser(page, /^Choose reminders/i);
     const chips = card.getByRole("group", { name: "Remind me this many days before" });
-    await expect(chips.getByRole("button")).toHaveText(["7d", "14d", "30d", "60d", "90d"]);
+    await expect(chips.getByRole("button")).toHaveText(["1d", "3d", "7d", "14d", "30d", "60d", "90d"]);
     await chips.getByRole("button", { name: "30d" }).click();
     await chips.getByRole("button", { name: "60d" }).click();
     for (const day of ["14d", "30d", "60d"]) await expect(chips.getByRole("button", { name: day })).toHaveAttribute("aria-pressed", "true");

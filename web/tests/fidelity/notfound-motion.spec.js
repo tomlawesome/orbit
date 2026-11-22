@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { settled } from "./settled.js";
+import { APP } from "./pocket-states.js";
 
 /*
  * #764's companion check. screens.spec.js's fidelity gate freezes every CSS
@@ -28,7 +29,6 @@ import { settled } from "./settled.js";
  */
 const ANIMATED_SELECTORS = [".disc-precess", ".disc-glow", ".photon", ".photon-hot", ".lensed", ".smear"];
 
-const APP = process.env.FIDELITY_APP ?? "http://127.0.0.1:4173";
 const SVG_NS = "http://www.w3.org/2000/svg";
 
 test("notfound keeps its six animations live after rasterising the filtered group", async ({ page }) => {

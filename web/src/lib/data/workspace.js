@@ -2209,6 +2209,7 @@ export async function hardDeleteHousehold(householdId, confirmation) {
  * @property {number} damagedValues
  * @property {number} damagedItems
  * @property {number} damagedReceipts
+ * @property {number} damagedDocuments
  */
 
 /**

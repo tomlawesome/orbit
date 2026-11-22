@@ -16,13 +16,17 @@
  * at column 0. A citation is stale when the function is not defined, or when
  * none of the cited lines fall inside the span. A range with no function name
  * in its parentheses is not checked here; main-script ranges and cited
- * content (both #1846) have their own checks below.
+ * content (#1846 and #1880) have their own checks below.
  */
 
 const FUNCTION_START = /^([A-Za-z_][A-Za-z0-9_]*)\(\) *\{/u;
 const SNAKE_CASE = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$/u;
 const CITATION_START = /(?<![\w./-])(?:scripts\/)?install\.sh:/gu;
-const SEGMENT = /\s*(\d+)(?:-(\d+))?(?:\s*\(([^)]*)\))?/uy;
+/** One line or line range, `N` or `N-M`: groups first and optional last. */
+const RANGE = String.raw`(\d+)(?:-(\d+))?`;
+/** An optional parenthesised note after a range. */
+const NOTE = String.raw`(?:\s*\([^)]*\))?`;
+const SEGMENT = new RegExp(String.raw`\s*${RANGE}(?:\s*\(([^)]*)\))?`, "uy");
 const SEPARATOR = /\s*,\s*/uy;
 
 /** Map of function name to its { start, end } 1-based line span. */
@@ -209,7 +213,7 @@ export function citationContentProblems(docText, installShText, expectations) {
  */
 export function citedFileLines(docText, fileText, guarantee, fileName) {
   const escaped = fileName.replaceAll(".", "\\.");
-  const pattern = new RegExp(`(?<![\\w./-])${escaped}:(\\d+)(?:-(\\d+))?`, "u");
+  const pattern = new RegExp(`(?<![\\w./-])${escaped}:${RANGE}`, "u");
   const entry = numberedGuarantees(docText).find((item) => item.guarantee === guarantee);
   const match = entry && pattern.exec(entry.text);
   if (!match) return null;
@@ -276,13 +280,13 @@ export function fileCitationContentProblems(docText, fileText, fileName, expecta
 export function fileNamedFunctionProblems(docText, fileText, fileName) {
   const spans = functionSpans(fileText);
   const escaped = fileName.replaceAll(".", "\\.");
-  const pattern = new RegExp(`(?<![\\w./-])${escaped}:(\\d+(?:-\\d+)?(?:\\s*\\([^)]*\\))?(?:\\s*,\\s*\\d+(?:-\\d+)?(?:\\s*\\([^)]*\\))?)*)`, "gu");
+  const pattern = new RegExp(`(?<![\\w./-])${escaped}:(${RANGE}${NOTE}(?:\\s*,\\s*${RANGE}${NOTE})*)`, "gu");
   const problems = [];
   for (const { guarantee, text } of numberedGuarantees(docText)) {
     if (!guarantee.startsWith(`${fileName} #`)) continue;
     const ranges = [];
     for (const match of text.matchAll(pattern)) {
-      for (const range of match[1].replace(/\([^)]*\)/gu, "").matchAll(/(\d+)(?:-(\d+))?/gu)) {
+      for (const range of match[1].replace(/\([^)]*\)/gu, "").matchAll(new RegExp(RANGE, "gu"))) {
         ranges.push([Number(range[1]), Number(range[2] ?? range[1])]);
       }
     }
@@ -305,7 +309,8 @@ export function fileNamedFunctionProblems(docText, fileText, fileName) {
 /**
  * #1880: "about N-M" citations, as in repair.sh `name` (about 6478-6499). The
  * script is the last `<script>.sh` named earlier in the same guarantee. Each
- * named function must be defined in the script and start inside the range.
+ * named function must be defined in the script, start inside the range, and
+ * end inside it or within ABOUT_END_SLACK lines after it.
  * `scriptTexts` maps a script name to its text. Returns `{ guarantee,
  * citation, problem }`.
  */
@@ -316,7 +321,11 @@ export function aboutCitationProblems(docText, scriptTexts) {
   const spansByScript = new Map(
     Object.entries(scriptTexts).map(([name, text]) => [name, functionSpans(text)]),
   );
-  const token = /([A-Za-z0-9_-]+\.sh)\b|`([A-Za-z_]\w*)`[^`;(]{0,3}\(about (\d+)(?:-(\d+))?\)/gu;
+  const tick = "`";
+  const token = new RegExp(
+    String.raw`([A-Za-z0-9_-]+\.sh)\b|${tick}([A-Za-z_]\w*)${tick}[^${tick};(]{0,3}\(about ${RANGE}\)`,
+    "gu",
+  );
   const problems = [];
   for (const { guarantee, text } of numberedGuarantees(docText)) {
     let script = null;

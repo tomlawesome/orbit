@@ -3,6 +3,7 @@ import {
   blankSendDraft,
   documentsOwed,
   exportsKeptShort,
+  exportsKeptTitle,
   failedHalvesOf,
   fetchNowRefusal,
   fetchNowWords,
@@ -189,5 +190,33 @@ describe("sizes and counts (#1285, #1433 D20, #1792)", () => {
     expect(gigabytes(2.5 * GIB)).toBe("2.5 GB");
     expect(exportsKeptShort({ retentionHours: 6, keepPerHousehold: 2, maxTotalBytes: 20 * GIB })).toBe("6 h · 2 · 20 GB");
     expect(exportsKeptShort({ retentionHours: 24, keepPerHousehold: 3, maxTotalBytes: 10 * GIB }, " per household")).toBe("24 h · 3 per household · 10 GB");
+  });
+});
+
+describe("the phone's Exports kept row words (#1913)", () => {
+  it("titles the row with the hours and the count per system", () => {
+    expect(exportsKeptTitle({ retentionHours: 6, keepPerHousehold: 2, maxTotalBytes: 10 * GIB })).toBe("6 h · 2 per system");
+    expect(exportsKeptTitle({ retentionHours: 24, keepPerHousehold: 3, maxTotalBytes: 20 * GIB })).toBe("24 h · 3 per system");
+  });
+
+  it("leaves the space out of the title and holds the worst case", () => {
+    const worst = exportsKeptTitle({ retentionHours: 720, keepPerHousehold: 10, maxTotalBytes: 102400 * GIB });
+    expect(worst).toBe("720 h · 10 per system");
+    expect(worst).not.toMatch(/GB/u);
+    expect(exportsKeptTitle({ retentionHours: 1, keepPerHousehold: 1, maxTotalBytes: 1 * GIB })).toBe("1 h · 1 per system");
+  });
+
+  it("keeps the meta, the space alone, within the 20-character cap at the worst case", () => {
+    expect(gigabytes(10 * GIB)).toBe("10 GB");
+    const worst = gigabytes(102400 * GIB);
+    expect(worst).toBe("102400 GB");
+    expect(worst.length).toBeLessThanOrEqual(9);
+    expect(worst.length).toBeLessThan(20);
+  });
+
+  it("leaves the desk's short form and its defaults line as they were", () => {
+    const kept = { retentionHours: 6, keepPerHousehold: 2, maxTotalBytes: 10 * GIB };
+    expect(exportsKeptShort(kept)).toBe("6 h · 2 · 10 GB");
+    expect(exportsKeptShort(kept, " per system")).toBe("6 h · 2 per system · 10 GB");
   });
 });

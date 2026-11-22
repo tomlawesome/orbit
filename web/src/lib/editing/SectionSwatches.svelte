@@ -4,8 +4,10 @@
    * the four section colours as dots in one row of a section's editor, the
    * checked one ringed. A radio group built as Tiles.svelte builds its own: one
    * swatch in the tab order (the checked one); left and right walk the four,
-   * wrapping, up and down stay put (one row), Home and End the ends. Arrows
-   * move focus only; Enter, Space or a press picks.
+   * wrapping, and up and down do the same (one row: the WAI-ARIA APG radio
+   * pattern, #1930); Home and End the ends. Selection follows focus: every
+   * move checks the swatch and hands it to `onpick`, which applies and saves
+   * it, as Settings does; a press, Enter or Space picks too.
    *
    * `value` is the section's EFFECTIVE colour (option-colour.js
    * sectionColourOf), so an untouched section shows its mark's colour checked;
@@ -36,11 +38,13 @@
   function walk(event, i) {
     const n = SECTION_COLOURS.length;
     const to = event.key === "Home" ? 0 : event.key === "End" ? n - 1
-      : event.key === "ArrowLeft" ? (i - 1 + n) % n : event.key === "ArrowRight" ? (i + 1) % n : null;
+      : event.key === "ArrowLeft" || event.key === "ArrowUp" ? (i - 1 + n) % n
+      : event.key === "ArrowRight" || event.key === "ArrowDown" ? (i + 1) % n : null;
     if (to === null) return;
     event.preventDefault();
     active = to;
     /** @type {HTMLButtonElement | undefined} */ (group?.querySelectorAll("[role=radio]")[to])?.focus({ preventScroll: true });
+    onpick(SECTION_COLOURS[to]);
   }
 </script>
 

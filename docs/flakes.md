@@ -20,10 +20,13 @@ test's own name, which does not move with the shard.
 
 - 2026-11-15 · !1325 dev 13eec37c · pipeline 4228 / fast (job 51590) · timed out at the 5s default on a loaded runner; retried as job 51647. First sighting.
 
-## src/cli/orbit.mail-sending-status.test.ts "source=imported, imported from the environment: one line, exit 0" and "source=ui after an import ...: imported-from-environment stays true"
+## scripts/web-playwright-config.test.mjs "web/playwright.config.js rig projects > has the five rig projects"
 
-- 2026-11-15 · local, chore/next-4 on 9c7361cf plus the #1848 W-F1 change (About page apk links only) · full `npx vitest run` on the loaded shared host · the first took 5.4 s; the second got its one expected line printed twice. A re-run of the file passed. First sighting.
-- 2026-11-15 · local, chore/next-5 on 0397b513 plus the #1848 O-F1 change (repair.sh only) · full `npx vitest run` on the loaded shared host · both timed out at 5 s. The file alone passed 3 runs of 3. Second sighting.
+- 2026-11-20 · !1438 7a4f3b1b · pipeline 4984 / fast (job 59774) · `Test timed out in 5000ms` in a 1429 s run on a loaded runner; the change touches none of it. First sighting.
+
+## tests/unit/v19-tour-chapter-the-item.test.mjs "the chapter played for real > a jump mid-chapter puts everything back, the row too — clear(), the same law unread() gives unwear()" and "... > leaves the real DOM exactly as it found it once the film is cleared"
+
+- 2026-11-20 · !1438 7a4f3b1b · pipeline 4984 / fast (job 59774) · both `Test timed out in 5000ms` in a 1429 s run on a loaded runner; the change touches none of it. First sighting.
 
 ## tests/integration/imap-attachment-processing.test.ts "records discard purge intent before an injected storage failure and retries safely"
 
@@ -45,10 +48,6 @@ test's own name, which does not move with the shard.
 
 - 2026-11-13 · !1302 6028593c · pipeline 4068 / fast (job 50111, a retry) · the first test timed out at 5 s on its first `await route()`, the cold import of the route, on a loaded runner; the next test then got 200 for 403, as the timed-out test's still-running call took its one-shot mock. The same commit's first run passed the file (job 50081). First sighting.
 
-## web/tests/rig/kept-previews-1433.spec.js "each page turn in the reader of a kept 3-page document completes within 1 s" (:106)
-
-- 2026-11-12 · dev nightly · pipeline 3998 / rig_chromium 1/2 (rig-desktop) · "turning to page 2" (back from page 3) took 1,372 ms against the 1,000 ms limit; rig-phone passed in 2/2. Locally on batch-b fb5afbb3, 6 of 6 passed (`--repeat-each=3`, desk and phone). First sighting.
-
 ## scripts/ci/upgrade-cell.test.mjs "upgrade-cell.sh: oidc stand-in provider (#1750)" (two tests of the block, the same 5s timeout)
 
 - 2026-11-09 · fix/1535-repair-start e227e22b · local `scripts/test-backend.sh` (395s), shared host under load · "starts the tests/oidc sidecar with the stand-in issuer before step 4" timed out at the 5s default; the file alone passed on the rerun. First sighting.
@@ -61,6 +60,7 @@ test's own name, which does not move with the shard.
 ## tests/unit/auth-pending-login-session-callback.test.mjs "passes session creation as collectSignInApproval's own mint callback, not a separate call"
 
 - 2026-11-04 · batch/v037-1 a5d0141f · local `pnpm exec vitest run --coverage`, shared host at load 35-65 · timed out at the 5s default (6.5s); the file's first test pays for the cold, instrumented import. Failed again run alone with two other files, then passed run alone (5/5). First sighting.
+- 2026-11-20 · !1441 68d651e2f · pipeline 4980 / fast retry (job 59988) · timed out at 5 s, with "never calls createSession outside the callback" in the same file failing after it. Passed in jobs 59718 and 59854.
 
 ## tests/unit/portable-archive-download-route.test.mjs "answers 200 with the stream's bytes, Content-Length equal to sizeBytes, and the unchanged headers"
 
@@ -206,20 +206,6 @@ timeout on this one case rather than a global raise.
 
 - 2026-10-09 · dad77c25 (#1325 rebased onto dev; the tree differs from pipeline 2287's green 8170fecb only in design files, an ADR, this log and one e2e spec) · pipeline 2290 / fidelity (job 33718) · `ArrowRight did not come back`; the same test passed at 390x844 in the same run. 45/45 locally with `--repeat-each=5` on the same commit; job retried as 33765. First sighting.
 
-## pocket-measure.spec.js:551 "/home · row-… meets the pocket floors" — `openRow`'s tap never opens the panel (row-retire-armed at 390x664, row-snooze at 360x640) (#1376) — quarantined 2026-10-16 (agent-infra#30)
-
-- 2026-10-09 · abcb06f1 · pipeline 2301 / fidelity (job 33822) · `openRow`'s tap on Car MOT's face never opened its panel (`locator.waitFor` ran to the 60 s test timeout), after `go()` had already waited for `body[data-home-ready]`; 487 others passed. Locally in the pinned image on 6afb412e: 20 repeats alone, then every `/home · row-` state 15 times over 4 workers (420 runs), all green. First sighting.
-- 2026-10-10 · cd964294 (!1052; since 8b9bf878, whose fidelity job 34065 passed, only e2e specs and one unit test changed) · pipeline 2341 / fidelity (job 34107) · row-snooze at 360x640, the same wait at `pocket-states.js:61` for Car MOT's opened panel ran to the 60 s test timeout; 487 others passed. Retried as job 34122. Second sighting.
-
-- 2026-10-10 · d80cf61b (!1054) · pipeline 2392 / fidelity (job 34627) · "/home · document-preview meets the pocket floors" at 390x664, the same wait at `pocket-states.js:61` for Car MOT's opened panel ran to the 60 s timeout; 487 others passed. Third sighting: filed as #1376.
-- 2026-10-10 · e0d5d796 (`dev`, merge of !1057; its head 327d32c1 passed fidelity in pipeline 2440, and the merge adds only `scripts/install.sh`, its test and `scripts/ci/repin-base-image.sh`) · pipeline 2461 / fidelity (job 35271) · "/home · row-complete meets the pocket floors" at 390x664, `locator.waitFor` ran to the 60 s test timeout; 487 of 488 passed.
-- 2026-10-14 · 00987a9d (door branch, !1066) · pipeline 2590 / fidelity (job 36196) · `pocket-measure.spec.js:544` "pocket measurement at 390x664 › /home · row-open meets the pocket floors" — `locator.waitFor: Test timeout of 60000ms exceeded`; 487 others passed. Diff since pipeline 2588 (where it passed) is an e2e keyboard spec and docs only; job retried as 36215.
-- 2026-10-16 · 614118ff (!1069; one e2e spec and this file changed since pipeline 2645, where fidelity passed) · pipeline 2649 / fidelity (job 36559) · "pocket measurement at 360x640 › /home · row-edit": `openRow` tapped the Car MOT row and the panel never opened (`locator.waitFor: Test timeout of 60000ms exceeded`); 487 others passed. Retried as 36573.
-- 2026-10-28 · 6274d16c (!1104) · pipeline 3086 / fidelity (job 40427, the `pocket-measure` project; the job's allowed exit code 3 kept the pipeline green) · "pocket measurement at 390x664 › /home · row-edit-section", tagged `@quarantine`: `locator.waitFor: Test timeout of 60000ms exceeded` after 1.0 m; 189 fidelity shots and every other measurement passed. Not retried.
-- 2026-10-28 · bffece83 (`dev`, nightly started by hand) · pipeline 3094 / fidelity (job 40514, `pocket-measure`; allowed exit code 3, nightly stayed green) · "pocket measurement at 390x664 › /home · row-snooze", tagged `@quarantine`: timed out; 486 fidelity shots and every other measurement passed. Not retried.
-- 2026-11-04 · 79eebff5 (`fix/v037-three-flakes`) · local full fidelity run, host load about 40 · `pocket-home-drawers.spec.js:90` "a chooser sheet holds the page behind it inert…" at 390x664 touch: `openRow (#1376): the tap opened no panel within 10 s; {"row":"i-mot","expanded":"false","open":false,"box":[17,263,356,56],"hit":"span.title in i-mot","scrollY":377}`. The tap point was on the row's own title, so the tap reached the row and the row did not act on it. The file passed alone straight after.
-- 2026-11-04 · 754ab8a2 (`fix/v037-three-1355`) · local full fidelity run, same host load · `pocket-home-drawers.spec.js:49` "a paper opens the preview as the bottom sheet…": the same diagnostics, word for word. Passed alone straight after.
-
 ## v19-tour-chapter-add.test.mjs
 
 - 2026-10-09 · 73481e5e (#1345) · local scripts/test-backend.sh under parallel load · 5–7 s timeout; passed alone and on rerun
@@ -283,7 +269,6 @@ timeout on this one case rather than a global raise.
 ## v19-create.spec.ts:1022 "the desk's lane offers 'not this one' while it is still reading, and pressing it closes the lane" — desktop-webkit
 
 - 2026-10-16 · a08de7a1 (!1069, v0.3 security batch) · pipeline 2650 / smoke_webkit (job 36591), desktop-webkit · failed once, passed on retry. First sighting; an issue on the third.
-
 
 ## validation.test.ts "structural document classification > classifies unsupported %PDF-1.7 ... as unsupported_structure"
 
@@ -386,11 +371,6 @@ timeout on this one case rather than a global raise.
 
 - 2026-11-01 · fd3ac6cc (+ #1636's uncommitted pipeline-rule change, nothing `scripts/install.sh` reads) · local `scripts/test-backend.sh`, worktree `hotfix-1632`, other sessions' builds on the host · `result.hungAlive` came back true (the hung pull child outlived the signal); the same file passed in the full run before and 12 of 12 alone right after. First sighting.
 
-## check-base-image-current.test.mjs, tests hit the 20s timeout (host)
-
-- 2026-11-02 · 640b8c2b · local `scripts/test-backend.sh`, worktree `v035-audit-ci`, two backend suites and an integration run in parallel on the shared host (load about 40) · 3 tests timed out at 20s; the file passed alone straight after (13 tests). Wall-clock under load. First sighting since #1134's fix.
-- 2026-11-02 · 3748dda7 · local `scripts/test-backend.sh`, worktree `v035-audit-tests`, same parallel runs · tests timed out at 20s (hook 10s); the file passed alone afterwards. Second sighting.
-
 ## web-build-stamp.test.mjs, timeout under load (host)
 
 - 2026-11-02 · 3748dda7 · local `scripts/test-backend.sh`, worktree `v035-audit-tests`, same parallel runs as above · timed out alongside check-base-image-current.test.mjs; passed alone afterwards. First sighting.
@@ -472,20 +452,10 @@ timeout on this one case rather than a global raise.
 - 2026-11-05 · feat/v037-three-sky 9834d7e8 · local sky-run.sh rig-webkit-desktop, `--cpus=3`, shared host at load 15-18 · `body[data-home-ready]` not reached after a reload within the 5s expect default; passed when the drawer tests were re-run alone. First sighting.
 - 2026-11-05 · feat/v037-three-sky 20d05324 (waits now 20s SETTLE) · same · the test's 60s budget ran out waiting for home after the reload; the next run of the file passed (20 of 20). Second sighting.
 
-## web/tests/rig/v19-home-drawer-scrolled.spec.js:268 "Space on the focused north star, with a row opened part-way down and the page scrolled further, ..." — rig-firefox (#1717)
-
-- 2026-11-05 · c9805ba8 (dev; the spec was at :237) · pipeline 3577 / `rig_firefox` job 45967 · "the page moved 273px from scrollY 1393 when the north star was pressed". First sighting.
-- 2026-11-05 · 34e87dae (chore/batch-a-intake-1, !1174) · pipeline 3609 / `rig_firefox` job 46352 · the same 273px from scrollY 1393. Local rig-firefox on the same commit passed 7 of 7 (the spec once, then the case `--repeat-each=6` at four workers). The identical figures on two CI runs suggest something the CI Firefox runner does every time, not a race. Second sighting.
-- 2026-11-05 · dbc2e3ba (chore/batch-a-intake-1, !1174) · pipeline 3615 / `rig_firefox` job 46465 · the same "page moved 273px from scrollY 1393", this time the Enter case of the loop at :268. host load; code unchanged since 3614. Third sighting: filed as #1717 (north star press moves the page on CI Firefox); the loop's two tests are quarantined.
-
 ## web/tests/rig/v19-screen-reader.spec.js:172 "/home?item=<id>: the item drawer, read and edited" — rig-firefox
 
 - 2026-11-05 · 34e87dae (chore/batch-a-intake-1, !1174) · pipeline 3609 / `rig_firefox` job 46352 · in the editing walk, links #9 to #14 (the dial's last body link and the manifest rows, by a local probe of the same state) read an empty accessible name, until the 30 s test timeout. Local rig-firefox on the same commit passed 16 of 16 at eight workers, and every one of those links is named there. Same run, rig-webkit-desktop timed out at `locator.count()` in the same walk. First sighting.
 - 2026-11-05 · dbc2e3ba (chore/batch-a-intake-1, !1174) · pipeline 3615 / `rig_webkit` job 46466 (rig-webkit-desktop; the spec is at :180 now) · `locator.count()` in `assertEveryControlIsNamed` ran to the 30 s test timeout in the same walk. host load; code unchanged since 3614. Second sighting.
-
-## web/tests/rig/sign-out-descent.spec.js:134 "sign out from home's menu reaches the dusk (phone-narrow, as the browser is)" — rig-webkit-desktop (#1716, fixed by 97cf5f82)
-
-- 2026-11-05 · dbc2e3ba (chore/batch-a-intake-1, !1174) · pipeline 3615 / `rig_webkit` job 46466 · "#1262: the descent was not seen to start and end" (`expect(took).not.toBeNull()` at :176, Received: null). Before the fix: 97cf5f82 corrects both causes of this test's failures (#1716), the unread `withdrawing` state among them. host load; code unchanged since 3614. Heading goes when a pipeline on 97cf5f82 shows the fix held.
 
 ## web/tests/rig/v19-document-preview.spec.js:278 "each page turn in the reader asks the server for that page's picture once"
 
@@ -499,27 +469,14 @@ timeout on this one case rather than a global raise.
 
 - 2026-11-05 · dbc2e3ba (chore/batch-a-intake-1, !1174) · pipeline 3615 / `rig_webkit` job 46466 · `locator.click` at :130 on "name your own system": "waiting for element to be visible, enabled and stable" until the 30 s test timeout. host load; code unchanged since 3614. First sighting.
 
-## web/tests/rig/v19-home-drawer-scrolled.spec.js:258 "a row opened part-way down, then scrolled further, one press on the north star opens the drawer and the page stays put" — rig-firefox (#1717)
-
-- 2026-11-05 · dbc2e3ba (chore/batch-a-intake-1, !1174) · pipeline 3615 / `rig_firefox` job 46465 · "the page moved 273px from scrollY 1393 when the north star was pressed", the same figures as the :268 cases above (#1717). host load; code unchanged since 3614. First sighting.
-
 ## `film_webkit` job: killed at its 35 min limit (host) (#1546)
 
 - 2026-11-05 · dbc2e3ba (chore/batch-a-intake-1, !1174) · pipeline 3615 / `film_webkit` job 46467 · "execution took longer than 35m0s"; 22 of the pocket-webkit specs had passed and the last running was `tour-pocket-webkit.spec.js:1418` (chapter 8, at 390x844, 46 s in). host load; code unchanged since 3614. First sighting. #1546 (CI sharding) removes these kills.
-
-## tests/unit/archive-slot-upload-spool-1792.test.mjs "L4: ... a spooled preview waits (not 200, not 429) while another import processes, an export is still refused at once, and the waiters are served first come first served"
-
-- 2026-11-11 · chore/1801-repins (batch-b 6d00597b + a base-image pin and supply-chain policy data, nowhere near the archive slot) · pipeline 3955 / `fast` job 49133 · "the slot went to the one that waited longest first": got owner-1, owner-4, owner-2. Likely cause: the test waits only until owner-2's spool has started, not finished, so under load owner-4's spool can finish and queue first. Passed in pipeline 3949 on the same batch-b code. First sighting.
-- 2026-11-19 · !1415 852ea382 (the upload open check, nowhere near the archive slot) · pipeline 4774 / `fast` job 57519 · "the slot went to the one that waited longest first": got owner-1, owner-4, owner-2 again. Passed 5 of 5 locally on the same commit. Second sighting.
 
 ## src/server/documents/pdf-structure-sandbox-poppler.test.ts "line 14: with check 1 / view 1, a render holding the view slot does not delay a structure check" (after-test check, :108)
 
 - 2026-11-12 · chore/v039-batch-b-ci d92e92b6 (Dockerfile pin and JSON policy only, nowhere near the PDF sandbox) · pipeline 4032 / fast (job 49856) · "§1.5 line 16: a child still in flight after the test: expected 1 to be +0"; the retried job 49859 passed. First sighting.
 - 2026-11-18 · !1371 batch-a 5a2828af (the batch-a dev gate fix: an exceptions file and coverage floors, nowhere near the PDF sandbox) · pipeline 4550 / fast (job 54979) · the timing check: "expected 87.98 to be less than or equal to 86.68" (ms, the 2x-solo bound); the retried job 55050 passed. Second sighting.
-
-## github-await-handoff.sh, a flaky GitHub › counts a successful read as a reset (scripts/ci/github-await-handoff.test.mjs)
-
-- 2026-11-15 · local, chore/next-4 on the dev merge plus the #1846 change (docs and the guarantees test only) · full `npx vitest run`, load average about 30 · `Test timed out in 30000ms`; the file re-run twice passed 53/53. First sighting.
 
 ## src/server/documents/pdf-structure-sandbox-poppler.test.ts "D5: a background draw holding its one slot does not delay a view draw (within 2x its solo time)"
 
@@ -528,3 +485,124 @@ timeout on this one case rather than a global raise.
 ## scripts/install.rollback.test.mjs "install.sh: an interrupt rolls a fresh install back (#1456) > emits one well-formed terminal `failed` event after the rollback events, even though the exit was not a planned failure"
 
 - 2026-11-15 · fix/1834-undo-copies 605f583e (a one-line change in install.sh's SMTP undo copy, not on the interrupt path) · pipeline 4220 / fast (job 51469) · failed in the same loaded job that hit the 20-minute limit; it passed in pipeline 4212 / fast (job 51358) on cb70f4e1, and passed twice locally on 605f583e. First sighting.
+
+## src/server/documents/image-sandbox.test.ts "accepts a 1x1 JPEG/PNG padded to the size limit ..." (:185)
+
+- 2026-11-18 · !1371 batch-a 5866edd4 (the batch-a dev gate: pins and exceptions only, nowhere near the image sandbox) · pipeline 4563 / fast (job 55116) · "expected 'structure_check_unavailable' to be 'supported_structure'" in a 1320 s job on a loaded runner: the child decode did not answer in time. The image-sandbox files are unchanged since, and the fast job passed on !1371's next pipeline and on !1395. First sighting.
+
+## tour-pocket-webkit.spec.js:685 "the pocket film in WebKit (#1174) › plays end to end at 430x932 under normal motion" — pocket-webkit
+
+- 2026-11-19 · bed6d036 (batch-b) · local run in the Playwright image, no pipeline · `locator.tap` on `#pocket-entry .pc-chip[data-imp="low"]` (line 818) retried "element was detached from the DOM" until the 600 s test timeout. 27 others passed. Rerun of the same case on unchanged code: passed (3.4m). First sighting.
+
+## upgrade_cell: [latest-3, all-keys] "Could not download the release manifest for channel v0.3.7" (image-registry)
+
+- 2026-11-19 · !1409 a44b60f8 · pipeline 4800 / upgrade_cell: [latest-3, all-keys] (job 57816) · the old installer's identity phase failed `reason=image-registry`, then "Could not download the release manifest for channel v0.3.7", step=install assertion=install-exited-0. The retry, job 57965, passed on the same commit. First sighting.
+
+## scripts/install-undo-copy-1848.test.mjs "#1874 O-R2 install.sh prune: Ctrl-C at the undo-copy prompt > restores echo on the terminal"
+
+- 2026-11-20 · !1433 602b02c06 · pipeline 4890 / fast (job 58758) · timed out with only the fake banner printed. Passed in pipeline 4902 on the same test code. First sighting.
+
+## scripts/ci/batch-intake-ci.test.mjs "every other pipeline is as it is without the batch-intake rule (#1720) > scheduleInstallBootstrap: same pipeline, same jobs, same verdicts"
+
+- 2026-11-20 · !1433 602b02c06 · pipeline 4890 / fast (job 58758) · `Test timed out in 5000ms` on a loaded runner. Passed in pipeline 4902 on the same test code. First sighting.
+
+## scripts/installer-ui.test.mjs "installer text prompts with double-width characters (#1885) > shows exactly the stored value after right arrow across a wide character on a repainting terminal"
+
+- 2026-11-20 · !1433 f1ddf6952 · pipeline 4902 / fast (job 58884) · output ended before `VALUE=a中Xb` was printed. Passed in pipeline 4890 and locally on the same test code. First sighting.
+
+## tests/unit/v19-mail-sender-rows-1650.test.mjs "#1650: the desk lists the extra addresses > keeps the sign-in rows as they were, and draws no extra row when there is only the sign-in address"
+
+- 2026-11-20 · !1431 c13324bc · pipeline 4885 / fast (job 58706) · timed out at the 5 s default (5118 ms) in a 1507 s run on a loaded runner; the change touched only scripts/test-backup-restore.sh. Retried as job 58725, passed. First sighting.
+
+## scripts/repair-owner-writes-1872.test.mjs "#1872 V7: ... > rotate-credential: a stalled owner step ends as timed out within the limit plus grace, no lock held, nothing left"
+
+- 2026-11-20 · !1431 c13324bc · pipeline 4885 / fast (job 58706) · failed in the same loaded 1507 s run; the change touched only scripts/test-backup-restore.sh. Retried as job 58725, passed. First sighting.
+
+## classify (CI job) "fails at its last step with exit 1 and no message"
+
+- 2026-11-20 · !1439 7b273238 · pipeline 4965 / classify (job 59524) · the step after `fast_checks: stands on job 59091` exited 1 with nothing printed. Retried as job 59552, passed. First sighting.
+
+## scripts/check-svelte-server-parse.test.mjs "the client output check (#1267) > passes every component in web/src today"
+
+- 2026-11-20 · !1433 80582f500 · pipeline 4912 / fast (job 58965) · the check was killed at its 30 s deadline without exiting on a loaded runner. Passed in the retry (job 59031). First sighting.
+
+## src/lib/backup-restore-cli.test.ts "runBackup > O2-R3: a SIGTERM while the adapter is dumping leaves the .orbit-backup.* scratch in place, and the next runBackup removes it"
+
+- 2026-11-20 · !1433 80582f500 · pipeline 4912 / fast retry (job 59031) · `Test timed out in 5000ms`. Passed in job 58965 on the same code. First sighting.
+
+## scripts/ci/job-inputs.test.mjs (a case timed out at the 5 s default)
+
+- 2026-11-20 · local, ci/1927-backup-drill-nightly at 77299f33 (.gitlab-ci.yml and its tests) · the 37 files that read .gitlab-ci.yml, on the loaded shared host · one case timed out at 5 s; a re-run passed. First sighting.
+
+## scripts/repair-owner-writes-1872.test.mjs "#1872 V7: each owner step is time- and size-bounded; a failure releases the lock and leaves nothing root made > restore-transaction (mv): an owner ..."
+
+- 2026-11-20 · !1433 eb548d90a · pipeline 4944 / fast (job 59284) · "a temp file or folder was left behind: expected [ '.orbit-repair-recovery.…' ] to deeply equal []". Passed in the retries (jobs 59336, 59391). Possibly a cleanup race, not load; Orbit is having it diagnosed. First sighting.
+
+## tests/unit/admin-alert-repeat-1810.test.ts "the alert footer says the rule for its kind (#1810 A-F8) > scanner_unavailable html / text: the scanner sentence, not the per-fault one"
+
+- 2026-11-20 · !1433 eb548d90a · pipeline 4944 / fast retry (job 59336) · the html case timed out at 5 s and the text case then saw the mail sender called twice, not once. The file passed 3 of 3 locally and in job 59391. First sighting.
+- 2026-11-20 · !1441 68d651e2f · pipeline 4980 / fast retry (job 59988) · the same pair: html timed out at 5 s, text then saw the sender called twice. Second sighting.
+
+## tests/unit/v19-tour-chapter-done.test.mjs "the chapter played for real > played on from chapter 8, closes the drawer chapter 8 opened and leaves home exactly as it found it"
+
+- 2026-11-20 · !1441 68d651e2f · pipeline 4980 / fast (job 59718) · took 5652 ms against the 5 s limit; locally 1.5 to 1.8 s, 3 of 3 passed. Passed in the retry (job 59854). First sighting.
+
+## scripts/repair-lock-rw-1890.test.mjs "#1890 L1: no open of the lock waits, read-only lock or not > a lock the user can only read (0444): swapped for a link to a regular file between the lstat and the open, the link is not followed"
+
+- 2026-11-20 · !1441 68d651e2f · pipeline 4980 / fast retry (job 59854) · "expected true to be false". Passed in job 59718 on the same code. First sighting.
+
+## tests/unit/about-page-load.test.mjs "the About page load reads the library list once per build (#1465) > does not read the library list again on a second visit"
+
+- 2026-11-20 · !1441 68d651e2f · pipeline 4980 / fast retry (job 59854) · `Test timed out in 5000ms`. Passed in job 59718 on the same code. First sighting.
+
+## tests/unit/about-prebuilt-libraries.test.mjs "the About page load reads the list built with the image (#1575) > returns exactly the prebuilt list, with no fetch and no grouping"
+
+- 2026-11-20 · !1441 68d651e2f · pipeline 4980 / fast retry (job 59854) · `Test timed out in 5000ms`. Passed in job 59718 on the same code. First sighting.
+
+## tests/unit/admin-alert-wording-1800.test.ts "the undo-failed alert wording (#1800) > html: carries the lede verbatim and nothing after it" and "html: carries the new Orbit did fact and not the old one"
+
+- 2026-11-20 · !1441 68d651e2f · pipeline 4980 / fast retry (job 59988) · timed out at 5 s. Passed in jobs 59718 and 59854 on the same code. First sighting.
+
+## tests/unit/admin-mailbox-fetch-now-route-1651.test.mjs "POST /api/admin/mailbox fetch_now > runs the engine for the caller's own id ..." and "passes the refusal already_running back as the outcome"
+
+- 2026-11-20 · !1441 68d651e2f · pipeline 4980 / fast retry (job 59988) · timed out at 5 s. Passed in jobs 59718 and 59854 on the same code. First sighting.
+
+## scripts/install-undo-copy-1848.test.mjs "#1915 O-F1/O-F3 install.sh smtp_discard_copy: the copy marker's temporary file > is removed with the folder once mail sending is confirmed"
+
+- 2026-11-21 · !1445 ee011d95c · pipeline 5061 / fast (job 60610) · the second update exited 1, not 0, in a 1463 s full run on a loaded runner. Passed in jobs 60143, 60215 and 60270, and locally at ee011d95c six times at once (#1944). The assertion now prints the update's stderr. First sighting.
+
+## tests/unit/pocket-inbox.test.mjs "the inbox on a phone, mounted > #1584 web-wr9-3: an amendment the engine replayed says so, not 'added', and the sheet closes"
+
+- 2026-11-21 · !1445 ee011d95c · pipeline 5061 / fast (job 60610) · the send button's aria-disabled stayed 'true' past vi.waitFor's 1 s, in a 1463 s full run on a loaded runner. Passed in jobs 60143, 60215, 60270 and 60418, and locally at ee011d95c six times at once (#1944). First sighting.
+
+## scripts/ci/carry-previous-release.test.mjs "sign_evidence still running: a bounded wait on an in-flight dependency (#1607 note 48548, item 3) > a sign_evidence that stays preparing past the poll cap fails, saying it is still running and to run this job again"
+
+- 2026-11-21 · !1447 8264fee23 · pipeline 5072 / fast (job 60738) · the child was killed at its 30 s deadline without exiting, in a 1446 s full run on a loaded runner. The audit fixes don't touch this script or its test. Passed locally at 8264fee23 (377/377), and in job 60610 on the same script. First sighting.
+
+## scripts/install.update-prune-undo-copies.test.mjs "install.sh --plain --update: nothing to prune (#1834 slice 5) > prints nothing about old copies when there is no orbit-install-backups folder, with or without the flag"
+
+- 2026-11-21 · !1447 cf420ec53 · pipeline 5080 / fast (job 60786) · `install.sh --update` exited 1 instead of 0, in a 1390 s full run on a loaded runner; the test doesn't print the child's stderr, so the cause is not shown. The audit fixes don't touch install.sh or this test. Passed locally at cf420ec53 three times in a row. First sighting.
+
+## src/server/documents/pdf-structure-sandbox-poppler.test.ts "page draws are pdftoppm (real pdftoppm/pdfinfo) > §1.5 line 10: the tiny-step tiling pattern is stopped by the clock (500 ms) with stop timeout ..." (:345)
+
+- 2026-11-21 · !1457 batch-b 1eb93654 · pipeline 5167 / fast (job 61981) · `expected 5194 to be less than 2000` in a 1445 s run on a loaded runner; the change touches none of it. First sighting.
+
+## tests/integration/document-kept-previews.test.ts "pages drawn once and kept, encrypted (#1433 §2.6) (real pdftoppm/pdfinfo) > line 5: a view before the worker ran draws on demand ..." (:277)
+
+- 2026-11-21 · !1457 batch-b 1eb93654 · pipeline 5167 / integration 1/4 (job 61922) · `expected 422 to be 200` on a loaded runner, alongside fast's poppler clock miss above; the change touches none of it. First sighting.
+
+## tests/integration/reviewed-intake-route-retry.test.ts (whole file: Postgres connection ended)
+
+- 2026-11-21 · !1457 batch-b 1eb93654 · pipeline 5167 / integration 2/4 (job 61923) · `write CONNECTION_ENDED postgres:5432` in `delete from "instance_authority"`, then 15 s timeouts and further CONNECTION_ENDED errors in the same file; the change touches none of it. First sighting.
+
+## scripts/install.interrupts-journal.test.mjs "B21: dated folder names never collide: an existing name is skipped, never reused or emptied; past -9 the install is refused at the start"
+
+- 2026-11-22 · !1457 batch-b 3d2a694c · pipeline for !1457 / fast (job 62291) · failed after 74 s on a loaded runner, with two other long shell-driven tests in the same run; the change touches none of it. First sighting.
+
+## scripts/repair-retire-smtp-1817.test.mjs "7: a retirement interrupted at step=backed-up is refused while a journal exists, record and secret stay, and a later clean run finishes"
+
+- 2026-11-22 · !1457 batch-b 3d2a694c · pipeline for !1457 / fast (job 62291) · failed after 53 s on a loaded runner; the change touches none of it. First sighting.
+
+## scripts/repair-retire-privdrop-1848.test.mjs "owned by the folder's owner (the shim lies about nothing): not refused"
+
+- 2026-11-22 · !1457 batch-b 3d2a694c · pipeline for !1457 / fast (job 62291) · failed after 33 s on a loaded runner; the change touches none of it. First sighting.

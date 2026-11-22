@@ -12,7 +12,7 @@
    *   · "timezone", "currency": the shared pick list (PickList.svelte);
    *   · "section": the tiles of "where do these entries go?" (Tiles.svelte,
    *     the chooser card's own body), one per `choices`, titled `heading`.
-   *     Picking a tile chooses; closing any other way calls `oncancel`.
+   *     Arrows move the highlight; a press, Enter or Space chooses; closing any other way calls `oncancel`.
    * @typedef {{
    *   open?: boolean,
    *   kind: "timezone" | "currency" | "section",
@@ -26,6 +26,10 @@
   /** @type {Props} */
   let { open = $bindable(false), kind, value, onchoose, choices = [], heading = "", oncancel = undefined } = $props();
 
+  /** The tiles' highlight: arrows stage a check, Enter, Space or a press lands it (#1494). */
+  /** @type {string | null} */
+  let staged = $state(null);
+  $effect.pre(() => { if (open) staged = value; });
   let picked = false;
   /** @param {string} chosen */
   function pick(chosen) {
@@ -45,7 +49,7 @@
   <!-- mounted only while open: a fresh filter each time -->
   {#if open}
     {#if kind === "section"}
-      <Tiles {choices} {value} label="sections" cols={2} onpick={pick} />
+      <Tiles {choices} value={staged} label="sections" cols={2} onpick={(v) => (staged = v)} oncommit={pick} />
     {:else}
       <PickList {kind} value={value ?? ""} onpick={pick} />
     {/if}

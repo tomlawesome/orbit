@@ -15,13 +15,17 @@
  */
 import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { imapIngestionMessages, items, metadataDamageSightings } from "@/db/schema";
+import { documents, imapIngestionAttachments, imapIngestionMessages, items, metadataDamageSightings } from "@/db/schema";
 import { log, operationalDetail } from "@/lib/logger";
 import type { MetadataColumn } from "@/server/metadata/crypto";
 import type { MetadataExecutor } from "@/server/metadata/keys";
 
-/** The two tables Tier 1 covers, as `row_id` addresses them. */
-export type MetadataDamageTable = "items" | "imap_ingestion_messages";
+/**
+ * The tables whose damage is counted, as `row_id` addresses them: the two
+ * Tier 1 covers, and the two whose damaged plain content hash the
+ * maintenance backfills report and clear (#1931).
+ */
+export type MetadataDamageTable = "items" | "imap_ingestion_messages" | "documents" | "imap_ingestion_attachments";
 
 interface Sighting {
   tableName: string;
@@ -72,6 +76,26 @@ export function noteMetadataDamage(column: MetadataColumn, rowId: string): void 
   pendingSeen.set(key, sighting);
   recorded.add(key);
   schedule();
+}
+
+/**
+ * Records a sighting durably, in the caller's own transaction (#1943 A-R2).
+ * For a caller that acts on the damage in the same transaction -- the
+ * maintenance backfills clear a damaged plain value -- so the record and the
+ * act commit together or not at all: record, then clear. Unlike
+ * `noteMetadataDamage` this throws when the row cannot be written, which is
+ * the point: no sighting, no clear.
+ */
+export async function recordMetadataDamage(
+  column: MetadataColumn,
+  rowId: string,
+  executor: MetadataExecutor,
+): Promise<void> {
+  const sighting = sightingOf(column, rowId);
+  await executor.insert(metadataDamageSightings).values(sighting).onConflictDoNothing();
+  const key = keyOf(sighting);
+  pendingCleared.delete(key);
+  recorded.add(key);
 }
 
 /**
@@ -184,15 +208,17 @@ export function flushMetadataDamageSightings(): Promise<void> {
 export interface MetadataDamageCounts {
   values: number;
   items: number;
+  /** Mail-in messages: those with a damaged value of their own or on one of their attachments. */
   receipts: number;
+  documents: number;
 }
 
 /**
  * How many damaged values are known, and how many rows they sit on.
  *
- * Each half joins the table its sightings address, so a row that has since
- * been deleted — a receipt that burned up, an item that went with its
- * household — stops counting the moment it goes, with no sweep job to run and
+ * Each bucket joins the table its sightings address, so a row that has since
+ * been deleted — a receipt that burned up (its attachments go with it), a
+ * document removed, an item that went with its household — stops counting the moment it goes, with no sweep job to run and
  * nothing left claiming damage to data that no longer exists.
  *
  * `count(*)::int` rather than a bare `count(*)`: the driver hands a PostgreSQL
@@ -200,28 +226,42 @@ export interface MetadataDamageCounts {
  * a plausible-looking number that arithmetic silently mangles.
  */
 export async function countMetadataDamage(): Promise<MetadataDamageCounts> {
-  const [itemRows, receiptRows] = await Promise.all([
-    getDb().select({
-      values: sql<number>`count(*)::int`,
-      rows: sql<number>`count(distinct ${metadataDamageSightings.rowId})::int`,
-    })
-      .from(metadataDamageSightings)
-      .innerJoin(items, eq(items.id, metadataDamageSightings.rowId))
-      .where(eq(metadataDamageSightings.tableName, "items")),
-    getDb().select({
-      values: sql<number>`count(*)::int`,
-      rows: sql<number>`count(distinct ${metadataDamageSightings.rowId})::int`,
-    })
-      .from(metadataDamageSightings)
-      .innerJoin(imapIngestionMessages, eq(imapIngestionMessages.id, metadataDamageSightings.rowId))
-      .where(eq(metadataDamageSightings.tableName, "imap_ingestion_messages")),
+  const tally = {
+    values: sql<number>`count(*)::int`,
+    rows: sql<number>`count(distinct ${metadataDamageSightings.rowId})::int`,
+  };
+  const sightings = metadataDamageSightings;
+  const [itemRows, receiptRows, documentRows] = await Promise.all([
+    getDb().select(tally)
+      .from(sightings)
+      .innerJoin(items, eq(items.id, sightings.rowId))
+      .where(eq(sightings.tableName, "items")),
+    // An attachment's sighting counts against its receipt, so the card's
+    // "mail-in messages" covers it without a line of its own (#1931), and a
+    // receipt damaged in both places is one receipt.
+    getDb().execute<{ values: number; rows: number }>(sql`
+      select count(*)::int as values, count(distinct receipt_id)::int as rows from (
+        select ${imapIngestionMessages.id} as receipt_id from ${sightings}
+          join ${imapIngestionMessages} on ${imapIngestionMessages.id} = ${sightings.rowId}
+          where ${sightings.tableName} = 'imap_ingestion_messages'
+        union all
+        select ${imapIngestionAttachments.messageId} as receipt_id from ${sightings}
+          join ${imapIngestionAttachments} on ${imapIngestionAttachments.id} = ${sightings.rowId}
+          where ${sightings.tableName} = 'imap_ingestion_attachments'
+      ) as receipt_sightings`),
+    getDb().select(tally)
+      .from(sightings)
+      .innerJoin(documents, eq(documents.id, sightings.rowId))
+      .where(eq(sightings.tableName, "documents")),
   ]);
   const itemValues = Number(itemRows[0]?.values ?? 0);
   const receiptValues = Number(receiptRows[0]?.values ?? 0);
+  const documentValues = Number(documentRows[0]?.values ?? 0);
   return {
-    values: itemValues + receiptValues,
+    values: itemValues + receiptValues + documentValues,
     items: Number(itemRows[0]?.rows ?? 0),
     receipts: Number(receiptRows[0]?.rows ?? 0),
+    documents: Number(documentRows[0]?.rows ?? 0),
   };
 }
 

@@ -56,10 +56,10 @@
       "id": "CVE-2026-111943",
       "package": "stdlib",
       "owner": "Orbit maintainers",
-      "expiresOn": "2026-12-04",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794,
       "installedVersion": "v1.24.6",
-      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; the newest 18-alpine build and gosu 1.19 are still on Go 1.24.6. Clears only when upstream rebuilds gosu on a fixed Go. Checked 2026-10-21: no published release carries a fixed Go (1.26.10 or 1.27.3); owner granted on that condition, 2026-10-21."
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; the newest 18-alpine build and gosu 1.19 are still on Go 1.24.6. Clears only when upstream rebuilds gosu on a fixed Go. Checked 2026-10-21: no published release carries a fixed Go (1.26.10 or 1.27.3); owner granted on that condition, 2026-10-21. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18."
     },
     {
       "kind": "vulnerability",
@@ -67,10 +67,10 @@
       "id": "CVE-2026-111943",
       "package": "stdlib",
       "owner": "Orbit maintainers",
-      "expiresOn": "2026-12-04",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794,
       "installedVersion": "v1.26.7",
-      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.2.0-full; 4.1.0-1-full and 4.2.0-SNAPSHOT-full are still on Go 1.26.7. Clears when a Tika image ships pebble on a fixed Go. Checked 2026-10-21: no published release carries a fixed Go (1.26.10 or 1.27.3); owner granted on that condition, 2026-10-21."
+      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.2.0-full; 4.1.0-1-full and 4.2.0-SNAPSHOT-full are still on Go 1.26.7. Clears when a Tika image ships pebble on a fixed Go. Checked 2026-10-21: no published release carries a fixed Go (1.26.10 or 1.27.3); owner granted on that condition, 2026-10-21. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18."
     },
     {
       "kind": "vulnerability",
@@ -79,8 +79,8 @@
       "package": "stdlib",
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -90,8 +90,8 @@
       "package": "stdlib",
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -101,8 +101,8 @@
       "package": "stdlib",
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -112,8 +112,8 @@
       "package": "stdlib",
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -123,8 +123,8 @@
       "package": "stdlib",
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -134,8 +134,8 @@
       "package": "stdlib",
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -145,8 +145,8 @@
       "package": "stdlib",
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -156,8 +156,8 @@
       "package": "stdlib",
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -167,8 +167,8 @@
       "package": "stdlib",
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -178,8 +178,8 @@
       "package": "stdlib",
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -189,8 +189,8 @@
       "package": "stdlib",
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -200,8 +200,8 @@
       "package": "stdlib",
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -211,8 +211,8 @@
       "package": "stdlib",
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -222,8 +222,8 @@
       "package": "stdlib",
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -233,8 +233,8 @@
       "package": "stdlib",
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -244,8 +244,8 @@
       "package": "stdlib",
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -255,8 +255,8 @@
       "package": "stdlib",
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -266,8 +266,8 @@
       "package": "stdlib",
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -277,8 +277,8 @@
       "package": "stdlib",
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -288,8 +288,8 @@
       "package": "stdlib",
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -299,8 +299,8 @@
       "package": "stdlib",
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -310,8 +310,8 @@
       "package": "stdlib",
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -321,8 +321,8 @@
       "package": "stdlib",
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. gosu 1.19 (2025-09-23, Go 1.24.6) is still its newest release, and the 18-alpine tag has not moved since 2026-09-21 (#1366).",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. gosu 1.19 (2025-09-23, Go 1.24.6) is still its newest release, and the 18-alpine tag has not moved since 2026-09-21 (#1366). Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -332,8 +332,8 @@
       "package": "stdlib",
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. gosu 1.19 (2025-09-23, Go 1.24.6) is still its newest release, and the 18-alpine tag has not moved since 2026-09-21 (#1366).",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. gosu 1.19 (2025-09-23, Go 1.24.6) is still its newest release, and the 18-alpine tag has not moved since 2026-09-21 (#1366). Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -343,8 +343,8 @@
       "package": "stdlib",
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. gosu 1.19 (2025-09-23, Go 1.24.6) is still its newest release, and the 18-alpine tag has not moved since 2026-09-21 (#1366).",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. gosu 1.19 (2025-09-23, Go 1.24.6) is still its newest release, and the 18-alpine tag has not moved since 2026-09-21 (#1366). Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -354,8 +354,8 @@
       "package": "stdlib",
       "installedVersion": "v1.26.7",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.2.0-full; clears only when the image is rebuilt on a newer pebble. 4.2.0-full still carries pebble on Go 1.26.7 (local scan, 2026-11-03).",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.2.0-full; clears only when the image is rebuilt on a newer pebble. 4.2.0-full still carries pebble on Go 1.26.7 (local scan, 2026-11-03). Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -365,8 +365,8 @@
       "package": "stdlib",
       "installedVersion": "v1.26.7",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.2.0-full; clears only when the image is rebuilt on a newer pebble. 4.2.0-full still carries pebble on Go 1.26.7 (local scan, 2026-11-03).",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.2.0-full; clears only when the image is rebuilt on a newer pebble. 4.2.0-full still carries pebble on Go 1.26.7 (local scan, 2026-11-03). Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -376,8 +376,8 @@
       "package": "stdlib",
       "installedVersion": "v1.26.7",
       "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.2.0-full; clears only when the image is rebuilt on a newer pebble. 4.2.0-full still carries pebble on Go 1.26.7 (local scan, 2026-11-03).",
-      "expiresOn": "2026-12-04",
+      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.2.0-full; clears only when the image is rebuilt on a newer pebble. 4.2.0-full still carries pebble on Go 1.26.7 (local scan, 2026-11-03). Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -387,8 +387,8 @@
       "package": "brace-expansion",
       "installedVersion": "5.0.9",
       "owner": "Orbit maintainers",
-      "rationale": "Bundled with npm inside node:24-alpine; the 2026-10 rebuild moved it to a newer version that is still affected, and only a further rebuild replaces it. Owner granted, 2026-10-20.",
-      "expiresOn": "2026-12-04",
+      "rationale": "Bundled with npm inside node:24-alpine; the 2026-10 rebuild moved it to a newer version that is still affected, and only a further rebuild replaces it. Owner granted, 2026-10-20. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -398,8 +398,8 @@
       "package": "brace-expansion",
       "installedVersion": "5.0.9",
       "owner": "Orbit maintainers",
-      "rationale": "Bundled with npm inside node:24-alpine; the 2026-10 rebuild moved it to a newer version that is still affected, and only a further rebuild replaces it. Owner granted, 2026-10-20.",
-      "expiresOn": "2026-12-04",
+      "rationale": "Bundled with npm inside node:24-alpine; the 2026-10 rebuild moved it to a newer version that is still affected, and only a further rebuild replaces it. Owner granted, 2026-10-20. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
@@ -409,20 +409,20 @@
       "package": "undici",
       "installedVersion": "6.28.0",
       "owner": "Orbit maintainers",
-      "rationale": "Bundled with npm inside node:24-alpine; the 2026-10 rebuild moved it to a newer version that is still affected, and only a further rebuild replaces it. Owner granted, 2026-10-20.",
-      "expiresOn": "2026-12-04",
+      "rationale": "Bundled with npm inside node:24-alpine; the 2026-10 rebuild moved it to a newer version that is still affected, and only a further rebuild replaces it. Owner granted, 2026-10-20. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794
     },
     {
       "kind": "vulnerability",
       "scope": "image",
       "owner": "Orbit maintainers",
-      "expiresOn": "2026-12-04",
+      "expiresOn": "2027-01-04",
       "trackingIssue": 794,
       "id": "CVE-2026-109869",
       "package": "undici",
       "installedVersion": "6.28.0",
-      "rationale": "Bundled with npm inside node:24-alpine; fixed in undici 6.29.1, but the pinned tag is still the current upstream build, so only an upstream rebuild replaces it. Owner granted, 2026-10-27."
+      "rationale": "Bundled with npm inside node:24-alpine; fixed in undici 6.29.1, but the pinned tag is still the current upstream build, so only an upstream rebuild replaces it. Owner granted, 2026-10-27. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18."
     },
     {
       "kind": "vulnerability",
@@ -452,31 +452,9 @@
       "id": "CVE-2026-114938",
       "package": "openjdk-25-jre-headless",
       "owner": "Orbit maintainers",
-      "expiresOn": "2026-11-26",
+      "expiresOn": "2026-12-03",
       "trackingIssue": 1918,
-      "rationale": "Java runtime in apache/tika:4.2.0-full; Tika runs on it to parse uploaded documents, so reachability has not been ruled out. Fixed in the 25.0.5 update 1 build (Debian revision 2-1~26.04.1); installedVersion is left out because the scanner's four-part Java version reads as a network address to the private-details check. No published Tika image ships it yet (checked 2026-11-19 on 4.2.0-full, 4.2.1-SNAPSHOT-full and the 4.3.0-SNAPSHOT-full nightly). Owner granted 7 days and a re-check, 2026-11-19 (#1918, 69a)."
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-109518",
-      "package": "apt",
-      "owner": "Orbit maintainers",
-      "expiresOn": "2027-01-04",
-      "trackingIssue": 1729,
-      "installedVersion": "2.8.3",
-      "rationale": "Debian/Ubuntu package manager in ollama/ollama:0.40.15; Orbit never runs apt in this container (no entrypoint or command calls it), so the flaw is not reachable. Fixed in 2.8.4ubuntu0.1, but no published image ships it yet (checked 2026-11-13 on 0.40.16, the newest release). Owner granted 7 days and a re-check, 2026-11-05, and 7 more, 2026-11-13 (#1729). Extended 2026-11-18 to 2027-01-04: Ollama 0.40.16 still ships apt 2.8.3 and the rebuilt Tika 4.2.0-full still ships apt 3.2.0 (#1729); owner 23a, 2026-11-18."
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-109518",
-      "package": "libapt-pkg6.0t64",
-      "owner": "Orbit maintainers",
-      "expiresOn": "2027-01-04",
-      "trackingIssue": 1729,
-      "installedVersion": "2.8.3",
-      "rationale": "Debian/Ubuntu package manager in ollama/ollama:0.40.15; Orbit never runs apt in this container (no entrypoint or command calls it), so the flaw is not reachable. Fixed in 2.8.4ubuntu0.1, but no published image ships it yet (checked 2026-11-13 on 0.40.16, the newest release). Owner granted 7 days and a re-check, 2026-11-05, and 7 more, 2026-11-13 (#1729). Extended 2026-11-18 to 2027-01-04: Ollama 0.40.16 still ships apt 2.8.3 and the rebuilt Tika 4.2.0-full still ships apt 3.2.0 (#1729); owner 23a, 2026-11-18."
+      "rationale": "Java runtime in apache/tika:4.2.0-full; Tika runs on it to parse uploaded documents, so reachability has not been ruled out. Fixed in the 25.0.5 update 1 build (Debian revision 2-1~26.04.1); installedVersion is left out because the scanner's four-part Java version reads as a network address to the private-details check. No published Tika image ships it yet (checked 2026-11-19 on 4.2.0-full, 4.2.1-SNAPSHOT-full and the 4.3.0-SNAPSHOT-full nightly). Owner granted 7 days and a re-check, 2026-11-19 (#1918, 69a). Renewed 2026-11-20 to 2026-12-03: still no stable Tika image with the fixed Java, only the 4.3.0-SNAPSHOT-full nightly (#1918); owner 50a, 2026-11-20."
     },
     {
       "kind": "vulnerability",
@@ -509,224 +487,59 @@
       "expiresOn": "2027-01-04",
       "trackingIssue": 1759,
       "installedVersion": "v0.61.0",
-      "rationale": "x/net html parser slows on crafted input, in /usr/bin/ollama in ollama/ollama:0.40.15. Fixed in x/net 0.62.0, but the newest release, 0.40.15, still ships v0.61.0, so no image carries the fix. Orbit runs Ollama only under the optional ai profile, with no internet access and no published port (ADR-0025). Owner decision 2026-11-07, question 137: 14 days. Checked 2026-11-09 on 0.40.15. Extended 2026-11-18 to 2027-01-04: Ollama 0.40.16, the newest release, still has golang.org/x/net v0.61.0 (#1759); owner 24a, 2026-11-18."
+      "rationale": "x/net html parser slows on crafted input, in /usr/bin/ollama in ollama/ollama:0.40.17. Fixed in x/net 0.62.0, but the newest release, 0.40.17, still ships v0.61.0, so no image carries the fix. Orbit runs Ollama only under the optional ai profile, with no internet access and no published port (ADR-0025). Owner decision 2026-11-07, question 137: 14 days. Checked 2026-11-09 on 0.40.15. Extended 2026-11-18 to 2027-01-04: Ollama 0.40.16, the newest release, still has golang.org/x/net v0.61.0 (#1759); owner 24a, 2026-11-18. Checked 2026-11-21 inside 0.40.17, the newest release: still golang.org/x/net v0.61.0."
     },
     {
       "kind": "vulnerability",
       "scope": "image",
-      "id": "CVE-2026-107364",
-      "package": "krb5-libs",
+      "id": "CVE-2026-97054",
+      "package": "stdlib",
       "owner": "Orbit maintainers",
-      "expiresOn": "2026-12-04",
-      "trackingIssue": 794,
-      "installedVersion": "1.22.2-r1",
-      "rationale": "Alpine package krb5-libs 1.22.2-r1 in postgres:18-alpine (fixed in 1.22.3-r0); the newest 18-alpine build (amd64 300ebd02, tag unmoved since 2026-11-06) has not been rebuilt with it. The database publishes no ports and is reached only on Orbit's own compose network. Clears when upstream rebuilds; the sidecar re-pin then retires it. Checked 2026-11-11; owner granted on that condition, 2026-11-11 (question 54a)."
+      "expiresOn": "2026-12-03",
+      "trackingIssue": 1922,
+      "installedVersion": "v1.24.6",
+      "rationale": "CVE-2026-97054 is a Go net/http flaw: an HTTP/1 server that uses MaxBytesReader can panic if its handler reads the body while writing the response header. It is in the Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine. gosu only drops privileges and then runs postgres; it serves no HTTP, so the flaw is not reachable. Fixed in Go 1.26.11 and 1.27.4, but no postgres image ships gosu built on either yet. Owner 47a, 2026-11-19: 14 days."
     },
     {
       "kind": "vulnerability",
       "scope": "image",
-      "id": "CVE-2026-112315",
-      "package": "krb5-libs",
+      "id": "CVE-2026-97054",
+      "package": "stdlib",
       "owner": "Orbit maintainers",
-      "expiresOn": "2026-12-04",
-      "trackingIssue": 794,
-      "installedVersion": "1.22.2-r1",
-      "rationale": "Alpine package krb5-libs 1.22.2-r1 in postgres:18-alpine (fixed in 1.22.3-r0); the newest 18-alpine build (amd64 300ebd02, tag unmoved since 2026-11-06) has not been rebuilt with it. The database publishes no ports and is reached only on Orbit's own compose network. Clears when upstream rebuilds; the sidecar re-pin then retires it. Checked 2026-11-11; owner granted on that condition, 2026-11-11 (question 54a)."
+      "expiresOn": "2026-12-03",
+      "trackingIssue": 1922,
+      "installedVersion": "v1.26.10",
+      "rationale": "CVE-2026-97054 is a Go net/http flaw: an HTTP/1 server that uses MaxBytesReader can panic if its handler reads the body while writing the response header. It is in the Go standard library compiled into /usr/bin/ollama in ollama/ollama:0.40.17 (built with go1.26.10, checked 2026-11-21). Orbit runs Ollama only under the optional ai profile, on the internal network, with no published port (ADR-0025), so only Orbit's app can reach it and the worst case is a crash and restart. Fixed in Go 1.26.11 and 1.27.4, but no Ollama image ships a build on either yet. Owner 47a, 2026-11-19: 14 days."
     },
     {
       "kind": "vulnerability",
       "scope": "image",
-      "id": "CVE-2026-112316",
-      "package": "krb5-libs",
+      "id": "CVE-2026-86144",
+      "package": "libxml2",
       "owner": "Orbit maintainers",
-      "expiresOn": "2026-12-04",
-      "trackingIssue": 794,
-      "installedVersion": "1.22.2-r1",
-      "rationale": "Alpine package krb5-libs 1.22.2-r1 in postgres:18-alpine (fixed in 1.22.3-r0); the newest 18-alpine build (amd64 300ebd02, tag unmoved since 2026-11-06) has not been rebuilt with it. The database publishes no ports and is reached only on Orbit's own compose network. Clears when upstream rebuilds; the sidecar re-pin then retires it. Checked 2026-11-11; owner granted on that condition, 2026-11-11 (question 54a)."
+      "expiresOn": "2026-12-05",
+      "trackingIssue": 1948,
+      "installedVersion": "2.13.9-r2",
+      "rationale": "CVE-2026-86144 is a libxml2 flaw, in Alpine's libxml2 2.13.9-r2 in postgres:18-alpine and clamav/clamav:1.5.5. Fixed in Alpine 2.13.9-r3, but neither image has been rebuilt with it: on 2026-11-21 both pinned digests are still the newest upstream builds of their tags (sidecar-pins check). ClamAV reads untrusted files, so this is the one to clear first; remove this entry as soon as a rebuilt image is pinned. Owner 91a, 2026-11-21: 14 days."
     },
     {
       "kind": "vulnerability",
       "scope": "image",
-      "id": "CVE-2026-112317",
-      "package": "krb5-libs",
+      "id": "CVE-2026-97054",
+      "package": "stdlib",
       "owner": "Orbit maintainers",
-      "expiresOn": "2026-12-04",
-      "trackingIssue": 794,
-      "installedVersion": "1.22.2-r1",
-      "rationale": "Alpine package krb5-libs 1.22.2-r1 in postgres:18-alpine (fixed in 1.22.3-r0); the newest 18-alpine build (amd64 300ebd02, tag unmoved since 2026-11-06) has not been rebuilt with it. The database publishes no ports and is reached only on Orbit's own compose network. Clears when upstream rebuilds; the sidecar re-pin then retires it. Checked 2026-11-11; owner granted on that condition, 2026-11-11 (question 54a)."
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-112318",
-      "package": "krb5-libs",
-      "owner": "Orbit maintainers",
-      "expiresOn": "2026-12-04",
-      "trackingIssue": 794,
-      "installedVersion": "1.22.2-r1",
-      "rationale": "Alpine package krb5-libs 1.22.2-r1 in postgres:18-alpine (fixed in 1.22.3-r0); the newest 18-alpine build (amd64 300ebd02, tag unmoved since 2026-11-06) has not been rebuilt with it. The database publishes no ports and is reached only on Orbit's own compose network. Clears when upstream rebuilds; the sidecar re-pin then retires it. Checked 2026-11-11; owner granted on that condition, 2026-11-11 (question 54a)."
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-112319",
-      "package": "krb5-libs",
-      "owner": "Orbit maintainers",
-      "expiresOn": "2026-12-04",
-      "trackingIssue": 794,
-      "installedVersion": "1.22.2-r1",
-      "rationale": "Alpine package krb5-libs 1.22.2-r1 in postgres:18-alpine (fixed in 1.22.3-r0); the newest 18-alpine build (amd64 300ebd02, tag unmoved since 2026-11-06) has not been rebuilt with it. The database publishes no ports and is reached only on Orbit's own compose network. Clears when upstream rebuilds; the sidecar re-pin then retires it. Checked 2026-11-11; owner granted on that condition, 2026-11-11 (question 54a)."
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-112320",
-      "package": "krb5-libs",
-      "owner": "Orbit maintainers",
-      "expiresOn": "2026-12-04",
-      "trackingIssue": 794,
-      "installedVersion": "1.22.2-r1",
-      "rationale": "Alpine package krb5-libs 1.22.2-r1 in postgres:18-alpine (fixed in 1.22.3-r0); the newest 18-alpine build (amd64 300ebd02, tag unmoved since 2026-11-06) has not been rebuilt with it. The database publishes no ports and is reached only on Orbit's own compose network. Clears when upstream rebuilds; the sidecar re-pin then retires it. Checked 2026-11-11; owner granted on that condition, 2026-11-11 (question 54a)."
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-112321",
-      "package": "krb5-libs",
-      "owner": "Orbit maintainers",
-      "expiresOn": "2026-12-04",
-      "trackingIssue": 794,
-      "installedVersion": "1.22.2-r1",
-      "rationale": "Alpine package krb5-libs 1.22.2-r1 in postgres:18-alpine (fixed in 1.22.3-r0); the newest 18-alpine build (amd64 300ebd02, tag unmoved since 2026-11-06) has not been rebuilt with it. The database publishes no ports and is reached only on Orbit's own compose network. Clears when upstream rebuilds; the sidecar re-pin then retires it. Checked 2026-11-11; owner granted on that condition, 2026-11-11 (question 54a)."
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-112322",
-      "package": "krb5-libs",
-      "owner": "Orbit maintainers",
-      "expiresOn": "2026-12-04",
-      "trackingIssue": 794,
-      "installedVersion": "1.22.2-r1",
-      "rationale": "Alpine package krb5-libs 1.22.2-r1 in postgres:18-alpine (fixed in 1.22.3-r0); the newest 18-alpine build (amd64 300ebd02, tag unmoved since 2026-11-06) has not been rebuilt with it. The database publishes no ports and is reached only on Orbit's own compose network. Clears when upstream rebuilds; the sidecar re-pin then retires it. Checked 2026-11-11; owner granted on that condition, 2026-11-11 (question 54a)."
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-112323",
-      "package": "krb5-libs",
-      "owner": "Orbit maintainers",
-      "expiresOn": "2026-12-04",
-      "trackingIssue": 794,
-      "installedVersion": "1.22.2-r1",
-      "rationale": "Alpine package krb5-libs 1.22.2-r1 in postgres:18-alpine (fixed in 1.22.3-r0); the newest 18-alpine build (amd64 300ebd02, tag unmoved since 2026-11-06) has not been rebuilt with it. The database publishes no ports and is reached only on Orbit's own compose network. Clears when upstream rebuilds; the sidecar re-pin then retires it. Checked 2026-11-11; owner granted on that condition, 2026-11-11 (question 54a)."
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-118380",
-      "package": "krb5-libs",
-      "owner": "Orbit maintainers",
-      "expiresOn": "2026-12-04",
-      "trackingIssue": 794,
-      "installedVersion": "1.22.2-r1",
-      "rationale": "Alpine package krb5-libs 1.22.2-r1 in postgres:18-alpine (fixed in 1.22.3-r0); the newest 18-alpine build (amd64 300ebd02, tag unmoved since 2026-11-06) has not been rebuilt with it. The database publishes no ports and is reached only on Orbit's own compose network. Clears when upstream rebuilds; the sidecar re-pin then retires it. Checked 2026-11-11; owner granted on that condition, 2026-11-11 (question 54a)."
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-119079",
-      "package": "krb5-libs",
-      "owner": "Orbit maintainers",
-      "expiresOn": "2026-12-04",
-      "trackingIssue": 794,
-      "installedVersion": "1.22.2-r1",
-      "rationale": "Alpine package krb5-libs 1.22.2-r1 in postgres:18-alpine (fixed in 1.22.3-r0); the newest 18-alpine build (amd64 300ebd02, tag unmoved since 2026-11-06) has not been rebuilt with it. The database publishes no ports and is reached only on Orbit's own compose network. Clears when upstream rebuilds; the sidecar re-pin then retires it. Checked 2026-11-11; owner granted on that condition, 2026-11-11 (question 54a)."
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-40355",
-      "package": "krb5-libs",
-      "owner": "Orbit maintainers",
-      "expiresOn": "2026-12-04",
-      "trackingIssue": 794,
-      "installedVersion": "1.22.2-r1",
-      "rationale": "Alpine package krb5-libs 1.22.2-r1 in postgres:18-alpine (fixed in 1.22.3-r0); the newest 18-alpine build (amd64 300ebd02, tag unmoved since 2026-11-06) has not been rebuilt with it. The database publishes no ports and is reached only on Orbit's own compose network. Clears when upstream rebuilds; the sidecar re-pin then retires it. Checked 2026-11-11; owner granted on that condition, 2026-11-11 (question 54a)."
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-40356",
-      "package": "krb5-libs",
-      "owner": "Orbit maintainers",
-      "expiresOn": "2026-12-04",
-      "trackingIssue": 794,
-      "installedVersion": "1.22.2-r1",
-      "rationale": "Alpine package krb5-libs 1.22.2-r1 in postgres:18-alpine (fixed in 1.22.3-r0); the newest 18-alpine build (amd64 300ebd02, tag unmoved since 2026-11-06) has not been rebuilt with it. The database publishes no ports and is reached only on Orbit's own compose network. Clears when upstream rebuilds; the sidecar re-pin then retires it. Checked 2026-11-11; owner granted on that condition, 2026-11-11 (question 54a)."
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-71199",
-      "package": "krb5-libs",
-      "owner": "Orbit maintainers",
-      "expiresOn": "2026-12-04",
-      "trackingIssue": 794,
-      "installedVersion": "1.22.2-r1",
-      "rationale": "Alpine package krb5-libs 1.22.2-r1 in postgres:18-alpine (fixed in 1.22.3-r0); the newest 18-alpine build (amd64 300ebd02, tag unmoved since 2026-11-06) has not been rebuilt with it. The database publishes no ports and is reached only on Orbit's own compose network. Clears when upstream rebuilds; the sidecar re-pin then retires it. Checked 2026-11-11; owner granted on that condition, 2026-11-11 (question 54a)."
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-71200",
-      "package": "krb5-libs",
-      "owner": "Orbit maintainers",
-      "expiresOn": "2026-12-04",
-      "trackingIssue": 794,
-      "installedVersion": "1.22.2-r1",
-      "rationale": "Alpine package krb5-libs 1.22.2-r1 in postgres:18-alpine (fixed in 1.22.3-r0); the newest 18-alpine build (amd64 300ebd02, tag unmoved since 2026-11-06) has not been rebuilt with it. The database publishes no ports and is reached only on Orbit's own compose network. Clears when upstream rebuilds; the sidecar re-pin then retires it. Checked 2026-11-11; owner granted on that condition, 2026-11-11 (question 54a)."
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-87636",
-      "package": "libxslt",
-      "owner": "Orbit maintainers",
-      "expiresOn": "2026-12-04",
-      "trackingIssue": 794,
-      "installedVersion": "1.1.43-r3",
-      "rationale": "Alpine package libxslt 1.1.43-r3 in postgres:18-alpine (fixed in 1.1.43-r4); the newest 18-alpine build (amd64 300ebd02, tag unmoved since 2026-11-06) has not been rebuilt with it. The database publishes no ports and is reached only on Orbit's own compose network. Clears when upstream rebuilds; the sidecar re-pin then retires it. Checked 2026-11-11; owner granted on that condition, 2026-11-11 (question 54a)."
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-9947",
-      "package": "libxslt",
-      "owner": "Orbit maintainers",
-      "expiresOn": "2026-12-04",
-      "trackingIssue": 794,
-      "installedVersion": "1.1.43-r3",
-      "rationale": "Alpine package libxslt 1.1.43-r3 in postgres:18-alpine (fixed in 1.1.43-r4); the newest 18-alpine build (amd64 300ebd02, tag unmoved since 2026-11-06) has not been rebuilt with it. The database publishes no ports and is reached only on Orbit's own compose network. Clears when upstream rebuilds; the sidecar re-pin then retires it. Checked 2026-11-11; owner granted on that condition, 2026-11-11 (question 54a)."
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-125350",
-      "package": "libxslt",
-      "owner": "Orbit maintainers",
-      "expiresOn": "2026-12-04",
-      "trackingIssue": 1825,
-      "installedVersion": "1.1.43-r3",
-      "rationale": "Alpine package libxslt 1.1.43-r3 in postgres:18-alpine (fixed in 1.1.43-r4, already in Alpine 3.24 main); the newest 18-alpine build (amd64 300ebd02) has not been rebuilt with it. Only the optional xml2 extension (pgxml.so) links it, and Orbit never installs that extension. The database publishes no ports and is reached only on Orbit's own compose network. Clears when upstream rebuilds; the sidecar re-pin then retires it. Checked 2026-11-12; owner granted on that condition, 2026-11-12 (question 12a)."
+      "expiresOn": "2026-12-05",
+      "trackingIssue": 1948,
+      "installedVersion": "v1.27.3",
+      "rationale": "CVE-2026-97054 is a Go net/http flaw: an HTTP/1 server that uses MaxBytesReader can panic if its handler reads the body while writing the response header. It is in the Go standard library compiled into /usr/bin/pebble in apache/tika:4.2.0-full. The image's entrypoint runs Java (TikaServerCli) directly and never starts pebble, so the flaw is not reachable. Fixed in Go 1.26.11 and 1.27.4, but on 2026-11-21 the pinned digest is still the newest build of 4.2.0-full and no newer Tika release exists. Owner 91a, 2026-11-21: 14 days."
     }
   ],
   "containerImages": [
     {
       "name": "Orbit base image (Alpine plus Node from official signed source)",
       "tag": "ghcr.io/tomlawesome/orbit-base-image:latest",
-      "reference": "ghcr.io/tomlawesome/orbit-base-image:latest@sha256:899a5fe4cdeb76138307bb1ecedb91c71f21b83bafb386cf83d1d1a0a30e82fa",
-      "indexDigest": "sha256:899a5fe4cdeb76138307bb1ecedb91c71f21b83bafb386cf83d1d1a0a30e82fa",
+      "reference": "ghcr.io/tomlawesome/orbit-base-image:latest@sha256:893babc5c27cae3ddbbff8d11d70894599ccbeed2e114bf413eae96078fe0acd",
+      "indexDigest": "sha256:893babc5c27cae3ddbbff8d11d70894599ccbeed2e114bf413eae96078fe0acd",
       "platform": "linux/amd64",
       "locations": [
         "Dockerfile"
@@ -742,8 +555,8 @@
     {
       "name": "Node.js build and runtime",
       "tag": "node:24-alpine",
-      "reference": "node:24-alpine@sha256:ec318aabf188af4e5488847eea4b24452650b9917140563e140762526a37f1df",
-      "indexDigest": "sha256:a34ab6d7f6f4813f4d0c5469d74685604b962fbdbf5793a7bc7b4998ecb867c8",
+      "reference": "node:24-alpine@sha256:d8d97e479cdc64f052f81f129362168717c59783ade8dcc1abd22e1cca8dbd7c",
+      "indexDigest": "sha256:116b800c3754b440ee0aa3ed2f20f5bf3d99a554bfd9adeea09ea8017f6e85f5",
       "platform": "linux/amd64",
       "locations": [
         "tests/oidc/Dockerfile",
@@ -754,14 +567,14 @@
       "license": "MIT",
       "licenseSource": "https://github.com/nodejs/docker-node/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-11-09",
+      "resolvedOn": "2026-11-19",
       "reviewBy": "2026-11-30"
     },
     {
       "name": "PostgreSQL database",
       "tag": "postgres:18-alpine",
-      "reference": "postgres:18-alpine@sha256:300ebd02c6d4de9ee27ad7f6855d5d21b4d3a4a5117767c1197d284c635d9736",
-      "indexDigest": "sha256:123b17998ccaf47e53b502e8c6a1e79afd8f579c6f3eec83c563da026f957395",
+      "reference": "postgres:18-alpine@sha256:68e33adb18d9962952f00d5e3b8644305e10e375f98dd652bf6ee6a1836314ba",
+      "indexDigest": "sha256:ff64c9e3bdf8e2120107d3559de8db314e8305f7e38c5105903c6295876738ff",
       "platform": "linux/amd64",
       "locations": [
         "docker-compose.yml",
@@ -773,14 +586,14 @@
       "license": "MIT",
       "licenseSource": "https://github.com/docker-library/postgres/blob/master/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-11-09",
+      "resolvedOn": "2026-11-19",
       "reviewBy": "2027-01-31"
     },
     {
       "name": "ClamAV malware scanner",
-      "tag": "clamav/clamav:1.5.4",
-      "reference": "clamav/clamav:1.5.4@sha256:26509520043b68576c95e76576673d90b423fccb765dc8cba3a9fdc143891bf5",
-      "indexDigest": "sha256:6d87c712e3391e13c1ba6e05dfb074d4b1ddb5a6834b23bb9da990d2a4ef042a",
+      "tag": "clamav/clamav:1.5.5",
+      "reference": "clamav/clamav:1.5.5@sha256:ee429ed5760a4792cd9711db6902fa019d26f90a2714d2bfd92b717d21967e38",
+      "indexDigest": "sha256:12177441d1b40cef3c47b44c4090d59d4babc4c67bedd5af0fa315e603aa6dd8",
       "platform": "linux/amd64",
       "locations": [
         "docker-compose.yml"
@@ -790,14 +603,14 @@
       "license": "GPL-2.0-only",
       "licenseSource": "https://github.com/Cisco-Talos/clamav/blob/main/COPYING.txt",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-11-08",
+      "resolvedOn": "2026-11-19",
       "reviewBy": "2027-01-31"
     },
     {
       "name": "Apache Tika parser",
       "tag": "apache/tika:4.2.0-full",
-      "reference": "apache/tika:4.2.0-full@sha256:701ce79199164d9347914ebcce6585cbfbcde05553b99944479373612cf28d96",
-      "indexDigest": "sha256:4774eaac44f86cdf648ae7b5a367016eaf6f9052adec31e5cff07cff1a0c6e24",
+      "reference": "apache/tika:4.2.0-full@sha256:22dc5d818413729955c73666f0630e75090b819e21c484ec0a549b2e5837cd02",
+      "indexDigest": "sha256:12a6b0332f1c047dc80489f336ca39fb2332e1810e75cc84e7b07a9b502c1cb0",
       "platform": "linux/amd64",
       "locations": [
         "docker-compose.yml"
@@ -807,14 +620,14 @@
       "license": "Apache-2.0",
       "licenseSource": "https://github.com/apache/tika-docker/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-10-29",
+      "resolvedOn": "2026-11-21",
       "reviewBy": "2027-01-31"
     },
     {
       "name": "Ollama optional local AI service",
-      "tag": "ollama/ollama:0.40.15",
-      "reference": "ollama/ollama:0.40.15@sha256:a717bfc1c56acfc2e85d3109bd40a7646258ec9062c40cea83b9ed0927eb4223",
-      "indexDigest": "sha256:0e59999e0e8f9fd4e704bd788a89b7e4cad399367fb1365f8c102ac662288761",
+      "tag": "ollama/ollama:0.40.17",
+      "reference": "ollama/ollama:0.40.17@sha256:5e5802d3c018ecdee7c7dff32a7e3b10ca9a2c4b3a461392cff97c313c2af0fc",
+      "indexDigest": "sha256:ccc42bcd3d5fcf7ab0d532b300382154e1a4da56fc666bdb313b78ebdd912754",
       "platform": "linux/amd64",
       "locations": [
         "docker-compose.yml"
@@ -824,7 +637,7 @@
       "license": "MIT",
       "licenseSource": "https://github.com/ollama/ollama/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-11-09",
+      "resolvedOn": "2026-11-21",
       "reviewBy": "2026-11-30"
     }
   ],
@@ -858,7 +671,7 @@
       "reason": "CI signing image built by the orbit-base-image pipeline; its digest comes from that pipeline, not from a registry tag. Ships nothing to operators."
     },
     {
-      "reference": "golang:1.27.3-bookworm@sha256:972b4110ba0f47539a975c31e52c64765e1ff19f2d74469ae4a595c6676e80a5",
+      "reference": "golang:1.27.4-bookworm@sha256:4fa7c968ba93f1635670522dbb01a2c78150443e1385746924566079f36570ea",
       "locations": [
         ".gitlab-ci.yml"
       ],
@@ -893,7 +706,7 @@
       "reason": "CI image for the weekly dependency-update job; ships nothing to operators. Pinned under an `image:`/`services:` key in .gitlab-ci.yml, which Renovate's gitlabci manager proposes updates for; not watched by sidecar-pins."
     },
     {
-      "reference": "greenmail/standalone:2.1.13@sha256:3df66b7edd01c8a301343ca5e3601d8674760d4708655573560c24745e624fb2",
+      "reference": "greenmail/standalone:2.1.15@sha256:309ba544ea482e5d4265d09921cdab07c8dad2cc4481d715c9b8ff5d3f0a149f",
       "locations": [
         "compose/docker-compose.acceptance.yml"
       ],
@@ -926,7 +739,7 @@
       "reason": "Disposable labelled container the repair journeys' hostile-value journey starts; never part of a deployment. Its CI copy (ORBIT_REPAIR_JOURNEYS_CANARY_IMAGE) is a `_IMAGE:` pin Renovate proposes updates for; the script's fallback default is not seen by Renovate and moves by hand with it. Pins the multi-architecture index digest (1.38.0 as of 2026-10-30)."
     },
     {
-      "reference": "apache/tika:${TIKA_VERSION}-full@sha256:701ce79199164d9347914ebcce6585cbfbcde05553b99944479373612cf28d96",
+      "reference": "apache/tika:${TIKA_VERSION}-full@sha256:22dc5d818413729955c73666f0630e75090b819e21c484ec0a549b2e5837cd02",
       "locations": [
         "scripts/extract-bundle/cli.ts"
       ],

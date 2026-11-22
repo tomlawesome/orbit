@@ -4,6 +4,7 @@
   import { onMount, tick, untrack } from "svelte";
   import { SvelteMap } from "svelte/reactivity";
   import { invalidateAll } from "$app/navigation";
+  import { page } from "$app/state";
   import Chrome from "$lib/Chrome.svelte";
   import Mark from "$lib/Mark.svelte";
   import { createArm } from "$lib/arm.js";
@@ -26,7 +27,7 @@
   import ChooserCard from "$lib/editing/ChooserCard.svelte";
   import SectionSwatches from "$lib/editing/SectionSwatches.svelte";
   import { sectionColourOf } from "$lib/option-colour.js";
-  import { settleColourPick, startColourPick } from "$lib/section-colours.js";
+  import { colourFailureKind, settleColourPick, settleUnknownColourPick, startColourPick } from "$lib/section-colours.js";
   import { WIDE_QUERY } from "../../home/preview-pair.js";
   import "./household.css";
 
@@ -448,11 +449,35 @@
       await invalidateAll();
       for (const one of data.household.sections) if (pickedColours.get(one.id) === one.colour) pickedColours.delete(one.id);
     } catch (error) {
-      if (pickedColours.get(id) === colour) pickedColours.delete(id);
-      const saved = Object.fromEntries(data.household.sections.map((one) => [one.id, one.colour]));
-      const settled = settleColourPick({ rows, saved, problems: colourProblems, id, colour, error: wordsOf(error) });
+      if (colourFailureKind(error) === "refused") {
+        if (pickedColours.get(id) === colour) pickedColours.delete(id);
+        const saved = Object.fromEntries(data.household.sections.map((one) => [one.id, one.colour]));
+        const settled = settleColourPick({ rows, saved, problems: colourProblems, id, colour, error: wordsOf(error) });
+        rows = settled.rows;
+        colourProblems = settled.problems;
+        return;
+      }
+      /* #1915 W-R1: unknown outcome. Read the sections again and settle on what is stored;
+         the pick stays in pickedColours until then so a later Save does not overwrite it. */
+      /** @type {"ok" | "failed"} */
+      let reread = "ok";
+      try {
+        await invalidateAll();
+        /* A load that fails inside invalidateAll() resolves and leaves `data` as it was. */
+        if (page.error) reread = "failed";
+      } catch {
+        reread = "failed";
+      }
+      const stored = data.household.sections.find((one) => one.id === id)?.colour;
+      if (reread === "ok" && stored === undefined) reread = "failed";
+      const settled = settleUnknownColourPick({ rows, problems: colourProblems, id, colour, stored, reread });
       rows = settled.rows;
       colourProblems = settled.problems;
+      if (reread === "ok" && pickedColours.get(id) === colour) pickedColours.delete(id);
+      /* Stored as picked: the save landed, so it is no longer an unsaved change. */
+      if (reread === "ok" && stored === colour) {
+        sectionsBaseline = JSON.stringify(JSON.parse(sectionsBaseline).map((/** @type {{ id: string }} */ one) => (one.id === id ? { ...one, colour } : one)));
+      }
     }
   }
 
@@ -1096,7 +1121,7 @@
            buttons already say the fields save alone, and a member's copy
            prints as plain values (the .member rules in household.css), which
            says read-only without a caption. -->
-      {#if identityProblem}<p class="problem">not saved — {identityProblem}</p>{/if}
+      <p class="problem" role="alert">{#if identityProblem}not saved — {identityProblem}{/if}</p>
     </div>
 
     <!-- ── sections: one list, replaced whole. OWNER-ONLY (2b) ─────────────
@@ -1161,12 +1186,10 @@
         <div class="savebar">
           <button class="btn" onclick={saveSections}>save</button>
         </div>
-        {#if saidSections}
-          <p class="said show">saved</p>
-        {/if}
+        <p class="said" class:show={saidSections} role="status">{#if saidSections}saved{/if}</p>
         <p class="moved" class:show={sectionSaid} role="status">{sectionSaid}</p>
-        {#if sectionsProblem}<p class="problem">not saved — {sectionsProblem}</p>{/if}
-        {#each Object.entries(colourProblems) as [id, text] (id)}<p class="problem">{text}</p>{/each}
+        <p class="problem" role="alert">{#if sectionsProblem}not saved — {sectionsProblem}{/if}</p>
+        <div role="alert">{#each Object.entries(colourProblems) as [id, text] (id)}<p class="problem">{text}</p>{/each}</div>
         <!-- round 2 (#481): one button under one list says the list saves
              whole, and the × that only exists on empty rows says "hidden,
              never removed". The open question — choosing a mark for a NEW
@@ -1214,10 +1237,8 @@
           {/if}
         {/each}
       </div>
-      {#if saidLeft}
-        <p class="said show">you’ve left {saidLeft} · it’s a label in your sky again, and you can ask to rejoin</p>
-      {/if}
-      {#if membersProblem}<p class="problem">{membersProblem}</p>{/if}
+      <p class="said" class:show={saidLeft} role="status">{#if saidLeft}you’ve left {saidLeft} · it’s a label in your sky again, and you can ask to rejoin{/if}</p>
+      <p class="problem" role="alert">{#if membersProblem}{membersProblem}{/if}</p>
 
       {#if v.canManage}
         <!-- §11 + 2g: the owner decides who comes in, and this is the ONLY
@@ -1239,9 +1260,7 @@
                 <button onclick={() => decide(request, "decline")}>decline</button>
               </div>
             {/each}
-            {#if saidJoin}
-              <p class="said show">{saidJoin} is in</p>
-            {/if}
+            <p class="said" class:show={saidJoin} role="status">{#if saidJoin}{saidJoin} is in{/if}</p>
           </div>
         {/if}
 
@@ -1289,7 +1308,7 @@
                 {armed === `inv:${invitation.id}` ? "tap again to withdraw" : "withdraw"}</button>
             </div>
           {/each}
-          {#if saidInvite}<p class="said show">{saidInvite}</p>{/if}
+          <p class="said" class:show={saidInvite} role="status">{#if saidInvite}{saidInvite}{/if}</p>
           <p class="note top">
             the link admits only someone signed in with <b>this exact address</b>
           </p>
@@ -1322,9 +1341,7 @@
           </div>
           <!-- kept: a consequence, said at the moment of the act -->
           <p class="note">you stay a member and keep everything you added</p>
-          {#if saidHandover}
-            <p class="said show">{saidHandover} owns {v.name} now · you’re a member</p>
-          {/if}
+          <p class="said" class:show={saidHandover} role="status">{#if saidHandover}{saidHandover} owns {v.name} now · you’re a member{/if}</p>
         </div>
       {:else}
         <!-- §11's "who sees what" (#481): a member sees who has been invited
@@ -1398,13 +1415,11 @@
             </div>
           </div>
         {/if}
-        {#if saidDoom}
-          <p class="said show">
-            requested · {v.name} stops now, and is gone for good in {daysWords(v.retention?.recoveryDays)} ·
-            an instance admin can turn this back until then
-          </p>
-        {/if}
-        {#if doomProblem}<p class="problem">not requested — {doomProblem}</p>{/if}
+        <p class="said" class:show={saidDoom} role="status">
+          {#if saidDoom}requested · {v.name} stops now, and is gone for good in {daysWords(v.retention?.recoveryDays)} ·
+          an instance admin can turn this back until then{/if}
+        </p>
+        <p class="problem" role="alert">{#if doomProblem}not requested — {doomProblem}{/if}</p>
       </div>
     {/if}
 
