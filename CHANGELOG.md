@@ -34,7 +34,7 @@ and Orbit uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A configure `--migrate` that was killed is finished by the next run, and a leftover rollback copy no longer blocks it; a half-removed staging folder is never read as an interrupted install (#1877, #1876).
 - Installer prompts draw wide characters correctly, answers show on a plain terminal, and the terminal is restored when you press Ctrl-C (#1885, #1874).
 - Restore and repair messages are plainer: they name the backups folder, the exact `ORBIT_BACKUP_DIR` when another restore is unfinished, and say to re-enter the SMTP password after a restore (#1848, #1874, #1603).
-- The sidecar images are re-pinned: ClamAV 1.5.5, Ollama 0.40.17, the rebuilt Tika 4.2.0-full, and rebuilt Postgres and Node base images (#1856, #1825).
+- The Orbit base image and the sidecar images are re-pinned: ClamAV 1.5.5, Ollama 0.40.17, the rebuilt Tika 4.2.0-full, and rebuilt Postgres and Node base images (#1856, #1825).
 - GitLab now signs the SBOM as its own attestation, and GitHub verifies each attestation before it is copied to `ghcr.io`, so `cosign verify-attestation` also covers the SBOM; builds attested before this change must be re-validated on GitLab before they publish (#1848, #1862).
 - Reminder catch-up mail is one message per item and channel, About shows a service version only while its last check succeeded, and the scanner's version check is bounded (#1603).
 - The administration draft now carries a time and is dropped after 15 minutes or a plain visit, a search result for an item deleted elsewhere says so, and the browser-alerts words follow the switch (#1604).
