@@ -671,7 +671,7 @@
       "reason": "CI signing image built by the orbit-base-image pipeline; its digest comes from that pipeline, not from a registry tag. Ships nothing to operators."
     },
     {
-      "reference": "golang:1.27.3-bookworm@sha256:972b4110ba0f47539a975c31e52c64765e1ff19f2d74469ae4a595c6676e80a5",
+      "reference": "golang:1.27.4-bookworm@sha256:4fa7c968ba93f1635670522dbb01a2c78150443e1385746924566079f36570ea",
       "locations": [
         ".gitlab-ci.yml"
       ],
