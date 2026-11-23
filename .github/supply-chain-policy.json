@@ -741,6 +741,17 @@
       "expiresOn": "2026-11-30",
       "trackingIssue": 1950,
       "rationale": "Upstream has not yet rebuilt ollama/ollama:0.40.17 with libudev1 255.4-1ubuntu8.19; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+    },
+    {
+      "kind": "stale-package",
+      "image": "apache/tika:4.2.0-full",
+      "package": "python3-oauthlib",
+      "installedVersion": "3.3.1-1build1",
+      "availableVersion": "3.3.1-1ubuntu0.1",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-11-30",
+      "trackingIssue": 1950,
+      "rationale": "Upstream has not yet rebuilt apache/tika:4.2.0-full with python3-oauthlib 3.3.1-1ubuntu0.1; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
     }
   ],
   "containerImages": [
