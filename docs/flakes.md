@@ -355,6 +355,14 @@ timeout on this one case rather than a global raise.
 
 - 2026-11-01 · 6299c4fa (`deps/1565-sveltekit-3`, #1565; the SvelteKit 3 upgrade, not touching the arrival journey) · browser e2e run on this branch · failed, then passed on a rerun of unchanged code. First sighting.
 
+## scripts/install.interrupts-journal.test.mjs "B19: nothing is written under HOME, XDG_STATE_HOME or TMPDIR, whatever the run"
+
+- 2026-11-23 · !1453 9338b5a3f · pipeline 5244 / fast (job 62788) · `Test timed out in 45000ms` (51.9 s) on a loaded runner; the change touches no installer code. The rerun (job 62838) ran past the job's 30m limit, so it neither passed nor failed. First sighting.
+
+## src/lib/install-transaction.interruption.test.ts "SIGKILL interruption leaves install.sh-equivalent recovery evidence > leaves the target untouched for an uncommitted managed path ..."
+
+- 2026-11-23 · !1453 9338b5a3f · pipeline 5244 / fast (job 62788) · `installer rehearsal never reached the pause`, then the file's clean-up hit `ENOTEMPTY` removing its temp root, on a loaded runner; the change touches no installer code. First sighting.
+
 ## tests/unit/archive-slot.test.mjs "an upload that drips for a long time (#1390) > is never cut while it keeps moving, however long it takes, and the slot stays held until the caller releases it"
 
 - 2026-11-21 · local, fix/1943-audit-h-held on 1c35745f (nothing near the archive slot) · full `npx vitest run` with 8 workers, 1668 s on a shared host · the stall timer fired (`The archive failed to upload`, archive-slot.js:314) while the drip was still moving. The file alone passed right after. First sighting.
