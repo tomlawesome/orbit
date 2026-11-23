@@ -20,8 +20,15 @@
 //      resolves elsewhere. Remedy: re-pin both places, which `sync` does.
 //   2. The pinned image's own packages are stale. The digest is still current
 //      but its distribution has published fixes since it was built. There is
-//      nothing to re-pin to: either upstream rebuilds, or the finding becomes
-//      a named expiring entry in the policy's `exceptions[]` (see #740).
+//      nothing to re-pin to: either upstream rebuilds, or each pending upgrade
+//      becomes a named expiring entry in the policy's `exceptions[]` (#740,
+//      #1950). The entry has `kind: "stale-package"` and names `image` (the
+//      pin's tag), `package`, `installedVersion` and `availableVersion`, plus
+//      `owner`, `rationale`, `expiresOn` and `trackingIssue`. An upgrade is
+//      covered only when all four naming fields match, so a newer available
+//      version, or an unparseable upgrade line, is still stale. When every
+//      pending upgrade is covered the status is `excepted`, which is not
+//      behind; an entry that matches nothing is reported as unused.
 //   3. Upstream has published a newer stable release, and the tag we pinned
 //      has *not* moved -- it still resolves to exactly the manifest we think
 //      it does, so axis 1 has nothing to say. A digest pin only ever answers
@@ -135,6 +142,21 @@ export function pendingUpgrades(manager, output) {
     return lines.filter((line) => line.startsWith("Inst "));
   }
   return [];
+}
+
+const APK_UPGRADE = /^\(\d+\/\d+\) Upgrading (\S+) \((\S+) -> (\S+)\)\s*$/u;
+const APT_UPGRADE = /^Inst (\S+) \[([^\]]+)\] \((\S+)(?: [^)]*)?\)/u;
+
+/**
+ * Split one pending-upgrade line into package, installed and available
+ * version, or null when the line has a shape we do not recognise (which is
+ * then never covered by an exception).
+ */
+export function parseUpgradeLine(manager, line) {
+  const match = (manager === "apk" ? APK_UPGRADE : APT_UPGRADE).exec(line);
+  return match
+    ? { package: match[1], installedVersion: match[2], availableVersion: match[3] }
+    : null;
 }
 
 /**
@@ -463,7 +485,7 @@ async function checkTag(entry, resolveTag) {
 
 // --- Axis 2: are the pinned image's own packages behind? ---------------------
 
-async function checkPackages(entry, simulatePackages) {
+async function checkPackages(entry, simulatePackages, exceptions = []) {
   let simulation;
   try {
     simulation = await simulatePackages(entry.reference);
@@ -492,14 +514,75 @@ async function checkPackages(entry, simulatePackages) {
       status: "current",
       manager,
       pending,
+      covered: [],
+      unused: exceptions
+        .filter((exception) => exception.kind === "stale-package" && exception.image === entry.tag)
+        .map((exception) => ({
+          package: exception.package,
+          installedVersion: exception.installedVersion,
+          availableVersion: exception.availableVersion,
+          expiresOn: exception.expiresOn,
+          trackingIssue: exception.trackingIssue,
+        })),
       summary: `packages are current for the release ${entry.tag} was built from`,
+    };
+  }
+  const own = exceptions.filter(
+    (exception) => exception.kind === "stale-package" && exception.image === entry.tag,
+  );
+  const used = new Set();
+  const covered = [];
+  const uncovered = [];
+  for (const line of pending) {
+    const parsed = parseUpgradeLine(manager, line);
+    const match = parsed
+      ? own.find(
+          (exception) =>
+            exception.package === parsed.package &&
+            exception.installedVersion === parsed.installedVersion &&
+            exception.availableVersion === parsed.availableVersion,
+        )
+      : undefined;
+    if (match) {
+      used.add(match);
+      covered.push({
+        line,
+        package: match.package,
+        installedVersion: match.installedVersion,
+        availableVersion: match.availableVersion,
+        expiresOn: match.expiresOn,
+        trackingIssue: match.trackingIssue,
+      });
+    } else {
+      uncovered.push(line);
+    }
+  }
+  const unused = own
+    .filter((exception) => !used.has(exception))
+    .map((exception) => ({
+      package: exception.package,
+      installedVersion: exception.installedVersion,
+      availableVersion: exception.availableVersion,
+      expiresOn: exception.expiresOn,
+      trackingIssue: exception.trackingIssue,
+    }));
+  if (uncovered.length === 0) {
+    return {
+      status: "excepted",
+      manager,
+      pending: [],
+      covered,
+      unused,
+      summary: `${covered.length} package upgrade(s) are available inside the pinned image, all covered by named expiring exceptions`,
     };
   }
   return {
     status: "stale",
     manager,
-    pending,
-    summary: `${pending.length} package upgrade(s) are available inside the pinned image`,
+    pending: uncovered,
+    covered,
+    unused,
+    summary: `${uncovered.length} package upgrade(s) are available inside the pinned image and not covered by an exception`,
   };
 }
 
@@ -635,7 +718,7 @@ export async function checkPins({
       packages:
         offline || !packages
           ? SKIPPED_PACKAGE_AXIS
-          : await checkPackages(entry, simulatePackages),
+          : await checkPackages(entry, simulatePackages, policy.exceptions ?? []),
     };
     images.push({
       name: entry.name,
@@ -736,12 +819,22 @@ export function renderReport(result) {
     }
 
     lines.push(`- **Packages inside the pin**: ${image.axes.packages.summary}`);
+    for (const covered of image.axes.packages.covered ?? []) {
+      lines.push(
+        `  - covered: ${covered.package} (${covered.installedVersion} -> ${covered.availableVersion}), exception expires ${covered.expiresOn}, tracking issue #${covered.trackingIssue}`,
+      );
+    }
     for (const pending of image.axes.packages.pending) {
       lines.push(`  - ${pending}`);
     }
+    for (const unused of image.axes.packages.unused ?? []) {
+      lines.push(
+        `  - note: unused exception for ${unused.package} (${unused.installedVersion} -> ${unused.availableVersion}), tracking issue #${unused.trackingIssue}; it matches no pending upgrade and can be removed`,
+      );
+    }
     if (image.axes.packages.status === "stale") {
       lines.push(
-        "  - Remedy: none here. The tag has not moved, so there is nothing to re-pin to. Wait for upstream to rebuild, or record a named, expiring entry in the policy's `exceptions[]` with an owner and a tracking issue (#740).",
+        "  - Remedy: none here. The tag has not moved, so there is nothing to re-pin to. Wait for upstream to rebuild, or record one named, expiring entry per upgrade in the policy's `exceptions[]`: `kind: \"stale-package\"` with `image`, `package`, `installedVersion`, `availableVersion`, `owner`, `rationale`, `expiresOn` and `trackingIssue` (#740, #1950). A newer available version needs a new entry.",
       );
     }
     lines.push("");
@@ -1140,7 +1233,7 @@ export async function runSidecarPins(argv, deps = {}) {
 
   if (result.exitCode === 1) {
     writeError(
-      "sidecar pins: at least one pin is behind. A moved tag, or a tag behind on releases, is re-pinned with `node scripts/sidecar-pins.mjs sync`; stale packages inside a current pin have no re-pin remedy and need upstream or a named expiring exception (#740).\n",
+      "sidecar pins: at least one pin is behind. A moved tag, or a tag behind on releases, is re-pinned with `node scripts/sidecar-pins.mjs sync`; stale packages inside a current pin have no re-pin remedy and need upstream or a named expiring `stale-package` exception naming image, package, installedVersion and availableVersion (#740, #1950).\n",
     );
   } else if (result.exitCode === 2) {
     writeError(
