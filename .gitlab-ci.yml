@@ -218,7 +218,7 @@ workflow:
 # validation job. This is the one schedule that must run them, and only the
 # ones the browsers need: `classify`, `fast`, `fast_checks` (it builds the web
 # application the rig serves) and `build_image` (the image the smoke jobs test), then
-# the nine, `pocket_measure` and `browser_report` (#1546), and `nightly_report` last. Nothing else lists
+# the nine, `pocket_measure`, `backup_drill` (#1927) and `browser_report` (#1546), and `nightly_report` last. Nothing else lists
 # it, so no other job starts.
 #
 # The owner creates the schedule (Settings > CI/CD > Schedules); nothing here
@@ -411,14 +411,14 @@ variables:
   # the content, so both registries serve the same bytes.
   ORBIT_BASE_IMAGE_REGISTRY: registry.tomlawson.io/ai
   # build_launcher's job image (ADR-0031 #3): at least the Go version in
-  # launcher/pin.json's go.mod (go 1.27.2 at the pin this repository
-  # currently carries). 1.27.3 fixes CVE-2026-111943 (crypto/x509 refuses the
+  # launcher/pin.json's go.mod (go 1.27.4 at the pin this repository
+  # currently carries, v0.4.7). 1.27.3 fixes CVE-2026-111943 (crypto/x509 refuses the
   # compromised eMudhra intermediates), so the launcher binary built here
   # does not trust certificates forged with them (ai/orbit-launcher#280).
   # A pin bump to a launcher release needing a newer Go needs this bumped
   # alongside it -- build-launcher.sh's own toolchain check fails closed and
   # names the mismatch if it is not.
-  GOLANG_IMAGE: golang:1.27.3-bookworm@sha256:972b4110ba0f47539a975c31e52c64765e1ff19f2d74469ae4a595c6676e80a5
+  GOLANG_IMAGE: golang:1.27.4-bookworm@sha256:4fa7c968ba93f1635670522dbb01a2c78150443e1385746924566079f36570ea
   # Same scanner build as the old workflow, so a finding here and a finding there
   # mean the same thing.
   TRIVY_IMAGE: aquasec/trivy@sha256:2e6c00d711ab4ae41d8a30c2c1fd3bd3b62704c177bb120f95012e939edfb3df
@@ -2347,7 +2347,10 @@ flake_check:
 # Two slots cap the nightly at two rig jobs at once (#1921): `rig-slot-webkit`
 # (`rig_webkit`, `film_webkit`) and `rig-slot-chromium` (`rig_chromium`,
 # `rig_firefox`, `screens_chromium`, `pocket_measure`), each a `resource_group`.
-# Shards of one job share its slot, so they run one after another. Two because
+# Shards of one job share its slot, so they run one after another. A
+# `resource_group` serialises the job across every pipeline on the project,
+# not only the nightly, so a rig job in a merge request waits for one running
+# elsewhere. Two because
 # 2 rig jobs plus 2 smoke jobs are 28 of the host's 32 CPUs; three went over.
 # The full tap-floor measurement is not here: it is `pocket_measure`, nightly
 # only (#1616).

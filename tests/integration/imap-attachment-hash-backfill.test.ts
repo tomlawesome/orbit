@@ -432,3 +432,64 @@ describe("'already held' matches before and after the backfill (#1778)", () => {
     }
   }, 60_000);
 });
+
+/* #1945: a damaged plain value is cleared only in the transaction that writes
+   its damage sighting (record, then clear). Written from the spec alone. */
+describe("the backfill records a damaged hash's sighting before it clears the value (#1945)", () => {
+  it("a sighting insert that fails leaves the plain value in place", async () => {
+    const fixture = await createIntegrationFixture("attach-backfill-clear-unrecorded");
+    try {
+      await drainAll();
+      await getDb().delete(metadataDamageSightings);
+      resetMetadataDamageSightingsForTests();
+      const odd = await legacyAttachment(fixture, fixture.household.id, "not-a-hash-1945", `0${randomUUID().slice(1)}`);
+      await getDb().execute(sql.raw(`
+        create or replace function orbit_test_refuse_sighting_1945() returns trigger language plpgsql as $$
+        begin
+          if new.row_id::text = '${odd.attachmentId}' then raise exception 'sighting write refused by the #1945 test'; end if;
+          return new;
+        end $$`));
+      await getDb().execute(sql.raw(`
+        create trigger orbit_test_refuse_sighting_1945 before insert on metadata_damage_sightings
+        for each row execute function orbit_test_refuse_sighting_1945()`));
+      try {
+        // Either shape of a fix is fine: the backfill may throw or skip the row; it must not clear it.
+        await backfill().catch(() => 0);
+        await flushMetadataDamageSightings();
+        const sightings = await getDb().select().from(metadataDamageSightings).where(eq(metadataDamageSightings.rowId, odd.attachmentId));
+        expect(sightings, "the trigger let the sighting through, so the test proves nothing").toHaveLength(0);
+        expect((await attachmentColumns(odd.attachmentId)).plain, "the damaged value was cleared with no sighting recorded").toBe("not-a-hash-1945");
+      } finally {
+        await getDb().execute(sql.raw("drop trigger if exists orbit_test_refuse_sighting_1945 on metadata_damage_sightings"));
+        await getDb().execute(sql.raw("drop function if exists orbit_test_refuse_sighting_1945()"));
+        resetMetadataDamageSightingsForTests();
+        await getDb().execute(sql`delete from imap_ingestion_attachments where id = ${odd.attachmentId}`);
+      }
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  it("a damaged row that is cleared has its sighting as soon as the call returns, with no flush", async () => {
+    const fixture = await createIntegrationFixture("attach-backfill-clear-recorded");
+    try {
+      await drainAll();
+      await getDb().delete(metadataDamageSightings);
+      resetMetadataDamageSightingsForTests();
+      const odd = await legacyAttachment(fixture, fixture.household.id, "not-a-hash-1945", `0${randomUUID().slice(1)}`);
+      try {
+        await backfill();
+        expect((await attachmentColumns(odd.attachmentId)).plain, "the damaged value is cleared").toBeNull();
+        // No flushMetadataDamageSightings() here: the sighting must already be committed.
+        const sightings = await getDb().select().from(metadataDamageSightings).where(eq(metadataDamageSightings.rowId, odd.attachmentId));
+        expect(sightings, "the sighting is already in the table").toHaveLength(1);
+        expect(sightings[0]).toMatchObject({ tableName: "imap_ingestion_attachments", columnName: "content_sha256" });
+      } finally {
+        resetMetadataDamageSightingsForTests();
+        await getDb().execute(sql`delete from imap_ingestion_attachments where id = ${odd.attachmentId}`);
+      }
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+});

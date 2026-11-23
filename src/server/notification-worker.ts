@@ -236,7 +236,11 @@ export function isRevokedPushFailure(error: unknown, subscriptionId: string): bo
  */
 export function categorizeProviderError(channel: "email" | "web_push", error: unknown): NotificationFailureCategory {
   const details = error as ProviderErrorDetails | undefined;
-  const code = typeof details?.code === "string" ? details.code : "";
+  // nodemailer wraps a system error (ESOCKET, ECONNECTION, EDNS) and keeps the
+  // system code in `originalCode`, as invitations/send.ts reads it.
+  const rawCode = typeof details?.code === "string" ? details.code : "";
+  const originalCode = (error as { originalCode?: unknown } | undefined)?.originalCode;
+  const code = ["ESOCKET", "ECONNECTION", "EDNS"].includes(rawCode) && typeof originalCode === "string" ? originalCode : rawCode;
   const responseCode = typeof details?.responseCode === "number" ? details.responseCode : undefined;
   const statusCode = typeof details?.statusCode === "number" ? details.statusCode : undefined;
 
@@ -481,6 +485,10 @@ function isPrivateOrReservedIPv4(address: string): boolean {
   if (a === 172 && b >= 16 && b <= 31) return true;
   if (a === 192 && b === 168) return true;
   if (a === 192 && b === 0 && parts[2] === 0) return true;
+  // RFC 5737 documentation ranges (TEST-NET-1, -2, -3).
+  if (a === 192 && b === 0 && parts[2] === 2) return true;
+  if (a === 198 && b === 51 && parts[2] === 100) return true;
+  if (a === 203 && b === 0 && parts[2] === 113) return true;
   return false;
 }
 
@@ -844,9 +852,6 @@ async function claimDeliveries(
   });
 }
 
-/** Exported for the fast suite (#1151 SR2-R4): the one place real `nodemailer`
- *  and `web-push` calls are built, and therefore the one place their
- *  outbound timeout can be pinned without a live provider. */
 /**
  * The connect-time address check for push (#1929 part 2, OWASP SSRF second
  * layer): the socket's own lookup, so the addresses checked are the addresses
@@ -870,6 +875,9 @@ const blockedAddressFilteringLookup: LookupFunction = (hostname, options, callba
   });
 };
 
+/** Exported for the fast suite (#1151 SR2-R4): the one place real `nodemailer`
+ *  and `web-push` calls are built, and therefore the one place their
+ *  outbound timeout can be pinned without a live provider. */
 export function createDefaultNotificationProviders(config: NotificationWorkerConfig): NotificationProviders {
   /* One agent per providers object, default keepAlive (off), so every
      connection goes through the lookup again. No servername,
