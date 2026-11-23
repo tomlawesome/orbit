@@ -596,3 +596,7 @@ timeout on this one case rather than a global raise.
 ## scripts/repair.test.mjs "scripts/repair.sh --export-diagnostics (issue #531, ADR-0014 decision 10) > tolerates --plain in either order around --export-diagnostics"
 
 - 2026-11-21 · !1454 51b164933 · pipeline 5109 / fast (job 61066) · the two runs' output differed: the first reported `finding class=docker-unavailable` (checked=19 skipped=1), the second did not (checked=20), so the docker probe answered differently between two runs a moment apart, in the same 1557 s loaded run (7.2 s for the test). Passed 3 of 3 locally on unchanged code straight after. First sighting.
+
+## tests/integration/mail-relay-sender-check-failures.test.ts:687 "M-R8: a send attempt counts when it starts, and the mailer call holds no lock > the relay settings read for that member resolves within 2 s while the mailer is stuck"
+
+- 2026-11-23 · !1462 b9629da38 (release record only: CHANGELOG, release notes, docs/releases; nothing near mail) · pipeline 5245 / integration 3/4 (job 62806) · `expected 'hung' to be 'read'`: the settings read did not settle inside the test's 2 s window, in a 252 s integration run on a loaded runner; the other 154 tests in the job passed. Wall-clock-under-load shape. First sighting.
