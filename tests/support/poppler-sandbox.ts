@@ -78,6 +78,7 @@ export type PopplerSandbox = {
   pdfSandboxSelfCheck(): Promise<string | undefined>;
   setPdfStructureSandboxLimitsForTests(override: Record<string, unknown> | undefined): void;
   pdfStructureSandboxInFlightForTests(): number;
+  pdfStructureSandboxViewWaitingForTests(): number;
   lastPdfSandboxChildPidForTests(): number | undefined;
   PDF_STRUCTURE_SANDBOX_LIMITS: Record<string, unknown>;
 };

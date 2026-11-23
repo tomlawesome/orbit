@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Backup/restore acceptance drill. Runs in CI against the container-validation
-# deployment and asserts the operator guarantees
+# Backup/restore acceptance drill. CI runs it nightly with --own-stack (its own
+# throwaway deployment); without the flag it borrows the deployment .env-orbit
+# names. It asserts the operator guarantees
 # below, cited as Part 2 / script #entry in docs/installer-guarantees.md
 # (issue #290 coverage map; the drill predates the catalogue, so citations
 # are mapped per test function rather than per assertion):
@@ -53,10 +54,10 @@
 #
 # Ownership (#1241, #1273). By default this drill does NOT bring up a stack of
 # its own: it runs against the deployment that ORBIT_ENV_FILE (default
-# .env-orbit) names, in CI the disposable container-validation one. The rest
-# of this paragraph describes that borrowed path.
+# .env-orbit) names, which must already be running. The rest of this
+# paragraph describes that borrowed path.
 #
-# --own-stack is the local way to run it (#1273): the drill builds an image
+# --own-stack is how CI, and a clean local host, run it (#1273): the drill builds an image
 # from this working tree, installs a throwaway deployment with install.sh into
 # a `mktemp -d` target under its own Compose project (orbit-backup-drill,
 # app on 127.0.0.1:3212, local registry on 5302), copies this checkout's
@@ -71,8 +72,7 @@
 # (docs/testing.md, "Local traps"). Environment values aimed
 # at another deployment (ORBIT_ENV_FILE, ORBIT_BACKUP_DIR, ORBIT_BIND_ADDRESS,
 # ORBIT_PORT, COMPOSE_FILE, COMPOSE_PROJECT_NAME) are
-# ignored. ORBIT_BACKUP_DRILL_IMAGE=<ref> skips the build. CI keeps the
-# borrowed path: its pipeline already supplies a throwaway deployment.
+# ignored. ORBIT_BACKUP_DRILL_IMAGE=<ref> skips the build.
 #
 #   Borrowed, never removed: the Compose project and its orbit-app and orbit-db
 #   containers, every volume and network, the images, the live document KEK and

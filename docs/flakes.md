@@ -383,11 +383,6 @@ timeout on this one case rather than a global raise.
 
 - 2026-11-01 · fd3ac6cc (+ #1636's uncommitted pipeline-rule change, nothing `scripts/install.sh` reads) · local `scripts/test-backend.sh`, worktree `hotfix-1632`, other sessions' builds on the host · `result.hungAlive` came back true (the hung pull child outlived the signal); the same file passed in the full run before and 12 of 12 alone right after. First sighting.
 
-## check-base-image-current.test.mjs, tests hit the 20s timeout (host)
-
-- 2026-11-02 · 640b8c2b · local `scripts/test-backend.sh`, worktree `v035-audit-ci`, two backend suites and an integration run in parallel on the shared host (load about 40) · 3 tests timed out at 20s; the file passed alone straight after (13 tests). Wall-clock under load. First sighting since #1134's fix.
-- 2026-11-02 · 3748dda7 · local `scripts/test-backend.sh`, worktree `v035-audit-tests`, same parallel runs · tests timed out at 20s (hook 10s); the file passed alone afterwards. Second sighting.
-
 ## web-build-stamp.test.mjs, timeout under load (host)
 
 - 2026-11-02 · 3748dda7 · local `scripts/test-backend.sh`, worktree `v035-audit-tests`, same parallel runs as above · timed out alongside check-base-image-current.test.mjs; passed alone afterwards. First sighting.
@@ -543,11 +538,6 @@ timeout on this one case rather than a global raise.
 
 - 2026-11-20 · !1433 80582f500 · pipeline 4912 / fast (job 58965) · the check was killed at its 30 s deadline without exiting on a loaded runner. Passed in the retry (job 59031). First sighting.
 
-## scripts/repair-signal-1919.test.mjs "#1919: ... > TERM to the group, 20 times in a row (the race is repeated, bounded): the copy is gone every time"
-
-- 2026-11-20 · !1433 80582f500 · pipeline 4912 / fast (job 58965) · `Test timed out in 45000ms` on a loaded runner. Passed in the retry (job 59031). First sighting.
-- 2026-11-20 · !1433 eb548d90a · pipeline 4944 / fast (job 59284) · `Test timed out in 45000ms` again. Passed in the retries (jobs 59336, 59391). Second sighting.
-
 ## src/lib/backup-restore-cli.test.ts "runBackup > O2-R3: a SIGTERM while the adapter is dumping leaves the .orbit-backup.* scratch in place, and the next runBackup removes it"
 
 - 2026-11-20 · !1433 80582f500 · pipeline 4912 / fast retry (job 59031) · `Test timed out in 5000ms`. Passed in job 58965 on the same code. First sighting.
@@ -600,3 +590,34 @@ timeout on this one case rather than a global raise.
 ## scripts/repair.test.mjs "scripts/repair.sh --execute --dangerous: regenerate-secret (#530 slice) > a permissions change on the secrets directory during the approval window fails the step cleanly: reason=step-failed, exit 4, secret still absent and recoverable on retry"
 
 - 2026-11-21 · !1450 692921fe0 · pipeline 5077 / fast (job 60776) · `Timed out waiting for stderr predicate`, then spawnRepair killed the child after 20 s without output, at the `type 'regenerate'` prompt, in a 1523 s full run on a loaded runner. The change touches none of repair.sh. Passed in job 60770 (pipeline 5076, same batch-a base) and locally. First sighting.
+## scripts/ci/carry-previous-release.test.mjs "sign_evidence still running: a bounded wait on an in-flight dependency (#1607 note 48548, item 3) > a sign_evidence that stays preparing past the poll cap fails, saying it is still running and to run this job again"
+
+- 2026-11-21 · !1447 8264fee23 · pipeline 5072 / fast (job 60738) · the child was killed at its 30 s deadline without exiting, in a 1446 s full run on a loaded runner. The audit fixes don't touch this script or its test. Passed locally at 8264fee23 (377/377), and in job 60610 on the same script. First sighting.
+
+## scripts/install.update-prune-undo-copies.test.mjs "install.sh --plain --update: nothing to prune (#1834 slice 5) > prints nothing about old copies when there is no orbit-install-backups folder, with or without the flag"
+
+- 2026-11-21 · !1447 cf420ec53 · pipeline 5080 / fast (job 60786) · `install.sh --update` exited 1 instead of 0, in a 1390 s full run on a loaded runner; the test doesn't print the child's stderr, so the cause is not shown. The audit fixes don't touch install.sh or this test. Passed locally at cf420ec53 three times in a row. First sighting.
+
+## src/server/documents/pdf-structure-sandbox-poppler.test.ts "page draws are pdftoppm (real pdftoppm/pdfinfo) > §1.5 line 10: the tiny-step tiling pattern is stopped by the clock (500 ms) with stop timeout ..." (:345)
+
+- 2026-11-21 · !1457 batch-b 1eb93654 · pipeline 5167 / fast (job 61981) · `expected 5194 to be less than 2000` in a 1445 s run on a loaded runner; the change touches none of it. First sighting.
+
+## tests/integration/document-kept-previews.test.ts "pages drawn once and kept, encrypted (#1433 §2.6) (real pdftoppm/pdfinfo) > line 5: a view before the worker ran draws on demand ..." (:277)
+
+- 2026-11-21 · !1457 batch-b 1eb93654 · pipeline 5167 / integration 1/4 (job 61922) · `expected 422 to be 200` on a loaded runner, alongside fast's poppler clock miss above; the change touches none of it. First sighting.
+
+## tests/integration/reviewed-intake-route-retry.test.ts (whole file: Postgres connection ended)
+
+- 2026-11-21 · !1457 batch-b 1eb93654 · pipeline 5167 / integration 2/4 (job 61923) · `write CONNECTION_ENDED postgres:5432` in `delete from "instance_authority"`, then 15 s timeouts and further CONNECTION_ENDED errors in the same file; the change touches none of it. First sighting.
+
+## scripts/install.interrupts-journal.test.mjs "B21: dated folder names never collide: an existing name is skipped, never reused or emptied; past -9 the install is refused at the start"
+
+- 2026-11-22 · !1457 batch-b 3d2a694c · pipeline for !1457 / fast (job 62291) · failed after 74 s on a loaded runner, with two other long shell-driven tests in the same run; the change touches none of it. First sighting.
+
+## scripts/repair-retire-smtp-1817.test.mjs "7: a retirement interrupted at step=backed-up is refused while a journal exists, record and secret stay, and a later clean run finishes"
+
+- 2026-11-22 · !1457 batch-b 3d2a694c · pipeline for !1457 / fast (job 62291) · failed after 53 s on a loaded runner; the change touches none of it. First sighting.
+
+## scripts/repair-retire-privdrop-1848.test.mjs "owned by the folder's owner (the shim lies about nothing): not refused"
+
+- 2026-11-22 · !1457 batch-b 3d2a694c · pipeline for !1457 / fast (job 62291) · failed after 33 s on a loaded runner; the change touches none of it. First sighting.
