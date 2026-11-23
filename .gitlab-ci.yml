@@ -411,14 +411,14 @@ variables:
   # the content, so both registries serve the same bytes.
   ORBIT_BASE_IMAGE_REGISTRY: registry.tomlawson.io/ai
   # build_launcher's job image (ADR-0031 #3): at least the Go version in
-  # launcher/pin.json's go.mod (go 1.27.2 at the pin this repository
-  # currently carries). 1.27.3 fixes CVE-2026-111943 (crypto/x509 refuses the
+  # launcher/pin.json's go.mod (go 1.27.4 at the pin this repository
+  # currently carries, v0.4.7). 1.27.3 fixes CVE-2026-111943 (crypto/x509 refuses the
   # compromised eMudhra intermediates), so the launcher binary built here
   # does not trust certificates forged with them (ai/orbit-launcher#280).
   # A pin bump to a launcher release needing a newer Go needs this bumped
   # alongside it -- build-launcher.sh's own toolchain check fails closed and
   # names the mismatch if it is not.
-  GOLANG_IMAGE: golang:1.27.3-bookworm@sha256:972b4110ba0f47539a975c31e52c64765e1ff19f2d74469ae4a595c6676e80a5
+  GOLANG_IMAGE: golang:1.27.4-bookworm@sha256:4fa7c968ba93f1635670522dbb01a2c78150443e1385746924566079f36570ea
   # Same scanner build as the old workflow, so a finding here and a finding there
   # mean the same thing.
   TRIVY_IMAGE: aquasec/trivy@sha256:2e6c00d711ab4ae41d8a30c2c1fd3bd3b62704c177bb120f95012e939edfb3df
