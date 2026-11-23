@@ -680,6 +680,40 @@ describe("runRestore (restore.sh's main flow :897-933, including check_capacity 
       return { ...context, rollbackFile };
     }
 
+    // #1943 A-S1: during a recovery import the checkpoint reads the key from the
+    // rollback copy; when that fails the mode check, the operator's fix is the
+    // live key file the message must name, not the rollback copy.
+    it("a key-mode refusal during a recovery import names the live key file, not the rollback copy (#1943 A-S1)", () => {
+      const { documentKekFile, restorePaths, adapter } = setup();
+      const rollbackFile = join(sandbox, "document-kek.import-rollback");
+      writeFileSync(rollbackFile, `${PRE_RESTORE_KEY}\n`, { mode: 0o600 });
+      chmodSync(rollbackFile, 0o644);
+      const updateBundlePath = buildBundle(join(sandbox, "update-source-a-s1"), UPDATED_KEY, 22, LIVE_KEK, join(sandbox, "update-backups-a-s1"));
+
+      let refusal: unknown;
+      try {
+        runRestore({
+          backupTarPath: updateBundlePath,
+          documentKekHex: LIVE_KEK,
+          paths: restorePaths,
+          adapter,
+          workDir: mkdtempSync(join(sandbox, "restore-run-a-s1-")),
+          confirm: () => true,
+          rollbackDocumentKekFile: rollbackFile,
+        });
+      } catch (error) {
+        refusal = error;
+      }
+
+      expect(refusal).toBeInstanceOf(RestoreEngineRefusal);
+      const { code, message } = refusal as RestoreEngineRefusal;
+      expect(code).toBe("checkpoint-key-invalid");
+      expect(message).toContain("mode 0600");
+      // The rollback path starts with the live path, so a bare contains is not enough.
+      expect(message.replaceAll(rollbackFile, "")).toContain(documentKekFile);
+      expect(message).not.toContain(rollbackFile);
+    });
+
     it("a successful runRestore leaves the journal and the checkpoint directory on disk", () => {
       const { restorePaths } = restoreOverSwappedKey();
       expect(existsSync(restorePaths.journalPath)).toBe(true);
