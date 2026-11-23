@@ -218,7 +218,7 @@ workflow:
 # validation job. This is the one schedule that must run them, and only the
 # ones the browsers need: `classify`, `fast`, `fast_checks` (it builds the web
 # application the rig serves) and `build_image` (the image the smoke jobs test), then
-# the nine, `pocket_measure` and `browser_report` (#1546), and `nightly_report` last. Nothing else lists
+# the nine, `pocket_measure`, `backup_drill` (#1927) and `browser_report` (#1546), and `nightly_report` last. Nothing else lists
 # it, so no other job starts.
 #
 # The owner creates the schedule (Settings > CI/CD > Schedules); nothing here
@@ -2347,7 +2347,10 @@ flake_check:
 # Two slots cap the nightly at two rig jobs at once (#1921): `rig-slot-webkit`
 # (`rig_webkit`, `film_webkit`) and `rig-slot-chromium` (`rig_chromium`,
 # `rig_firefox`, `screens_chromium`, `pocket_measure`), each a `resource_group`.
-# Shards of one job share its slot, so they run one after another. Two because
+# Shards of one job share its slot, so they run one after another. A
+# `resource_group` serialises the job across every pipeline on the project,
+# not only the nightly, so a rig job in a merge request waits for one running
+# elsewhere. Two because
 # 2 rig jobs plus 2 smoke jobs are 28 of the host's 32 CPUs; three went over.
 # The full tap-floor measurement is not here: it is `pocket_measure`, nightly
 # only (#1616).

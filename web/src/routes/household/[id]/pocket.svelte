@@ -1,6 +1,7 @@
 <script>
   import { uuid } from "$lib/uuid.js";
   import { tick } from "svelte";
+  import { SvelteMap } from "svelte/reactivity";
   import { plural } from "$lib/format.js";
   import { goto, invalidateAll } from "$app/navigation";
   import { resolve } from "$app/paths";
@@ -371,22 +372,40 @@
      back after the reload (the reload resets the draft to the server's list); the
      pick is in both. A row still being named keeps it for the bar's save. */
   /** @param {EditorRow} row @param {string} colour */
-  async function pickColour(row, colour) {
+  function pickColour(row, colour) {
     row.colour = colour;
-    if (row.fresh || saving) return;
+    if (row.fresh || saving) return Promise.resolve();
+    if (!rowsOf(v).some((one) => one.id === row.id)) return Promise.resolve();
+    // #1943 W-R1, as the desk's pickColour: saves run one after another, and a
+    // later pick for a section is what the next save sends, so the last pick wins.
+    pickedColours.set(row.id, colour);
+    colourChain = colourChain.then(() => saveColour(row.id, colour));
+    return colourChain;
+  }
+  const pickedColours = /** @type {SvelteMap<string, string>} */ (new SvelteMap());
+  let colourChain = /** @type {Promise<void>} */ (Promise.resolve());
+  /** @param {string} id @param {string} colour */
+  async function saveColour(id, colour) {
+    if (saving) return;
     const savedRows = rowsOf(v);
-    if (!savedRows.some((one) => one.id === row.id)) return;
+    if (!savedRows.some((one) => one.id === id)) return;
     const draft = { identity: $state.snapshot(identity), rows: $state.snapshot(rows), moveSaid };
     problem = null;
     try {
-      await writeSections(v.id, savedRows.map((one) => (one.id === row.id ? { ...one, colour } : one)));
+      await writeSections(v.id, savedRows.map((one) => (pickedColours.has(one.id) ? { ...one, colour: pickedColours.get(one.id) ?? one.colour } : one)));
       await invalidateAll();
       await tick();
       identity = draft.identity;
       rows = draft.rows;
       moveSaid = draft.moveSaid;
+      for (const row of rows) {
+        const latest = pickedColours.get(row.id);
+        if (latest !== undefined) row.colour = latest;
+      }
     } catch (error) {
       problem = `not saved — ${wordsOf(error)}`;
+    } finally {
+      if (pickedColours.get(id) === colour) pickedColours.delete(id);
     }
   }
 
