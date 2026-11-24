@@ -64,17 +64,6 @@
     {
       "kind": "vulnerability",
       "scope": "image",
-      "id": "CVE-2026-111943",
-      "package": "stdlib",
-      "owner": "Orbit maintainers",
-      "expiresOn": "2027-01-04",
-      "trackingIssue": 794,
-      "installedVersion": "v1.26.7",
-      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.2.0-full; 4.1.0-1-full and 4.2.0-SNAPSHOT-full are still on Go 1.26.7. Clears when a Tika image ships pebble on a fixed Go. Checked 2026-10-21: no published release carries a fixed Go (1.26.10 or 1.27.3); owner granted on that condition, 2026-10-21. Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18."
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
       "id": "CVE-2025-61726",
       "package": "stdlib",
       "installedVersion": "v1.24.6",
@@ -350,39 +339,6 @@
     {
       "kind": "vulnerability",
       "scope": "image",
-      "id": "CVE-2026-78667",
-      "package": "stdlib",
-      "installedVersion": "v1.26.7",
-      "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.2.0-full; clears only when the image is rebuilt on a newer pebble. 4.2.0-full still carries pebble on Go 1.26.7 (local scan, 2026-11-03). Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
-      "expiresOn": "2027-01-04",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-78669",
-      "package": "stdlib",
-      "installedVersion": "v1.26.7",
-      "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.2.0-full; clears only when the image is rebuilt on a newer pebble. 4.2.0-full still carries pebble on Go 1.26.7 (local scan, 2026-11-03). Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
-      "expiresOn": "2027-01-04",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-97031",
-      "package": "stdlib",
-      "installedVersion": "v1.26.7",
-      "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.2.0-full; clears only when the image is rebuilt on a newer pebble. 4.2.0-full still carries pebble on Go 1.26.7 (local scan, 2026-11-03). Renewed 2026-11-18 to 2027-01-04: still no fixed upstream build (re-scan on #794); owner 20a, 2026-11-18.",
-      "expiresOn": "2027-01-04",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
       "id": "CVE-2026-102276",
       "package": "brace-expansion",
       "installedVersion": "5.0.9",
@@ -454,7 +410,7 @@
       "owner": "Orbit maintainers",
       "expiresOn": "2026-12-03",
       "trackingIssue": 1918,
-      "rationale": "Java runtime in apache/tika:4.2.0-full; Tika runs on it to parse uploaded documents, so reachability has not been ruled out. Fixed in the 25.0.5 update 1 build (Debian revision 2-1~26.04.1); installedVersion is left out because the scanner's four-part Java version reads as a network address to the private-details check. No published Tika image ships it yet (checked 2026-11-19 on 4.2.0-full, 4.2.1-SNAPSHOT-full and the 4.3.0-SNAPSHOT-full nightly). Owner granted 7 days and a re-check, 2026-11-19 (#1918, 69a). Renewed 2026-11-20 to 2026-12-03: still no stable Tika image with the fixed Java, only the 4.3.0-SNAPSHOT-full nightly (#1918); owner 50a, 2026-11-20."
+      "rationale": "Java runtime in apache/tika:4.2.0-2-full; Tika runs on it to parse uploaded documents, so reachability has not been ruled out. Fixed in the 25.0.5 update 1 build (Debian revision 2-1~26.04.1); installedVersion is left out because the scanner's four-part Java version reads as a network address to the private-details check. No published Tika image ships it yet (checked 2026-11-19 on 4.2.0-full, 4.2.1-SNAPSHOT-full and the 4.3.0-SNAPSHOT-full nightly). Owner granted 7 days and a re-check, 2026-11-19 (#1918, 69a). Renewed 2026-11-20 to 2026-12-03: still no stable Tika image with the fixed Java, only the 4.3.0-SNAPSHOT-full nightly (#1918); owner 50a, 2026-11-20."
     },
     {
       "kind": "vulnerability",
@@ -465,7 +421,7 @@
       "expiresOn": "2027-01-04",
       "trackingIssue": 1729,
       "installedVersion": "3.2.0",
-      "rationale": "Debian/Ubuntu package manager in apache/tika:4.2.0-full; Orbit never runs apt in this container (no entrypoint or command calls it), so the flaw is not reachable. Fixed in 3.2.1ubuntu0.1, but no published image ships it yet (checked 2026-11-13: no newer release). Owner granted 7 days and a re-check, 2026-11-05, and 7 more, 2026-11-13 (#1729). Extended 2026-11-18 to 2027-01-04: Ollama 0.40.16 still ships apt 2.8.3 and the rebuilt Tika 4.2.0-full still ships apt 3.2.0 (#1729); owner 23a, 2026-11-18."
+      "rationale": "Debian/Ubuntu package manager in apache/tika:4.2.0-2-full; Orbit never runs apt in this container (no entrypoint or command calls it), so the flaw is not reachable. Fixed in 3.2.1ubuntu0.1, but no published image ships it yet (checked 2026-11-13: no newer release). Owner granted 7 days and a re-check, 2026-11-05, and 7 more, 2026-11-13 (#1729). Extended 2026-11-18 to 2027-01-04: Ollama 0.40.16 still ships apt 2.8.3 and the rebuilt Tika 4.2.0-full still ships apt 3.2.0 (#1729); owner 23a, 2026-11-18."
     },
     {
       "kind": "vulnerability",
@@ -476,7 +432,7 @@
       "expiresOn": "2027-01-04",
       "trackingIssue": 1729,
       "installedVersion": "3.2.0",
-      "rationale": "Debian/Ubuntu package manager in apache/tika:4.2.0-full; Orbit never runs apt in this container (no entrypoint or command calls it), so the flaw is not reachable. Fixed in 3.2.1ubuntu0.1, but no published image ships it yet (checked 2026-11-13: no newer release). Owner granted 7 days and a re-check, 2026-11-05, and 7 more, 2026-11-13 (#1729). Extended 2026-11-18 to 2027-01-04: Ollama 0.40.16 still ships apt 2.8.3 and the rebuilt Tika 4.2.0-full still ships apt 3.2.0 (#1729); owner 23a, 2026-11-18."
+      "rationale": "Debian/Ubuntu package manager in apache/tika:4.2.0-2-full; Orbit never runs apt in this container (no entrypoint or command calls it), so the flaw is not reachable. Fixed in 3.2.1ubuntu0.1, but no published image ships it yet (checked 2026-11-13: no newer release). Owner granted 7 days and a re-check, 2026-11-05, and 7 more, 2026-11-13 (#1729). Extended 2026-11-18 to 2027-01-04: Ollama 0.40.16 still ships apt 2.8.3 and the rebuilt Tika 4.2.0-full still ships apt 3.2.0 (#1729); owner 23a, 2026-11-18."
     },
     {
       "kind": "vulnerability",
@@ -521,17 +477,6 @@
       "trackingIssue": 1948,
       "installedVersion": "2.13.9-r2",
       "rationale": "CVE-2026-86144 is a libxml2 flaw, in Alpine's libxml2 2.13.9-r2 in postgres:18-alpine and clamav/clamav:1.5.5. Fixed in Alpine 2.13.9-r3, but neither image has been rebuilt with it: on 2026-11-21 both pinned digests are still the newest upstream builds of their tags (sidecar-pins check). ClamAV reads untrusted files, so this is the one to clear first; remove this entry as soon as a rebuilt image is pinned. Owner 91a, 2026-11-21: 14 days."
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-97054",
-      "package": "stdlib",
-      "owner": "Orbit maintainers",
-      "expiresOn": "2026-12-05",
-      "trackingIssue": 1948,
-      "installedVersion": "v1.27.3",
-      "rationale": "CVE-2026-97054 is a Go net/http flaw: an HTTP/1 server that uses MaxBytesReader can panic if its handler reads the body while writing the response header. It is in the Go standard library compiled into /usr/bin/pebble in apache/tika:4.2.0-full. The image's entrypoint runs Java (TikaServerCli) directly and never starts pebble, so the flaw is not reachable. Fixed in Go 1.26.11 and 1.27.4, but on 2026-11-21 the pinned digest is still the newest build of 4.2.0-full and no newer Tika release exists. Owner 91a, 2026-11-21: 14 days."
     },
     {
       "kind": "stale-package",
@@ -601,113 +546,113 @@
     },
     {
       "kind": "stale-package",
-      "image": "apache/tika:4.2.0-full",
+      "image": "apache/tika:4.2.0-2-full",
       "package": "libc-gconv-modules-extra",
       "installedVersion": "2.43-2ubuntu2.4",
       "availableVersion": "2.43-2ubuntu2.7",
       "owner": "Orbit maintainers",
       "expiresOn": "2026-11-30",
       "trackingIssue": 1950,
-      "rationale": "Upstream has not yet rebuilt apache/tika:4.2.0-full with libc-gconv-modules-extra 2.43-2ubuntu2.7; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+      "rationale": "Upstream has not yet rebuilt apache/tika:4.2.0-2-full with libc-gconv-modules-extra 2.43-2ubuntu2.7; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
     },
     {
       "kind": "stale-package",
-      "image": "apache/tika:4.2.0-full",
+      "image": "apache/tika:4.2.0-2-full",
       "package": "libc6",
       "installedVersion": "2.43-2ubuntu2.4",
       "availableVersion": "2.43-2ubuntu2.7",
       "owner": "Orbit maintainers",
       "expiresOn": "2026-11-30",
       "trackingIssue": 1950,
-      "rationale": "Upstream has not yet rebuilt apache/tika:4.2.0-full with libc6 2.43-2ubuntu2.7; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+      "rationale": "Upstream has not yet rebuilt apache/tika:4.2.0-2-full with libc6 2.43-2ubuntu2.7; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
     },
     {
       "kind": "stale-package",
-      "image": "apache/tika:4.2.0-full",
+      "image": "apache/tika:4.2.0-2-full",
       "package": "base-files",
       "installedVersion": "14ubuntu6.2",
       "availableVersion": "14ubuntu6.3",
       "owner": "Orbit maintainers",
       "expiresOn": "2026-11-30",
       "trackingIssue": 1950,
-      "rationale": "Upstream has not yet rebuilt apache/tika:4.2.0-full with base-files 14ubuntu6.3; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+      "rationale": "Upstream has not yet rebuilt apache/tika:4.2.0-2-full with base-files 14ubuntu6.3; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
     },
     {
       "kind": "stale-package",
-      "image": "apache/tika:4.2.0-full",
+      "image": "apache/tika:4.2.0-2-full",
       "package": "perl-base",
       "installedVersion": "5.40.1-7ubuntu0.3",
       "availableVersion": "5.40.1-7ubuntu0.4",
       "owner": "Orbit maintainers",
       "expiresOn": "2026-11-30",
       "trackingIssue": 1950,
-      "rationale": "Upstream has not yet rebuilt apache/tika:4.2.0-full with perl-base 5.40.1-7ubuntu0.4; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+      "rationale": "Upstream has not yet rebuilt apache/tika:4.2.0-2-full with perl-base 5.40.1-7ubuntu0.4; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
     },
     {
       "kind": "stale-package",
-      "image": "apache/tika:4.2.0-full",
+      "image": "apache/tika:4.2.0-2-full",
       "package": "libc-bin",
       "installedVersion": "2.43-2ubuntu2.4",
       "availableVersion": "2.43-2ubuntu2.7",
       "owner": "Orbit maintainers",
       "expiresOn": "2026-11-30",
       "trackingIssue": 1950,
-      "rationale": "Upstream has not yet rebuilt apache/tika:4.2.0-full with libc-bin 2.43-2ubuntu2.7; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+      "rationale": "Upstream has not yet rebuilt apache/tika:4.2.0-2-full with libc-bin 2.43-2ubuntu2.7; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
     },
     {
       "kind": "stale-package",
-      "image": "apache/tika:4.2.0-full",
+      "image": "apache/tika:4.2.0-2-full",
       "package": "libapt-pkg7.0",
       "installedVersion": "3.2.0",
       "availableVersion": "3.2.1ubuntu0.1",
       "owner": "Orbit maintainers",
       "expiresOn": "2026-11-30",
       "trackingIssue": 1950,
-      "rationale": "Upstream has not yet rebuilt apache/tika:4.2.0-full with libapt-pkg7.0 3.2.1ubuntu0.1; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+      "rationale": "Upstream has not yet rebuilt apache/tika:4.2.0-2-full with libapt-pkg7.0 3.2.1ubuntu0.1; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
     },
     {
       "kind": "stale-package",
-      "image": "apache/tika:4.2.0-full",
+      "image": "apache/tika:4.2.0-2-full",
       "package": "apt",
       "installedVersion": "3.2.0",
       "availableVersion": "3.2.1ubuntu0.1",
       "owner": "Orbit maintainers",
       "expiresOn": "2026-11-30",
       "trackingIssue": 1950,
-      "rationale": "Upstream has not yet rebuilt apache/tika:4.2.0-full with apt 3.2.1ubuntu0.1; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+      "rationale": "Upstream has not yet rebuilt apache/tika:4.2.0-2-full with apt 3.2.1ubuntu0.1; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
     },
     {
       "kind": "stale-package",
-      "image": "apache/tika:4.2.0-full",
+      "image": "apache/tika:4.2.0-2-full",
       "package": "libpcre2-8-0",
       "installedVersion": "10.46-1build1",
       "availableVersion": "10.46-1ubuntu0.1",
       "owner": "Orbit maintainers",
       "expiresOn": "2026-11-30",
       "trackingIssue": 1950,
-      "rationale": "Upstream has not yet rebuilt apache/tika:4.2.0-full with libpcre2-8-0 10.46-1ubuntu0.1; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+      "rationale": "Upstream has not yet rebuilt apache/tika:4.2.0-2-full with libpcre2-8-0 10.46-1ubuntu0.1; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
     },
     {
       "kind": "stale-package",
-      "image": "apache/tika:4.2.0-full",
+      "image": "apache/tika:4.2.0-2-full",
       "package": "tzdata",
       "installedVersion": "2026e-0ubuntu0.26.04.1",
       "availableVersion": "2026f-0ubuntu0.26.04.1",
       "owner": "Orbit maintainers",
       "expiresOn": "2026-11-30",
       "trackingIssue": 1950,
-      "rationale": "Upstream has not yet rebuilt apache/tika:4.2.0-full with tzdata 2026f-0ubuntu0.26.04.1; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+      "rationale": "Upstream has not yet rebuilt apache/tika:4.2.0-2-full with tzdata 2026f-0ubuntu0.26.04.1; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
     },
     {
       "kind": "stale-package",
-      "image": "apache/tika:4.2.0-full",
+      "image": "apache/tika:4.2.0-2-full",
       "package": "python3-oauthlib",
       "installedVersion": "3.3.1-1build1",
       "availableVersion": "3.3.1-1ubuntu0.1",
       "owner": "Orbit maintainers",
       "expiresOn": "2026-11-30",
       "trackingIssue": 1950,
-      "rationale": "Upstream has not yet rebuilt apache/tika:4.2.0-full with python3-oauthlib 3.3.1-1ubuntu0.1; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+      "rationale": "Upstream has not yet rebuilt apache/tika:4.2.0-2-full with python3-oauthlib 3.3.1-1ubuntu0.1; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
     },
     {
       "kind": "stale-package",
@@ -872,8 +817,8 @@
     },
     {
       "name": "Apache Tika parser",
-      "tag": "apache/tika:4.2.0-full",
-      "reference": "apache/tika:4.2.0-full@sha256:22dc5d818413729955c73666f0630e75090b819e21c484ec0a549b2e5837cd02",
+      "tag": "apache/tika:4.2.0-2-full",
+      "reference": "apache/tika:4.2.0-2-full@sha256:22dc5d818413729955c73666f0630e75090b819e21c484ec0a549b2e5837cd02",
       "indexDigest": "sha256:12a6b0332f1c047dc80489f336ca39fb2332e1810e75cc84e7b07a9b502c1cb0",
       "platform": "linux/amd64",
       "locations": [
