@@ -521,9 +521,9 @@ variables:
 #
 # Split from the download below because `supply_chain_image` never runs a
 # local trivy binary at all -- it scans through `docker run` inside
-# scripts/ci/scan-image.sh, whose own trivy, run without `--skip-db-update`,
-# already downloads into whatever TRIVY_CACHE_DIR points at when it finds no
-# current database there. Nothing here needs to invoke trivy a second time.
+# scripts/ci/scan-image.sh, which downloads into whatever TRIVY_CACHE_DIR
+# points at, in a step of its own, when it finds no database there. Nothing
+# here needs to invoke trivy a second time.
 .trivy_db_dir: &trivy_db_dir |
   trivy_db_dir="$CI_PROJECT_DIR/.trivy-db-cache/$(date -u +%Y-%m-%d)"
   if [ ! -d "$trivy_db_dir" ]; then
