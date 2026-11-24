@@ -564,8 +564,8 @@ const output = (result) => `${result.stdout}${result.stderr}`;
 // that must be the one that refused; the fixtures carry genuine signatures, so
 // the signature check cannot refuse in its place), and nothing under previous/.
 const expectLoudFailure = ({ result, previousFiles, hasPrevious }, cause) => {
-  expect(result.status).not.toBe(0);
-  expect(result.status).not.toBeNull();
+  expect(result.status, result.stderr + result.stdout).not.toBe(0);
+  expect(result.status, result.stderr + result.stdout).not.toBeNull();
   expect(output(result)).toMatch(cause);
   expect(hasPrevious()).toBe(false);
   expect(previousFiles()).toEqual([]);
@@ -573,8 +573,8 @@ const expectLoudFailure = ({ result, previousFiles, hasPrevious }, cause) => {
 // --prepare is what failed (so the job stops before the push), cleanly: no
 // previous/, no staging directory, no header file left behind, no token printed.
 const expectPrepareFailure = (r, cause) => {
-  expect(r.prepare.status).not.toBe(0);
-  expect(r.prepare.status).not.toBeNull();
+  expect(r.prepare.status, r.prepare.stderr + r.prepare.stdout).not.toBe(0);
+  expect(r.prepare.status, r.prepare.stderr + r.prepare.stdout).not.toBeNull();
   expect(r.final).toBeNull();
   expectLoudFailure(r, cause);
   expect(r.supplyChainEntries()).toEqual([]);
@@ -583,7 +583,7 @@ const expectPrepareFailure = (r, cause) => {
 };
 // A failure after the push, at the final call: nothing under previous/, token never printed.
 const expectFinalFailure = (r, cause) => {
-  expect(r.prepare.status).toBe(0);
+  expect(r.prepare.status, r.prepare.stderr + r.prepare.stdout).toBe(0);
   expect(r.final).not.toBeNull();
   expectLoudFailure(r, cause);
   expect(r.tmpEntries()).toEqual([]);
@@ -595,10 +595,10 @@ const FIRST_RELEASE = (ref = "main") => `no successful record_image job on ${ref
 // exits 0, nothing is fetched or verified, and previous/ is never created, even
 // by the final call (the job still has to pass).
 const expectFirstRelease = (r, ref = "main") => {
-  expect(r.prepare.status).toBe(0);
+  expect(r.prepare.status, r.prepare.stderr + r.prepare.stdout).toBe(0);
   expect(output(r.prepare)).toContain(FIRST_RELEASE(ref));
   expect(r.final).not.toBeNull();
-  expect(r.final.status).toBe(0);
+  expect(r.final.status, r.final.stderr + r.final.stdout).toBe(0);
   expect(r.hasPrevious()).toBe(false);
   expect(r.previousFiles()).toEqual([]);
   expect(r.requestedPaths().filter((path) => path.includes("/artifacts/"))).toEqual([]);
@@ -620,8 +620,8 @@ describe("carry-previous-release.sh", () => {
   it("normal case: --prepare then the digest saves the predecessor's manifest and signature byte-for-byte", () => {
     const own = pair(OLDER);
     const r = carry({ routes: world(own) });
-    expect(r.prepare.status).toBe(0);
-    expect(r.final.status).toBe(0);
+    expect(r.prepare.status, r.prepare.stderr + r.prepare.stdout).toBe(0);
+    expect(r.final.status, r.final.stderr + r.final.stdout).toBe(0);
     expect(r.previousFiles()).toEqual([MANIFEST, SIG].sort());
     expect(r.previous(MANIFEST).equals(Buffer.from(own.body))).toBe(true);
     expect(r.previous(SIG).equals(Buffer.from(own.sig))).toBe(true);
@@ -632,7 +632,7 @@ describe("carry-previous-release.sh", () => {
 
   it("looks the predecessor up by job: lists successful jobs on the ref, then lists that pipeline's jobs, and fetches the manifest from the record_image job, the signature from the same pipeline's sign_evidence job and the record_image job's own previous/ pair, all by job id, with the JOB-TOKEN header from a file, not argv", () => {
     const r = carry({ routes: world(pair(OLDER)) });
-    expect(r.result.status).toBe(0);
+    expect(r.result.status, r.result.stderr + r.result.stdout).toBe(0);
     const urls = r.listingUrls();
     expect(urls.length).toBeGreaterThanOrEqual(1);
     const first = new URL(urls[0]).searchParams;
@@ -659,7 +659,7 @@ describe("carry-previous-release.sh", () => {
 
   it("fetches the predecessor's manifest once: manifest and signature come from one build by job id, so there is no second download to compare", () => {
     const r = carry({ routes: world(pair(OLDER)) });
-    expect(r.result.status).toBe(0);
+    expect(r.result.status, r.result.stderr + r.result.stdout).toBe(0);
     expect(r.requestedPaths().filter((path) => path === artifactKey(REC, MANIFEST))).toHaveLength(1);
     expect(r.requestedPaths().filter((path) => path === artifactKey(SIGN, SIG))).toHaveLength(1);
   });
@@ -672,7 +672,7 @@ describe("carry-previous-release.sh", () => {
         jobs: [job(601, "record_image", { ref: "hotfix/y", pipeline: 7101 }), job(REC, "record_image", { ref: "hotfix/x", pipeline: PIPE })],
       }),
     });
-    expect(r.result.status).toBe(0);
+    expect(r.result.status, r.result.stderr + r.result.stdout).toBe(0);
     expect(r.previous(MANIFEST).equals(Buffer.from(own.body))).toBe(true);
     const urls = r.listingUrls();
     expect(urls.length).toBeGreaterThanOrEqual(1);
@@ -683,7 +683,7 @@ describe("carry-previous-release.sh", () => {
   it("a predecessor whose digest is not the published one is picked even when it carries a pair of its own", () => {
     const own = pair(OLDER);
     const r = carry({ routes: world(own, pair(THIRD)) }, CURRENT);
-    expect(r.result.status).toBe(0);
+    expect(r.result.status, r.result.stderr + r.result.stdout).toBe(0);
     expect(r.previous(MANIFEST).equals(Buffer.from(own.body))).toBe(true);
     expect(r.previous(SIG).equals(Buffer.from(own.sig))).toBe(true);
   });
@@ -692,7 +692,7 @@ describe("carry-previous-release.sh", () => {
     it("--prepare alone does the lookup, fetches and verifies the pair against cosign.pub, and saves nothing under previous/", () => {
       const own = pair(OLDER);
       const r = run({ routes: world(own) });
-      expect(r.result.status).toBe(0);
+      expect(r.result.status, r.result.stderr + r.result.stdout).toBe(0);
       expect(r.hasPrevious()).toBe(false);
       expect(r.previousFiles()).toEqual([]);
       expect(r.requestedPaths()).toContain(artifactKey(REC, MANIFEST));
@@ -713,8 +713,8 @@ describe("carry-previous-release.sh", () => {
     it("the digest call saves the pick in one rename: previous/ appears complete, with exactly the two files", () => {
       const own = pair(OLDER);
       const r = carry({ routes: world(own) });
-      expect(r.prepare.status).toBe(0);
-      expect(r.final.status).toBe(0);
+      expect(r.prepare.status, r.prepare.stderr + r.prepare.stdout).toBe(0);
+      expect(r.final.status, r.final.stderr + r.final.stdout).toBe(0);
       expect(r.previousFiles()).toEqual([MANIFEST, SIG].sort());
     });
   });
@@ -732,7 +732,7 @@ describe("carry-previous-release.sh", () => {
           ],
         }),
       });
-      expect(r.result.status).toBe(0);
+      expect(r.result.status, r.result.stderr + r.result.stdout).toBe(0);
       expect(r.previous(MANIFEST).equals(Buffer.from(own.body))).toBe(true);
       expect(r.previous(SIG).equals(Buffer.from(own.sig))).toBe(true);
       // Nothing was fetched from the newer pipeline.
@@ -747,7 +747,7 @@ describe("carry-previous-release.sh", () => {
           ...listing([job(701, "lint", { pipeline: 7201 }), job(702, "unit", { pipeline: 7201 })], [job(REC, "record_image", { pipeline: PIPE })]),
         },
       });
-      expect(r.result.status).toBe(0);
+      expect(r.result.status, r.result.stderr + r.result.stdout).toBe(0);
       expect(r.previous(MANIFEST).equals(Buffer.from(own.body))).toBe(true);
       const urls = r.listingUrls();
       expect(urls).toHaveLength(2);
@@ -765,7 +765,7 @@ describe("carry-previous-release.sh", () => {
           jobs: [job(601, "record_image", { pipeline: 7101 }), job(REC, "record_image", { pipeline: PIPE })],
         }),
       });
-      expect(r.result.status).toBe(0);
+      expect(r.result.status, r.result.stderr + r.result.stdout).toBe(0);
       expect(r.previous(MANIFEST).equals(Buffer.from(newer.body))).toBe(true);
       expect(r.requestedKeys().filter((key) => key.includes(`/jobs/${REC}/`) && !key.includes("/previous/"))).toEqual([]);
       expect(r.requestedKeys().filter((key) => key.includes(`/pipelines/${PIPE}/`))).toEqual([]);
@@ -778,7 +778,7 @@ describe("carry-previous-release.sh", () => {
           jobs: [job(601, "record_image", { ref: "other", pipeline: 7101 }), job(REC, "record_image", { pipeline: PIPE })],
         }),
       });
-      expect(r.result.status).toBe(0);
+      expect(r.result.status, r.result.stderr + r.result.stdout).toBe(0);
       expect(r.previous(MANIFEST).equals(Buffer.from(own.body))).toBe(true);
       expect(r.requestedKeys().filter((key) => key.includes("7101") || key.includes("/jobs/601/"))).toEqual([]);
     });
@@ -791,7 +791,7 @@ describe("carry-previous-release.sh", () => {
           jobs: [job(601, "record_image", { pipeline: 7101 }), job(REC, "record_image", { pipeline: PIPE })],
         }),
       });
-      expect(r.result.status).toBe(0);
+      expect(r.result.status, r.result.stderr + r.result.stdout).toBe(0);
       expect(r.previous(MANIFEST).equals(Buffer.from(own.body))).toBe(true);
       expect(r.requestedKeys().filter((key) => key.includes("7101") || key.includes("/jobs/601/"))).toEqual([]);
     });
@@ -918,7 +918,7 @@ describe("carry-previous-release.sh", () => {
 
     it("a 404 on the carried pair means that file is absent, not a failure of --prepare", () => {
       const r = run({ routes: world(pair(OLDER)) });
-      expect(r.result.status).toBe(0);
+      expect(r.result.status, r.result.stderr + r.result.stdout).toBe(0);
       expect(r.hasPrevious()).toBe(false);
     });
   });
@@ -928,7 +928,7 @@ describe("carry-previous-release.sh", () => {
       const carried = pair(OLDER);
       const own = pair(CURRENT);
       const r = carry({ routes: world(own, carried) }, CURRENT);
-      expect(r.result.status).toBe(0);
+      expect(r.result.status, r.result.stderr + r.result.stdout).toBe(0);
       expect(r.previousFiles()).toEqual([MANIFEST, SIG].sort());
       expect(r.previous(MANIFEST).equals(Buffer.from(carried.body))).toBe(true);
       expect(r.previous(SIG).equals(Buffer.from(carried.sig))).toBe(true);
@@ -972,18 +972,18 @@ describe("carry-previous-release.sh", () => {
 
   it("never prints the job token, on success or on failure", () => {
     const ok = carry({ routes: world(pair(OLDER)) });
-    expect(ok.result.status).toBe(0);
+    expect(ok.result.status, ok.result.stderr + ok.result.stdout).toBe(0);
     expectNoToken(ok.prepare);
     expectNoToken(ok.final);
     const failed = carry({ routes: { ...world(pair(OLDER)), [listingKey(1)]: { status: 401, body: '{"message":"401 Unauthorized"}' } } });
-    expect(failed.result.status).not.toBe(0);
+    expect(failed.result.status, failed.result.stderr + failed.result.stdout).not.toBe(0);
     expectNoToken(failed.result);
     expectTokenOnlyInHeaderFile(failed);
   });
 
   it("without arguments exits 2 with a usage message on stderr and fetches nothing", () => {
     const r = run({ args: [] });
-    expect(r.result.status).toBe(2);
+    expect(r.result.status, r.result.stderr + r.result.stdout).toBe(2);
     expect(r.result.stderr.toLowerCase()).toContain("usage");
     expect(r.calls()).toEqual([]);
     expect(r.previousFiles()).toEqual([]);
@@ -991,7 +991,7 @@ describe("carry-previous-release.sh", () => {
 
   it("with an empty digest argument exits 2 with a usage message on stderr", () => {
     const r = run({ args: [""] });
-    expect(r.result.status).toBe(2);
+    expect(r.result.status, r.result.stderr + r.result.stdout).toBe(2);
     expect(r.result.stderr.toLowerCase()).toContain("usage");
     expect(r.calls()).toEqual([]);
   });
@@ -1016,7 +1016,7 @@ describe("carry-previous-release.sh", () => {
     it("(b) the verifier accepts: the pair is saved byte-for-byte, and the verifier saw exactly that pair", () => {
       const { body, sig } = pair(OLDER);
       const r = carry({ routes: world({ body, sig }) });
-      expect(r.result.status).toBe(0);
+      expect(r.result.status, r.result.stderr + r.result.stdout).toBe(0);
         expect(r.previousFiles()).toEqual([MANIFEST, SIG].sort());
       expect(r.previous(MANIFEST).equals(Buffer.from(body))).toBe(true);
       expect(r.previous(SIG).equals(Buffer.from(sig))).toBe(true);
@@ -1037,7 +1037,7 @@ describe("carry-previous-release.sh", () => {
         env: { STUB_COSIGN_REJECT_MATCH: OLDER },
         routes: world(own, carried),
       });
-      expect(r.prepare.status).toBe(0);
+      expect(r.prepare.status, r.prepare.stderr + r.prepare.stdout).toBe(0);
       expect(r.verifications().some((v) => v.manifest.equals(Buffer.from(carried.body)))).toBe(true);
       expectFinalFailure(r, /does not verify/i);
     });
@@ -1046,7 +1046,7 @@ describe("carry-previous-release.sh", () => {
       const own = pair(CURRENT);
       const carried = pair(OLDER);
       const r = carry({ routes: world(own, carried) });
-      expect(r.result.status).toBe(0);
+      expect(r.result.status, r.result.stderr + r.result.stdout).toBe(0);
       expect(r.previousFiles()).toEqual([MANIFEST, SIG].sort());
       expect(r.previous(MANIFEST).equals(Buffer.from(carried.body))).toBe(true);
       expect(r.previous(SIG).equals(Buffer.from(carried.sig))).toBe(true);
@@ -1092,19 +1092,19 @@ describe("carry-previous-release.sh", () => {
         const older = pair(OLDER);
         const own = pair(CURRENT);
         const first = carry({ routes: world(older) });
-        expect(first.result.status).toBe(0);
+        expect(first.result.status, first.result.stderr + first.result.stdout).toBe(0);
         // The re-run: the newest successful record_image job now recorded CURRENT and carried what `first` saved.
         const rerun1 = carry({ routes: world(own, savedPair(first)) }, CURRENT);
         const rerun2 = carry({ routes: world(own, savedPair(first)) }, CURRENT);
         for (const r of [rerun1, rerun2]) {
-          expect(r.result.status).toBe(0);
+          expect(r.result.status, r.result.stderr + r.result.stdout).toBe(0);
           expect(r.previousFiles()).toEqual([MANIFEST, SIG].sort());
           expect(r.previous(MANIFEST).equals(Buffer.from(older.body))).toBe(true);
           expect(r.previous(SIG).equals(Buffer.from(older.sig))).toBe(true);
         }
         // The next build, a new digest, finds the re-run's own manifest, not nothing.
         const next = carry({ routes: world(own, savedPair(first)) }, THIRD);
-        expect(next.result.status).toBe(0);
+        expect(next.result.status, next.result.stderr + next.result.stdout).toBe(0);
         expect(next.previous(MANIFEST).equals(Buffer.from(own.body))).toBe(true);
         expect(next.previous(SIG).equals(Buffer.from(own.sig))).toBe(true);
       });
@@ -1118,7 +1118,7 @@ describe("carry-previous-release.sh", () => {
           expect(output(r.final)).toContain(CURRENT);
         }
         // Idempotent: the same inputs give the same refusal.
-        expect(second.final.status).toBe(first.final.status);
+        expect(second.final.status, second.final.stderr + second.final.stdout).toBe(first.final.status);
         expect(output(second.final)).toBe(output(first.final));
       });
     });
@@ -1144,13 +1144,13 @@ describe("carry-previous-release.sh", () => {
         const second = carry(options(), CURRENT);
         expectFinalFailure(first, MIX_CAUSE);
         expectFinalFailure(second, MIX_CAUSE);
-        expect(second.result.status).toBe(first.result.status);
+        expect(second.result.status, second.result.stderr + second.result.stdout).toBe(first.result.status);
         expect(output(second.final)).toBe(output(first.final));
       });
 
       it("whatever is saved is one build's manifest with that same build's signature", () => {
         const r = carry({ routes: world(pair(OLDER)) });
-        expect(r.result.status).toBe(0);
+        expect(r.result.status, r.result.stderr + r.result.stdout).toBe(0);
         // The saved signature verifies the saved manifest, with the real key.
         const sigFile = join(keyDir, "saved.sig");
         const manifestFile = join(keyDir, "saved.json");
@@ -1266,9 +1266,9 @@ describe("key rotation: retired public keys verify old builds (#1607 note 48548,
   it("a pair signed by a retired key in cosign-retired/ beside cosign.pub passes --prepare, the log names that file, and the pair is carried", () => {
     const own = pairSignedBy(RETIRED_KEY, OLDER);
     const r = carry({ routes: world(own), env: trustRoot([[RETIRED_NAME, RETIRED_KEY.publicKey]]) });
-    expect(r.prepare.status).toBe(0);
+    expect(r.prepare.status, r.prepare.stderr + r.prepare.stdout).toBe(0);
     expect(output(r.prepare)).toContain(RETIRED_NAME);
-    expect(r.final.status).toBe(0);
+    expect(r.final.status, r.final.stderr + r.final.stdout).toBe(0);
     expect(r.previous(MANIFEST).equals(Buffer.from(own.body))).toBe(true);
     expect(r.previous(SIG).equals(Buffer.from(own.sig))).toBe(true);
     expectNoToken(r.prepare);
@@ -1288,7 +1288,7 @@ describe("key rotation: retired public keys verify old builds (#1607 note 48548,
     it("a pair signed by cosign.pub passes and is carried", () => {
       const own = pair(OLDER);
       const r = carry({ routes: world(own), env: trustRoot([]) });
-      expect(r.result.status).toBe(0);
+      expect(r.result.status, r.result.stderr + r.result.stdout).toBe(0);
       expect(r.previous(MANIFEST).equals(Buffer.from(own.body))).toBe(true);
     });
 
@@ -1360,10 +1360,10 @@ describe("artifact expiry: records are retained, and a lost predecessor has a re
     ])("a matching line passes --prepare after %s: logs the acceptance, carries nothing, and the digest call saves nothing", (_failure, routes) => {
       const gap = ["# the break-glass entries", "", `main ${REC} ${REASON}`, ""].join("\n");
       const r = carry({ routes: routes(), gap });
-      expect(r.prepare.status).toBe(0);
+      expect(r.prepare.status, r.prepare.stderr + r.prepare.stdout).toBe(0);
       expect(output(r.prepare)).toContain(`gap accepted for record_image job ${REC} on main (${REASON})`);
       expect(r.final).not.toBeNull();
-      expect(r.final.status).toBe(0);
+      expect(r.final.status, r.final.stderr + r.final.stdout).toBe(0);
       expect(r.hasPrevious()).toBe(false);
       expect(r.previousFiles()).toEqual([]);
       expect(r.tmpEntries()).toEqual([]);
@@ -1428,8 +1428,8 @@ describe("sign_evidence still running: a bounded wait on an in-flight dependency
       [pipelineKey(PIPE)]: { sequence: [jsonBody(evidenceJobs(status)), jsonBody(evidenceJobs(status)), jsonBody(evidenceJobs("success"))] },
     };
     const r = carry({ routes, env: polling });
-    expect(r.prepare.status).toBe(0);
-    expect(r.final.status).toBe(0);
+    expect(r.prepare.status, r.prepare.stderr + r.prepare.stdout).toBe(0);
+    expect(r.final.status, r.final.stderr + r.final.stdout).toBe(0);
     expect(pipelineRequests(r)).toHaveLength(3);
     for (const url of pipelineRequests(r)) expect(new URL(url).searchParams.getAll("scope[]")).toEqual([]);
     expect(r.previous(MANIFEST).equals(Buffer.from(own.body))).toBe(true);
@@ -1445,7 +1445,7 @@ describe("sign_evidence still running: a bounded wait on an in-flight dependency
       [pipelineKey(PIPE)]: { sequence: [jsonBody(evidenceJobs("running")), jsonBody(evidenceJobs("pending")), jsonBody(evidenceJobs("success"))] },
     };
     const r = carry({ routes, shims: { sleep: sleepShim }, env: { ORBIT_CARRY_POLL_SECONDS: "7", SLEEP_LOG: sleepLog } });
-    expect(r.prepare.status).toBe(0);
+    expect(r.prepare.status, r.prepare.stderr + r.prepare.stdout).toBe(0);
     expect(pipelineRequests(r)).toHaveLength(3);
     expect(readFileSync(sleepLog, "utf8").trim().split("\n")).toEqual(["7", "7"]);
     rmSync(join(sleepLog, ".."), { recursive: true, force: true });
@@ -1467,7 +1467,7 @@ describe("sign_evidence still running: a bounded wait on an in-flight dependency
   it.each(["failed", "canceled", "skipped"])("a sign_evidence that is %s is not waited for: --prepare passes at once, and never says to retry or that it is still running", (status) => {
     const routes = { ...world(pair(OLDER)), [pipelineKey(PIPE)]: jsonBody(evidenceJobs(status)) };
     const r = carry({ routes, env: polling });
-    expect(r.prepare.status).toBe(0);
+    expect(r.prepare.status, r.prepare.stderr + r.prepare.stdout).toBe(0);
     expect(output(r.prepare)).not.toMatch(/still running/i);
     expect(output(r.prepare)).not.toMatch(/retry its sign_evidence job/i);
     expect(pipelineRequests(r)).toHaveLength(1);
@@ -1483,7 +1483,7 @@ describe("--max-filesize on every curl call (#1607 note 48548, Lows)", () => {
 
   it("every curl call of a full rebuild carry (listings, manifest, signature, carried pair) passes a positive --max-filesize", () => {
     const r = carry({ routes: world(pair(CURRENT), pair(OLDER)) }, CURRENT);
-    expect(r.result.status).toBe(0);
+    expect(r.result.status, r.result.stderr + r.result.stdout).toBe(0);
     expect(r.calls().length).toBeGreaterThanOrEqual(6);
     for (const argv of r.calls()) {
       const limit = limitOf(argv);
@@ -1539,9 +1539,9 @@ describe("a gap line excuses only the predecessor's own pair (#1607 note 48718, 
     const own = pair(CURRENT);
     // Not a rebuild: the published digest is a new one, so the predecessor's own pair is the pick.
     const r = carry({ ...options(), gap }, THIRD);
-    expect(r.prepare.status).toBe(0);
+    expect(r.prepare.status, r.prepare.stderr + r.prepare.stdout).toBe(0);
     expect(output(r.prepare)).not.toMatch(ACCEPTED);
-    expect(r.final.status).toBe(0);
+    expect(r.final.status, r.final.stderr + r.final.stdout).toBe(0);
     expect(output(r.final)).not.toMatch(ACCEPTED);
     expect(savedPair(r)).toEqual(own);
     // The predecessor's own pair verified, and so was the carried one (whose verdict is what was recorded).
@@ -1558,9 +1558,9 @@ describe("a verifier rejection is told apart from a tooling failure (#1607 note 
 
   it("a verifier that rejects the signature, with a matching gap line, is excused: a first release, nothing carried", () => {
     const r = carry({ routes: world(pair(OLDER)), env: { STUB_COSIGN_REJECT: "1" }, gap });
-    expect(r.prepare.status).toBe(0);
+    expect(r.prepare.status, r.prepare.stderr + r.prepare.stdout).toBe(0);
     expect(output(r.prepare)).toMatch(ACCEPTED);
-    expect(r.final.status).toBe(0);
+    expect(r.final.status, r.final.stderr + r.final.stdout).toBe(0);
     expect(r.hasPrevious()).toBe(false);
     expect(r.verifications().length).toBeGreaterThanOrEqual(1);
   });
@@ -1637,8 +1637,8 @@ describe("a chunked answer is bounded by the bytes read (#1607 note 48718, Low 3
     expect(Buffer.byteLength(own.body)).toBe(LIMIT);
     const routes = { ...world(own), [artifactKey(REC, MANIFEST)]: chunked(own.body) };
     const r = carry({ routes });
-    expect(r.prepare.status).toBe(0);
-    expect(r.final.status).toBe(0);
+    expect(r.prepare.status, r.prepare.stderr + r.prepare.stdout).toBe(0);
+    expect(r.final.status, r.final.stderr + r.final.stdout).toBe(0);
     expect(r.previous(MANIFEST).equals(Buffer.from(own.body))).toBe(true);
     expect(r.previous(SIG).equals(Buffer.from(own.sig))).toBe(true);
   });
@@ -1681,8 +1681,8 @@ describe("ORBIT_CARRY_POLL_SECONDS is capped at 60 and must be a number (#1607 n
   it.each(["0", "60"])("%s is within the cap and carries normally", (value) => {
     const own = pair(OLDER);
     const r = carry({ routes: world(own), env: { ORBIT_CARRY_POLL_SECONDS: value } });
-    expect(r.prepare.status).toBe(0);
-    expect(r.final.status).toBe(0);
+    expect(r.prepare.status, r.prepare.stderr + r.prepare.stdout).toBe(0);
+    expect(r.final.status, r.final.stderr + r.final.stdout).toBe(0);
     expect(r.previous(MANIFEST).equals(Buffer.from(own.body))).toBe(true);
   });
 });
@@ -1748,8 +1748,8 @@ describe("the carry retries in the script with a fresh buffer each attempt (#160
   const good = (key) => fullWorld[key];
   // The carry went through with the clean answers: both pairs were verified as served, the predecessor's is saved byte for byte.
   const expectCleanCarry = (r) => {
-    expect(r.prepare.status).toBe(0);
-    expect(r.final.status).toBe(0);
+    expect(r.prepare.status, r.prepare.stderr + r.prepare.stdout).toBe(0);
+    expect(r.final.status, r.final.stderr + r.final.stdout).toBe(0);
     expect(r.previous(MANIFEST).equals(Buffer.from(own.body))).toBe(true);
     expect(r.previous(SIG).equals(Buffer.from(own.sig))).toBe(true);
     const verified = r.verifications();
@@ -1852,8 +1852,8 @@ describe("the carry retries in the script with a fresh buffer each attempt (#160
       const r = carry({ routes: sequence(key, { status: 404, body: '{"message":"404 Not Found"}' }, good(key)), env: retrying });
       // The carried signature exists with no carried manifest: a half pair, which is a verdict on the carried pair (#1607 note 48805,
       // item 1) and no longer fails --prepare, after exactly one call for the manifest.
-      expect(r.prepare.status).toBe(0);
-      expect(r.final.status).toBe(0);
+      expect(r.prepare.status, r.prepare.stderr + r.prepare.stdout).toBe(0);
+      expect(r.final.status, r.final.stderr + r.final.stdout).toBe(0);
       expect(r.routeCalls(key)).toBe(1);
     });
 
@@ -1915,14 +1915,14 @@ describe("the carry retries in the script with a fresh buffer each attempt (#160
 
     it("one retry waits the number of seconds set (1): the second attempt is not made at once", () => {
       const { result, sleeps, calls } = timedPrepare([busy(), "good"], "1");
-      expect(result.status).toBe(0);
+      expect(result.status, result.stderr + result.stdout).toBe(0);
       expect(calls).toBe(2);
       expect(sleeps).toEqual(["1"]);
     });
 
     it("two retries wait twice, between each pair of attempts and not after the last", () => {
       const { result, sleeps, calls } = timedPrepare([busy(), busy(), "good"], "1");
-      expect(result.status).toBe(0);
+      expect(result.status, result.stderr + result.stdout).toBe(0);
       expect(calls).toBe(3);
       expect(sleeps).toEqual(["1", "1"]);
     });
@@ -1942,8 +1942,8 @@ describe("the carry retries in the script with a fresh buffer each attempt (#160
 
     it.each(["0", "2", "30"])("%s is within the cap and carries normally", (value) => {
       const r = carry({ routes: world(own), env: { ORBIT_CARRY_RETRY_SECONDS: value } });
-      expect(r.prepare.status).toBe(0);
-      expect(r.final.status).toBe(0);
+      expect(r.prepare.status, r.prepare.stderr + r.prepare.stdout).toBe(0);
+      expect(r.final.status, r.final.stderr + r.final.stdout).toBe(0);
       expect(r.previous(MANIFEST).equals(Buffer.from(own.body))).toBe(true);
     });
   });
@@ -2055,7 +2055,8 @@ describe("the carried pair is judged at the point of use (#1607 note 48805, item
   ];
   const verdictAfterPrepare = (options) => {
     const session = start(options);
-    expect(session.invoke(["--prepare"]).status).toBe(0);
+    const prepared = session.invoke(["--prepare"]);
+    expect(prepared.status, prepared.stderr + prepared.stdout).toBe(0);
     return readFileSync(VERDICT_FILE(session.work), "utf8").trim();
   };
 
@@ -2063,10 +2064,10 @@ describe("the carried pair is judged at the point of use (#1607 note 48805, item
     it("passes --prepare, records that verdict in the stage, and a normal digest saves the predecessor's own pair byte-for-byte", () => {
       const own = pair(CURRENT);
       const r = carry(options(), THIRD);
-      expect(r.prepare.status).toBe(0);
+      expect(r.prepare.status, r.prepare.stderr + r.prepare.stdout).toBe(0);
       expect(output(r.prepare)).not.toMatch(/gap accepted/i);
       expect(output(r.prepare)).not.toMatch(/FAILED/);
-      expect(r.final.status).toBe(0);
+      expect(r.final.status, r.final.stderr + r.final.stdout).toBe(0);
       expect(r.previousFiles()).toEqual([MANIFEST, SIG].sort());
       expect(savedPair(r)).toEqual(own);
       expect(r.tmpEntries()).toEqual([]);
@@ -2085,7 +2086,7 @@ describe("the carried pair is judged at the point of use (#1607 note 48805, item
 
     it("a rebuild picks the carried pair: the digest call fails naming the verdict and 'push a new commit; a retry of this commit cannot carry', saving nothing", () => {
       const r = carry(options(), CURRENT);
-      expect(r.prepare.status).toBe(0);
+      expect(r.prepare.status, r.prepare.stderr + r.prepare.stdout).toBe(0);
       expectFinalFailure(r, cause);
       expect(output(r.final)).toContain(PUSH_NEW_COMMIT);
     });
@@ -2093,12 +2094,12 @@ describe("the carried pair is judged at the point of use (#1607 note 48805, item
     it("a matching gap line changes neither: --prepare passes with no gap logged, a normal digest saves the predecessor's pair, a rebuild fails the same way", () => {
       const gap = `main ${REC} ${GAP_REASON}\n`;
       const normal = carry({ ...options(), gap }, THIRD);
-      expect(normal.prepare.status).toBe(0);
+      expect(normal.prepare.status, normal.prepare.stderr + normal.prepare.stdout).toBe(0);
       expect(output(normal.prepare)).not.toMatch(/gap accepted/i);
-      expect(normal.final.status).toBe(0);
+      expect(normal.final.status, normal.final.stderr + normal.final.stdout).toBe(0);
       expect(savedPair(normal)).toEqual(pair(CURRENT));
       const rebuild = carry({ ...options(), gap }, CURRENT);
-      expect(rebuild.prepare.status).toBe(0);
+      expect(rebuild.prepare.status, rebuild.prepare.stderr + rebuild.prepare.stdout).toBe(0);
       expect(output(rebuild.prepare)).not.toMatch(/gap accepted/i);
       expectFinalFailure(rebuild, cause);
       expect(output(rebuild.final)).toContain(PUSH_NEW_COMMIT);
@@ -2109,15 +2110,16 @@ describe("the carried pair is judged at the point of use (#1607 note 48805, item
     const carried = pair(OLDER);
     expect(verdictAfterPrepare({ routes: world(pair(CURRENT), carried) })).toBe("ok");
     const r = carry({ routes: world(pair(CURRENT), carried) }, CURRENT);
-    expect(r.final.status).toBe(0);
+    expect(r.final.status, r.final.stderr + r.final.stdout).toBe(0);
     expect(savedPair(r)).toEqual(carried);
   });
 
   it("the verdict is read only when the carried pair is picked: a rebuild of a bad pair does not fail a normal digest of the same stage", () => {
     const session = start({ env: { STUB_COSIGN_REJECT_MATCH: OLDER }, routes: world(pair(CURRENT), pair(OLDER)) });
-    expect(session.invoke(["--prepare"]).status).toBe(0);
+    const prepared = session.invoke(["--prepare"]);
+    expect(prepared.status, prepared.stderr + prepared.stdout).toBe(0);
     const normal = session.invoke([THIRD]);
-    expect(normal.status).toBe(0);
+    expect(normal.status, normal.stderr + normal.stdout).toBe(0);
     expect(session.previous(MANIFEST).equals(Buffer.from(pair(CURRENT).body))).toBe(true);
   });
 
@@ -2158,9 +2160,9 @@ describe("a build whose signing finally failed is not a release: the carry skips
   it.each(FINAL_FAILURES)("sign_evidence %s with a carried pair: the carry logs the line and ships job REC's own previous/ pair byte-for-byte as the predecessor pair", (status) => {
     const carried = pair(OLDER);
     const r = carry({ routes: unsigned(status, carried), env: polling }, CURRENT);
-    expect(r.prepare.status).toBe(0);
+    expect(r.prepare.status, r.prepare.stderr + r.prepare.stdout).toBe(0);
     expect(output(r.prepare)).toContain(NEVER_SIGNED(status));
-    expect(r.final.status).toBe(0);
+    expect(r.final.status, r.final.stderr + r.final.stdout).toBe(0);
     expect(r.previousFiles()).toEqual([MANIFEST, SIG].sort());
     expect(r.previous(MANIFEST).equals(Buffer.from(carried.body))).toBe(true);
     expect(r.previous(SIG).equals(Buffer.from(carried.sig))).toBe(true);
@@ -2183,11 +2185,11 @@ describe("a build whose signing finally failed is not a release: the carry skips
 
   it.each(FINAL_FAILURES)("sign_evidence %s and job REC has no previous/ pair: nothing before it was ever signed, so a first release, logged as such, nothing saved", (status) => {
     const r = carry({ routes: unsigned(status, undefined), env: polling }, CURRENT);
-    expect(r.prepare.status).toBe(0);
+    expect(r.prepare.status, r.prepare.stderr + r.prepare.stdout).toBe(0);
     expect(output(r.prepare)).toContain(NEVER_SIGNED(status));
     expect(output(r.prepare)).toMatch(/first release, nothing carried/);
     expect(r.final).not.toBeNull();
-    expect(r.final.status).toBe(0);
+    expect(r.final.status, r.final.stderr + r.final.stdout).toBe(0);
     expect(r.hasPrevious()).toBe(false);
     expect(r.previousFiles()).toEqual([]);
     expect(r.verifications()).toEqual([]);
@@ -2204,9 +2206,9 @@ describe("a build whose signing finally failed is not a release: the carry skips
     };
     const r = carry({ routes, env: polling }, CURRENT);
     expect(pipelineRequests(r)).toHaveLength(3);
-    expect(r.prepare.status).toBe(0);
+    expect(r.prepare.status, r.prepare.stderr + r.prepare.stdout).toBe(0);
     expect(output(r.prepare)).toContain(NEVER_SIGNED("failed"));
-    expect(r.final.status).toBe(0);
+    expect(r.final.status, r.final.stderr + r.final.stdout).toBe(0);
     expect(savedPair(r)).toEqual(carried);
   });
 
@@ -2224,9 +2226,9 @@ describe("a build whose signing finally failed is not a release: the carry skips
       [pipelineKey(PIPE)]: jsonBody(evidenceJobs([SIGN, "failed"], [SIGN + 10, "success"])),
     };
     const r = carry({ routes, env: polling }, CURRENT);
-    expect(r.prepare.status).toBe(0);
+    expect(r.prepare.status, r.prepare.stderr + r.prepare.stdout).toBe(0);
     expect(output(r.prepare)).not.toContain("was never signed");
-    expect(r.final.status).toBe(0);
+    expect(r.final.status, r.final.stderr + r.final.stdout).toBe(0);
     expect(savedPair(r)).toEqual(own);
   });
 
@@ -2249,9 +2251,9 @@ describe("a build whose signing finally failed is not a release: the carry skips
     const unexcused = carry(options, CURRENT);
     expectPrepareFailure(unexcused, /does not verify/i);
     const r = carry({ ...options, gap: `main ${REC} ${GAP_REASON}\n` }, CURRENT);
-    expect(r.prepare.status).toBe(0);
+    expect(r.prepare.status, r.prepare.stderr + r.prepare.stdout).toBe(0);
     expect(output(r.prepare)).toContain(`gap accepted for record_image job ${REC} on main (${GAP_REASON})`);
-    expect(r.final.status).toBe(0);
+    expect(r.final.status, r.final.stderr + r.final.stdout).toBe(0);
     expect(r.hasPrevious()).toBe(false);
     expect(r.tmpEntries()).toEqual([]);
   });
@@ -2329,8 +2331,8 @@ describe("the end of a list is cross-checked, never taken on trust (#1607 note 4
       ...listing([job(701, "lint", { pipeline: 7201 })], [job(702, "unit", { pipeline: 7201 })], [job(REC, "record_image", { pipeline: PIPE })]),
     };
     const r = carry({ routes });
-    expect(r.prepare.status).toBe(0);
-    expect(r.final.status).toBe(0);
+    expect(r.prepare.status, r.prepare.stderr + r.prepare.stdout).toBe(0);
+    expect(r.final.status, r.final.stderr + r.final.stdout).toBe(0);
     expect(r.listingUrls()).toHaveLength(3);
     expect(savedPair(r)).toEqual(own);
   });
@@ -2489,7 +2491,7 @@ describe("a never-signed job whose own artifacts are gone is not a first release
         { routes: gone(status), env: polling, gap: GAP },
         CURRENT,
       );
-      expect(r.prepare.status).toBe(0);
+      expect(r.prepare.status, r.prepare.stderr + r.prepare.stdout).toBe(0);
       expect(output(r.prepare)).toContain(
         `gap accepted for record_image job ${REC} on main (${GAP_REASON})`,
       );
@@ -2497,7 +2499,7 @@ describe("a never-signed job whose own artifacts are gone is not a first release
         "nothing before it was ever signed",
       );
       expect(r.final).not.toBeNull();
-      expect(r.final.status).toBe(0);
+      expect(r.final.status, r.final.stderr + r.final.stdout).toBe(0);
       expect(r.hasPrevious()).toBe(false);
       expect(r.verifications()).toEqual([]);
       expect(r.tmpEntries()).toEqual([]);
@@ -2521,13 +2523,13 @@ describe("a never-signed job whose own artifacts are gone is not a first release
       { routes: unsigned("failed", undefined), env: polling },
       CURRENT,
     );
-    expect(r.prepare.status).toBe(0);
+    expect(r.prepare.status, r.prepare.stderr + r.prepare.stdout).toBe(0);
     expect(output(r.prepare)).toMatch(
       /nothing before it was ever signed: first release, nothing carried/,
     );
     expect(r.routeCalls(artifactKey(REC, MANIFEST))).toBeGreaterThanOrEqual(1);
     expect(r.final).not.toBeNull();
-    expect(r.final.status).toBe(0);
+    expect(r.final.status, r.final.stderr + r.final.stdout).toBe(0);
     expect(r.hasPrevious()).toBe(false);
     expect(r.verifications()).toEqual([]);
     expect(r.tmpEntries()).toEqual([]);
@@ -2563,7 +2565,7 @@ describe("a never-signed job whose own artifacts are gone is not a first release
         `gap accepted for record_image job ${REC} on main (${GAP_REASON})`,
       );
       expect(excused.final).not.toBeNull();
-      expect(excused.final.status).toBe(0);
+      expect(excused.final.status, excused.final.stderr + excused.final.stdout).toBe(0);
       expect(excused.hasPrevious()).toBe(false);
       expect(excused.tmpEntries()).toEqual([]);
     }
@@ -2576,7 +2578,8 @@ describe("a carried pair with no recorded verdict fails closed at the digest cal
   // --prepare of a build whose predecessor (CURRENT) carried a good pair, then the verdict file removed from the stage.
   const stagedWithoutVerdict = () => {
     const session = start({ routes: world(pair(CURRENT), pair(OLDER)) });
-    expect(session.invoke(["--prepare"]).status).toBe(0);
+    const prepared = session.invoke(["--prepare"]);
+    expect(prepared.status, prepared.stderr + prepared.stdout).toBe(0);
     expect(existsSync(VERDICT_FILE(session.work))).toBe(true);
     expect(existsSync(join(stageDir(session.work), "carried", MANIFEST))).toBe(
       true,
@@ -2600,7 +2603,7 @@ describe("a carried pair with no recorded verdict fails closed at the digest cal
   it("a normal digest of the same stage is not a rebuild: it still saves the predecessor's own pair", () => {
     const session = stagedWithoutVerdict();
     const normal = session.invoke([THIRD]);
-    expect(normal.status).toBe(0);
+    expect(normal.status, normal.stderr + normal.stdout).toBe(0);
     expect(
       session.previous(MANIFEST).equals(Buffer.from(pair(CURRENT).body)),
     ).toBe(true);
@@ -2849,9 +2852,9 @@ describe("the launcher archives are carried beside the manifest pair, both or ne
 
   // Both archives carried: previous/ holds the pair `saved` and the archives `archives`, byte-for-byte, after the digest call.
   const expectCarried = (r, saved, archives) => {
-    expect(r.prepare.status).toBe(0);
+    expect(r.prepare.status, r.prepare.stderr + r.prepare.stdout).toBe(0);
     expect(r.final).not.toBeNull();
-    expect(r.final.status).toBe(0);
+    expect(r.final.status, r.final.stderr + r.final.stdout).toBe(0);
     expect(r.previousFiles()).toEqual([MANIFEST, SIG, AMD64, ARM64].sort());
     expect(savedPair(r)).toEqual(saved);
     for (const name of ARCHIVES) expect(r.previous(name).equals(archives[name]), name).toBe(true);
@@ -2863,9 +2866,9 @@ describe("the launcher archives are carried beside the manifest pair, both or ne
   // Neither carried, and the job passes: previous/ holds the pair `saved` alone, and --prepare said why on stderr
   // in the given line, once, its cause matching each of `cause` (the archive it names, and which case it was).
   const expectNotCarried = (r, saved, cause) => {
-    expect(r.prepare.status).toBe(0);
+    expect(r.prepare.status, r.prepare.stderr + r.prepare.stdout).toBe(0);
     expect(r.final).not.toBeNull();
-    expect(r.final.status).toBe(0);
+    expect(r.final.status, r.final.stderr + r.final.stdout).toBe(0);
     expect(r.previousFiles()).toEqual([MANIFEST, SIG].sort());
     expect(savedPair(r)).toEqual(saved);
     const causes = notCarrying(r.prepare.stderr);
@@ -2893,7 +2896,7 @@ describe("the launcher archives are carried beside the manifest pair, both or ne
     it("normal, --prepare alone: the archives are fetched but nothing is saved under previous/", () => {
       const { routes } = normal();
       const r = run({ routes });
-      expect(r.result.status).toBe(0);
+      expect(r.result.status, r.result.stderr + r.result.stdout).toBe(0);
       for (const name of ARCHIVES) expect(r.routeCalls(launcherKey(LAUNCHER, name)), name).toBe(1);
       expect(r.hasPrevious()).toBe(false);
     });
@@ -2981,8 +2984,8 @@ describe("the launcher archives are carried beside the manifest pair, both or ne
     it("rebuild: a 404 on a carried archive carries the carried pair alone, saying so", () => {
       const { carried, routes } = rebuild();
       const r = carry({ routes: without(routes, carriedArchiveKey(ARM64)) }, CURRENT);
-      expect(r.prepare.status).toBe(0);
-      expect(r.final.status).toBe(0);
+      expect(r.prepare.status, r.prepare.stderr + r.prepare.stdout).toBe(0);
+      expect(r.final.status, r.final.stderr + r.final.stdout).toBe(0);
       expect(r.previousFiles()).toEqual([MANIFEST, SIG].sort());
       expect(savedPair(r)).toEqual(carried);
       const causes = notCarrying(r.prepare.stderr);
@@ -3003,7 +3006,7 @@ describe("the launcher archives are carried beside the manifest pair, both or ne
     ])("%s: its archives are never fetched, while the predecessor's are", (_label, edit, env) => {
       const { routes } = rebuild();
       const r = run({ routes: edit(routes), env });
-      expect(r.result.status).toBe(0);
+      expect(r.result.status, r.result.stderr + r.result.stdout).toBe(0);
       for (const name of ARCHIVES) expect(r.routeCalls(carriedArchiveKey(name)), `previous/${name}`).toBe(0);
       for (const name of ARCHIVES) expect(r.routeCalls(launcherKey(LAUNCHER, name)), name).toBe(1);
       expect(r.hasPrevious()).toBe(false);
@@ -3019,7 +3022,7 @@ describe("the launcher archives are carried beside the manifest pair, both or ne
     ];
     const expectFailed = (r, cause) => {
       expectPrepareFailure(r, cause);
-      expect(r.prepare.status).toBe(1);
+      expect(r.prepare.status, r.prepare.stderr + r.prepare.stdout).toBe(1);
       expect(output(r.prepare)).toMatch(/FAILED/);
       expect(notCarrying(output(r.prepare))).toEqual([]);
     };
@@ -3097,7 +3100,7 @@ describe("the launcher archives are carried beside the manifest pair, both or ne
   it("the token is never in curl's argv nor in the log, on a carry that fetches all four archives", () => {
     const { routes } = rebuild();
     const r = carry({ routes }, CURRENT);
-    expect(r.result.status).toBe(0);
+    expect(r.result.status, r.result.stderr + r.result.stdout).toBe(0);
     const archiveUrls = r.requestedKeys().filter((key) => key.includes(".tar.gz"));
     expect(archiveUrls).toHaveLength(4);
     expectTokenOnlyInHeaderFile(r);
@@ -3146,7 +3149,7 @@ describe("scripts/ci/carry-previous-release.sh names the cause when its set-up f
     ["the supply-chain folder cannot be made", failing("mkdir", ".orbit-supply-chain")],
   ])("%s: the script's own FAILED line names it", (_label, shims) => {
     const r = carry({ routes: world(pair(OLDER)), shims });
-    expect(r.prepare.status).not.toBe(0);
+    expect(r.prepare.status, r.prepare.stderr + r.prepare.stdout).not.toBe(0);
     expect(output(r.prepare)).toMatch(/carry-previous-release: FAILED: /u);
   });
 });

@@ -4,7 +4,11 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "./process-budget.mjs";
+
+vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 const scriptsDir = dirname(fileURLToPath(import.meta.url));
 const script = join(scriptsDir, "check-base-image-current.sh");
@@ -105,7 +109,9 @@ function digest(seed) {
 }
 
 function runGit(cwd, args) {
-  const result = spawnSync("git", args, { cwd, encoding: "utf8" });
+  const result = failOnProcessDeadline(spawnSync("git", args, { cwd, encoding: "utf8", ...processGuard() }), {
+    label: `git ${args[0]}`,
+  });
   if (result.status !== 0) {
     throw new Error(`git ${args.join(" ")} in ${cwd} failed: ${result.stderr}`);
   }
@@ -188,10 +194,14 @@ function writeDockerfile({ firstReference, stages = 3000 }) {
 }
 
 function runCheck(dockerfile, env = stubDockerOnPath()) {
-  return spawnSync("bash", [script, dockerfile], {
-    encoding: "utf8",
-    env,
-  });
+  return failOnProcessDeadline(
+    spawnSync("bash", [script, dockerfile], {
+      encoding: "utf8",
+      env,
+      ...processGuard(),
+    }),
+    { label: "check-base-image-current.sh" },
+  );
 }
 
 describe("scripts/check-base-image-current.sh", () => {
@@ -279,7 +289,7 @@ describe("scripts/check-base-image-current.sh", () => {
 // roughly ten times the quiet-host time: a stuck git still fails promptly, a
 // busy host does not. The global default stays at 5s; only this block asks for
 // more.
-describe("scripts/check-base-image-current.sh -- moved tag vs. behind dev (#1027)", { timeout: 20_000 }, () => {
+describe("scripts/check-base-image-current.sh -- moved tag vs. behind dev (#1027)", () => {
   const pinnedTag = "ghcr.io/tomlawesome/orbit-base-image:latest";
 
   it("tells the reader to merge dev when dev already pins the tag's current digest", () => {
@@ -369,7 +379,7 @@ describe("scripts/check-base-image-current.sh -- moved tag vs. behind dev (#1027
 // #1483: the base image is published as a single image manifest, so there is no
 // linux/amd64 index entry; the gate must compare the manifest's own digest
 // rather than skip the moved-tag check.
-describe("scripts/check-base-image-current.sh -- single-manifest tag (#1483)", { timeout: 20_000 }, () => {
+describe("scripts/check-base-image-current.sh -- single-manifest tag (#1483)", () => {
   const pinnedTag = "ghcr.io/tomlawesome/orbit-base-image:latest";
 
   it("does not skip the moved-tag check for a single manifest", () => {
