@@ -96,8 +96,10 @@ export const POST = api(
       session = await createSession(hold.userId, config, event.request.headers.get("user-agent"));
     } catch (error) {
       if (error instanceof PasswordChangeRequiredError) {
-        /* A refusal re-marked the account between the save and the mint. */
-        const fresh = await issuePasswordChangeHold(event.cookies, error, config);
+        /* A refusal re-marked the account between the save and the mint.
+           The fresh hold keeps this one's lapse (#1943 SEC-H2): a re-issue
+           only ever shortens a hold, never extends it. */
+        const fresh = await issuePasswordChangeHold(event.cookies, error, config, hold.lapsesAt);
         return answer({ saved: true, state: "password_change_required", refusedAt: fresh.refusedAt });
       }
       /* Anything else: the password is saved, the reader signs in with it.

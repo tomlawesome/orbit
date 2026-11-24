@@ -64,13 +64,15 @@ afterEach(() => {
 });
 
 describe("POST /api/auth/local/login/pending session minting (#1151 SR1-R7)", () => {
+  const recordMint = async () => {};
+
   it("passes session creation as collectSignInApproval's own mint callback, not a separate call", async () => {
     mocks.collectSignInApproval.mockImplementation(async (_claim, mintSession) => {
       // Exercises the callback the same way the real, already-fixed
       // collectSignInApproval does, so this proves the route hands it one
       // that actually mints a session rather than calling createSession
       // itself afterward.
-      const session = await mintSession("u1");
+      const session = await mintSession("u1", recordMint);
       return { state: "approved", userId: "u1", session };
     });
     mocks.createSession.mockResolvedValue({ token: "new-token", expiresAt: new Date() });
@@ -83,7 +85,8 @@ describe("POST /api/auth/local/login/pending session minting (#1151 SR1-R7)", ()
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ state: "approved", authenticated: true });
     expect(mocks.collectSignInApproval).toHaveBeenCalledWith("the-claim", expect.any(Function));
-    expect(mocks.createSession).toHaveBeenCalledWith("u1", config, "test");
+    /* The spend's record of the mint rides in the session's own transaction (#1943 SEC-H1). */
+    expect(mocks.createSession).toHaveBeenCalledWith("u1", config, "test", { alsoInTransaction: recordMint });
     expect(mocks.setSessionCookie).toHaveBeenCalledWith(expect.anything(), "new-token", config);
   });
 
@@ -94,7 +97,7 @@ describe("POST /api/auth/local/login/pending session minting (#1151 SR1-R7)", ()
     // matters is that createSession is reached only through the callback,
     // so there is no second, uncoordinated call this revert cannot see.
     mocks.collectSignInApproval.mockImplementation(async (_claim, mintSession) => {
-      await mintSession("u1").catch(() => {});
+      await mintSession("u1", recordMint).catch(() => {});
       throw new Error("database unavailable");
     });
     mocks.createSession.mockRejectedValue(new Error("database unavailable"));
@@ -109,6 +112,6 @@ describe("POST /api/auth/local/login/pending session minting (#1151 SR1-R7)", ()
 
     expect(response.status).toBeGreaterThanOrEqual(500);
     expect(mocks.createSession).toHaveBeenCalledTimes(1);
-    expect(mocks.createSession).toHaveBeenCalledWith("u1", config, "test");
+    expect(mocks.createSession).toHaveBeenCalledWith("u1", config, "test", { alsoInTransaction: recordMint });
   });
 });
