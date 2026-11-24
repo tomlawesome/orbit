@@ -27,6 +27,7 @@ const API = `${APP}/api/households/hh-harlow-1`;
 const INVITED = "daniel.harlow@example.com";
 const REFUSAL = "Only the owner can do that.";
 const knock = { id: "jr-1", householdId: "hh-harlow-1", userId: "u-ben", displayName: "Ben Harlow", createdAt: "2026-08-11T09:00:00Z" };
+/** @param {string} email @param {string | null} sentAt */
 const invitationOf = (email, sentAt) => ({
   id: "inv-new", householdId: "hh-harlow-1", email, createdAt: "2026-08-13T12:00:00.000Z",
   sentAt, sendError: sentAt ? null : "bounced", expiresAt: "2026-09-18T12:00:00.000Z",
@@ -42,7 +43,7 @@ const invitationOf = (email, sentAt) => ({
 async function stage(page, { refuse = false, unsent = false, knocking = false, hold = false } = {}) {
   /** @type {{ method: string, path: string, body: any }[]} */
   const sent = [];
-  /** @type {() => void} */
+  /** @type {(value?: unknown) => void} */
   let release = () => {};
   const gate = new Promise((resolve) => { release = resolve; });
   /** @param {import("@playwright/test").Route} route @param {any} json */
