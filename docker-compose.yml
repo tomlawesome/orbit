@@ -85,7 +85,7 @@ services:
   # closed when it is unavailable, while the rest of the application stays up.
   orbit-clamav:
     container_name: orbit-clamav
-    image: clamav/clamav:1.5.5@sha256:ee429ed5760a4792cd9711db6902fa019d26f90a2714d2bfd92b717d21967e38
+    image: clamav/clamav:1.5.5@sha256:9b2f34be1f8be02f58edb1c8868dca99d6e04f8f8daf191f8448c762f563dde3
     restart: unless-stopped
     # The image starts freshclam and clamd side by side. On a volume that
     # already holds an older database, freshclam downloads the newer one while
@@ -183,7 +183,7 @@ services:
   # separate, deliberate step -- see the one-shot model pull helper below.
   orbit-ollama:
     container_name: orbit-ollama
-    image: ollama/ollama:0.40.17@sha256:5e5802d3c018ecdee7c7dff32a7e3b10ca9a2c4b3a461392cff97c313c2af0fc
+    image: ollama/ollama:0.40.18@sha256:4e0d5daa6c5cd91e27011977031466844c5ea4ba2393b35e78068835edec040b
     profiles: ["ai"]
     restart: unless-stopped
     environment:
@@ -242,7 +242,7 @@ services:
     # length of the download only, writes to the volume, and stops. Deliberately
     # no container_name, and restart "no": a one-shot `run` container must not
     # claim a name a long-lived service could want, nor come back by itself.
-    image: ollama/ollama:0.40.17@sha256:5e5802d3c018ecdee7c7dff32a7e3b10ca9a2c4b3a461392cff97c313c2af0fc
+    image: ollama/ollama:0.40.18@sha256:4e0d5daa6c5cd91e27011977031466844c5ea4ba2393b35e78068835edec040b
     profiles: ["ai-model-pull"]
     restart: "no"
     environment:
