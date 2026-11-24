@@ -634,6 +634,7 @@ timeout on this one case rather than a global raise.
 
 - 2026-11-23 · !1463 18e9f0ca · pipeline 5266 / fast (job 63120) · failed after 13 s on a loaded runner, with five other long shell-driven tests in the same run; the change touches none of it. First sighting.
 
-## scripts/repair-held-1915.test.mjs "#1915 O-R2: ... the owner's mv -fT lands and then stalls: reported done, .env-orbit is a regular file, the staged name is gone"
+## scripts/repair-held-1915.test.mjs: the O-R2 and O-S2 "lands and then stalls" tests (2 s owner-step limit)
 
 - 2026-11-24 · !1453 fa64d9d8b · pipeline 5319 / fast (job 64034) · `the owner's mv was never run` on a loaded runner: the test gives the owner step 2 s; the change only alters how names are printed in other repair.sh messages. Passed three times in a row locally on the same commit. First sighting.
+- 2026-11-24 · !1453 fffd1ee45 · pipeline 5323 / fast (job 64105) · the file's sibling test, "#1915 O-S2: discard_staging_root counts a timed-out rename that landed as done", failed the same way (`the owner's rename never ran`) in a 30-minute fast job on a loaded runner. Same 2 s step limit; the change touches neither code path. Second sighting of the file.
