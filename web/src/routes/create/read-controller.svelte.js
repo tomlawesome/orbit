@@ -115,12 +115,17 @@ export function createReadController(handlers, { readPicked = readPickedDocument
         refuse(outcome.why);
         return;
       }
-      /** @type {Carried[]} */
-      const carry = outcome.kind === "read" ? suggestionsToCarry(outcome.suggestions, valueOf) : [];
-      const caption = captionOf(outcome, carry.length);
-      safely(() => handlers.onRead?.({ outcome, carry, caption }));
-      readDone = true;
-      settle();
+      try {
+        /** @type {Carried[]} */
+        const carry = outcome.kind === "read" ? suggestionsToCarry(outcome.suggestions, valueOf) : [];
+        const caption = captionOf(outcome, carry.length);
+        safely(() => handlers.onRead?.({ outcome, carry, caption }));
+      } finally {
+        // As the drivers' old `.finally`: a field read that throws still
+        // settles an undrawn page.
+        readDone = true;
+        settle();
+      }
     });
 
     const done = Promise.allSettled([page, read]).then(() => undefined);
