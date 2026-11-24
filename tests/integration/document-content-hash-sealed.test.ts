@@ -953,3 +953,64 @@ describe("a KEK rewrap leaves every sealed hash readable (#1771)", () => {
     }
   });
 });
+
+/* #1943 A-R2: a damaged plain value is cleared only once its damage sighting
+   is durably written (record, then clear). Here the sighting write is made to
+   fail, by a trigger that refuses the insert for this one row, and the value
+   must still be there afterwards: nothing was recorded, so nothing may be
+   cleared. Written from the finding alone. */
+describe("the backfill never clears a damaged value whose sighting could not be written (#1943 A-R2)", () => {
+  it("a sighting insert that fails leaves the plain value in place", async () => {
+    const fixture = await createIntegrationFixture("sealed-backfill-clear-unrecorded");
+    await drainAll();
+    await getDb().delete(metadataDamageSightings);
+    resetMetadataDamageSightingsForTests();
+    const oddRow = `0${randomUUID().slice(1)}`;
+    await getDb().insert(documents).values({
+      id: oddRow, householdId: fixture.household.id, itemId: fixture.item.id, displayName: "odd-unrecorded.pdf", mediaType: "application/pdf",
+      sizeBytes: 10, contentSha256: "not-a-hash-1943", lifecycle: "available", scanStatus: "clean",
+    });
+    await getDb().execute(sql.raw(`
+      create or replace function orbit_test_refuse_sighting_1943() returns trigger language plpgsql as $$
+      begin
+        if new.row_id::text = '${oddRow}' then raise exception 'sighting write refused by the #1943 test'; end if;
+        return new;
+      end $$`));
+    await getDb().execute(sql.raw(`
+      create trigger orbit_test_refuse_sighting_1943 before insert on metadata_damage_sightings
+      for each row execute function orbit_test_refuse_sighting_1943()`));
+    try {
+      // Either shape of a fix is fine: the backfill may throw or skip the row; it must not clear it.
+      await backfillDocumentContentIndexes().catch(() => 0);
+      await flushMetadataDamageSightings();
+      const sightings = await getDb().select().from(metadataDamageSightings).where(eq(metadataDamageSightings.rowId, oddRow));
+      expect(sightings, "the trigger let the sighting through, so the test proves nothing").toHaveLength(0);
+      expect((await columnsOf(oddRow)).plain, "the damaged value was cleared with no sighting recorded").toBe("not-a-hash-1943");
+    } finally {
+      await getDb().execute(sql.raw("drop trigger if exists orbit_test_refuse_sighting_1943 on metadata_damage_sightings"));
+      await getDb().execute(sql.raw("drop function if exists orbit_test_refuse_sighting_1943()"));
+      resetMetadataDamageSightingsForTests();
+      await getDb().execute(sql`delete from documents where id = ${oddRow}`);
+    }
+  });
+
+  it("control: with the sighting written, the same value is recorded and cleared", async () => {
+    const fixture = await createIntegrationFixture("sealed-backfill-clear-recorded");
+    await drainAll();
+    await getDb().delete(metadataDamageSightings);
+    resetMetadataDamageSightingsForTests();
+    const oddRow = `0${randomUUID().slice(1)}`;
+    await getDb().insert(documents).values({
+      id: oddRow, householdId: fixture.household.id, itemId: fixture.item.id, displayName: "odd-recorded.pdf", mediaType: "application/pdf",
+      sizeBytes: 10, contentSha256: "not-a-hash-1943", lifecycle: "available", scanStatus: "clean",
+    });
+    try {
+      await backfillDocumentContentIndexes();
+      await flushMetadataDamageSightings();
+      expect(await getDb().select().from(metadataDamageSightings).where(eq(metadataDamageSightings.rowId, oddRow))).toHaveLength(1);
+      expect((await columnsOf(oddRow)).plain).toBeNull();
+    } finally {
+      await getDb().execute(sql`delete from documents where id = ${oddRow}`);
+    }
+  });
+});

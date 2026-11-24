@@ -85,7 +85,7 @@ services:
   # closed when it is unavailable, while the rest of the application stays up.
   orbit-clamav:
     container_name: orbit-clamav
-    image: clamav/clamav:1.5.5@sha256:ee429ed5760a4792cd9711db6902fa019d26f90a2714d2bfd92b717d21967e38
+    image: clamav/clamav:1.5.5@sha256:9b2f34be1f8be02f58edb1c8868dca99d6e04f8f8daf191f8448c762f563dde3
     restart: unless-stopped
     # The image starts freshclam and clamd side by side. On a volume that
     # already holds an older database, freshclam downloads the newer one while

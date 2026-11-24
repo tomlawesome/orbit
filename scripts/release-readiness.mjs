@@ -408,9 +408,31 @@ export function runWithLimit(command, args, options = {}) {
 /** Environment names a child script may see; everything else (tokens included) stays out. */
 const CHILD_ENV_NAMES = ["PATH", "HOME", "USER", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "TMPDIR", "XDG_RUNTIME_DIR", "DOCKER_CONFIG", "DOCKER_HOST", "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy", "BASE_REPIN_TARGET_BRANCH", "ORBIT_BASE_IMAGE_DEV_REMOTE", "ORBIT_MAX_EVIDENCE_AGE_DAYS", "COSIGN_PUBLIC_KEY", "ORBIT_COSIGN", "ORBIT_POLICY_VERSION", "SSH_AUTH_SOCK", "GIT_SSH_COMMAND"];
 
+/** The most git config pairs passed through; the pipeline sets one (safe.directory). */
+const MAX_GIT_CONFIG_PAIRS = 16;
+
+/**
+ * The git config the pipeline sets through the environment (`GIT_CONFIG_COUNT`
+ * with `GIT_CONFIG_KEY_<n>`/`GIT_CONFIG_VALUE_<n>`; .gitlab-ci.yml trusts the
+ * checkout with it). A child that runs git needs it, or git refuses a
+ * checkout an earlier job left owned by another user (#1951). A COUNT that is
+ * not a small non-negative integer passes nothing.
+ */
+function gitConfigEnv() {
+  const count = process.env.GIT_CONFIG_COUNT;
+  if (count === undefined || !/^(?:0|[1-9]\d?)$/u.test(count) || Number(count) > MAX_GIT_CONFIG_PAIRS) return {};
+  const env = { GIT_CONFIG_COUNT: count };
+  for (let n = 0; n < Number(count); n += 1) {
+    for (const name of [`GIT_CONFIG_KEY_${n}`, `GIT_CONFIG_VALUE_${n}`]) {
+      if (process.env[name] !== undefined) env[name] = process.env[name];
+    }
+  }
+  return env;
+}
+
 /** The allowlisted environment for a child script, plus any values the lookup sets itself. */
-function scriptEnv(extra = {}) {
-  const env = {};
+export function scriptEnv(extra = {}) {
+  const env = gitConfigEnv();
   for (const name of CHILD_ENV_NAMES) if (process.env[name] !== undefined) env[name] = process.env[name];
   return { ...env, ...extra };
 }
