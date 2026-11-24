@@ -333,6 +333,14 @@ describe("child script environment (R5)", () => {
     "PATH HOME USER LANG LC_ALL LC_CTYPE TZ TMPDIR XDG_RUNTIME_DIR DOCKER_CONFIG DOCKER_HOST SSL_CERT_FILE SSL_CERT_DIR NODE_EXTRA_CA_CERTS HTTP_PROXY HTTPS_PROXY NO_PROXY http_proxy https_proxy no_proxy BASE_REPIN_TARGET_BRANCH ORBIT_BASE_IMAGE_DEV_REMOTE ORBIT_MAX_EVIDENCE_AGE_DAYS COSIGN_PUBLIC_KEY ORBIT_COSIGN ORBIT_POLICY_VERSION SSH_AUTH_SOCK GIT_SSH_COMMAND".split(" "),
   );
   const SHELL_EXTRAS = new Set(["PWD", "SHLVL", "OLDPWD", "_"]);
+  const GIT_TRUST_PATH = "/fake/project/dir";
+  const GIT_COUNT = 1;
+  // GIT_CONFIG_COUNT, and the KEY/VALUE pair for each n < COUNT, only.
+  const isGitTrustName = (name) => {
+    if (name === "GIT_CONFIG_COUNT") return true;
+    const m = /^GIT_CONFIG_(?:KEY|VALUE)_(0|[1-9][0-9]*)$/u.exec(name);
+    return m !== null && Number(m[1]) < GIT_COUNT;
+  };
   const FORBIDDEN = ["ORBIT_REUSE_TOKEN", "GITLAB_TOKEN", "CI_JOB_TOKEN", "CI_COMMIT_SHA", "ORBIT_UNRELATED_SETTING"];
 
   beforeEach(() => {
@@ -342,6 +350,10 @@ describe("child script environment (R5)", () => {
     process.env.ORBIT_UNRELATED_SETTING = "fake-placeholder-value";
     process.env.TZ = "UTC";
     process.env.HTTPS_PROXY = "http://proxy.invalid:3128";
+    // The pipeline's git-trust shape (#1951): set explicitly so local and CI runs exercise the same thing.
+    process.env.GIT_CONFIG_COUNT = "1";
+    process.env.GIT_CONFIG_KEY_0 = "safe.directory";
+    process.env.GIT_CONFIG_VALUE_0 = GIT_TRUST_PATH;
   });
 
   const nodeStub = (dump, body = "") =>
@@ -353,12 +365,17 @@ describe("child script environment (R5)", () => {
     expect(names.has("PATH")).toBe(true);
     for (const name of FORBIDDEN) expect(names.has(name), `${name} reached the child`).toBe(false);
     for (const name of names) {
-      expect(ALLOWED.has(name) || SHELL_EXTRAS.has(name) || extraAllowed.includes(name), `${name} is not on the allowlist`).toBe(true);
+      expect(ALLOWED.has(name) || SHELL_EXTRAS.has(name) || isGitTrustName(name) || extraAllowed.includes(name), `${name} is not on the allowlist`).toBe(true);
     }
     const text = readFileSync(dump, "utf8");
     expect(text).not.toContain(FAKE_TOKEN);
     expect(text).toContain("TZ=UTC");
     expect(text).toContain("HTTPS_PROXY=http://proxy.invalid:3128");
+    // the git trust must arrive, not merely be allowed
+    const lines = text.split("\n");
+    expect(lines).toContain(`GIT_CONFIG_COUNT=${GIT_COUNT}`);
+    expect(lines).toContain("GIT_CONFIG_KEY_0=safe.directory");
+    expect(lines).toContain(`GIT_CONFIG_VALUE_0=${GIT_TRUST_PATH}`);
   }
 
   function setup() {
