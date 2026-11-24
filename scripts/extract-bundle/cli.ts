@@ -72,8 +72,8 @@ const MEDIA_TYPES: Record<string, string> = {
   ".png": "image/png",
 };
 
-// O2-Q11 (#1151): the version number comes from tika-version.mjs, the one
-// place build.mjs also reads it from, so the two cannot drift apart. The
+// O2-Q11 (#1151): the image tag comes from tika-version.mjs, beside the
+// release number build.mjs reads, so neither can drift from the pin. The
 // image digest is still pinned here directly -- it is a property of that
 // specific build, not of the version number alone.
 const TIKA_IMAGE = `apache/tika:${TIKA_IMAGE_TAG}-full@sha256:22dc5d818413729955c73666f0630e75090b819e21c484ec0a549b2e5837cd02`;
