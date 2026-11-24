@@ -609,3 +609,27 @@ timeout on this one case rather than a global raise.
 ## scripts/repair-retire-privdrop-1848.test.mjs "owned by the folder's owner (the shim lies about nothing): not refused"
 
 - 2026-11-22 · !1457 batch-b 3d2a694c · pipeline for !1457 / fast (job 62291) · failed after 33 s on a loaded runner; the change touches none of it. First sighting.
+
+## scripts/install.bootstrap.test.mjs "prepares the processing profile's service and fails its bounded wait with a stable reason"
+
+- 2026-11-23 · !1463 18e9f0ca · pipeline 5266 / fast (job 63120) · failed after 60 s on a loaded runner, with five other long shell-driven tests in the same run; the change touches none of it. Both profile tests pass locally on the same commit in about 5 s each. First sighting.
+
+## scripts/install.bootstrap.test.mjs "prepares the ai profile's service and fails its bounded wait with a stable reason"
+
+- 2026-11-23 · !1463 18e9f0ca · pipeline 5266 / fast (job 63120) · failed after 31 s on a loaded runner, with five other long shell-driven tests in the same run; the change touches none of it. First sighting.
+
+## scripts/install.interrupts-journal.test.mjs "R6-10: an original cannot be put back and an engine entry cannot be removed: both lines, with the copy sentence"
+
+- 2026-11-23 · !1463 18e9f0ca · pipeline 5266 / fast (job 63120) · failed after 32 s on a loaded runner, with five other long shell-driven tests in the same run; the change touches none of it. First sighting.
+
+## scripts/install.interrupts-journal.test.mjs "B3: the person's top-level file is moved into <stamp>/moved, the folder put back, the copy released, and the output says where"
+
+- 2026-11-23 · !1463 18e9f0ca · pipeline 5266 / fast (job 63120) · failed after 32 s on a loaded runner, with five other long shell-driven tests in the same run; the change touches none of it. First sighting.
+
+## scripts/repair-retire-smtp-1817.test.mjs "test 5: a mkdir of the dated folder that fails as the folder's owner refuses with the backup message and leaves no backup"
+
+- 2026-11-23 · !1463 18e9f0ca · pipeline 5266 / fast (job 63120) · failed after 39 s on a loaded runner, with five other long shell-driven tests in the same run; the change touches none of it. First sighting.
+
+## scripts/install.update-retire-smtp.test.mjs "--install never touches an existing smtp-password either"
+
+- 2026-11-23 · !1463 18e9f0ca · pipeline 5266 / fast (job 63120) · failed after 13 s on a loaded runner, with five other long shell-driven tests in the same run; the change touches none of it. First sighting.
