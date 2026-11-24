@@ -1885,6 +1885,24 @@ supply_chain_source:
         --output .orbit-supply-chain/source-raw.json \
         .
       trivy version --format json > .orbit-supply-chain/trivy-version.json
+      # Misconfiguration scan of the Dockerfiles (root user, unpinned base,
+      # secrets in build args, no health check), report-only (#1592): it never
+      # changes this job's result, and its report is kept as an artifact so the
+      # noise can be read before it blocks. Its rule bundle comes through the
+      # image cache like the databases, not Trivy's mirror.gcr.io default.
+      misconfig_status=0
+      trivy config \
+        --checks-bundle-repository "$CI_IMAGE_CACHE_GHCR/aquasecurity/trivy-checks:2" \
+        --skip-dirs node_modules --skip-dirs web/node_modules \
+        --exit-code 0 \
+        --format json \
+        --output .orbit-supply-chain/misconfig.json \
+        . || misconfig_status=$?
+      if [ "$misconfig_status" -eq 0 ]; then
+        trivy convert --format table .orbit-supply-chain/misconfig.json || true
+      else
+        echo "supply_chain_source: the report-only misconfiguration scan did not complete (exit $misconfig_status); see above (#1592)"
+      fi
       set +e
       node scripts/supply-chain-policy.mjs source \
         --input .orbit-supply-chain/source-raw.json \
@@ -1898,6 +1916,7 @@ supply_chain_source:
     paths:
       - .orbit-supply-chain/source-evidence.json
       - .orbit-supply-chain/trivy-version.json
+      - .orbit-supply-chain/misconfig.json
     expire_in: 7 days
     when: always
 
