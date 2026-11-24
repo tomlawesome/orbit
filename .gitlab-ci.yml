@@ -604,7 +604,7 @@ variables:
   #   ci             .gitlab-ci.yml, scripts/ci/, the classifier and the two
   #                  tests that read this file
   #                  -> fast, fast_checks, fast_docker, gitleaks, private-details,
-  #                     supply_chain_source
+  #                     supply_chain_source, code_scanners
   #   no_change      a proven comparison that found no changed path, such
   #                  as a back-merge (#1597)
   #                  -> gitleaks, licence_policy, private-details,
@@ -1831,6 +1831,9 @@ signing_image_age:
 # Blocking comes later, at a stated threshold, with an ignore file holding a
 # reason and an expiry for each false alarm. One job for all four, so one
 # light-lane slot (#1933). Reports: .orbit-code-scan/<tool>.json.
+# No `*system_lane_gate`, unlike `supply_chain_source`: what these tools read
+# is code and scripts, so an ordinary change to src/ or a script is exactly
+# what they must see, system risk or not. They take a minute or two.
 code_scanners:
   stage: policy
   tags: [light]
@@ -1853,14 +1856,16 @@ code_scanners:
     ORBIT_TOOL_CACHE: $CI_PROJECT_DIR/.orbit-tools
   # The downloads, kept between pipelines. Every run re-checks each cached
   # binary against its pinned hash, so a cache entry is never trusted as is.
+  # Saved whatever the job's result, so one failing tool does not make the
+  # other three download again on every run.
   cache:
     key: code-scanners-tools
     paths:
       - .orbit-tools/
+    when: always
   script:
     - *reach_helpers
     - orbit_lane_admits code_scanners || exit 0
-    - *system_lane_gate
     - |
       status=0
       for tool in shellcheck zizmor ruff opengrep; do
