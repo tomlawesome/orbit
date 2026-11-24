@@ -22,7 +22,6 @@ ruff="$(bash scripts/ci/ensure-ruff.sh)" || {
 
 out=".orbit-code-scan"
 mkdir -p "$out"
-printf '*\n' > "${out}/.gitignore"
 report="${out}/ruff.json"
 
 files=()

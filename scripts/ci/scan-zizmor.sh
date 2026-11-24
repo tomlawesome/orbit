@@ -3,8 +3,8 @@
 # Report-only zizmor scan of the GitHub workflows and actions (#1592, report
 # stage: owner decision, "report first, then block"). Exits 0 whatever zizmor
 # finds; exits non-zero only when the pinned tool cannot be installed and
-# verified (scripts/ci/ensure-zizmor.sh), so a missing or tampered tool is
-# never silent.
+# verified (scripts/ci/ensure-zizmor.sh) or fails to run at all, so a missing,
+# tampered or broken tool is never silent.
 #
 # Offline: no GitHub token is passed and --offline forbids network audits.
 # Report: .orbit-code-scan/zizmor.json (zizmor --format=json, v1). Run from
@@ -45,9 +45,9 @@ elapsed=$(($(date +%s) - start))
 printf 'scan-zizmor: zizmor exit %s, %s file(s), %ss, report %s (json v1)\n' \
   "$rc" "${#targets[@]}" "$elapsed" "$report"
 if [[ $rc -ne 0 ]]; then
-  printf 'scan-zizmor: zizmor failed to run (report-only, not failing the job):\n'
-  head -n 20 "${out_dir}/zizmor.stderr" || :
-  exit 0
+  printf 'scan-zizmor: zizmor failed to run (exit %s); failing. Findings never fail this scan, a broken run does:\n' "$rc" >&2
+  head -n 20 "${out_dir}/zizmor.stderr" >&2 || :
+  exit 1
 fi
 
 node -e '
