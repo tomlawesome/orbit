@@ -114,7 +114,7 @@ export const EXPECTED_TABLE_COLUMNS: Record<string, string[]> = {
   credential_setup_tokens: ["id", "user_id", "token_hash", "purpose", "expires_at", "consumed_at", "created_by_user_id", "created_at"],
   step_up_proofs: ["id", "session_id", "intent", "expires_at", "consumed_at", "created_at"],
   // The staged link of a resend whose mail may still arrive (#1896, 0022).
-  sign_in_approvals: ["id", "user_id", "token_hash", "staged_token_hash", "claim_hash", "user_agent", "client_address", "expires_at", "consumed_at", "outcome", "decided_at", "send_count", "last_sent_at", "created_at"],
+  sign_in_approvals: ["id", "user_id", "token_hash", "staged_token_hash", "claim_hash", "user_agent", "client_address", "expires_at", "consumed_at", "session_minted_at", "outcome", "decided_at", "send_count", "last_sent_at", "created_at"],
   sign_in_approval_sends: ["id", "approval_id", "user_id", "sent_at"],
 };
 for (const columns of Object.values(EXPECTED_TABLE_COLUMNS)) columns.sort();
