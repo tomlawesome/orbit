@@ -3317,9 +3317,10 @@ supply_chain_image:
     # and TRIVY_INSECURE are exported by *trivy_db_dir just above. The script
     # passes the database repository and TRIVY_INSECURE into the scanner
     # container itself and mounts the cache directory in unmodified.
-    # scan-image.sh's own trivy, run without --skip-db-update, downloads into
-    # it exactly when it finds nothing current there -- the same check
-    # `*trivy_db_warm` makes explicitly for the other two scanner jobs.
+    # scan-image.sh downloads into it in a step of its own, with its own
+    # deadline, exactly when it finds no db/trivy.db there -- the same check
+    # `*trivy_db_warm` makes for the other two scanner jobs -- and only then
+    # runs the scans.
     - |
       set -eu
       TESTED_IMAGE_ID="$ORBIT_IMAGE_ID" \
