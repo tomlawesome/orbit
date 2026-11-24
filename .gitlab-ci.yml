@@ -1885,8 +1885,9 @@ supply_chain_source:
         --output .orbit-supply-chain/source-raw.json \
         .
       trivy version --format json > .orbit-supply-chain/trivy-version.json
-      # Misconfiguration scan of the Dockerfiles (root user, unpinned base,
-      # secrets in build args, no health check), report-only (#1592): it never
+      # Misconfiguration scan of every config file Trivy recognises -- here the
+      # Dockerfiles and compose files (root user, unpinned base, secrets in
+      # build args, no health check) -- report-only (#1592): it never
       # changes this job's result, and its report is kept as an artifact so the
       # noise can be read before it blocks. Its rule bundle comes through the
       # image cache like the databases, not Trivy's mirror.gcr.io default.
