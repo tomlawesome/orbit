@@ -9,8 +9,8 @@ dist
 .orbit-secrets/
 web/.orbit-card-*/
 .orbit-code-scan/
+.orbit-tools/
 .orbit-cosign/
-.orbit-code-scan/
 .orbit-crane/
 .agents/handoffs/
 .agents/reviews/
