@@ -71,7 +71,16 @@ export interface CreateSessionOptions {
    * `id_token_hint`; never returned by any read.
    */
   idToken?: string | null;
+  /**
+   * Work that must commit exactly when the session does, run in the
+   * session's own transaction after its row is written: a spent sign-in
+   * approval records here that it minted this session (#1943 SEC-H1).
+   */
+  alsoInTransaction?: (transaction: SessionTransaction) => Promise<void>;
 }
+
+/** The transaction `createSession` writes the session row in. */
+export type SessionTransaction = Parameters<Parameters<ReturnType<typeof getDb>["transaction"]>[0]>[0];
 
 export async function createSession(
   userId: string,
@@ -125,6 +134,7 @@ export async function createSession(
       userAgent: userAgent ? userAgent.slice(0, USER_AGENT_MAX_LENGTH) : null,
       idTokenEnc,
     });
+    await options.alsoInTransaction?.(transaction);
   });
   return { token, expiresAt };
 }

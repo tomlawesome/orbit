@@ -60,7 +60,14 @@ export const POST = api(
     try {
       pending = await collectSignInApproval(
         claim,
-        (userId) => createSession(userId, config, event.request.headers.get("user-agent")),
+        (userId, recordMint) => createSession(
+          userId,
+          config,
+          event.request.headers.get("user-agent"),
+          /* The spend's record that it minted this session commits with the
+             session itself (#1943 SEC-H1). */
+          { alsoInTransaction: recordMint },
+        ),
       );
     } catch (error) {
       /* The account was disabled between the approval and this insert. The
