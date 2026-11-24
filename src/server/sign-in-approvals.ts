@@ -51,6 +51,7 @@ import { absoluteAppLink, sendBoundedMail, type InvitationMailer, type Invitatio
 import { sendingConfigured } from "@/server/mail-in/sending-settings";
 import { openInstanceMetadataReader } from "@/server/metadata/fields";
 import type { MetadataExecutor } from "@/server/metadata/keys";
+import type { SessionTransaction } from "@/lib/auth/session";
 import { renderApprovalMail } from "@/server/sign-in-approvals/mail";
 
 /** Ten minutes (ADR-0027 §6): long enough to reach a phone, short enough that
@@ -728,6 +729,13 @@ export async function decideSignInApproval(
   });
 }
 
+/**
+ * Records, in the transaction that writes the session, that this approval's
+ * spend minted it (#1943 SEC-H1). A mint passes it to `createSession` as
+ * `alsoInTransaction`.
+ */
+export type RecordApprovalMint = (transaction: SessionTransaction) => Promise<void>;
+
 /** What a caller's own session mint hands back, once spending the approval has succeeded. */
 export interface MintedApprovalSession {
   token: string;
@@ -767,7 +775,7 @@ export type PendingSignInState =
  */
 export async function collectSignInApproval(
   claim: string,
-  mintSession?: (userId: string) => Promise<MintedApprovalSession>,
+  mintSession?: (userId: string, recordMint: RecordApprovalMint) => Promise<MintedApprovalSession>,
 ): Promise<PendingSignInState> {
   if (claim.length === 0) return { state: "unknown" };
   const db = getDb();
@@ -778,6 +786,7 @@ export async function collectSignInApproval(
       expiresAt: signInApprovals.expiresAt,
       outcome: signInApprovals.outcome,
       consumedAt: signInApprovals.consumedAt,
+      sessionMintedAt: signInApprovals.sessionMintedAt,
     })
     .from(signInApprovals)
     .where(eq(signInApprovals.claimHash, secretDigest(claim)))
@@ -786,6 +795,9 @@ export async function collectSignInApproval(
   if (!row) return { state: "unknown" };
   if (row.outcome === "denied") return { state: "denied" };
   if (row.consumedAt) {
+    /* A spend that minted a session is done for good (#1943 SEC-H1): never a
+       hold on replay, however a refusal's mark and this spend interleaved. */
+    if (row.sessionMintedAt) return { state: "unknown" };
     if (row.outcome === "approved") return reissueFromReceipt(row.userId, row.consumedAt);
     return { state: "unknown" };
   }
@@ -801,8 +813,15 @@ export async function collectSignInApproval(
   if (!claimed) return { state: "unknown" };
   if (!mintSession) return { state: "approved", userId: row.userId };
 
+  /* Written in the mint's own transaction, so the record and the session
+     commit together or not at all (#1943 SEC-H1). */
+  const recordMint: RecordApprovalMint = async (transaction) => {
+    await transaction.update(signInApprovals)
+      .set({ sessionMintedAt: new Date() })
+      .where(and(eq(signInApprovals.id, row.id), eq(signInApprovals.consumedAt, spentAt)));
+  };
   try {
-    const session = await mintSession(row.userId);
+    const session = await mintSession(row.userId, recordMint);
     return { state: "approved", userId: row.userId, session };
   } catch (error) {
     // A marked password (#1881) is an answer too: the approval stays spent --
@@ -852,9 +871,12 @@ export async function collectSignInApproval(
  * change-password hold, not `unknown`. Only while all of these hold, else
  * `unknown` as before:
  *
+ *  - the spend minted no session: the caller has already answered
+ *    `unknown` for one that did (`session_minted_at`, #1943 SEC-H1), which
+ *    is what keeps a minted approval from ever turning into a hold, since a
+ *    refusal's mark can be stamped before the spend and commit after it;
  *  - the account is still marked, and by a refusal no later than the spend:
- *    a mark made after it is not the one this approval was answered with,
- *    and an approval that minted a session must never turn into a hold;
+ *    a mark made after it is not the one this approval was answered with;
  *  - the account is not disabled;
  *  - the spend is under the hold's own ten minutes old.
  *
