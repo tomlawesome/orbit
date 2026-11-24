@@ -1,0 +1,13 @@
+rules:
+  - id: svelte-raw-html
+    # Why: Svelte's {@html} skips escaping, so non-literal content there is cross-site scripting.
+    message: >-
+      {@html} renders unescaped markup; render text instead, or sanitise the value
+      and say where in a comment.
+    severity: WARNING
+    languages: [regex]
+    paths:
+      include:
+        - "*.svelte"
+    # Literal strings are left alone; anything else (a variable, call or expression) is reported.
+    pattern-regex: \{@html\s+(?!"[^"{}]*"\s*\}|'[^'{}]*'\s*\})[^}]
