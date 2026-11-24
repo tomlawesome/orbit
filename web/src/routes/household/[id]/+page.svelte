@@ -12,15 +12,16 @@
   import { PEN_ORDER, inkOf, nextMark } from "$lib/marks.js";
   import { constellationPlanetsOf } from "$lib/data/chart.js";
   import { BAND_VAR } from "$lib/data/bands.js";
-  import { MAX_SECTIONS, deletionNameMatches, entriesIn, entriesLabel, moveEntriesAway, whereHeadingOf } from "$lib/data/household.js";
+  import { MAX_SECTIONS, entriesIn, entriesLabel, moveEntriesAway, whereHeadingOf } from "$lib/data/household.js";
   import { FIELD, berthsOf, liftOf, roomOf, skyMap, toField } from "./room.js";
   import { consumeDoor } from "./door.js";
+  import { createActs, createOwnerLeave, nameOk } from "./acts.js";
   import { isPocket } from "$lib/pocket/media.js";
   import Pocket from "./pocket.svelte";
   import { daysWords } from "$lib/data/engine-limits.js";
   import DeskArchive from "./DeskArchive.svelte";
   import HouseholdClosed from "$lib/HouseholdClosed.svelte";
-  import { addMember, decideJoinRequest, removeMember, requestHouseholdDeletion, sendInvitation, transferOwnership, withdrawInvitation, wordsOf, writeHouseholdIdentity, writeSections } from "$lib/data/workspace.js";
+  import { addMember, removeMember, requestHouseholdDeletion, withdrawInvitation, wordsOf, writeHouseholdIdentity, writeSections } from "$lib/data/workspace.js";
   import { zoneLabel } from "$lib/pick-lists.js";
   import PickSheet from "./PickSheet.svelte";
   import { destinationChoices } from "$lib/editing/item-draft.js";
@@ -142,13 +143,7 @@
      the card's foot now answers only the person it stops, while it stops
      them — with the way out lit beside it. It fades on its own. */
   let ownerRefused = $state(false);
-  /** @type {ReturnType<typeof setTimeout> | null} */
-  let refuseTimer = null;
-  function ownerLeave() {
-    ownerRefused = true;
-    clearTimeout(refuseTimer ?? undefined);
-    refuseTimer = setTimeout(() => (ownerRefused = false), 6000);
-  }
+  const pressLeave = createOwnerLeave((on) => (ownerRefused = on));
 
   /* ── invitations by email (#481) ───────────────────────────────────────
      The address is held here only while it is being typed: nothing keeps it
@@ -330,7 +325,7 @@
     window.addEventListener("pointerdown", onPress, true);
     return () => window.removeEventListener("pointerdown", onPress, true);
   });
-  const nameOk = $derived(deletionNameMatches(typedName, v.name));
+  const nameIs = $derived(nameOk(typedName, v.name));
 
   /* ── the two-tap protocol (§14, lib/arm.js) ─────────────────────────────
      The first tap arms, the second fires, and an unfired arm relaxes on its
@@ -594,37 +589,31 @@
   }
 
   /* ── members ──────────────────────────────────────────────────────────── */
-  /** @param {() => Promise<unknown>} run */
-  async function act(run) {
-    membersProblem = null;
-    try {
-      await run();
-      await invalidateAll();
-    } catch (error) {
-      membersProblem = wordsOf(error);
-    }
-  }
+  const acts = createActs({
+    householdId: () => v.id,
+    clear: () => (membersProblem = null),
+    fail: (words) => (membersProblem = words),
+    refresh: () => invalidateAll(),
+  });
 
   /** @param {HouseholdView["roster"][number]} member */
-  const dropMember = (member) => act(() => removeMember(v.id, member.id));
+  const dropMember = (member) => acts.act(() => removeMember(v.id, member.id));
   /** @param {HouseholdView["candidates"][number]} candidate */
-  const putMember = (candidate) => act(() => addMember(v.id, candidate.id));
+  const putMember = (candidate) => acts.act(() => addMember(v.id, candidate.id));
 
   function leave() {
     const me = v.you;
     if (!me) return;
-    act(async () => {
+    acts.act(async () => {
       await removeMember(v.id, me.id);
       saidLeft = v.name;
     });
   }
 
-  function handOver() {
+  function giveOver() {
     const taker = v.roster.find((member) => member.id === heir);
-    if (!taker) return;
-    act(async () => {
-      await transferOwnership(v.id, taker.id);
-      saidHandover = taker.name;
+    acts.handOver(taker, () => {
+      saidHandover = taker?.name ?? null;
       handoverOpen = false;
     });
   }
@@ -633,9 +622,8 @@
    * @param {HouseholdView["joinRequests"][number]} request
    * @param {"approve" | "decline"} action
    */
-  const decide = (request, action) =>
-    act(async () => {
-      await decideJoinRequest(request.id, action);
+  const decideRequest = (request, action) =>
+    acts.decide(request, action, () => {
       if (action === "approve") saidJoin = request.name;
     });
 
@@ -653,11 +641,11 @@
    * @param {string} email
    * @param {string} said
    */
-  function offer(email, said) {
-    const address = email.trim();
-    if (!address) return;
-    act(async () => {
-      const { invitation } = await sendInvitation(v.id, address);
+  function sendOffer(email, said) {
+    if (!email.trim()) return;
+    acts.act(async () => {
+      const invitation = await acts.offer(email);
+      if (!invitation) return;
       /* An honest confirmation: the row records a bounded failure class when
          the provider would not take it, and pretending otherwise leaves the
          owner waiting for a reply that cannot come. */
@@ -668,13 +656,13 @@
     });
   }
 
-  const invite = () => offer(inviteEmail, "invitation sent");
+  const invite = () => sendOffer(inviteEmail, "invitation sent");
   /** @param {HouseholdView["invitations"][number]} row */
-  const resend = (row) => offer(row.email, "invitation sent again");
+  const resend = (row) => sendOffer(row.email, "invitation sent again");
 
   /** @param {HouseholdView["invitations"][number]} row */
   const withdraw = (row) =>
-    act(async () => {
+    acts.act(async () => {
       await withdrawInvitation(v.id, row.id);
       saidInvite = `the invitation to ${row.email} has been withdrawn · its link no longer works`;
     });
@@ -1215,7 +1203,7 @@
             {#if person.role === "owner" && person.you}
               <button class="ghost" class:beckon={ownerRefused} aria-expanded={handoverOpen}
                       onclick={() => (handoverOpen = !handoverOpen)}>hand over →</button>
-              <button class="ghost" onclick={ownerLeave}>leave this system</button>
+              <button class="ghost" onclick={pressLeave}>leave this system</button>
             {:else if v.canManage && person.role !== "owner"}
               <button class="ghost" class:armed={armed === `drop:${person.id}`}
                       onclick={(event) => twoTap(`drop:${person.id}`, () => dropMember(person), event.currentTarget)}>
@@ -1256,8 +1244,8 @@
               <div class="joinreq">
                 <span class="avatar" aria-hidden="true">{request.initials}</span>
                 <p><b>{request.name}</b> asks to join <b>{v.name}</b>{request.waited ? ` · ${request.waited}` : ""}</p>
-                <button class="yes" onclick={() => decide(request, "approve")}>approve</button>
-                <button onclick={() => decide(request, "decline")}>decline</button>
+                <button class="yes" onclick={() => decideRequest(request, "approve")}>approve</button>
+                <button onclick={() => decideRequest(request, "decline")}>decline</button>
               </div>
             {/each}
             <p class="said" class:show={saidJoin} role="status">{#if saidJoin}{saidJoin} is in{/if}</p>
@@ -1330,7 +1318,7 @@
             <span class="n">STEP TWO — CONFIRM</span>
             <div class="row">
               <button class="ghost" class:armed={armed === "handover"} disabled={!heir}
-                      onclick={(event) => twoTap("handover", handOver, event.currentTarget)}>
+                      onclick={(event) => twoTap("handover", giveOver, event.currentTarget)}>
                 {armed === "handover"
                   ? "tap again to hand over"
                   : heir
@@ -1393,7 +1381,7 @@
           {#if !confirming}
             <button class="dangerbtn" onclick={openConfirm}>request deletion →</button>
           {:else}
-            <button class="dangerbtn" class:armed={armed === "doom"} disabled={!nameOk || saidDoom}
+            <button class="dangerbtn" class:armed={armed === "doom"} disabled={!nameIs || saidDoom}
                     onclick={(event) => twoTap("doom", requestDeletion, event.currentTarget)}>
               {armed === "doom" ? "tap again to schedule deletion" : "request deletion"}</button>
           {/if}
