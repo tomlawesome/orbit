@@ -598,6 +598,7 @@ timeout on this one case rather than a global raise.
 ## scripts/install.interrupts-journal.test.mjs "B21: dated folder names never collide: an existing name is skipped, never reused or emptied; past -9 the install is refused at the start"
 
 - 2026-11-22 · !1457 batch-b 3d2a694c · pipeline for !1457 / fast (job 62291) · failed after 74 s on a loaded runner, with two other long shell-driven tests in the same run; the change touches none of it. First sighting.
+- 2026-11-24 · !1466 1ca05f76 · pipeline 5303 / fast (job 63701) · failed after 47 s on a loaded runner; the change touches none of it. Passed on retry (job 63755).
 
 ## scripts/repair-retire-smtp-1817.test.mjs "7: a retirement interrupted at step=backed-up is refused while a journal exists, record and secret stay, and a later clean run finishes"
 
@@ -630,3 +631,7 @@ timeout on this one case rather than a global raise.
 ## scripts/install.update-retire-smtp.test.mjs "--install never touches an existing smtp-password either"
 
 - 2026-11-23 · !1463 18e9f0ca · pipeline 5266 / fast (job 63120) · failed after 13 s on a loaded runner, with five other long shell-driven tests in the same run; the change touches none of it. First sighting.
+
+## scripts/install.update-retire-smtp.test.mjs "removes an inline SMTP_PASSWORD line too, and the password is then in no file of the folder or the installer's state"
+
+- 2026-11-24 · dev 1d397e4a · pipeline 5313 (nightly browsers, started early) / fast (job 63916) · failed after 12 s on a loaded runner, the only failure of 16,661; the change touches none of it. First sighting.
