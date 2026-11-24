@@ -622,7 +622,7 @@ variables:
       nightly_yield:*) echo "skipped: a pipeline on preview or main is running; the nightly yields to it (#1546)"; return 1 ;;
       full:*) return 0 ;;
       ignore_policy:gitleaks | ignore_policy:licence_policy | ignore_policy:private-details | ignore_policy:supply_chain_source) return 0 ;;
-      ci:fast | ci:fast_checks | ci:fast_docker | ci:gitleaks | ci:private-details | ci:supply_chain_source) return 0 ;;
+      ci:fast | ci:fast_checks | ci:fast_docker | ci:gitleaks | ci:private-details | ci:supply_chain_source | ci:code_scanners) return 0 ;;
       no_change:gitleaks | no_change:licence_policy | no_change:private-details | no_change:supply_chain_source) return 0 ;;
     esac
     echo "skipped: the ${ORBIT_LANE:-full} lane does not run ${1} (#889)"
@@ -1819,6 +1819,61 @@ signing_image_age:
     - bash scripts/check-signing-image-age.sh
 
 # --- policy ------------------------------------------------------------------
+
+# Code scanners, report-only (#1592; owner decision 96, 2026-11-24): shellcheck
+# on the shell scripts, zizmor on the GitHub workflows, ruff's S rules on the
+# Python, opengrep with the repository's own rules (.opengrep/rules) on the
+# TypeScript, JavaScript and Svelte. Each tool is a release binary pinned by
+# version and checksum (opengrep also by its Cosign signature) in
+# scripts/ci/ensure-<tool>.sh, which refuses anything else. Findings never
+# fail this job; a tool that cannot be fetched, verified or run does, and
+# allow_failure keeps that from blocking a merge while the reports are read.
+# Blocking comes later, at a stated threshold, with an ignore file holding a
+# reason and an expiry for each false alarm. One job for all four, so one
+# light-lane slot (#1933). Reports: .orbit-code-scan/<tool>.json.
+code_scanners:
+  stage: policy
+  tags: [light]
+  image:
+    name: $NODE_IMAGE
+    pull_policy: if-not-present
+  timeout: 15m
+  allow_failure: true
+  rules:
+    - !reference [.dev-landing, job_rule]
+    - !reference [.backmerge-skip, job_rule]
+    - *batch_intake_skip
+    - *not_on_main_push
+    - *not_scheduled
+    - when: on_success
+  needs:
+    - job: classify
+      artifacts: true
+  variables:
+    ORBIT_TOOL_CACHE: $CI_PROJECT_DIR/.orbit-tools
+  # The downloads, kept between pipelines. Every run re-checks each cached
+  # binary against its pinned hash, so a cache entry is never trusted as is.
+  cache:
+    key: code-scanners-tools
+    paths:
+      - .orbit-tools/
+  script:
+    - *reach_helpers
+    - orbit_lane_admits code_scanners || exit 0
+    - *system_lane_gate
+    - |
+      status=0
+      for tool in shellcheck zizmor ruff opengrep; do
+        echo "--- $tool"
+        bash "scripts/ci/scan-$tool.sh" || { echo "code_scanners: $tool did not complete"; status=1; }
+      done
+      exit "$status"
+  artifacts:
+    name: orbit-code-scan
+    paths:
+      - .orbit-code-scan/
+    expire_in: 7 days
+    when: always
 
 # Mirrors the old workflow's source policy job. Trivy runs as the job image rather
 # than through `docker run`: under dind a bind mount of the workspace would be
