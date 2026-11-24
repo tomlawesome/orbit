@@ -1,0 +1,31 @@
+rules:
+  - id: insecure-random-token
+    # Why: Math.random() is predictable, so tokens, ids, nonces or secrets made from it can be guessed.
+    message: >-
+      Math.random() feeds a value named like a token, id, nonce, key or secret; use
+      crypto.randomUUID() or crypto.randomBytes() instead.
+    severity: WARNING
+    languages: [javascript, typescript]
+    paths:
+      include:
+        - "/src/**"
+        - "/scripts/**"
+        - "*.server.ts"
+        - "*.server.js"
+    patterns:
+      - pattern-either:
+          - pattern: $V = <... Math.random() ...>
+          - pattern: '{..., $V: <... Math.random() ...>, ...}'
+          - patterns:
+              - pattern-inside: |
+                  function $V(...) { ... }
+              - pattern: return <... Math.random() ...>;
+          - patterns:
+              - pattern-inside: |
+                  const $V = (...) => { ... }
+              - pattern: return <... Math.random() ...>;
+          - pattern: const $V = (...) => <... Math.random() ...>;
+      # Anchored at the start, as metavariable-regex always is. Case matters: "id"/"key" only as a whole word or camel/snake suffix, so "valid" or "grid" stay quiet.
+      - metavariable-regex:
+          metavariable: $V
+          regex: ^(.*(?i:token|secret|nonce|salt|passw|api_?key|session|csrf|otp|uuid).*|(.*_)?(id|ids|key|ID|IDS|KEY)|.*[a-z0-9](Id|Ids|ID|Key))$

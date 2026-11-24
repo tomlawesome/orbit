@@ -10,6 +10,7 @@ dist
 web/.orbit-card-*/
 .orbit-code-scan/
 .orbit-cosign/
+.orbit-code-scan/
 .orbit-crane/
 .agents/handoffs/
 .agents/reviews/
