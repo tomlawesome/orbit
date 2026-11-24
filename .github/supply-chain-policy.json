@@ -700,50 +700,6 @@
     },
     {
       "kind": "stale-package",
-      "image": "ollama/ollama:0.40.17",
-      "package": "libc6",
-      "installedVersion": "2.39-0ubuntu8.9",
-      "availableVersion": "2.39-0ubuntu8.12",
-      "owner": "Orbit maintainers",
-      "expiresOn": "2026-11-30",
-      "trackingIssue": 1950,
-      "rationale": "Upstream has not yet rebuilt ollama/ollama:0.40.17 with libc6 2.39-0ubuntu8.12; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
-    },
-    {
-      "kind": "stale-package",
-      "image": "ollama/ollama:0.40.17",
-      "package": "libc-bin",
-      "installedVersion": "2.39-0ubuntu8.9",
-      "availableVersion": "2.39-0ubuntu8.12",
-      "owner": "Orbit maintainers",
-      "expiresOn": "2026-11-30",
-      "trackingIssue": 1950,
-      "rationale": "Upstream has not yet rebuilt ollama/ollama:0.40.17 with libc-bin 2.39-0ubuntu8.12; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
-    },
-    {
-      "kind": "stale-package",
-      "image": "ollama/ollama:0.40.17",
-      "package": "libsystemd0",
-      "installedVersion": "255.4-1ubuntu8.18",
-      "availableVersion": "255.4-1ubuntu8.19",
-      "owner": "Orbit maintainers",
-      "expiresOn": "2026-11-30",
-      "trackingIssue": 1950,
-      "rationale": "Upstream has not yet rebuilt ollama/ollama:0.40.17 with libsystemd0 255.4-1ubuntu8.19; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
-    },
-    {
-      "kind": "stale-package",
-      "image": "ollama/ollama:0.40.17",
-      "package": "libudev1",
-      "installedVersion": "255.4-1ubuntu8.18",
-      "availableVersion": "255.4-1ubuntu8.19",
-      "owner": "Orbit maintainers",
-      "expiresOn": "2026-11-30",
-      "trackingIssue": 1950,
-      "rationale": "Upstream has not yet rebuilt ollama/ollama:0.40.17 with libudev1 255.4-1ubuntu8.19; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
-    },
-    {
-      "kind": "stale-package",
       "image": "apache/tika:4.2.0-full",
       "package": "python3-oauthlib",
       "installedVersion": "3.3.1-1build1",
@@ -752,6 +708,94 @@
       "expiresOn": "2026-11-30",
       "trackingIssue": 1950,
       "rationale": "Upstream has not yet rebuilt apache/tika:4.2.0-full with python3-oauthlib 3.3.1-1ubuntu0.1; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+    },
+    {
+      "kind": "stale-package",
+      "image": "postgres:18-alpine",
+      "package": "libffi",
+      "installedVersion": "3.5.2-r1",
+      "availableVersion": "3.8.1-r0",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-12-01",
+      "trackingIssue": 1950,
+      "rationale": "Upstream has not yet rebuilt postgres:18-alpine with libffi 3.8.1-r0; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+    },
+    {
+      "kind": "stale-package",
+      "image": "postgres:18-alpine",
+      "package": "zstd-libs",
+      "installedVersion": "1.5.7-r2",
+      "availableVersion": "1.6.0-r1",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-12-01",
+      "trackingIssue": 1950,
+      "rationale": "Upstream has not yet rebuilt postgres:18-alpine with zstd-libs 1.6.0-r1; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+    },
+    {
+      "kind": "stale-package",
+      "image": "postgres:18-alpine",
+      "package": "zstd",
+      "installedVersion": "1.5.7-r2",
+      "availableVersion": "1.6.0-r1",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-12-01",
+      "trackingIssue": 1950,
+      "rationale": "Upstream has not yet rebuilt postgres:18-alpine with zstd 1.6.0-r1; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+    },
+    {
+      "kind": "stale-package",
+      "image": "clamav/clamav:1.5.5",
+      "package": "zstd-libs",
+      "installedVersion": "1.5.7-r2",
+      "availableVersion": "1.6.0-r1",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-12-01",
+      "trackingIssue": 1950,
+      "rationale": "Upstream has not yet rebuilt clamav/clamav:1.5.5 with zstd-libs 1.6.0-r1; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+    },
+    {
+      "kind": "stale-package",
+      "image": "ollama/ollama:0.40.18",
+      "package": "libc6",
+      "installedVersion": "2.39-0ubuntu8.9",
+      "availableVersion": "2.39-0ubuntu8.12",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-12-01",
+      "trackingIssue": 1950,
+      "rationale": "Upstream has not yet rebuilt ollama/ollama:0.40.18 with libc6 2.39-0ubuntu8.12; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+    },
+    {
+      "kind": "stale-package",
+      "image": "ollama/ollama:0.40.18",
+      "package": "libc-bin",
+      "installedVersion": "2.39-0ubuntu8.9",
+      "availableVersion": "2.39-0ubuntu8.12",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-12-01",
+      "trackingIssue": 1950,
+      "rationale": "Upstream has not yet rebuilt ollama/ollama:0.40.18 with libc-bin 2.39-0ubuntu8.12; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+    },
+    {
+      "kind": "stale-package",
+      "image": "ollama/ollama:0.40.18",
+      "package": "libsystemd0",
+      "installedVersion": "255.4-1ubuntu8.18",
+      "availableVersion": "255.4-1ubuntu8.19",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-12-01",
+      "trackingIssue": 1950,
+      "rationale": "Upstream has not yet rebuilt ollama/ollama:0.40.18 with libsystemd0 255.4-1ubuntu8.19; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+    },
+    {
+      "kind": "stale-package",
+      "image": "ollama/ollama:0.40.18",
+      "package": "libudev1",
+      "installedVersion": "255.4-1ubuntu8.18",
+      "availableVersion": "255.4-1ubuntu8.19",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-12-01",
+      "trackingIssue": 1950,
+      "rationale": "Upstream has not yet rebuilt ollama/ollama:0.40.18 with libudev1 255.4-1ubuntu8.19; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
     }
   ],
   "containerImages": [
@@ -845,9 +889,9 @@
     },
     {
       "name": "Ollama optional local AI service",
-      "tag": "ollama/ollama:0.40.17",
-      "reference": "ollama/ollama:0.40.17@sha256:5e5802d3c018ecdee7c7dff32a7e3b10ca9a2c4b3a461392cff97c313c2af0fc",
-      "indexDigest": "sha256:ccc42bcd3d5fcf7ab0d532b300382154e1a4da56fc666bdb313b78ebdd912754",
+      "tag": "ollama/ollama:0.40.18",
+      "reference": "ollama/ollama:0.40.18@sha256:4e0d5daa6c5cd91e27011977031466844c5ea4ba2393b35e78068835edec040b",
+      "indexDigest": "sha256:1cabd20e1762a7a8444bf4a7110b346d923cd77ab6c97c984434140638c913ec",
       "platform": "linux/amd64",
       "locations": [
         "docker-compose.yml"
@@ -857,7 +901,7 @@
       "license": "MIT",
       "licenseSource": "https://github.com/ollama/ollama/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-11-21",
+      "resolvedOn": "2026-11-24",
       "reviewBy": "2026-11-30"
     }
   ],
