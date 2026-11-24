@@ -91,10 +91,33 @@ function validateThresholds(thresholds) {
   }
 }
 
-function validateException(exception, index, now) {
+function validateStalePackageException(exception, label, now, images) {
+  // A risk-acceptance entry for one pending package upgrade inside a pinned
+  // image (#1950). Named exactly: image, package and both versions. Used only
+  // by scripts/sidecar-pins.mjs; Trivy matching never reads it.
+  const image = requiredString(exception.image, `${label} image`);
+  if (!images.some((entry) => entry?.tag === image)) {
+    throw new Error(`${label} names image ${image}, which is not in containerImages.`);
+  }
+  requiredString(exception.package, `${label} package`);
+  requiredString(exception.installedVersion, `${label} installedVersion`);
+  requiredString(exception.availableVersion, `${label} availableVersion`);
+  requiredString(exception.owner, `${label} owner`);
+  requiredString(exception.rationale, `${label} rationale`);
+  requireLiveDate(exception.expiresOn, `${label} expiry`, now);
+  requireTrackingIssue(exception.trackingIssue, label);
+}
+
+function validateException(exception, index, now, images = []) {
   const label = `Exception ${index + 1}`;
+  if (exception?.kind === "stale-package") {
+    validateStalePackageException(exception, label, now, images);
+    return;
+  }
   if (exception?.kind !== "vulnerability") {
-    throw new Error(`${label} may cover only a vulnerability; secret findings cannot be excepted.`);
+    throw new Error(
+      `${label} covers neither a vulnerability nor a stale-package upgrade; secret findings cannot be excepted.`,
+    );
   }
   if (!["source", "image"].includes(exception?.scope)) {
     throw new Error(`${label} has an unsupported scope.`);
@@ -198,7 +221,7 @@ export function validateSupplyChainPolicy(policy, now = new Date().toISOString()
     throw new Error("Supply-chain exceptions must be an array.");
   }
   policy.exceptions.forEach((exception, index) =>
-    validateException(exception, index, currentDate),
+    validateException(exception, index, currentDate, policy.containerImages),
   );
   if (!Array.isArray(policy.containerImages) || policy.containerImages.length === 0) {
     throw new Error("At least one reviewed container image is required.");

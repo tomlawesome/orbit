@@ -26,8 +26,9 @@
  * Any other plain value is damage (ruling #1779 note 67344): no product path
  * writes one, and every reader compares it with a real digest it can never
  * equal, yet a plain value is trusted as genuine. So it is reported once per
- * process, recorded as a damage sighting for the administrator card, and then
- * cleared in an UPDATE guarded on the value read, with no seal and no index
+ * process, recorded as a damage sighting for the administrator card, and
+ * cleared in an UPDATE guarded on the value read, in the same transaction
+ * as the sighting (#1943 A-R2), with no seal and no index
  * written from it. The row becomes "content hash missing", the fail-closed
  * state its readers already handle, and the clearing counts as a fix. A seal
  * that will not open is damage too, but is left exactly as it is (note
@@ -41,7 +42,7 @@ import { getDb } from "@/db";
 import { documents } from "@/db/schema";
 import { log, operationalDetail } from "@/lib/logger";
 import { CONTENT_HASH_COLUMN, openContentHash, sealContentHash } from "@/server/documents/content-hash";
-import { noteMetadataDamage } from "@/server/metadata/damage-sightings";
+import { noteMetadataDamage, recordMetadataDamage } from "@/server/metadata/damage-sightings";
 import { openMetadataWriter, type MetadataCipher } from "@/server/metadata/fields";
 import { MetadataKeyLockedError } from "@/server/metadata/keys";
 import { CONTENT_INDEX_BACKFILL_BATCH_SIZE } from "@/server/document-maintenance/backfill-rate";
@@ -69,8 +70,14 @@ const reportedDamage = new Set<string>();
 
 function reportDamageOnce(rowId: string, reason: string): void {
   if (reportedDamage.has(rowId)) return;
-  reportedDamage.add(rowId);
   noteMetadataDamage(CONTENT_HASH_COLUMN, rowId);
+  warnDamageOnce(rowId, reason);
+}
+
+/** The once-per-process warning alone, for a sighting already written. */
+function warnDamageOnce(rowId: string, reason: string): void {
+  if (reportedDamage.has(rowId)) return;
+  reportedDamage.add(rowId);
   log.warn({
     event: "metadata.integrity",
     state: "degraded",
@@ -107,12 +114,19 @@ async function fixRow(metadata: MetadataCipher, row: WorkRow): Promise<number> {
     return updated.length;
   }
   if (!SHA256_HEX.test(plain)) {
-    /* Damage: reported, then cleared, guarded on the value read. Nothing is
-       sealed or indexed from it; the row is left "content hash missing". */
-    reportDamageOnce(row.id, "held a plain value that is not a SHA-256 and it was cleared");
-    const cleared = await getDb().update(documents).set({ contentSha256: null })
-      .where(and(eq(documents.id, row.id), eq(documents.contentSha256, plain)))
-      .returning({ id: documents.id });
+    /* Damage: recorded, then cleared, guarded on the value read, in one
+       transaction (#1943 A-R2), so the value is never gone without its
+       sighting: a sighting that cannot be written rolls the clear back and
+       the error goes to the cycle; the cursor has already passed the row, so
+       it is tried again on a later lap. Nothing is sealed or indexed from it;
+       the row is left "content hash missing". */
+    const cleared = await getDb().transaction(async (transaction) => {
+      await recordMetadataDamage(CONTENT_HASH_COLUMN, row.id, transaction);
+      return transaction.update(documents).set({ contentSha256: null })
+        .where(and(eq(documents.id, row.id), eq(documents.contentSha256, plain)))
+        .returning({ id: documents.id });
+    });
+    warnDamageOnce(row.id, "held a plain value that is not a SHA-256 and it was cleared");
     return cleared.length;
   }
   /* Guarded on what was read: the plain value, and a blind index still

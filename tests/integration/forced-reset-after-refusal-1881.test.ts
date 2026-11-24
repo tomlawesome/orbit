@@ -1033,3 +1033,57 @@ describe("a stale approval cannot mark a password it was never for (#1881 fix re
     expect(await markOf(account.id)).not.toBeNull();
   });
 });
+
+/* #1943 SEC-H2: the hold a re-mark between save and mint hands back keeps the
+   first hold's lapse. A re-issue only shortens a hold, never extends it, so a
+   save at minute six that meets a re-mark leaves the browser the four minutes
+   the first hold had left, not a fresh ten. Written from the finding alone. */
+describe("a re-mark between save and mint never extends the hold (#1943 SEC-H2)", () => {
+  it("the fresh hold lapses when the first one would have: a save just past it is password_change_lapsed", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const { account, hold } = await landOnTheStep("remark-keeps-lapse");
+    const firstIssuedAt = Date.now();
+
+    vi.setSystemTime(firstIssuedAt + 6 * 60 * SECOND);
+    const remarked = new Date(Date.now());
+    vi.spyOn(sessionModule, "createSession").mockImplementationOnce(async () => {
+      await getDb().update(localCredentials).set({ passwordChangeRequiredAt: remarked })
+        .where(eq(localCredentials.userId, account.id));
+      throw new PasswordChangeRequiredError(account.id, remarked);
+    });
+    const answered = await save({ password: NEW_PASSWORD, passwordAgain: NEW_PASSWORD }, hold);
+    expect(answered.status).toBe(200);
+    expect(await answered.clone().json()).toMatchObject({ saved: true, state: "password_change_required" });
+    const fresh = replayCookies(answered);
+    expect(fresh, "the re-mark answer set no hold cookie").not.toBe("");
+
+    // One second past the first hold's own ten minutes.
+    vi.setSystemTime(firstIssuedAt + 10 * 60 * SECOND + SECOND);
+    const third = "a-third-password-after-the-remark";
+    const late = await save({ password: third, passwordAgain: third }, fresh);
+    expect(late.status, "the re-issued hold outlived the first hold's lapse").toBe(400);
+    expect(await errorCode(late)).toBe("password_change_lapsed");
+    expect(sessionCookieOf(late)).toBeUndefined();
+    expect(await markOf(account.id), "a hold past its first lapse saved a password").not.toBeNull();
+  });
+
+  it("control: the fresh hold still saves before the first hold's lapse", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const { account, hold } = await landOnTheStep("remark-inside-lapse");
+    const firstIssuedAt = Date.now();
+
+    vi.setSystemTime(firstIssuedAt + 6 * 60 * SECOND);
+    const remarked = new Date(Date.now());
+    vi.spyOn(sessionModule, "createSession").mockImplementationOnce(async () => {
+      await getDb().update(localCredentials).set({ passwordChangeRequiredAt: remarked })
+        .where(eq(localCredentials.userId, account.id));
+      throw new PasswordChangeRequiredError(account.id, remarked);
+    });
+    const answered = await save({ password: NEW_PASSWORD, passwordAgain: NEW_PASSWORD }, hold);
+    expect(answered.status).toBe(200);
+
+    vi.setSystemTime(firstIssuedAt + 10 * 60 * SECOND - 30 * SECOND);
+    const third = "a-third-password-inside-the-lapse";
+    await expectSavedAndSignedIn(await save({ password: third, passwordAgain: third }, replayCookies(answered)), account.id);
+  });
+});
