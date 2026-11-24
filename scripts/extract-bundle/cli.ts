@@ -59,6 +59,7 @@ import type { TaggedCandidate } from "../../src/server/documents/extraction-stag
 import { undoTikaMarkdownEscapes } from "../../src/server/documents/tika";
 import { readTruthFile, TRUTH_HELP, truthCsv } from "./truth";
 import { TIKA_VERSION } from "./tika-version.mjs";
+import { TIKA_IMAGE_TAG } from "./tika-version.mjs";
 import { dockerRunFailure } from "./docker-run-outcome.mjs";
 
 /** As the application: what Tika sends past this point is not read. */
@@ -75,7 +76,7 @@ const MEDIA_TYPES: Record<string, string> = {
 // place build.mjs also reads it from, so the two cannot drift apart. The
 // image digest is still pinned here directly -- it is a property of that
 // specific build, not of the version number alone.
-const TIKA_IMAGE = `apache/tika:${TIKA_VERSION}-full@sha256:22dc5d818413729955c73666f0630e75090b819e21c484ec0a549b2e5837cd02`;
+const TIKA_IMAGE = `apache/tika:${TIKA_IMAGE_TAG}-full@sha256:22dc5d818413729955c73666f0630e75090b819e21c484ec0a549b2e5837cd02`;
 const TIKA_JAR = `tika-server-standard-${TIKA_VERSION}.jar`;
 const LOCAL_TIKA = "http://127.0.0.1:9998";
 const CONTAINER = "orbit-extract-tika";
