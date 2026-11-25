@@ -655,3 +655,11 @@ timeout on this one case rather than a global raise.
 
 - 2026-11-24 · !1453 fa64d9d8b · pipeline 5319 / fast (job 64034) · `the owner's mv was never run` on a loaded runner: the test gives the owner step 2 s; the change only alters how names are printed in other repair.sh messages. Passed three times in a row locally on the same commit. First sighting.
 - 2026-11-24 · !1453 fffd1ee45 · pipeline 5323 / fast (job 64105) · the file's sibling test, "#1915 O-S2: discard_staging_root counts a timed-out rename that landed as done", failed the same way (`the owner's rename never ran`) in a 30-minute fast job on a loaded runner. Same 2 s step limit; the change touches neither code path. Second sighting of the file.
+
+## tests/unit/v19-create-check-unavailable.test.mjs: the file's `beforeAll` (compiles the pocket component)
+
+- 2026-11-24 · !1469 274bfc7b3 · pipeline 5325 / fast (job 64148) · `Hook timed out in 10000ms` at line 196 on a loaded runner (load average about 52); the change is CI-only. The file passed locally. First sighting.
+
+## scripts/install.model-and-restarts.test.mjs "install.sh: one or two restarts are not a crash loop; three are (O-S2) > the database running, restart count +3 since the earlier sample: a crash loop, rolled back, `retry`"
+
+- 2026-11-24 · !1469 274bfc7b3 · pipeline 5325 / fast (job 64148) · the result did not deeply equal the expected 3-field outcome, on a loaded runner (load average about 52); the change is CI-only. The file passed locally. First sighting.
