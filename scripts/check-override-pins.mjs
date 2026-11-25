@@ -75,7 +75,8 @@ export function readLockedPackages(text) {
   for (const start of starts) {
     for (const line of lines.slice(start + 1)) {
       if (line !== "" && !line.startsWith("  ")) break;
-      const match = /^ {2}(?<id>@?[^\s:]+):$/u.exec(line);
+      // pnpm quotes a scoped key ('@scope/name@1.2.3':); the quotes are YAML's, not the id's (#1955).
+      const match = /^ {2}(?<q>['"]?)(?<id>@?[^\s:'"]+)\k<q>:$/u.exec(line);
       if (match) locked.add(match.groups.id);
     }
   }
