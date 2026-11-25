@@ -635,9 +635,3 @@ timeout on this one case rather than a global raise.
 ## scripts/install.update-retire-smtp.test.mjs "removes an inline SMTP_PASSWORD line too, and the password is then in no file of the folder or the installer's state"
 
 - 2026-11-24 · dev 1d397e4a · pipeline 5313 (nightly browsers, started early) / fast (job 63916) · failed after 12 s on a loaded runner, the only failure of 16,661; the change touches none of it. First sighting.
-
-## web/tests/rig/v19-importance.spec.js, `showImportanceSizes` then home draws cost sizes (#1961)
-
-- 2026-11-24 · nightly 5335 / rig-firefox (job 64242) · failed at the home-size assertion (~:218): home loaded before the PUT /api/preferences was stored, so planets drew by cost. Same numbers as the next sighting.
-- 2026-11-25 · nightly 5441 / rig-firefox (job 65554) · same failure, same numbers.
-- Cause: `showImportanceSizes` waited only for the PUT to be sent, not answered. Fix: wait for the response and assert it is ok (#1961); this heading goes when the fix lands.

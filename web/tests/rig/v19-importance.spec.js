@@ -181,11 +181,13 @@ test("settings: importance resizes the planets in the preview and on home, saves
   const previewCost = await drawnRadius(previewCircle(page, "i-gutter"));
 
   /* Gutter clearing is a high item, and today it is a small planet by cost */
-  const saved = page.waitForRequest((request) => request.url().endsWith("/api/preferences") && request.method() === "PUT");
+  const saved = page.waitForResponse((response) => response.url().endsWith("/api/preferences") && response.request().method() === "PUT");
   await importanceButton(page).click();
   await expect(importanceButton(page)).toHaveAttribute("aria-pressed", "true");
   await expect(costButton(page)).toHaveAttribute("aria-pressed", "false");
-  expect((await saved).postDataJSON().planetSize).toBe("importance");
+  const savedResponse = await saved;
+  expect(savedResponse.request().postDataJSON().planetSize).toBe("importance");
+  expect(savedResponse.ok(), "the preference save is stored before the page loads again").toBe(true);
   await expect.poll(() => drawnRadius(previewCircle(page, "i-gutter")), { timeout: RIG_EXPECT_MS, message: "the preview redraws at once" }).toBeGreaterThan(previewCost + 1);
 
   /* home follows, after a reload, and so does Settings */
@@ -196,10 +198,12 @@ test("settings: importance resizes the planets in the preview and on home, saves
   await expect(importanceButton(page)).toHaveAttribute("aria-pressed", "true");
 
   /* cost again: back where they were */
-  const savedBack = page.waitForRequest((request) => request.url().endsWith("/api/preferences") && request.method() === "PUT");
+  const savedBack = page.waitForResponse((response) => response.url().endsWith("/api/preferences") && response.request().method() === "PUT");
   await costButton(page).click();
   await expect(costButton(page)).toHaveAttribute("aria-pressed", "true");
-  expect((await savedBack).postDataJSON().planetSize).toBe("cost");
+  const savedBackResponse = await savedBack;
+  expect(savedBackResponse.request().postDataJSON().planetSize).toBe("cost");
+  expect(savedBackResponse.ok(), "the preference save is stored before the page loads again").toBe(true);
   await expect.poll(() => drawnRadius(previewCircle(page, "i-gutter")), { timeout: RIG_EXPECT_MS }).toBeCloseTo(previewCost, 0);
   await openHome(page);
   expect(await drawnRadius(homeCircle(page, "i-gutter", phone))).toBeCloseTo(homeCost, 0);
@@ -528,10 +532,12 @@ test("pass: 'not now' hides the pill for good: after a reload and in a new brows
   await useFixtureScenes(page, "keep-saves");
   await openHome(page);
   await expect(pill(page)).toBeVisible({ timeout: RIG_EXPECT_MS });
-  const saved = page.waitForRequest((request) => request.url().endsWith("/api/preferences") && request.method() === "PUT");
+  const saved = page.waitForResponse((response) => response.url().endsWith("/api/preferences") && response.request().method() === "PUT");
   await pill(page).getByRole("button", { name: "not now" }).click();
   await expect(pill(page)).toHaveCount(0);
-  expect((await saved).postDataJSON().importanceOfferDismissed).toBe(true);
+  const savedResponse = await saved;
+  expect(savedResponse.request().postDataJSON().importanceOfferDismissed).toBe(true);
+  expect(savedResponse.ok(), "the preference save is stored before the page loads again").toBe(true);
 
   await openHome(page);
   await expect(page.locator("body[data-home-ready]")).toBeAttached({ timeout: SETTLE });
