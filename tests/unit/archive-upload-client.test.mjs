@@ -164,7 +164,14 @@ describe.each([
   "web/src/routes/household/[id]/DeskArchive.svelte",
   "web/src/routes/household/[id]/PocketArchive.svelte",
 ])("%s hands over the file and does not read it (#1566)", (path) => {
-  const source = readFileSync(resolve(import.meta.dirname, "../..", path), "utf8");
+  const component = readFileSync(resolve(import.meta.dirname, "../..", path), "utf8");
+  // #1354: the acts live in the one controller both layouts call; the page and the controller are checked together.
+  const controller = readFileSync(resolve(import.meta.dirname, "../..", "web/src/routes/household/[id]/archive-controller.svelte.js"), "utf8");
+  const source = `${component}\n${controller}`;
+
+  it("uses the shared controller", () => {
+    expect(component).toMatch(/createArchiveController\(/u);
+  });
 
   it("never reads the chosen file in the page", () => {
     // Catches: JSON.parse(await file.text()) left in a layout.
@@ -173,8 +180,8 @@ describe.each([
   });
 
   it("passes the file itself to preview and import", () => {
-    expect(source).toMatch(/previewPortableArchive\(\s*householdId,\s*\{\s*file\b/u);
-    expect(source).toMatch(/importPortableArchive\(\s*householdId,\s*\{\s*file\b/u);
+    expect(source).toMatch(/previewPortableArchive\(\s*householdId\(\),\s*\{\s*file\b/u);
+    expect(source).toMatch(/importPortableArchive\(\s*householdId\(\),\s*\{\s*file\b/u);
   });
 
   it("maps the server's archive_invalid to the card's sentence for a file that is not an archive", () => {

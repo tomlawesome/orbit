@@ -1,0 +1,68 @@
+rules:
+  - id: child-process-exec-non-literal
+    # Why: exec/execSync run the string through a shell, so any interpolated value is command injection.
+    message: >-
+      child_process exec/execSync with a non-literal command runs it through a shell;
+      use execFile/spawn with an argument array instead.
+    severity: ERROR
+    languages: [javascript, typescript]
+    patterns:
+      - pattern-either:
+          - pattern: require("child_process").$EXEC($CMD, ...)
+          - pattern: require("node:child_process").$EXEC($CMD, ...)
+          - patterns:
+              - pattern-either:
+                  - pattern-inside: |
+                      const { ..., $EXEC, ... } = require("child_process");
+                      ...
+                  - pattern-inside: |
+                      const { ..., $EXEC, ... } = require("node:child_process");
+                      ...
+              - pattern: $EXEC($CMD, ...)
+          - patterns:
+              - pattern-either:
+                  - pattern-inside: |
+                      import { $EXEC } from "child_process";
+                      ...
+                  - pattern-inside: |
+                      import { $EXEC } from "node:child_process";
+                      ...
+              - pattern: $EXEC($CMD, ...)
+          - patterns:
+              - pattern-either:
+                  - pattern-inside: |
+                      import { $EXEC as $ALIAS } from "child_process";
+                      ...
+                  - pattern-inside: |
+                      import { $EXEC as $ALIAS } from "node:child_process";
+                      ...
+              - pattern: $ALIAS($CMD, ...)
+              - metavariable-regex:
+                  metavariable: $ALIAS
+                  regex: ^[A-Za-z_$][A-Za-z0-9_$]*$
+          - patterns:
+              - pattern-either:
+                  - pattern-inside: |
+                      import * as $CP from "child_process";
+                      ...
+                  - pattern-inside: |
+                      import * as $CP from "node:child_process";
+                      ...
+                  - pattern-inside: |
+                      import $CP from "child_process";
+                      ...
+                  - pattern-inside: |
+                      import $CP from "node:child_process";
+                      ...
+                  - pattern-inside: |
+                      const $CP = require("child_process");
+                      ...
+                  - pattern-inside: |
+                      const $CP = require("node:child_process");
+                      ...
+              - pattern: $CP.$EXEC($CMD, ...)
+      - metavariable-regex:
+          metavariable: $EXEC
+          regex: ^(exec|execSync)$
+      - pattern-not: $F("...", ...)
+      - pattern-not: $O.$F("...", ...)

@@ -1,0 +1,14 @@
+rules:
+  - id: dynamic-code-eval
+    # Why: eval, new Function and string timers compile text into code, so tainted text becomes code execution.
+    message: >-
+      eval / new Function / a string passed to setTimeout or setInterval compiles text
+      into code at run time; restructure so no string is executed.
+    severity: ERROR
+    languages: [javascript, typescript]
+    pattern-either:
+      - pattern: eval(...)
+      - pattern: new Function(...)
+      - pattern: Function(...)
+      - pattern: setTimeout("...", ...)
+      - pattern: setInterval("...", ...)
