@@ -16,16 +16,18 @@
 #   `docker build` (COPY only, no RUN), so the root filesystem holding them is
 #   read-only. Not a bind mount: under the dind service the daemon cannot see
 #   the job's workspace, and a bind mount of it comes up empty;
-#   a small --tmpfs for /tmp, and an anonymous volume as HOME for the report,
-#   removed with the container: `docker cp` cannot read a tmpfs, so the
-#   report could not otherwise come back out;
+#   every writable place a --tmpfs with a size cap (/tmp, HOME and the two
+#   below) and no volumes of any kind, so nothing knip runs can fill the
+#   runner's disk;
 #   `svelte-kit sync` run inside the container, never in the job (it loads
 #   svelte.config.js and vite.config.js, which are app code), so knip can
 #   resolve $lib, $app and ./$types. It writes web/.svelte-kit, and Vite
 #   bundles its config into web/node_modules/.vite-temp: each is a capped tmpfs.
 #   web/.svelte-kit is left out of the image, so a local run matches CI.
-# The report leaves by `docker cp` to ${ORBIT_CODE_SCAN_DIR:-.orbit-code-scan}/knip.json
-# (knip's json reporter). The base image is $NODE_IMAGE, read from
+# The report leaves on stdout (knip's json reporter) through
+# `docker start --attach`, read with a size cap into
+# ${ORBIT_CODE_SCAN_DIR:-.orbit-code-scan}/knip.json; everything else the
+# container prints goes to stderr, the job log. The base image is $NODE_IMAGE, read from
 # .gitlab-ci.yml when unset, so the pin lives in one place.
 #
 # ORBIT_KNIP_ENSURE names another ensure script (tests). Run from anywhere.
@@ -92,27 +94,33 @@ cid="$(docker create \
   --user 1000:1000 \
   --pids-limit 1024 \
   --tmpfs /tmp:rw,nosuid,nodev,size=64m \
+  --tmpfs /home/node:rw,nosuid,nodev,size=64m,uid=1000,gid=1000 \
   --tmpfs /work/web/.svelte-kit:rw,nosuid,nodev,size=64m,uid=1000,gid=1000 \
   --tmpfs /work/web/node_modules/.vite-temp:rw,nosuid,nodev,size=16m,uid=1000,gid=1000 \
-  --mount type=volume,dst=/home/node \
   -e PATH=/usr/local/bin:/usr/bin:/bin \
   -e HOME=/home/node \
   -e NODE_OPTIONS=--max-old-space-size=4096 \
   --workdir /work \
   "$tag" \
   sh -c 'cd web && node node_modules/@sveltejs/kit/svelte-kit.js sync >&2 && cd /work &&
-    node /opt/knip/node_modules/knip/bin/knip.js --reporter json --no-progress > /home/node/knip.json')" || {
+    exec node /opt/knip/node_modules/knip/bin/knip.js --reporter json --no-progress')" || {
   printf 'scan-knip: could not create the scan container; failing.\n' >&2
   exit 1
 }
 
 # knip exits 1 when it finds something; its stderr streams to the job log.
-docker start --attach "$cid" >&2 || :
+# The report is read with a cap: one byte over it means a runaway or hostile
+# stream, which fails the scan rather than filling the job's disk.
+readonly report_cap=$((8 * 1024 * 1024))
+docker start --attach "$cid" | head -c "$((report_cap + 1))" > "${work}/knip.json" || :
 knip_rc="$(docker wait "$cid" 2> /dev/null || echo '?')"
 elapsed=$(($(date +%s) - start))
 
-if ! docker cp "${cid}:/home/node/knip.json" "${work}/knip.json" > /dev/null ||
-  ! node -e '
+if (($(wc -c < "${work}/knip.json") > report_cap)); then
+  printf 'scan-knip: knip report over the %s-byte cap; failing.\n' "$report_cap" >&2
+  exit 1
+fi
+if ! node -e '
 const r = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
 if (!r || !(Array.isArray(r.issues) || Array.isArray(r.files))) process.exit(1);
 ' "${work}/knip.json" 2> /dev/null; then
