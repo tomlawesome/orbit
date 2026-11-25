@@ -9,6 +9,7 @@ SEC-D3/1, RANGE-R2/1, RANGE-R2/2, PR-5/PR-52, AR2-1; ADR-0010
 (outage-recoverable scanning); ADR-0024 decision 6 (the archive is the
 plaintext escape hatch); ADR-0034 (the engine owns every rule). Amended by
 the #1390 review round (issue note 55214, rulings 1 to 10).
+**Amended by:** [ADR-0047](0047-household-export-leased-background-job.md) (the export no longer runs inside the POST: it is a leased background job, #1774)
 
 ## Context
 
