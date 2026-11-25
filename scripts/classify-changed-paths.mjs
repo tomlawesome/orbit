@@ -128,7 +128,8 @@ const imageBuildPolicyPaths = new Set(["supply-chain/licence-policy.yml"]);
 // its jobs call, and the classifier that decides which of them run. A change
 // confined to these builds no image and stands up no stack, so the lane runs
 // `fast` -- where the unit suites that read .gitlab-ci.yml live -- plus
-// `gitleaks` and `supply_chain_source`.
+// `gitleaks`, `supply_chain_source` and `code_scanners` (#1592: most of what
+// shellcheck and zizmor read is CI).
 //
 // scripts/ci/ is in scope by the owner's decision on #889, and it is the wide
 // part of it: several of those scripts are the acceptance stage's own checks

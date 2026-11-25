@@ -23,10 +23,14 @@ import { describe, expect, it } from "vitest";
  * tests/unit/backdrop-mark-divergence.test.mjs.
  */
 
-const FILES = [
+// #1354: the floor is derived once in the shared controller; the two components
+// keep their own buttons' `disabled` checks, which read it through the controller.
+const COMPONENTS = [
   "web/src/routes/household/[id]/DeskArchive.svelte",
   "web/src/routes/household/[id]/PocketArchive.svelte",
 ];
+const CONTROLLER = "web/src/routes/household/[id]/archive-controller.svelte.js";
+const FILES = [...COMPONENTS, CONTROLLER];
 
 /** @param {string} relativePath */
 function read(relativePath) {
@@ -34,11 +38,11 @@ function read(relativePath) {
 }
 
 describe("the passphrase-length gate (#1151 W2-Q8)", () => {
-  it("imports passphraseFloor from archive.js in both desk and pocket archives", () => {
-    for (const path of FILES) {
-      const src = read(path);
-      expect(src, `${path} should import passphraseFloor from ./archive.js`)
-        .toMatch(/import\s*\{[^}]*\bpassphraseFloor\b[^}]*\}\s*from\s*"\.\/archive\.js"/);
+  it("imports passphraseFloor from archive.js in the controller both archives share, and both archives use it", () => {
+    expect(read(CONTROLLER), `${CONTROLLER} should import passphraseFloor from ./archive.js`)
+      .toMatch(/import\s*\{[^}]*\bpassphraseFloor\b[^}]*\}\s*from\s*"\.\/archive\.js"/);
+    for (const path of COMPONENTS) {
+      expect(read(path), `${path} should call createArchiveController`).toMatch(/createArchiveController\(/);
     }
   });
 
@@ -46,8 +50,14 @@ describe("the passphrase-length gate (#1151 W2-Q8)", () => {
     for (const path of FILES) {
       const src = read(path);
       expect(src, `${path} still has a bare-number passphrase gate`).not.toMatch(/passIn\.length\s*<\s*\d|passphraseLength\(passIn\)\s*<\s*\d/);
-      expect(src, `${path} should gate on passphraseMin instead`).toMatch(/passphraseLength\(passIn\)\s*<\s*passphraseMin\b/);
-      expect(src, `${path} should derive passphraseMin from passphraseFloor(limits)`).toMatch(/passphraseMin\s*=\s*\$derived\(passphraseFloor\(limits\)\)/);
+    }
+    // The lookInside() guard, in the controller.
+    const controller = read(CONTROLLER);
+    expect(controller, `${CONTROLLER} should gate on passphraseMin instead`).toMatch(/passphraseLength\(passIn\)\s*<\s*passphraseMin\b/);
+    expect(controller, `${CONTROLLER} should derive passphraseMin from passphraseFloor(limits())`).toMatch(/passphraseMin\s*=\s*\$derived\(passphraseFloor\(limits\(\)\)\)/);
+    // The button's own disabled check, in each component, reads the controller's floor.
+    for (const path of COMPONENTS) {
+      expect(read(path), `${path} should gate its button on the controller's passphraseMin`).toMatch(/passphraseLength\(a\.passIn\)\s*<\s*a\.passphraseMin\b/);
     }
   });
 });

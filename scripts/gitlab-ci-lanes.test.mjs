@@ -56,7 +56,7 @@ const jobs = [...allBlocks].filter(([name]) => !name.startsWith("."));
 // `private-details` (#1562).
 const laneMembers = {
   [CI_LANE.IGNORE_POLICY]: ["gitleaks", "licence_policy", "private-details", "supply_chain_source"],
-  [CI_LANE.CI]: ["fast", "fast_checks", "fast_docker", "gitleaks", "private-details", "supply_chain_source"],
+  [CI_LANE.CI]: ["code_scanners", "fast", "fast_checks", "fast_docker", "gitleaks", "private-details", "supply_chain_source"],
   // #1597: a proven empty diff runs the same four as the ignore/policy lane.
   // Spelled as a literal, not CI_LANE.NO_CHANGE, so the key means what it says
   // whether or not the classifier exports the constant yet.
@@ -204,6 +204,7 @@ describe("pipeline lanes", () => {
       "build_launcher",
       // #1608: the same build on every ref but the release branches.
       "build_launcher_branch",
+      "code_scanners",
       "fast",
       "fast_checks",
       "fast_docker",

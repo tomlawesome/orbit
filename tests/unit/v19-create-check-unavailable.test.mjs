@@ -202,6 +202,7 @@ beforeAll(async () => {
     .replaceAll("'svelte/internal/disclose-version'", quoted(join(svelteSrc, "internal/disclose-version.js")))
     .replaceAll('from "svelte"', `from ${quoted(join(svelteSrc, "index-client.js"))}`)
     .replaceAll('"./entry.js"', quoted(join(web, "src/routes/create/entry.js")))
+    .replaceAll('"./read-controller.svelte.js"', quoted(join(web, "src/routes/create/read-controller.svelte.js")))
     .replaceAll('"./EntryForm.svelte"', quoted(join(web, "src/routes/create/EntryForm.svelte")))
     .replaceAll('"$lib/pocket/Sheet.svelte"', quoted(join(web, "src/lib/pocket/Sheet.svelte")))
     .replaceAll('"$lib/pocket/Sky.svelte"', quoted(join(web, "src/lib/pocket/Sky.svelte")));
