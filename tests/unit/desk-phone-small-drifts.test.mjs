@@ -104,27 +104,33 @@ describe("home: startAmend's section fallback (#1344, web-11)", () => {
 
 describe("archive card: the step-up return notice (#1344, web-12)", () => {
   const NOTICE = "back from signing in again · choose the file once more to carry on";
-  const phone = () => route("household/[id]/PocketArchive.svelte");
+  // #1354: desk and phone share one controller, which holds the flag, the words and the redirect.
+  const phoneSrc = () => route("household/[id]/PocketArchive.svelte");
   const deskSrc = () => route("household/[id]/DeskArchive.svelte");
+  const controller = () => route("household/[id]/archive-controller.svelte.js");
 
-  it("control: the desk has the notice this one is copied from", () => {
-    expect(deskSrc()).toContain(NOTICE);
-    expect(deskSrc()).toContain("STEPUP_RETURN_FLAG");
+  it("control: the desk and the phone both take the notice from the one shared controller", () => {
+    for (const src of [deskSrc(), phoneSrc()]) {
+      expect(src).toMatch(/createArchiveController\(/);
+      expect(src).toMatch(/archive-controller\.svelte\.js/);
+    }
+    expect(controller()).toContain(NOTICE);
+    expect(controller()).toContain("STEPUP_RETURN_FLAG");
   });
 
-  it("the phone says the same words on its return", () => {
-    expect(phone()).toContain(NOTICE);
+  it("the controller says the same words on the return, for the desk and the phone alike", () => {
+    expect(controller()).toContain(NOTICE);
   });
 
-  it("the phone names its return flag STEPUP_RETURN_FLAG and keeps it in sessionStorage", () => {
-    const src = phone();
+  it("the controller names the return flag STEPUP_RETURN_FLAG and keeps it in sessionStorage", () => {
+    const src = controller();
     expect(src).toMatch(/const\s+STEPUP_RETURN_FLAG\s*=\s*["'][^"']+["']/);
     expect(src).toMatch(/sessionStorage\.setItem\(\s*STEPUP_RETURN_FLAG/);
     expect(src).toMatch(/sessionStorage\.getItem\(\s*STEPUP_RETURN_FLAG/);
   });
 
-  it("the phone sets the flag before it leaves for the provider, and clears it if the redirect fails", () => {
-    const body = blockAfter(phone(), "async function toProvider()");
+  it("the shared toProvider sets the flag before it leaves for the provider, and clears it if the redirect fails", () => {
+    const body = blockAfter(controller(), "async function toProvider()");
     const set = body.indexOf("setItem");
     const start = body.indexOf("startStepUp(");
     expect(set, "flag is never set in toProvider").toBeGreaterThanOrEqual(0);
@@ -132,12 +138,13 @@ describe("archive card: the step-up return notice (#1344, web-12)", () => {
     expect(body).toMatch(/catch[\s\S]*sessionStorage\.removeItem\(\s*STEPUP_RETURN_FLAG/);
   });
 
-  it("the phone reads the flag on arrival, consumes it, and shows the notice in the card", () => {
-    const src = phone();
+  it("the controller reads the flag on arrival and consumes it; the desk and the phone each show the notice in the card", () => {
+    const src = controller();
     expect(src).toMatch(/onMount/);
     expect(src).toMatch(/sessionStorage\.removeItem\(\s*STEPUP_RETURN_FLAG/);
-    // shown as a note in the markup, not only assigned
-    expect(src).toMatch(/\{#if\s+stepUpNotice\}/);
+    expect(src).toMatch(/stepUpNotice\s*=\s*"back from signing in again/);
+    // shown as a note in each markup, not only assigned
+    for (const markup of [deskSrc(), phoneSrc()]) expect(markup).toMatch(/\{#if\s+a\.stepUpNotice\}/);
   });
 });
 

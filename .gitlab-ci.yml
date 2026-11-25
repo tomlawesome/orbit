@@ -521,9 +521,9 @@ variables:
 #
 # Split from the download below because `supply_chain_image` never runs a
 # local trivy binary at all -- it scans through `docker run` inside
-# scripts/ci/scan-image.sh, whose own trivy, run without `--skip-db-update`,
-# already downloads into whatever TRIVY_CACHE_DIR points at when it finds no
-# current database there. Nothing here needs to invoke trivy a second time.
+# scripts/ci/scan-image.sh, which downloads into whatever TRIVY_CACHE_DIR
+# points at, in a step of its own, when it finds no database there. Nothing
+# here needs to invoke trivy a second time.
 .trivy_db_dir: &trivy_db_dir |
   trivy_db_dir="$CI_PROJECT_DIR/.trivy-db-cache/$(date -u +%Y-%m-%d)"
   if [ ! -d "$trivy_db_dir" ]; then
@@ -604,7 +604,7 @@ variables:
   #   ci             .gitlab-ci.yml, scripts/ci/, the classifier and the two
   #                  tests that read this file
   #                  -> fast, fast_checks, fast_docker, gitleaks, private-details,
-  #                     supply_chain_source
+  #                     supply_chain_source, code_scanners
   #   no_change      a proven comparison that found no changed path, such
   #                  as a back-merge (#1597)
   #                  -> gitleaks, licence_policy, private-details,
@@ -622,7 +622,7 @@ variables:
       nightly_yield:*) echo "skipped: a pipeline on preview or main is running; the nightly yields to it (#1546)"; return 1 ;;
       full:*) return 0 ;;
       ignore_policy:gitleaks | ignore_policy:licence_policy | ignore_policy:private-details | ignore_policy:supply_chain_source) return 0 ;;
-      ci:fast | ci:fast_checks | ci:fast_docker | ci:gitleaks | ci:private-details | ci:supply_chain_source) return 0 ;;
+      ci:fast | ci:fast_checks | ci:fast_docker | ci:gitleaks | ci:private-details | ci:supply_chain_source | ci:code_scanners) return 0 ;;
       no_change:gitleaks | no_change:licence_policy | no_change:private-details | no_change:supply_chain_source) return 0 ;;
     esac
     echo "skipped: the ${ORBIT_LANE:-full} lane does not run ${1} (#889)"
@@ -1654,6 +1654,10 @@ fast_checks:
     - *drop_to_node
     # No cosign telemetry, and no Rekor upload except the marked public proof (#1841).
     - orbit_as_node 'node scripts/ci/check-cosign-calls.mjs'
+    # The GitHub workflows parse as GitHub parses them (#1592; owner answers
+    # 96 and 99a): GitHub's own @actions/workflow-parser, a devDependency
+    # pinned in the lockfile. Any parse or expression error fails the job.
+    - orbit_as_node 'node scripts/check-workflows.mjs'
     - orbit_as_node 'ORBIT_TEST_PHASE=checks bash scripts/test-backend.sh'
     # The render proof, run here as well as inside the image: the container
     # build is the authoritative gate but it is minutes away, and this fails in
@@ -1728,12 +1732,15 @@ fast_docker:
     # -- and node:22-bookworm carries every one of them except jq (pipeline
     # 1021). *docker_cli has just run `apt-get update`, so this is one package.
     - apt-get install -y -qq --no-install-recommends jq
+    # greenmail-roots.test.mjs (#1489) reads this image by tag and never builds
+    # it, so every spawn there keeps the standard process budget.
+    - docker build -q -t orbit-greenmail-roots:local tests/greenmail
     - pnpm install --frozen-lockfile
     - *drop_to_node
     # app-memory-limit-contract.test.mjs (#1429) and test-bed-compose.test.mjs
     # (#1158, #1445, run here since #1642) render `docker compose config`,
     # which needs the binary but no daemon.
-    - orbit_as_node 'pnpm exec vitest run src/lib/recovery-bundle.parity.test.ts scripts/test-e2e-local-reuse.test.mjs scripts/app-memory-limit-contract.test.mjs scripts/dev/test-bed-compose.test.mjs'
+    - orbit_as_node 'pnpm exec vitest run src/lib/recovery-bundle.parity.test.ts scripts/test-e2e-local-reuse.test.mjs scripts/app-memory-limit-contract.test.mjs scripts/dev/test-bed-compose.test.mjs scripts/greenmail-roots.test.mjs'
     - *reuse_evidence
   artifacts:
     name: orbit-fast-docker
@@ -1820,6 +1827,66 @@ signing_image_age:
 
 # --- policy ------------------------------------------------------------------
 
+# Code scanners, report-only (#1592; owner decision 96, 2026-11-24): shellcheck
+# on the shell scripts, zizmor on the GitHub workflows, ruff's S rules on the
+# Python, opengrep with the repository's own rules (.opengrep/rules) on the
+# TypeScript, JavaScript and Svelte. Each tool is a release binary pinned by
+# version and checksum (opengrep also by its Cosign signature) in
+# scripts/ci/ensure-<tool>.sh, which refuses anything else. Findings never
+# fail this job; a tool that cannot be fetched, verified or run does, and
+# allow_failure keeps that from blocking a merge while the reports are read.
+# Blocking comes later, at a stated threshold, with an ignore file holding a
+# reason and an expiry for each false alarm. One job for all four, so one
+# light-lane slot (#1933). Reports: .orbit-code-scan/<tool>.json.
+# No `*system_lane_gate`, unlike `supply_chain_source`: what these tools read
+# is code and scripts, so an ordinary change to src/ or a script is exactly
+# what they must see, system risk or not. They take a minute or two.
+code_scanners:
+  stage: policy
+  tags: [light]
+  image:
+    name: $NODE_IMAGE
+    pull_policy: if-not-present
+  timeout: 15m
+  allow_failure: true
+  rules:
+    - !reference [.dev-landing, job_rule]
+    - !reference [.backmerge-skip, job_rule]
+    - *batch_intake_skip
+    - *not_on_main_push
+    - *not_scheduled
+    - when: on_success
+  needs:
+    - job: classify
+      artifacts: true
+  variables:
+    ORBIT_TOOL_CACHE: $CI_PROJECT_DIR/.orbit-tools
+  # The downloads, kept between pipelines. Every run re-checks each cached
+  # binary against its pinned hash, so a cache entry is never trusted as is.
+  # Saved whatever the job's result, so one failing tool does not make the
+  # other three download again on every run.
+  cache:
+    key: code-scanners-tools
+    paths:
+      - .orbit-tools/
+    when: always
+  script:
+    - *reach_helpers
+    - orbit_lane_admits code_scanners || exit 0
+    - |
+      status=0
+      for tool in shellcheck zizmor ruff opengrep; do
+        echo "--- $tool"
+        bash "scripts/ci/scan-$tool.sh" || { echo "code_scanners: $tool did not complete"; status=1; }
+      done
+      exit "$status"
+  artifacts:
+    name: orbit-code-scan
+    paths:
+      - .orbit-code-scan/
+    expire_in: 7 days
+    when: always
+
 # Mirrors the old workflow's source policy job. Trivy runs as the job image rather
 # than through `docker run`: under dind a bind mount of the workspace would be
 # empty, because the workspace lives in the job container and the daemon does
@@ -1885,6 +1952,25 @@ supply_chain_source:
         --output .orbit-supply-chain/source-raw.json \
         .
       trivy version --format json > .orbit-supply-chain/trivy-version.json
+      # Misconfiguration scan of every config file Trivy recognises -- here the
+      # Dockerfiles and compose files (root user, unpinned base, secrets in
+      # build args, no health check) -- report-only (#1592): it never
+      # changes this job's result, and its report is kept as an artifact so the
+      # noise can be read before it blocks. Its rule bundle comes through the
+      # image cache like the databases, not Trivy's mirror.gcr.io default.
+      misconfig_status=0
+      trivy config \
+        --checks-bundle-repository "$CI_IMAGE_CACHE_GHCR/aquasecurity/trivy-checks:2" \
+        --skip-dirs node_modules --skip-dirs web/node_modules \
+        --exit-code 0 \
+        --format json \
+        --output .orbit-supply-chain/misconfig.json \
+        . || misconfig_status=$?
+      if [ "$misconfig_status" -eq 0 ]; then
+        trivy convert --format table .orbit-supply-chain/misconfig.json || true
+      else
+        echo "supply_chain_source: the report-only misconfiguration scan did not complete (exit $misconfig_status); see above (#1592)"
+      fi
       set +e
       node scripts/supply-chain-policy.mjs source \
         --input .orbit-supply-chain/source-raw.json \
@@ -1898,6 +1984,7 @@ supply_chain_source:
     paths:
       - .orbit-supply-chain/source-evidence.json
       - .orbit-supply-chain/trivy-version.json
+      - .orbit-supply-chain/misconfig.json
     expire_in: 7 days
     when: always
 
@@ -3317,9 +3404,10 @@ supply_chain_image:
     # and TRIVY_INSECURE are exported by *trivy_db_dir just above. The script
     # passes the database repository and TRIVY_INSECURE into the scanner
     # container itself and mounts the cache directory in unmodified.
-    # scan-image.sh's own trivy, run without --skip-db-update, downloads into
-    # it exactly when it finds nothing current there -- the same check
-    # `*trivy_db_warm` makes explicitly for the other two scanner jobs.
+    # scan-image.sh downloads into it in a step of its own, with its own
+    # deadline, exactly when it finds no db/trivy.db there -- the same check
+    # `*trivy_db_warm` makes for the other two scanner jobs -- and only then
+    # runs the scans.
     - |
       set -eu
       TESTED_IMAGE_ID="$ORBIT_IMAGE_ID" \
@@ -3371,8 +3459,9 @@ supply_chain_image:
 smoke:
   stage: acceptance
   extends: [.privileged_runner, .browser_suite]
-  # 30m + the quarantine run after the gate (capped at 8m, agent-infra#30).
-  timeout: 40m
+  # The suite's own 35m cap + the quarantine run after it (capped at 8m,
+  # agent-infra#30): 43m (#1943 D-F3, owner 83a).
+  timeout: 43m
   needs: *needs_gated_image_checked
   # One heavy pipeline at a time (#1546, owner 1c): a later pipeline's smoke
   # queues behind an earlier one's instead of the two slowing each other.
@@ -3401,7 +3490,7 @@ smoke:
     - *stack_diagnostics_on_failure
     # The old workflow builds the disposable OIDC provider as a step of its own,
     # before the stack starts. Not extracted, because it is one command.
-    - docker compose --env-file .env-orbit $COMPOSE_FILES build orbit-oidc orbit-dkim-dns
+    - docker compose --env-file .env-orbit $COMPOSE_FILES build orbit-oidc orbit-dkim-dns orbit-greenmail
     - bash scripts/ci/start-acceptance-stack.sh
     - bash scripts/ci/verify-health-endpoint.sh
     - |
@@ -3495,11 +3584,12 @@ smoke:
 # reuse key (scripts/ci/job-inputs.json) and artefacts -- so a red here means
 # the same as a red there.
 # Desktop alone now runs 28-31 minutes (pipelines 2640 and 2643, two jobs cut
-# off at 30m before the suite finished), so it gets 45m.
+# off at 30m before the suite finished), so its suite is capped at 40m, and
+# the job gets 48m: that cap + the 8m quarantine run (#1943 D-F3, owner 83a).
 smoke_webkit:
   stage: acceptance
   extends: [.privileged_runner, .browser_suite]
-  timeout: 45m
+  timeout: 48m
   needs: *needs_gated_image_checked
   # One heavy pipeline at a time (#1546, owner 1c): a later pipeline's smoke_webkit
   # queues behind an earlier one's instead of the two slowing each other.
@@ -3536,7 +3626,7 @@ smoke_webkit:
     - *stack_diagnostics_on_failure
     # The old workflow builds the disposable OIDC provider as a step of its own,
     # before the stack starts. Not extracted, because it is one command.
-    - docker compose --env-file .env-orbit $COMPOSE_FILES build orbit-oidc orbit-dkim-dns
+    - docker compose --env-file .env-orbit $COMPOSE_FILES build orbit-oidc orbit-dkim-dns orbit-greenmail
     - bash scripts/ci/start-acceptance-stack.sh
     - bash scripts/ci/verify-health-endpoint.sh
     - |
@@ -3598,7 +3688,8 @@ smoke_webkit:
 smoke_webkit_mobile:
   stage: acceptance
   extends: [.privileged_runner, .browser_suite]
-  timeout: 30m
+  # The suite's own 25m cap + the 8m quarantine run (#1943 D-F3, owner 83a).
+  timeout: 33m
   needs: *needs_gated_image_checked
   # One heavy pipeline at a time (#1546, owner 1c): a later pipeline's smoke_webkit_mobile
   # queues behind an earlier one's instead of the two slowing each other.
@@ -3635,7 +3726,7 @@ smoke_webkit_mobile:
     - *stack_diagnostics_on_failure
     # The old workflow builds the disposable OIDC provider as a step of its own,
     # before the stack starts. Not extracted, because it is one command.
-    - docker compose --env-file .env-orbit $COMPOSE_FILES build orbit-oidc orbit-dkim-dns
+    - docker compose --env-file .env-orbit $COMPOSE_FILES build orbit-oidc orbit-dkim-dns orbit-greenmail
     - bash scripts/ci/start-acceptance-stack.sh
     - bash scripts/ci/verify-health-endpoint.sh
     - |

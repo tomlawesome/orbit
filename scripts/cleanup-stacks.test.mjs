@@ -514,6 +514,70 @@ describe("cleanup-stacks.sh", () => {
     });
   });
 
+  // #1489: each e2e run also builds orbit-e2e-local-<run>-orbit-greenmail
+  // (compose/docker-compose.acceptance.yml). It follows the same rules as the
+  // sign-in image: listed, tied to its run's project, removed when orphaned.
+  describe("orphaned per-run GreenMail images (#1489)", () => {
+    const orphanOld = "orbit-e2e-local-1a2b3c4d-111-orbit-greenmail";
+    const projectLive = "orbit-e2e-local-5e6f7a8b-222";
+    const liveGreenmail = `${projectLive}-orbit-greenmail`;
+    const orphanRecent = "orbit-e2e-local-9c0d1e2f-333-orbit-greenmail";
+    const otherService = "orbit-e2e-local-3a4b5c6d-444-orbit-tika";
+    const notOurs = "someone-else-orbit-greenmail";
+    const imageRows = [
+      ...images,
+      `${orphanOld}|latest|sha256:b1|2 days ago|90MB|${createdAt(48)}`,
+      `${liveGreenmail}|latest|sha256:b2|2 days ago|90MB|${createdAt(48)}`,
+      `${orphanRecent}|latest|sha256:b3|2 hours ago|90MB|${createdAt(2)}`,
+      `${otherService}|latest|sha256:b4|3 days ago|90MB|${createdAt(72)}`,
+      `${notOurs}|latest|sha256:b5|3 days ago|90MB|${createdAt(72)}`,
+    ];
+    const psRows = [
+      ...containers,
+      `${projectLive}|c30|${projectLive}-app|Up 5 minutes|orbit-local:live|orbit-app|${projectLive}_default`,
+      `${projectLive}|c31|${projectLive}-db|Up 5 minutes|postgres:18-alpine|orbit-db|${projectLive}_default`,
+    ];
+    const options = { imageRows, psRows };
+    const removedNames = (r) => r.removed.images.filter((i) => /orbit-e2e-local|someone-else/.test(i));
+
+    it("lists the orphaned, the live and the recent GreenMail images and removes nothing without --remove", () => {
+      const r = run([], options);
+      expect(r.status).toBe(0);
+      expect(r.calls.some(mutating)).toBe(false);
+      for (const name of [orphanOld, liveGreenmail, orphanRecent]) expect(r.stdout).toContain(name);
+    });
+
+    it("--remove removes an orphaned GreenMail image older than a day, by name", () => {
+      const r = run(["--remove"], options);
+      expect(r.status).toBe(0);
+      expect(removedNames(r).some((i) => i.startsWith(`${orphanOld}:`) || i === orphanOld)).toBe(true);
+      expect(r.stdout).toContain(orphanOld);
+    });
+
+    it("--remove keeps and lists the GreenMail image of a project that still has a container", () => {
+      const r = run(["--remove"], options);
+      expect(removedNames(r).some((i) => i.includes(liveGreenmail))).toBe(false);
+      expect(r.stdout).toContain(liveGreenmail);
+    });
+
+    it("--remove keeps and lists a GreenMail image under a day old, even when no container is left", () => {
+      for (const args of [["--remove"], ["--remove", "--all"]]) {
+        const r = run(args, options);
+        expect(removedNames(r).some((i) => i.includes(orphanRecent))).toBe(false);
+        expect(r.stdout).toContain(orphanRecent);
+      }
+    });
+
+    it("removes only per-run GreenMail images: not another service's image, not another repository's", () => {
+      const r = run(["--remove"], options);
+      expect(removedNames(r).some((i) => i.includes(orphanOld))).toBe(true);
+      expect(removedNames(r).some((i) => i.includes(otherService))).toBe(false);
+      expect(removedNames(r).some((i) => i.includes(notOurs))).toBe(false);
+      expect(r.calls.filter((c) => c.startsWith("image rm")).every((c) => !c.includes("-f"))).toBe(true);
+      expect(r.calls.some((c) => c.includes("prune"))).toBe(false);
+    });
+  });
+
   it("rejects an unknown option without calling docker", () => {
     const r = run(["--nuke"]);
     expect(r.status).toBe(2);

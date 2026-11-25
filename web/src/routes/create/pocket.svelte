@@ -12,9 +12,9 @@
   } from "$lib/data/workspace.js";
   import { renewalDays } from "$lib/data/already-held.js";
   import {
-    CAP_ATTACHED, CAP_READING, CHECKING_HEAD, WHY_CHECKING, FOCUS_REFUSED, FOCUS_SCANNING, undrawnFocus, WHY_READING, captionOf, focusAfterScan, readPickedDocument,
-    suggestionsToCarry,
+    CAP_ATTACHED, CAP_READING, CHECKING_HEAD, WHY_CHECKING, FOCUS_REFUSED, FOCUS_SCANNING, undrawnFocus, WHY_READING,
   } from "$lib/data/document-read.js";
+  import { createReadController, lineAfterScan } from "./read-controller.svelte.js";
   import Sheet from "$lib/pocket/Sheet.svelte";
   import Sky from "$lib/pocket/Sky.svelte";
   import { standOnKeyboard } from "$lib/pocket/sheet.js";
@@ -111,7 +111,7 @@
   let picked = $state(null);
   /** @type {import('$lib/data/document-read.js').SuggestionField[]} */
   let marked = $state([]);
-  /** @type {AbortController | null} */
+  /** The read in flight, or null (its `current()` answers for reaskHeld). @type {{ current: () => boolean } | null} */
   let reading = null;
   let picks = 0;
   /** #1437: the hold on the read while the card asks about a file the
@@ -209,9 +209,9 @@
     readHold?.open();
     readHold = null;
     documentIds.delete(file);
-    const controller = reading;
-    if (!controller) return;
-    const current = () => reading === controller && attachment === file && entry.householdId === householdId;
+    const run = reading;
+    if (!run) return;
+    const current = () => run.current() && entry.householdId === householdId;
     const gate = readGate();
     const asked = askHeld(householdId, file, current, gate);
     pickStaging = { key: `${householdId}:${documentIdOf(file)}`, done: asked };
@@ -240,7 +240,7 @@
   }
 
   function stopReading() {
-    reading?.abort();
+    reader.stop();
     reading = null;
     if (picked?.page) URL.revokeObjectURL(picked.page);
     if (picked) picked.page = null;
@@ -282,15 +282,47 @@
     settle(FOCUS_REFUSED, why);
   }
 
+  /** What each outcome of the read does to the picked state; the flow is read-controller's. */
+  const reader = createReadController({
+    /* ADR-0033 step 5: the focus line moves on from the virus check to the
+       preview the moment the scan has passed, before anything opens the file. */
+    onScanned(scanned) {
+      if (!picked || picked.page || picked.settled) return;
+      picked.line = lineAfterScan(scanned);
+    },
+    onPage({ url, scanned }) {
+      if (!picked) return;
+      picked.page = url;
+      picked.scanned = scanned;
+    },
+    onRefused(why) {
+      refuse(why);
+    },
+    onRead({ outcome, carry, caption }) {
+      if (!picked) return;
+      for (const one of carry) {
+        /* The cost field holds a bare amount, as the review's accept()
+           copies it in. */
+        entry[one.field] = one.field === "cost" ? one.value.replace(/[^\d.]/g, "") : one.value;
+      }
+      marked = [...marked, ...carry.map((one) => one.field)];
+      picked.caption = caption;
+      /* The server's words about the read, as the desk shows them under its
+         caption (e.g. nothing could be extracted). */
+      picked.message = outcome.kind === "read" || outcome.kind === "unread" ? outcome.message : "";
+      picked.read = true;
+    },
+    onSettleUndrawn(why) {
+      settleUndrawn(why);
+    },
+  });
+
   /** @param {File} file */
   async function readDocument(file) {
     /* A refused file's loud note goes when a new file replaces it. */
     if (picked?.refused) problem = null;
     stopReading();
     clearSuggestions();
-    const controller = new AbortController();
-    reading = controller;
-    const current = () => reading === controller && attachment === file;
     readHold?.close();
     readHold = null;
     letGoStaged(entry.householdId ? `${entry.householdId}:${documentIdOf(file)}` : "");
@@ -303,62 +335,16 @@
     const householdId = entry.householdId;
     if (!householdId) return;
     askedFor = householdId;
-    /* ADR-0033 step 5: the focus line moves on from the virus check to the
-       preview the moment the scan has passed, before anything opens the file. */
-    /** @type {(scanned: boolean) => void} */
-    const onScanned = (scanned) => {
-      if (!current() || !picked || picked.page || picked.settled) return;
-      picked.line = focusAfterScan(scanned);
-    };
     const gate = readGate();
-    const outcomes = readPickedDocument(householdId, file, { signal: controller.signal, onScanned, documentReading, readAfter: gate.promise });
-    const asked = askHeld(householdId, file, current, gate);
+    const run = reader.start(file, {
+      householdId, documentReading, readAfter: gate.promise, valueOf: (field) => entry[field],
+      wanted: () => attachment === file && !!picked,
+    });
+    reading = run;
+    const asked = askHeld(householdId, file, run.current, gate);
     pickStaging = { key: `${householdId}:${documentIdOf(file)}`, done: asked };
-    /** @type {string | null} */
-    let undrawable = null;
 
-    const page = outcomes.page.then((outcome) => {
-      if (!current() || !picked) {
-        if (outcome.kind === "up") URL.revokeObjectURL(outcome.url);
-        return;
-      }
-      if (outcome.kind === "up") {
-        picked.page = outcome.url;
-        picked.scanned = outcome.scanned;
-      } else if (outcome.kind === "refused") {
-        refuse(outcome.why);
-      } else {
-        undrawable = outcome.why;
-        if (picked.read) settleUndrawn(undrawable);
-      }
-    });
-
-    const read = outcomes.read.then((outcome) => {
-      if (!current() || !picked) return;
-      if (outcome.kind === "refused") {
-        refuse(outcome.why);
-        return;
-      }
-      let carried = 0;
-      if (outcome.kind === "read") {
-        const carry = suggestionsToCarry(outcome.suggestions, (field) => entry[field]);
-        for (const one of carry) {
-          /* The cost field holds a bare amount, as the review's accept()
-             copies it in. */
-          entry[one.field] = one.field === "cost" ? one.value.replace(/[^\d.]/g, "") : one.value;
-        }
-        marked = [...marked, ...carry.map((one) => one.field)];
-        carried = carry.length;
-      }
-      picked.caption = captionOf(outcome, carried);
-      /* The server's words about the read, as the desk shows them under its
-         caption (e.g. nothing could be extracted). */
-      picked.message = outcome.kind === "read" || outcome.kind === "unread" ? outcome.message : "";
-      picked.read = true;
-      if (undrawable) settleUndrawn(undrawable);
-    });
-
-    await Promise.allSettled([page, read, asked]);
+    await Promise.allSettled([run.done, asked]);
   }
 
   /* "not this one": the file has already left the entry (EntryForm), and
@@ -387,7 +373,7 @@
   onDestroy(() => {
     /* #1437: the pick's copy is let go when the form is left unsaved. */
     letGoStaged();
-    reading?.abort();
+    reader.stop();
     reading = null;
     if (picked?.page) URL.revokeObjectURL(picked.page);
   });

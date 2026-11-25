@@ -853,8 +853,8 @@ else
   if [[ "$profile" == "local-only" ]]; then
     log "local-only profile: no identity provider to build"
   else
-    log "building the disposable OIDC acceptance provider and DKIM key stand-in"
-    compose build orbit-oidc orbit-dkim-dns
+    log "building the disposable OIDC acceptance provider, DKIM key stand-in and GreenMail (#1489)"
+    compose build orbit-oidc orbit-dkim-dns orbit-greenmail
   fi
 
   log "starting the acceptance stack (profile ${profile}, project ${project_name}, app on ${base_url})"

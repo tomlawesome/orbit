@@ -9,8 +9,9 @@ import {
 } from "$lib/data/already-held.js";
 import {
   CAP_ATTACHED, CAP_READING, CHECKING_HEAD, WHY_CHECKING, FOCUS_REFUSED, FOCUS_SCANNING, undrawnFocus, PAGE_HEAD, READING_HEAD, WHY_READING,
-  DOCUMENT_ACCEPT, captionOf, focusAfterScan, readPickedDocument, suggestionsToCarry, whyLines,
+  DOCUMENT_ACCEPT, whyLines,
 } from "$lib/data/document-read.js";
+import { createReadController, lineAfterScan } from "./read-controller.svelte.js";
 import { saveProblem } from "$lib/data/metadata-status.js";
 import { screenScope } from "$lib/teardown.js";
 import { takeHeldDocument } from "$lib/data/held-document.js";
@@ -390,13 +391,13 @@ export function mountCreate({
 
   /** One read in flight at a time: picking again, "not this one" or leaving
       cancels the last. */
-  /** @type {AbortController | null} */
-  let reading = null;
+  let pickSeq = 0;
+  /** The file the read in flight is about (its handlers write against it). @type {File | null} */
+  let readFile = null;
   /** The sheet's object URL, revoked when the sheet is cleared. */
   let sheetUrl = "";
   /** @type {"pending" | "up" | "failed"} */
   let pageState = "pending";
-  let readDone = false;
   /** How the lane is to settle once the read is done, if the page failed. */
   /** @type {{ line: string, why: string, refused: boolean } | null} */
   let pageProblem = null;
@@ -578,7 +579,6 @@ export function mountCreate({
   function resetLane(/** @type {File} */ file, reading = true) {
     clearSheet();
     pageState = "pending";
-    readDone = false;
     pageProblem = null;
     readcard.classList.remove("still", "rc-refused");
     delete readcard.dataset.page;
@@ -616,8 +616,7 @@ export function mountCreate({
       and the save is held until it is replaced or removed (#1406, owner's
       answer 6a); the lane says so in the item page's own words. */
   function refuseDocument(/** @type {File} */ file, /** @type {string} */ why) {
-    reading?.abort();
-    reading = null;
+    stopRead();
     fileRefusal = why;
     /* The heldName line is text: the lane's own two-line words carry markup. */
     const reason = why.replaceAll("<br>", "; ");
@@ -626,7 +625,6 @@ export function mountCreate({
     clearSheet();
     pageState = "failed";
     readcard.dataset.page = "failed";
-    readDone = true;
     delete readcard.dataset.reading;
     honest.textContent = "";
     rcScan.hidden = true;
@@ -662,8 +660,7 @@ export function mountCreate({
   function dropDocument() {
     letGoStaged();
     alerting?.gate.close();
-    reading?.abort();
-    reading = null;
+    stopRead();
     attachment = null;
     attachmentId = "";
     fileRefusal = null;
@@ -674,86 +671,48 @@ export function mountCreate({
     updateRefusal();
   }
 
-  /**
-   * The read itself. Two requests from one pick, independent of each other:
-   * the page lands the moment it is drawn (`body.snap`, head "Page one"),
-   * whether or not the read has finished; the read's outcome is written
-   * where the lane is by then — under the sheet if the page is up, in the
-   * focus block if it never came.
-   */
-  async function readDocument(/** @type {File} */ file) {
-    reading?.abort();
-    const controller = new AbortController();
-    reading = controller;
-    const current = () => reading === controller && attachment === file;
-    /* A swapped file takes the first file's suggestions with it, as the
-       pocket's readDocument does: carrying only fills empty fields, so stale
-       ones would otherwise be saved against the new file. */
-    clearSuggestions();
-    resetLane(file, documentReading);
-    const householdId = (household ?? await activeHousehold()).id;
-    if (!current()) return;
+  /** Cancels the read in flight, and any still waiting for its household. */
+  function stopRead() {
+    pickSeq += 1;
+    reader.stop();
+  }
 
+  /** The form's current value for a suggestion's field (the date through its picker). */
+  const valueOf = (/** @type {string} */ field) => {
+    const slot = SUGGESTION_SLOTS[field];
+    return slot.read ? slot.read() : /** @type {HTMLInputElement} */ (document.getElementById(slot.input)).value;
+  };
+
+  /** What each outcome of the read does to the lane; the flow is read-controller's. */
+  const reader = createReadController({
     /* ADR-0033 step 5: the focus line moves on from the virus check to the
        preview the moment the scan has passed, before anything opens the file. */
-    const onScanned = (/** @type {boolean} */ scanned) => {
-      if (!current() || pageState !== "pending") return;
-      focusline.textContent = focusAfterScan(scanned);
-    };
-    const gate = readGate();
-    const outcomes = readPickedDocument(householdId, file, { signal: controller.signal, onScanned, documentReading, readAfter: gate.promise });
-    const asked = askHeld(householdId, file, attachmentId, current, gate);
-    pickStaging = { id: attachmentId, done: asked };
-
-    const page = outcomes.page.then((outcome) => {
-      if (!current()) {
-        if (outcome.kind === "up") URL.revokeObjectURL(outcome.url);
-        return;
-      }
-      if (outcome.kind === "up") {
-        sheetUrl = outcome.url;
-        sheetPage.alt = `Page one of ${file.name}`;
-        sheetPage.src = outcome.url;
-        rcScan.hidden = !outcome.scanned || fileRefusal !== null;
-        pageState = "up";
-        readcard.dataset.page = "up";
-        if (!alerting) readHead.textContent = PAGE_HEAD;
-        document.body.classList.add("snap");
-        return;
-      }
+    onScanned(scanned) {
+      if (pageState !== "pending") return;
+      focusline.textContent = lineAfterScan(scanned);
+    },
+    onPage({ url, scanned }) {
+      sheetUrl = url;
+      sheetPage.alt = `Page one of ${readFile?.name}`;
+      sheetPage.src = url;
+      rcScan.hidden = !scanned || fileRefusal !== null;
+      pageState = "up";
+      readcard.dataset.page = "up";
+      if (!alerting) readHead.textContent = PAGE_HEAD;
+      document.body.classList.add("snap");
+    },
+    onPageUndrawn(why) {
       pageState = "failed";
       readcard.dataset.page = "failed";
-      if (outcome.kind === "refused") {
-        refuseDocument(file, outcome.why);
-        return;
-      }
-      pageProblem = { ...undrawnFocus(outcome.why), refused: false };
-      if (readDone) settleFocus(pageProblem);
-    });
-
-    const read = outcomes.read
-      .then((outcome) => {
-        if (!current()) return;
-        if (outcome.kind === "refused") {
-          /* The upload would refuse it too, so the save is held now. */
-          refuseDocument(file, outcome.why);
-          return;
-        }
-        if (outcome.kind === "attached") {
-          /* #1459: reading is off; the file goes with the entry as it is. */
-          capline.textContent = captionOf(outcome, 0);
-          return;
-        }
-        if (outcome.kind === "unread") {
-          capline.textContent = captionOf(outcome, 0);
-          honest.textContent = outcome.message;
-          return;
-        }
-        const valueOf = (/** @type {string} */ field) => {
-          const slot = SUGGESTION_SLOTS[field];
-          return slot.read ? slot.read() : /** @type {HTMLInputElement} */ (document.getElementById(slot.input)).value;
-        };
-        const carry = suggestionsToCarry(outcome.suggestions, valueOf);
+      pageProblem = { ...undrawnFocus(why), refused: false };
+    },
+    /* The upload would refuse it too (the read), or the scan found malware
+       (the page), so the save is held now. */
+    onRefused(why) {
+      if (readFile) refuseDocument(readFile, why);
+    },
+    onRead({ outcome, carry, caption }) {
+      if (outcome.kind === "read") {
         for (const suggestion of carry) {
           const slot = SUGGESTION_SLOTS[suggestion.field];
           writeSlot(slot, suggestion.value);
@@ -764,17 +723,41 @@ export function mountCreate({
           edited();
           updateRefusal();
         }
-        capline.textContent = captionOf(outcome, carry.length);
-        honest.textContent = outcome.message;
-      })
-      .finally(() => {
-        if (!current()) return;
-        readDone = true;
-        delete readcard.dataset.reading;
-        if (pageState === "failed" && pageProblem) settleFocus(pageProblem);
-      });
+      }
+      /* #1459: "attached" is reading off; the file goes with the entry as it is. */
+      capline.textContent = caption;
+      if (outcome.kind !== "attached") honest.textContent = outcome.message;
+      delete readcard.dataset.reading;
+    },
+    onSettleUndrawn() {
+      if (pageProblem) settleFocus(pageProblem);
+    },
+  });
 
-    await Promise.allSettled([page, read, asked]);
+  /**
+   * The read itself. Two requests from one pick, independent of each other:
+   * the page lands the moment it is drawn (`body.snap`, head "Page one"),
+   * whether or not the read has finished; the read's outcome is written
+   * where the lane is by then — under the sheet if the page is up, in the
+   * focus block if it never came.
+   */
+  async function readDocument(/** @type {File} */ file) {
+    stopRead();
+    const mine = pickSeq;
+    const wanted = () => pickSeq === mine && attachment === file;
+    /* A swapped file takes the first file's suggestions with it, as the
+       pocket's readDocument does: carrying only fills empty fields, so stale
+       ones would otherwise be saved against the new file. */
+    clearSuggestions();
+    resetLane(file, documentReading);
+    const householdId = (household ?? await activeHousehold()).id;
+    if (!wanted()) return;
+    readFile = file;
+    const gate = readGate();
+    const run = reader.start(file, { householdId, documentReading, readAfter: gate.promise, valueOf, wanted });
+    const asked = askHeld(householdId, file, attachmentId, run.current, gate);
+    pickStaging = { id: attachmentId, done: asked };
+    await Promise.allSettled([run.done, asked]);
   }
 
   /* "not this one": the file leaves the entry, with what it suggested, and
@@ -1001,8 +984,7 @@ export function mountCreate({
          must not outlive the screen. */
       /* #1437: the pick's copy is let go when the form is left unsaved. */
       letGoStaged();
-      reading?.abort();
-      reading = null;
+      stopRead();
       clearSheet();
       /* `dragging`, `over` and the zone's `landed` go with `doc` (#1244). */
       dropFeedback.clear();
