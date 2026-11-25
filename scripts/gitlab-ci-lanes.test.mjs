@@ -1687,7 +1687,7 @@ describe("merge requests run changed-reachable tests, the dev push runs everythi
           chmodSync(join(stubs, name), 0o755);
         }
         const env = { ...process.env, PATH: `${stubs}:/usr/bin:/bin`, STUB_LOG: log, ...(base ? { ORBIT_TEST_CHANGED_BASE: base } : {}), ...environment };
-        for (const key of ["CI", "ORBIT_TEST_COVERAGE", "ORBIT_TEST_CHANGED_BASE", "ORBIT_TEST_PHASE"]) if (!(key in environment) && !(key === "ORBIT_TEST_CHANGED_BASE" && base)) delete env[key];
+        for (const key of ["CI", "ORBIT_TEST_COVERAGE", "ORBIT_TEST_CHANGED_BASE", "ORBIT_TEST_PHASE", "ORBIT_TEST_SHARD"]) if (!(key in environment) && !(key === "ORBIT_TEST_CHANGED_BASE" && base)) delete env[key];
         const result = spawnSync("bash", [join(repo, "scripts", "test-backend.sh")], {
           cwd: repo,
           encoding: "utf8",
@@ -3390,11 +3390,12 @@ describe("the fast job is split by phase (#1831)", () => {
     }
   });
 
-  it("makes every job that takes fast's artifacts take fast_checks' as well", () => {
-    const takers = needLists().filter((list) => list.some((need) => need.job === "fast" && need.artifacts === true) && !isFastCoverage(list));
-    expect(takers.length, "lists taking fast's artifacts").toBeGreaterThan(0);
+  it("makes every job that takes fast_checks' artifacts take them, and fast only as a wait (#1831, #1933)", () => {
+    const takers = needLists().filter((list) => list.some((need) => need.job === "fast_checks" && need.artifacts === true));
+    expect(takers.length, "lists taking fast_checks' artifacts").toBeGreaterThan(0);
     for (const list of takers) {
-      expect(list.find((need) => need.job === "fast_checks"), JSON.stringify(list)).toMatchObject({ artifacts: true });
+      // #1933: fast's artefacts are the shard blobs, which only fast_coverage reads.
+      expect(list.find((need) => need.job === "fast"), JSON.stringify(list)).toMatchObject({ artifacts: false });
     }
   });
 

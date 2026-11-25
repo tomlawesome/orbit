@@ -70,7 +70,9 @@ beforeEach(() => {
   ctx = setup();
 });
 
-describe("test-backend.sh with ORBIT_TEST_SHARD (#1933)", () => {
+// Each test runs the script as a child (60 s deadline) up to three times, so
+// the test's own limit sits above it, as in gitlab-ci-lanes.test.mjs (#1634).
+describe("test-backend.sh with ORBIT_TEST_SHARD (#1933)", { timeout: 75_000 }, () => {
   it("shard 1/2 runs the node --test guards", () => {
     const r = run(ctx, { ORBIT_TEST_SHARD: "1/2" });
     expect(r.guards.length).toBeGreaterThanOrEqual(4);

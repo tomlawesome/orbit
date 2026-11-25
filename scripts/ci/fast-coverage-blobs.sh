@@ -51,7 +51,10 @@ for ((i = 1; i <= count; i++)); do
   fi
   printf 'shard %s/%s: stood on job %s; fetching its blob\n' "${i}" "${count}" "${job_id}"
   partial="${blob}.part"
-  if ! curl --fail --silent --show-error --location \
+  # No --location: curl would send the JOB-TOKEN header on to whatever host a
+  # redirect names. A whole-suite blob is about 20 MB; 500 MB and five minutes
+  # are generous bounds that still stop a runaway download inside the job.
+  if ! curl --fail --silent --show-error --max-time 300 --max-filesize 500000000 \
     --header "JOB-TOKEN: ${CI_JOB_TOKEN:?CI_JOB_TOKEN is required to fetch a blob}" \
     "${CI_API_V4_URL:?}/projects/${CI_PROJECT_ID:?}/jobs/${job_id}/artifacts/${blob}" \
     -o "${partial}"; then

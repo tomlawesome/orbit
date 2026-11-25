@@ -742,11 +742,13 @@ variables:
 # `fast_checks` publishes the built web application here, and the rig serves it
 # rather than building its own. A `needs:` that stopped delivering artefacts
 # would not fail — the gate would quietly rebuild — so the delivery says so.
+# `fast` itself is a waiting order only since #1933: its artefacts are now
+# the shards' Vitest blobs (about 20 MB each), which only `fast_coverage` reads.
 .needs_gated_with_fast_artifacts: &needs_gated_with_fast_artifacts
   - job: classify
     artifacts: true
   - job: fast
-    artifacts: true
+    artifacts: false
   - job: fast_checks
     artifacts: true
   - job: fast_docker
@@ -774,7 +776,7 @@ variables:
   - job: classify
     artifacts: true
   - job: fast
-    artifacts: true
+    artifacts: false
   - job: fast_checks
     artifacts: true
   - job: fast_docker
