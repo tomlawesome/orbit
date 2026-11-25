@@ -279,9 +279,18 @@
   async function saveAdmin() {
     const person = adminFor;
     if (!person) return;
+    /* Never a PUT with neither a password nor a live proof: once the proof is
+       spent, the press starts a fresh step-up instead. */
+    if (!actorHasPassword && provenIntent !== "administrator_set") {
+      await challenge("administrator_set", () => {}, (message) => wake(message, { failure: true }), { admin: { personId: person.id } });
+      return;
+    }
     await setAdministrator(person, !person.isInstanceAdmin, adminPassword, {
       card: adminCard, actorHasPassword, reread, wake,
       landed: () => { adminOpen = false; adminPassword = ""; spent(); },
+      /* With no password the step-up proof is spent: close, so the next try
+         starts a fresh step-up rather than a PUT that carries nothing. */
+      refused: () => { if (!actorHasPassword) { adminOpen = false; spent(); } },
     });
   }
 
@@ -325,8 +334,8 @@
        row stays open under the sheet: folded, the act would be hidden and
        Escape could not hand focus back to it. */
     ...(person.isPrimaryAdministrator || (!person.isInstanceAdmin && person.disabledAt) ? [] : [person.isInstanceAdmin
-      ? { label: "remove admin", name: `Remove ${person.displayName}'s administrator access`, onact: () => { openAdmin(person); return false; } }
-      : { label: "make admin", name: `Give ${person.displayName} administrator access`, tone: "accent", onact: () => { openAdmin(person); return false; } }]),
+      ? /** @type {import('$lib/pocket/row.js').RowAct} */ ({ label: "remove admin", name: `Remove ${person.displayName}'s administrator access`, onact: () => { openAdmin(person); return false; } })
+      : /** @type {import('$lib/pocket/row.js').RowAct} */ ({ label: "make admin", name: `Give ${person.displayName} administrator access`, tone: "accent", onact: () => { openAdmin(person); return false; } })]),
     person.disabledAt
       ? { label: "enable", name: `Enable ${person.displayName}`, tone: "ok", onact: () => disable(person, false) }
       /* §2.6: disable arms. The wake still offers undo (§1.13) once it has

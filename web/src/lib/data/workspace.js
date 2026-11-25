@@ -1922,7 +1922,7 @@ export async function readAdminScreen() {
     }, () => null),
     adminRead("/api/admin/users", tally).then((response) => json(response))
       .then(
-        (/** @type {{ users?: { id: string, displayName: string, email?: string, isInstanceAdmin?: boolean, disabledAt?: ?string, metadataStatus?: { email?: string } }[] }} */ body) =>
+        (/** @type {{ users?: { id: string, displayName: string, email?: string, isInstanceAdmin?: boolean, isPrimaryAdministrator?: boolean, disabledAt?: ?string, metadataStatus?: { email?: string } }[] }} */ body) =>
           body.users ?? [],
       )
       /* null, not []: a failed read is not an instance of nobody (#1442). */

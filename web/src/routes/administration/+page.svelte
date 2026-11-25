@@ -445,7 +445,12 @@
   const closeAdmin = (personId) => {
     adminFor = null;
     adminPassword = "";
+    adminCard.problem = null;
     tick().then(() => document.getElementById(`admin-access-${personId}`)?.focus());
+  };
+  /** Escape anywhere in the band closes it, as cancel does. @param {string} personId */
+  const escapeAdmin = (personId) => (/** @type {KeyboardEvent} */ event) => {
+    if (event.key === "Escape") { event.preventDefault(); closeAdmin(personId); }
   };
   /** Opens the band for one person, behind its own challenge. @param {{ id: string }} person */
   const openAdmin = (person) => { adminCard.problem = null; return challengeThen("administrator_set", () => {
@@ -456,12 +461,23 @@
       tick().then(() => /** @type {HTMLElement | null} */ (document.querySelector("#admin-band input, #admin-band button[type=submit]"))?.focus());
     }
   }, (message) => (adminCard.problem = message), { admin: { personId: person.id } }); };
-  /** @param {{ id: string, displayName: string, isInstanceAdmin: boolean }} person */
-  const setAdministratorNow = (person) => setAdministrator(person, !person.isInstanceAdmin, adminPassword, {
+  /** @param {{ id: string, displayName: string, isInstanceAdmin?: boolean }} person */
+  const setAdministratorNow = (person) => {
+    /* Never a PUT with neither a password nor a live proof: it can only be
+       refused. Once the proof is spent, the press starts a fresh step-up. */
+    if (!actorHasPassword && provenIntent !== "administrator_set") {
+      return challengeThen("administrator_set", () => {}, (message) => (adminCard.problem = message), { admin: { personId: person.id } });
+    }
+    return setAdministrator(person, !person.isInstanceAdmin, adminPassword, {
     card: adminCard, actorHasPassword, reread,
     landed: () => { adminFor = null; adminPassword = ""; provenIntent = ""; },
+    /* With no password, the step-up proof was spent by that request: close the
+       band, so the next try starts a fresh step-up rather than a PUT that
+       carries nothing. */
+    refused: () => { if (!actorHasPassword) { provenIntent = ""; adminFor = null; } },
     wake: (text, options) => { if (!options?.failure) adminSaid = text; },
-  });
+    });
+  };
   /** @type {import("./acts.svelte.js").Delivery | null} */
   let resendDelivery = $state(null);
 
@@ -1181,19 +1197,18 @@
             </form>
           {/if}
           {#if adminFor === person.id}
-            <form class="localuser resend" id="admin-band" onsubmit={(event) => { event.preventDefault(); setAdministratorNow(person); }}
-                  onkeydown={(event) => { if (event.key === "Escape") { event.preventDefault(); closeAdmin(person.id); } }}>
+            <form class="localuser resend" id="admin-band" onsubmit={(event) => { event.preventDefault(); setAdministratorNow(person); }}>
               <p class="mailboxnote">{person.isInstanceAdmin
                 ? `Removes ${person.displayName}'s administrator access. They keep their account and their households.`
                 : `Gives ${person.displayName} administrator access: they will see every household and every person on this instance, and can change who else is an administrator.`}</p>
               {#if actorHasPassword}
                 <label for="admin-current">your current password</label>
                 <input id="admin-current" type="password" autocomplete="current-password"
-                       bind:value={adminPassword} required />
+                       onkeydown={escapeAdmin(person.id)} bind:value={adminPassword} required />
               {/if}
               <div class="placerow localuserrow">
-                <button type="submit" disabled={adminCard.busy}>{person.isInstanceAdmin ? "remove it" : "give it"}</button>
-                <button type="button" onclick={() => closeAdmin(person.id)}>cancel</button>
+                <button type="submit" disabled={adminCard.busy} onkeydown={escapeAdmin(person.id)}>{person.isInstanceAdmin ? "remove it" : "give it"}</button>
+                <button type="button" onclick={() => closeAdmin(person.id)} onkeydown={escapeAdmin(person.id)}>cancel</button>
               </div>
             </form>
           {/if}
@@ -1202,8 +1217,10 @@
           <div class="adminproblem" class:ok={!addressSaid.failure}>{addressSaid.text}</div>
         {/if}
         {#if addressCard.problem}<div class="adminproblem">{addressCard.problem}</div>{/if}
-        {#if adminSaid}<div class="adminproblem ok" role="status">{adminSaid}</div>{/if}
-        {#if adminCard.problem}<div class="adminproblem" role="status">{adminCard.problem}</div>{/if}
+        <!-- In the page before any text arrives, so a screen reader hears it
+             (a region inserted with its text is not reliably announced). -->
+        <div class="adminproblem" class:ok={Boolean(adminSaid)} role="status">{adminSaid ?? ""}</div>
+        <div class="adminproblem" role="status">{adminCard.problem ?? ""}</div>
         {#if resendDelivery}
           {#if resendDelivery.sendError}
             <div class="adminproblem">{sendWords(resendDelivery.sendError)}</div>

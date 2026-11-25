@@ -19,7 +19,7 @@ import {
   testMail, wordsOf,
 } from "$lib/data/workspace.js";
 import { DONE_UNREAD, rereadAfterLanded } from "$lib/data/landed.js";
-import { JOB_KINDS, addressWords, lapsesShort, megabytes, removalWords, sendWords, setupWords } from "./words.js";
+import { JOB_KINDS, addressWords, adminAccessWords, lapsesShort, megabytes, removalWords, sendWords, setupWords } from "./words.js";
 
 /** @typedef {{ busy: boolean, problem: string | null }} Card */
 /** @typedef {(message: string, options?: { failure?: boolean, undo?: () => void }) => unknown} Wake */
@@ -297,19 +297,22 @@ export async function setDisabled(person, off, on) {
  * the proof is spent, and undoing would need another challenge. A refusal
  * is the server's own words, said on the card and, on the phone, as a
  * failure wake; `landed` closes the band only once the server took it.
+ * `refused` hears any refusal: a step-up proof is spent by the request
+ * whatever the answer, so the layout must not send another on it (#1633).
  * @param {{ id: string, displayName: string }} person @param {boolean} on @param {string} password
- * @param {{ card: Card, actorHasPassword: boolean, landed: () => void, reread: Reread, wake?: Wake }} options
+ * @param {{ card: Card, actorHasPassword: boolean, landed: () => void, refused?: () => void, reread: Reread, wake?: Wake }} options
  */
-export async function setAdministrator(person, on, password, { card, actorHasPassword, landed, reread, wake = quiet }) {
+export async function setAdministrator(person, on, password, { card, actorHasPassword, landed, refused = quiet, reread, wake = quiet }) {
   if (card.busy) return;
   card.busy = true;
   card.problem = null;
   try {
     await setUserAdministrator(person.id, on, actorHasPassword ? password : undefined);
   } catch (error) {
-    card.problem = setupWords(error);
+    card.problem = adminAccessWords(error);
     wake(card.problem, { failure: true });
     card.busy = false;
+    refused();
     return;
   }
   try {

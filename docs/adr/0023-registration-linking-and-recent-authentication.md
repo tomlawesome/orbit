@@ -133,6 +133,10 @@ window is deleted; the transfer calls this instead).
 > #1403 (owner, 2026-10-13) and is no longer a guarded action. The primary
 > administrator is fixed at install and cannot be demoted or disabled.
 
+> **Note (2026-11-25, #1633):** giving or removing an account's administrator
+> access is a guarded action, challenged under its own intent
+> `administrator_set`, so a proof taken for another action cannot pay for it.
+
 - If the user has a local credential, the request body carries
   `currentPassword`; it is verified under the same backoff and gate as a
   sign-in. No password, or a wrong one, is `recent_authentication_required`.
