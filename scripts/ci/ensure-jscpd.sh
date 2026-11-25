@@ -61,7 +61,9 @@ trap 'rm -rf "$work"' EXIT
 
 printf 'ensure-jscpd: downloading jscpd v%s\n' "$JSCPD_VERSION" >&2
 # https only, apart from file:// for a local override; the hash decides either way.
-curl --silent --show-error --fail --location --proto '=https,file' --max-time 300 \
+# The pinned tarball is 10,336,591 bytes; the cap sits just above it, so a swapped or
+# runaway download stops before it fills the disk. Raise it on a bump.
+curl --silent --show-error --fail --location --proto '=https,file' --max-time 300 --max-filesize 11M \
   --output "${work}/download.tar.gz" "$url" ||
   fail "could not download jscpd v${JSCPD_VERSION} from ${url}"
 verify "${work}/download.tar.gz" "$JSCPD_SHA256" ||
