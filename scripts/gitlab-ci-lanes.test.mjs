@@ -3530,3 +3530,44 @@ describe("nightly browser slots and starved-run messages (#1921)", () => {
     expect(handler.indexOf("fi;", starved), `${name}: message inside the if`).toBeGreaterThan(-1);
   });
 });
+
+// #1943 (owner decision 83a, note 68859): a smoke job's `timeout:` is its inner
+// suite cap plus the 8-minute quarantine run that follows the gate.
+describe("smoke job timeouts (#1943, owner decision 83a)", () => {
+  const smokeJobNames = ["smoke", "smoke_webkit", "smoke_webkit_mobile"];
+  const timeoutText = (name) => allBlocks.get(name).match(/^ {2}timeout: (\S+)\s*$/mu)?.[1];
+  // The suite's own cap: the `timeout -k 30s <N>m bash scripts/test-frontend.sh ||`
+  // line. The quarantine run has `--quarantine` before its `||`, so it does not match.
+  const innerCapMinutes = (name) => {
+    const commands = allBlocks
+      .get(name)
+      .split("\n")
+      .filter((line) => !/^\s*#/u.test(line))
+      .join("\n");
+    const match = commands.match(/timeout -k \S+ (\d+)m bash scripts\/test-frontend\.sh \|\|/u);
+    return match ? Number(match[1]) : null;
+  };
+
+  it("sets each smoke job's timeout to its inner suite cap plus the 8-minute quarantine run", () => {
+    for (const name of smokeJobNames) {
+      const cap = innerCapMinutes(name);
+      expect(cap, `${name}: no inner suite cap found in its script`).not.toBeNull();
+      expect(timeoutText(name), name).toBe(`${cap + 8}m`);
+    }
+  });
+
+  it("pins the smoke timeouts to 43m, 48m and 33m (#1943, owner decision 83a)", () => {
+    expect(timeoutText("smoke")).toBe("43m");
+    expect(timeoutText("smoke_webkit")).toBe("48m");
+    expect(timeoutText("smoke_webkit_mobile")).toBe("33m");
+  });
+
+  it("does not describe the smoke timeout as 30m plus the quarantine run (#1943)", () => {
+    const lines = allBlocks.get("smoke").split("\n");
+    const at = lines.findIndex((line) => /^ {2}timeout: /u.test(line));
+    expect(at, "smoke has a timeout line").toBeGreaterThan(-1);
+    const comment = [];
+    for (let i = at - 1; i >= 0 && /^ {2}#/u.test(lines[i]); i--) comment.unshift(lines[i]);
+    expect(comment.join("\n")).not.toMatch(/30m \+ the quarantine run/u);
+  });
+});

@@ -487,7 +487,7 @@
       "expiresOn": "2027-01-04",
       "trackingIssue": 1759,
       "installedVersion": "v0.61.0",
-      "rationale": "x/net html parser slows on crafted input, in /usr/bin/ollama in ollama/ollama:0.40.17. Fixed in x/net 0.62.0, but the newest release, 0.40.17, still ships v0.61.0, so no image carries the fix. Orbit runs Ollama only under the optional ai profile, with no internet access and no published port (ADR-0025). Owner decision 2026-11-07, question 137: 14 days. Checked 2026-11-09 on 0.40.15. Extended 2026-11-18 to 2027-01-04: Ollama 0.40.16, the newest release, still has golang.org/x/net v0.61.0 (#1759); owner 24a, 2026-11-18. Checked 2026-11-21 inside 0.40.17, the newest release: still golang.org/x/net v0.61.0."
+      "rationale": "x/net html parser slows on crafted input, in /usr/bin/ollama in ollama/ollama:0.40.17. Fixed in x/net 0.62.0, but the newest release, 0.40.17, still ships v0.61.0, so no image carries the fix. Orbit runs Ollama only under the optional ai profile, with no internet access and no published port (ADR-0025). Owner decision 2026-11-07, question 137: 14 days. Checked 2026-11-09 on 0.40.15. Extended 2026-11-18 to 2027-01-04: Ollama 0.40.16, the newest release, still has golang.org/x/net v0.61.0 (#1759); owner 24a, 2026-11-18. Checked 2026-11-21 inside 0.40.17, the newest release: still golang.org/x/net v0.61.0. Checked 2026-11-24 inside 0.40.18, the newest release: still golang.org/x/net v0.61.0."
     },
     {
       "kind": "vulnerability",
@@ -509,7 +509,7 @@
       "expiresOn": "2026-12-03",
       "trackingIssue": 1922,
       "installedVersion": "v1.26.10",
-      "rationale": "CVE-2026-97054 is a Go net/http flaw: an HTTP/1 server that uses MaxBytesReader can panic if its handler reads the body while writing the response header. It is in the Go standard library compiled into /usr/bin/ollama in ollama/ollama:0.40.17 (built with go1.26.10, checked 2026-11-21). Orbit runs Ollama only under the optional ai profile, on the internal network, with no published port (ADR-0025), so only Orbit's app can reach it and the worst case is a crash and restart. Fixed in Go 1.26.11 and 1.27.4, but no Ollama image ships a build on either yet. Owner 47a, 2026-11-19: 14 days."
+      "rationale": "CVE-2026-97054 is a Go net/http flaw: an HTTP/1 server that uses MaxBytesReader can panic if its handler reads the body while writing the response header. It is in the Go standard library compiled into /usr/bin/ollama in ollama/ollama:0.40.17 (built with go1.26.10, checked 2026-11-21). Orbit runs Ollama only under the optional ai profile, on the internal network, with no published port (ADR-0025), so only Orbit's app can reach it and the worst case is a crash and restart. Fixed in Go 1.26.11 and 1.27.4, but no Ollama image ships a build on either yet. Owner 47a, 2026-11-19: 14 days. Checked 2026-11-24 inside 0.40.18: still go1.26.10."
     },
     {
       "kind": "vulnerability",
@@ -532,14 +532,278 @@
       "trackingIssue": 1948,
       "installedVersion": "v1.27.3",
       "rationale": "CVE-2026-97054 is a Go net/http flaw: an HTTP/1 server that uses MaxBytesReader can panic if its handler reads the body while writing the response header. It is in the Go standard library compiled into /usr/bin/pebble in apache/tika:4.2.0-full. The image's entrypoint runs Java (TikaServerCli) directly and never starts pebble, so the flaw is not reachable. Fixed in Go 1.26.11 and 1.27.4, but on 2026-11-21 the pinned digest is still the newest build of 4.2.0-full and no newer Tika release exists. Owner 91a, 2026-11-21: 14 days."
+    },
+    {
+      "kind": "stale-package",
+      "image": "node:24-alpine",
+      "package": "libcrypto3",
+      "installedVersion": "3.5.9-r0",
+      "availableVersion": "3.5.9-r1",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-11-30",
+      "trackingIssue": 1950,
+      "rationale": "Upstream has not yet rebuilt node:24-alpine with libcrypto3 3.5.9-r1; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+    },
+    {
+      "kind": "stale-package",
+      "image": "node:24-alpine",
+      "package": "libssl3",
+      "installedVersion": "3.5.9-r0",
+      "availableVersion": "3.5.9-r1",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-11-30",
+      "trackingIssue": 1950,
+      "rationale": "Upstream has not yet rebuilt node:24-alpine with libssl3 3.5.9-r1; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+    },
+    {
+      "kind": "stale-package",
+      "image": "node:24-alpine",
+      "package": "zlib",
+      "installedVersion": "1.3.2-r1",
+      "availableVersion": "1.4-r0",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-11-30",
+      "trackingIssue": 1950,
+      "rationale": "Upstream has not yet rebuilt node:24-alpine with zlib 1.4-r0; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+    },
+    {
+      "kind": "stale-package",
+      "image": "postgres:18-alpine",
+      "package": "libxml2",
+      "installedVersion": "2.13.9-r2",
+      "availableVersion": "2.13.9-r3",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-11-30",
+      "trackingIssue": 1950,
+      "rationale": "Upstream has not yet rebuilt postgres:18-alpine with libxml2 2.13.9-r3; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+    },
+    {
+      "kind": "stale-package",
+      "image": "postgres:18-alpine",
+      "package": "libcrypto3",
+      "installedVersion": "3.5.9-r0",
+      "availableVersion": "3.5.9-r1",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-11-30",
+      "trackingIssue": 1950,
+      "rationale": "Upstream has not yet rebuilt postgres:18-alpine with libcrypto3 3.5.9-r1; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+    },
+    {
+      "kind": "stale-package",
+      "image": "postgres:18-alpine",
+      "package": "libssl3",
+      "installedVersion": "3.5.9-r0",
+      "availableVersion": "3.5.9-r1",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-11-30",
+      "trackingIssue": 1950,
+      "rationale": "Upstream has not yet rebuilt postgres:18-alpine with libssl3 3.5.9-r1; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+    },
+    {
+      "kind": "stale-package",
+      "image": "apache/tika:4.2.0-full",
+      "package": "libc-gconv-modules-extra",
+      "installedVersion": "2.43-2ubuntu2.4",
+      "availableVersion": "2.43-2ubuntu2.7",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-11-30",
+      "trackingIssue": 1950,
+      "rationale": "Upstream has not yet rebuilt apache/tika:4.2.0-full with libc-gconv-modules-extra 2.43-2ubuntu2.7; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+    },
+    {
+      "kind": "stale-package",
+      "image": "apache/tika:4.2.0-full",
+      "package": "libc6",
+      "installedVersion": "2.43-2ubuntu2.4",
+      "availableVersion": "2.43-2ubuntu2.7",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-11-30",
+      "trackingIssue": 1950,
+      "rationale": "Upstream has not yet rebuilt apache/tika:4.2.0-full with libc6 2.43-2ubuntu2.7; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+    },
+    {
+      "kind": "stale-package",
+      "image": "apache/tika:4.2.0-full",
+      "package": "base-files",
+      "installedVersion": "14ubuntu6.2",
+      "availableVersion": "14ubuntu6.3",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-11-30",
+      "trackingIssue": 1950,
+      "rationale": "Upstream has not yet rebuilt apache/tika:4.2.0-full with base-files 14ubuntu6.3; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+    },
+    {
+      "kind": "stale-package",
+      "image": "apache/tika:4.2.0-full",
+      "package": "perl-base",
+      "installedVersion": "5.40.1-7ubuntu0.3",
+      "availableVersion": "5.40.1-7ubuntu0.4",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-11-30",
+      "trackingIssue": 1950,
+      "rationale": "Upstream has not yet rebuilt apache/tika:4.2.0-full with perl-base 5.40.1-7ubuntu0.4; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+    },
+    {
+      "kind": "stale-package",
+      "image": "apache/tika:4.2.0-full",
+      "package": "libc-bin",
+      "installedVersion": "2.43-2ubuntu2.4",
+      "availableVersion": "2.43-2ubuntu2.7",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-11-30",
+      "trackingIssue": 1950,
+      "rationale": "Upstream has not yet rebuilt apache/tika:4.2.0-full with libc-bin 2.43-2ubuntu2.7; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+    },
+    {
+      "kind": "stale-package",
+      "image": "apache/tika:4.2.0-full",
+      "package": "libapt-pkg7.0",
+      "installedVersion": "3.2.0",
+      "availableVersion": "3.2.1ubuntu0.1",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-11-30",
+      "trackingIssue": 1950,
+      "rationale": "Upstream has not yet rebuilt apache/tika:4.2.0-full with libapt-pkg7.0 3.2.1ubuntu0.1; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+    },
+    {
+      "kind": "stale-package",
+      "image": "apache/tika:4.2.0-full",
+      "package": "apt",
+      "installedVersion": "3.2.0",
+      "availableVersion": "3.2.1ubuntu0.1",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-11-30",
+      "trackingIssue": 1950,
+      "rationale": "Upstream has not yet rebuilt apache/tika:4.2.0-full with apt 3.2.1ubuntu0.1; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+    },
+    {
+      "kind": "stale-package",
+      "image": "apache/tika:4.2.0-full",
+      "package": "libpcre2-8-0",
+      "installedVersion": "10.46-1build1",
+      "availableVersion": "10.46-1ubuntu0.1",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-11-30",
+      "trackingIssue": 1950,
+      "rationale": "Upstream has not yet rebuilt apache/tika:4.2.0-full with libpcre2-8-0 10.46-1ubuntu0.1; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+    },
+    {
+      "kind": "stale-package",
+      "image": "apache/tika:4.2.0-full",
+      "package": "tzdata",
+      "installedVersion": "2026e-0ubuntu0.26.04.1",
+      "availableVersion": "2026f-0ubuntu0.26.04.1",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-11-30",
+      "trackingIssue": 1950,
+      "rationale": "Upstream has not yet rebuilt apache/tika:4.2.0-full with tzdata 2026f-0ubuntu0.26.04.1; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+    },
+    {
+      "kind": "stale-package",
+      "image": "apache/tika:4.2.0-full",
+      "package": "python3-oauthlib",
+      "installedVersion": "3.3.1-1build1",
+      "availableVersion": "3.3.1-1ubuntu0.1",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-11-30",
+      "trackingIssue": 1950,
+      "rationale": "Upstream has not yet rebuilt apache/tika:4.2.0-full with python3-oauthlib 3.3.1-1ubuntu0.1; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+    },
+    {
+      "kind": "stale-package",
+      "image": "postgres:18-alpine",
+      "package": "libffi",
+      "installedVersion": "3.5.2-r1",
+      "availableVersion": "3.8.1-r0",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-12-01",
+      "trackingIssue": 1950,
+      "rationale": "Upstream has not yet rebuilt postgres:18-alpine with libffi 3.8.1-r0; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+    },
+    {
+      "kind": "stale-package",
+      "image": "postgres:18-alpine",
+      "package": "zstd-libs",
+      "installedVersion": "1.5.7-r2",
+      "availableVersion": "1.6.0-r1",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-12-01",
+      "trackingIssue": 1950,
+      "rationale": "Upstream has not yet rebuilt postgres:18-alpine with zstd-libs 1.6.0-r1; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+    },
+    {
+      "kind": "stale-package",
+      "image": "postgres:18-alpine",
+      "package": "zstd",
+      "installedVersion": "1.5.7-r2",
+      "availableVersion": "1.6.0-r1",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-12-01",
+      "trackingIssue": 1950,
+      "rationale": "Upstream has not yet rebuilt postgres:18-alpine with zstd 1.6.0-r1; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+    },
+    {
+      "kind": "stale-package",
+      "image": "clamav/clamav:1.5.5",
+      "package": "zstd-libs",
+      "installedVersion": "1.5.7-r2",
+      "availableVersion": "1.6.0-r1",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-12-01",
+      "trackingIssue": 1950,
+      "rationale": "Upstream has not yet rebuilt clamav/clamav:1.5.5 with zstd-libs 1.6.0-r1; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+    },
+    {
+      "kind": "stale-package",
+      "image": "ollama/ollama:0.40.18",
+      "package": "libc6",
+      "installedVersion": "2.39-0ubuntu8.9",
+      "availableVersion": "2.39-0ubuntu8.12",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-12-01",
+      "trackingIssue": 1950,
+      "rationale": "Upstream has not yet rebuilt ollama/ollama:0.40.18 with libc6 2.39-0ubuntu8.12; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+    },
+    {
+      "kind": "stale-package",
+      "image": "ollama/ollama:0.40.18",
+      "package": "libc-bin",
+      "installedVersion": "2.39-0ubuntu8.9",
+      "availableVersion": "2.39-0ubuntu8.12",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-12-01",
+      "trackingIssue": 1950,
+      "rationale": "Upstream has not yet rebuilt ollama/ollama:0.40.18 with libc-bin 2.39-0ubuntu8.12; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+    },
+    {
+      "kind": "stale-package",
+      "image": "ollama/ollama:0.40.18",
+      "package": "libsystemd0",
+      "installedVersion": "255.4-1ubuntu8.18",
+      "availableVersion": "255.4-1ubuntu8.19",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-12-01",
+      "trackingIssue": 1950,
+      "rationale": "Upstream has not yet rebuilt ollama/ollama:0.40.18 with libsystemd0 255.4-1ubuntu8.19; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+    },
+    {
+      "kind": "stale-package",
+      "image": "ollama/ollama:0.40.18",
+      "package": "libudev1",
+      "installedVersion": "255.4-1ubuntu8.18",
+      "availableVersion": "255.4-1ubuntu8.19",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-12-01",
+      "trackingIssue": 1950,
+      "rationale": "Upstream has not yet rebuilt ollama/ollama:0.40.18 with libudev1 255.4-1ubuntu8.19; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
     }
   ],
   "containerImages": [
     {
       "name": "Orbit base image (Alpine plus Node from official signed source)",
       "tag": "ghcr.io/tomlawesome/orbit-base-image:latest",
-      "reference": "ghcr.io/tomlawesome/orbit-base-image:latest@sha256:f6726f269f52c7285197b0714358f774b3839ca48bfb67f10785f1cadd619ef3",
-      "indexDigest": "sha256:f6726f269f52c7285197b0714358f774b3839ca48bfb67f10785f1cadd619ef3",
+      "reference": "ghcr.io/tomlawesome/orbit-base-image:latest@sha256:8f77d4a7b1d57411f8b8a53f2a4887a11f896c85a4cf8529c7b1cc520e470c6a",
+      "indexDigest": "sha256:8f77d4a7b1d57411f8b8a53f2a4887a11f896c85a4cf8529c7b1cc520e470c6a",
       "platform": "linux/amd64",
       "locations": [
         "Dockerfile"
@@ -549,7 +813,7 @@
       "license": "MIT",
       "licenseSource": "https://github.com/nodejs/node/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-11-23",
+      "resolvedOn": "2026-11-24",
       "reviewBy": "2026-11-30"
     },
     {
@@ -574,7 +838,7 @@
       "name": "PostgreSQL database",
       "tag": "postgres:18-alpine",
       "reference": "postgres:18-alpine@sha256:68e33adb18d9962952f00d5e3b8644305e10e375f98dd652bf6ee6a1836314ba",
-      "indexDigest": "sha256:ff64c9e3bdf8e2120107d3559de8db314e8305f7e38c5105903c6295876738ff",
+      "indexDigest": "sha256:0115267ab5a509022df9319c77be365cef335adb71556c75f60f5360ee247e71",
       "platform": "linux/amd64",
       "locations": [
         "docker-compose.yml",
@@ -586,14 +850,14 @@
       "license": "MIT",
       "licenseSource": "https://github.com/docker-library/postgres/blob/master/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-11-19",
+      "resolvedOn": "2026-11-23",
       "reviewBy": "2027-01-31"
     },
     {
       "name": "ClamAV malware scanner",
       "tag": "clamav/clamav:1.5.5",
-      "reference": "clamav/clamav:1.5.5@sha256:ee429ed5760a4792cd9711db6902fa019d26f90a2714d2bfd92b717d21967e38",
-      "indexDigest": "sha256:12177441d1b40cef3c47b44c4090d59d4babc4c67bedd5af0fa315e603aa6dd8",
+      "reference": "clamav/clamav:1.5.5@sha256:9b2f34be1f8be02f58edb1c8868dca99d6e04f8f8daf191f8448c762f563dde3",
+      "indexDigest": "sha256:64e30c0bf976198024deb3dc6d5cfe2485fb969c0f73549ba0fdb364b9469614",
       "platform": "linux/amd64",
       "locations": [
         "docker-compose.yml"
@@ -603,7 +867,7 @@
       "license": "GPL-2.0-only",
       "licenseSource": "https://github.com/Cisco-Talos/clamav/blob/main/COPYING.txt",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-11-19",
+      "resolvedOn": "2026-11-23",
       "reviewBy": "2027-01-31"
     },
     {
@@ -625,9 +889,9 @@
     },
     {
       "name": "Ollama optional local AI service",
-      "tag": "ollama/ollama:0.40.17",
-      "reference": "ollama/ollama:0.40.17@sha256:5e5802d3c018ecdee7c7dff32a7e3b10ca9a2c4b3a461392cff97c313c2af0fc",
-      "indexDigest": "sha256:ccc42bcd3d5fcf7ab0d532b300382154e1a4da56fc666bdb313b78ebdd912754",
+      "tag": "ollama/ollama:0.40.18",
+      "reference": "ollama/ollama:0.40.18@sha256:4e0d5daa6c5cd91e27011977031466844c5ea4ba2393b35e78068835edec040b",
+      "indexDigest": "sha256:1cabd20e1762a7a8444bf4a7110b346d923cd77ab6c97c984434140638c913ec",
       "platform": "linux/amd64",
       "locations": [
         "docker-compose.yml"
@@ -637,7 +901,7 @@
       "license": "MIT",
       "licenseSource": "https://github.com/ollama/ollama/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-11-21",
+      "resolvedOn": "2026-11-24",
       "reviewBy": "2026-11-30"
     }
   ],
