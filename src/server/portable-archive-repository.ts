@@ -406,16 +406,32 @@ async function failExport(job: ClaimedPortableArchiveExport, error: AppError, op
   });
 }
 
+/**
+ * The refusals that end a job at once (ADR-0047, design §2.5 and the role
+ * re-check): each needs something to change first, so nothing automatic
+ * retries them. Any other error, an AppError included (a 503 storage read,
+ * say), is retried and counted, and fails after EXPORT_MAX_ATTEMPTS claims.
+ */
+const EXPORT_FINAL_CODES: ReadonlySet<string> = new Set([
+  "archive_storage_full",
+  "archive_store_full",
+  "archive_metadata_damaged",
+  "archive_metadata_locked",
+  "archive_manifest_too_large",
+  "archive_integrity_failed",
+  "archive_forbidden",
+]);
+
 export type PortableArchiveExportOutcome =
   | { status: "completed"; archiveId: string }
   | { status: "failed" | "retry" | "lease_lost" };
 
 /**
  * One claimed job, run to its end: the key unwrapped, the file written, the
- * job completed with the archive, or ended. A refusal the export already
- * knows (an AppError: no room, a damaged field, a locked key ...) fails the
- * job at once; nothing automatic retries it. Anything else is retried, and
- * fails after EXPORT_MAX_ATTEMPTS claims. A lost lease ends quietly: the job
+ * job completed with the archive, or ended. A refusal in EXPORT_FINAL_CODES
+ * (no room, a damaged field, a locked key ...) fails the job at once;
+ * nothing automatic retries it. Anything else is retried, and fails after
+ * EXPORT_MAX_ATTEMPTS claims, in the last error's words when it had some. A lost lease ends quietly: the job
  * is another claim's now. The key is zeroed however it ends.
  */
 export async function runPortableArchiveExportJob(job: ClaimedPortableArchiveExport): Promise<PortableArchiveExportOutcome> {
@@ -433,13 +449,13 @@ export async function runPortableArchiveExportJob(job: ClaimedPortableArchiveExp
       log.warn({ event: "document.job", state: "degraded", reason: "invalid_state", action: "none", impact: "none", detail: operationalDetail`portable archive export lease lost; another claim holds it` });
       return { status: "lease_lost" };
     }
-    if (error instanceof AppError) {
+    if (error instanceof AppError && EXPORT_FINAL_CODES.has(error.code)) {
       await failExport(job, error);
       return { status: "failed" };
     }
-    log.error({ event: "document.job", state: "retrying", reason: "unexpected_failure", action: "inspect_admin_diagnostics", impact: "worker_degraded", detail: operationalDetail`portable archive export failed (${error instanceof Error ? error.name : "unknown"})` });
+    log.error({ event: "document.job", state: "retrying", reason: "unexpected_failure", action: "inspect_admin_diagnostics", impact: "worker_degraded", detail: operationalDetail`portable archive export failed (${error instanceof AppError ? error.code : error instanceof Error ? error.name : "unknown"})` });
     if (job.attempts >= EXPORT_MAX_ATTEMPTS) {
-      await failExport(job, new AppError("archive_export_failed", "Orbit couldn't write this archive; try again", 500));
+      await failExport(job, error instanceof AppError ? error : new AppError("archive_export_failed", "Orbit couldn't write this archive; try again", 500));
       return { status: "failed" };
     }
     await writeExportRow(getDb(), job, {

@@ -15,9 +15,10 @@
  * first takes its archive file in whole, to a spool file on the document
  * volume (`spoolPortableArchiveUpload`), and only then claims the slot, for
  * the decrypting, checking and restoring: server time, bounded by the file's
- * size, never by the client's link speed. Before, the slot was held while the
- * file arrived, so one signed-in owner sending slowly made every other
- * household's export, preview and import a 429 for as long as they liked.
+ * size, never by the client's link speed. Before #1792 the slot was held
+ * while the file arrived, so one signed-in owner sending slowly made every
+ * other household's archive request a 429 for as long as they liked (the
+ * export too, until #1774 took it off the slot).
  *
  * The lane bounds uploads per account: while an account has a preview or
  * import spooling or processing, its next one is refused at once with the
@@ -75,7 +76,14 @@ import {
 } from "orbit/server/archive-slot";
 import { discardBody } from "./body-limit.js";
 
-/** Route ids, not pathnames, as body-limit.js's sets are. POST only: a download stays out. */
+/**
+ * Route ids, not pathnames, as body-limit.js's sets are. POST only: a download
+ * stays out. These are the routes whose body the hook puts under the stall
+ * watchdog. The export POST stays listed for that alone (#1774): it claims no
+ * slot now, but a body that stalls would still hold its request open, and its
+ * small JSON body costs the watchdog nothing. Preview and import also claim
+ * the slot, once spooled.
+ */
 export const ARCHIVE_SLOT_ROUTES = new Set([
   "/api/portable-archives/preview",
   "/api/portable-archives/import",
@@ -299,9 +307,10 @@ export function watchArchiveBody(request, { stallMs } = {}) {
 
 /**
  * The slot and the watchdog together, for a caller that has already decided
- * the request may hold the slot. It models the export's path and the
- * processing phase (a test or hook helper), not an upload: since #1792 a
- * preview or import spools its file before it claims the slot. It answers
+ * the request may hold the slot. It models the processing phase (a test or
+ * hook helper), not an upload: since #1792 a preview or import spools its
+ * file before it claims the slot, and since #1774 no export request holds it
+ * (the document worker's export job does). It answers
  * null when the request is not an archive request (another route, not a
  * POST, no body), the 429 when the slot is taken (the body is then read
  * away unbuffered), or the watched request and the release the caller must

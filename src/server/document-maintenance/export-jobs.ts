@@ -15,8 +15,8 @@
  *
  * Orbit is one process, so a `processing` row this process is not writing
  * when it starts is dead: `requeueInterruptedExports()` puts it back (or, the
- * third time running, ends it as failed), and the document cycle calls it
- * once per process, first. The cycle also nulls a failed job's key after an
+ * third time running, ends it as failed), once per process, finished before
+ * the export loop's first claim. The cycle also nulls a failed job's key after an
  * hour and deletes finished jobs after a day.
  */
 import { eq, sql } from "drizzle-orm";
@@ -45,7 +45,8 @@ const exportWorkerState = globalThis as typeof globalThis & {
   __orbitExportWorkerWake?: () => void;
   /** Jobs this process is writing right now: never "interrupted". */
   __orbitExportsInFlight?: Set<string>;
-  __orbitExportsRequeuedAtBoot?: boolean;
+  /** The boot requeue, once per process; the loop waits for it before its first claim. */
+  __orbitExportsBootRequeue?: Promise<void>;
 };
 
 function inFlight(): Set<string> {
@@ -195,11 +196,19 @@ export async function requeueInterruptedExports(): Promise<void> {
   `);
 }
 
-/** The cycle's first step: the boot requeue, once per process. */
-export async function requeueInterruptedExportsAtBoot(): Promise<void> {
-  if (exportWorkerState.__orbitExportsRequeuedAtBoot) return;
-  await requeueInterruptedExports();
-  exportWorkerState.__orbitExportsRequeuedAtBoot = true;
+/**
+ * The boot requeue, once per process: one shared promise, which the export
+ * loop awaits before its first claim and the document cycle awaits first. So
+ * the requeue has finished before any claim of this process commits, and can
+ * never flip a fresh claim back to `retry`. A requeue that failed is tried
+ * again by the next caller.
+ */
+export function requeueInterruptedExportsAtBoot(): Promise<void> {
+  exportWorkerState.__orbitExportsBootRequeue ??= requeueInterruptedExports().catch((error: unknown) => {
+    exportWorkerState.__orbitExportsBootRequeue = undefined;
+    throw error;
+  });
+  return exportWorkerState.__orbitExportsBootRequeue;
 }
 
 /**
@@ -232,6 +241,7 @@ export function startExportWorker(idleMilliseconds = EXPORT_IDLE_MS): void {
     for (;;) {
       let taken = 0;
       try {
+        await requeueInterruptedExportsAtBoot();
         taken = await runExportWorkerOnce();
       } catch {
         // The cause may carry paths or provider text; the bounded record is enough.

@@ -79,7 +79,7 @@
         <p class="hh-note warm">Orbit never keeps this passphrase · without it the file cannot be opened</p>
         {#if a.outRefusal && (a.passOut || a.passAgain)}<p class="hh-note">{a.outRefusal}</p>{/if}
       </div>
-      {#if a.outRefusal}
+      {#if a.outRefusal || a.sending}
         <button class="p-pill act-accent wide" disabled>write the archive</button>
       {:else}
         <ArmButton label="write the archive" danger={false} wide class="act-accent" onfire={a.writeArchive} />

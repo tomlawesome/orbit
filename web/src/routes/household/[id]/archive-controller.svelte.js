@@ -142,6 +142,7 @@ export function createArchiveController({ householdId, limits, tabIdPrefix, wake
 
   /** The desk's cancel: closes the challenge and forgets the proof typed. */
   function cancelChallenge() {
+    sending = false;
     challengeOpen = false;
     retry = null;
     currentPassword = "";
@@ -150,6 +151,7 @@ export function createArchiveController({ householdId, limits, tabIdPrefix, wake
 
   /** The phone's Sheet closes itself; this only drops the held act. */
   function dropRetry() {
+    sending = false;
     retry = null;
   }
 
@@ -224,10 +226,18 @@ export function createArchiveController({ householdId, limits, tabIdPrefix, wake
     if (mounted && exportLive({ export: job })) pollTimer = setTimeout(readExport, EXPORT_POLL_MS);
   }
 
+  /* Latest request wins: a read's answer counts only if no read, start or
+     retry began after it, so an older answer landing late can never move the
+     card back (or fire the wake twice). */
+  let readSeq = 0;
+
   async function readExport() {
     pollTimer = null;
+    const seq = ++readSeq;
     try {
-      apply(await fetchPortableArchiveState(householdId()));
+      const state = await fetchPortableArchiveState(householdId());
+      if (seq !== readSeq) return;
+      apply(state);
     } catch {
       /* Unread this time: the card keeps what it showed and reads again on the next tick. */
     }
@@ -297,6 +307,7 @@ export function createArchiveController({ householdId, limits, tabIdPrefix, wake
 
   /** @param {import('$lib/data/workspace.js').ArchiveExportJob} started */
   function queued(started) {
+    readSeq += 1; // a read sent before this answer is older than it
     job = started;
     failure = null;
     outProblem = null;
@@ -316,69 +327,71 @@ export function createArchiveController({ householdId, limits, tabIdPrefix, wake
     await readExport();
   }
 
+  /* The start stays on the form, its button held by `sending`, until the
+     POST is answered: "queued" only once a job exists (never under the
+     step-up challenge). `sending` spans the whole act, the challenge
+     included, and is let go when it fails, holds for the challenge, or the
+     challenge is left. */
   function writeArchive() {
     if (outRefusal || sending) return;
     outProblem = null;
-    outPhase = "queued";
+    sending = true;
     guarded(async (proof) => {
       sending = true;
+      let started;
       try {
-        let started;
-        try {
-          started = await startPortableArchive(householdId(), { passphrase: passOut, currentPassword: proof || undefined });
-        } catch (error) {
-          if (codeOf(error) !== "archive_export_in_progress") throw error;
-          await followLive();
-          return;
-        }
-        sending = false;
-        queued(started);
-      } finally {
-        sending = false;
+        started = await startPortableArchive(householdId(), { passphrase: passOut, currentPassword: proof || undefined });
+      } catch (error) {
+        if (codeOf(error) !== "archive_export_in_progress") throw error;
+        await followLive();
+        return;
       }
+      sending = false;
+      queued(started);
     }, (words) => {
+      sending = false;
       outProblem = `not written — ${words}`;
       outPhase = "form";
-    }, "archive_export", () => { outPhase = "form"; });
+    }, "archive_export", () => { sending = false; outPhase = "form"; });
   }
 
   /** A failed job, again, with the key its start left (within the hour): no second passphrase. */
   function retryExport() {
     const failed = failure;
     if (!failed || sending) return;
+    sending = true;
     guarded(async (proof) => {
       sending = true;
+      let again;
       try {
-        let again;
-        try {
-          again = await retryPortableArchive(householdId(), failed.id, { currentPassword: proof || undefined });
-        } catch (error) {
-          const code = codeOf(error);
-          if (code === "archive_export_key_gone") {
-            /* The hour has passed: the form, for a new passphrase. */
-            failure = null;
-            outProblem = `not written — ${wordsOf(error)}`;
-            outPhase = "form";
-            return;
-          }
-          if (code === "archive_export_conflict") {
-            sending = false;
-            failure = null;
-            outPhase = "queued";
-            await readExport();
-            return;
-          }
-          throw error;
+        again = await retryPortableArchive(householdId(), failed.id, { currentPassword: proof || undefined });
+      } catch (error) {
+        const code = codeOf(error);
+        if (code === "archive_export_key_gone") {
+          /* The hour has passed: the form, for a new passphrase. */
+          sending = false;
+          failure = null;
+          outProblem = `not written — ${wordsOf(error)}`;
+          outPhase = "form";
+          return;
         }
-        sending = false;
-        queued(again);
-      } finally {
-        sending = false;
+        if (code === "archive_export_conflict") {
+          /* The job moved (another tab retried it): show what it is now. */
+          sending = false;
+          failure = null;
+          outPhase = "queued";
+          await readExport();
+          return;
+        }
+        throw error;
       }
+      sending = false;
+      queued(again);
     }, (words) => {
+      sending = false;
       outProblem = `not written — ${words}`;
       outPhase = "form";
-    }, "archive_export", () => { outPhase = "form"; });
+    }, "archive_export", () => { sending = false; outPhase = "form"; });
   }
 
   /** @param {Event} event */

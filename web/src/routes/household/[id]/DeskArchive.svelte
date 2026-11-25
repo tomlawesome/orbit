@@ -133,7 +133,7 @@
             by you, not by anyone, and Orbit holds nothing that changes that.</p>
           {#if a.outRefusal && (a.passOut || a.passAgain)}<p class="refuse">{a.outRefusal}</p>{/if}
           <div class="act">
-            <button class="ghost" class:armed={armed === "arch-out"} disabled={Boolean(a.outRefusal)}
+            <button class="ghost" class:armed={armed === "arch-out"} disabled={Boolean(a.outRefusal) || a.sending}
                     onclick={(event) => twoTap("arch-out", a.writeArchive, event.currentTarget)}>
               {armed === "arch-out" ? "tap again to write the archive" : "write the archive"}</button>
             <button class="ghost" type="button"
