@@ -38,6 +38,8 @@ const roster = () => [
   { id: "u-emma", displayName: "Emma Harlow", email: "emma@harlow.example", isInstanceAdmin: false, isPrimaryAdministrator: false, disabledAt: null },
   { id: "u-sue", displayName: "Sue Harlow", email: "sue@harlow.example", isInstanceAdmin: true, isPrimaryAdministrator: false, disabledAt: null },
   { id: "u-gran", displayName: "Gran", email: "gran@harlow.example", isInstanceAdmin: false, isPrimaryAdministrator: false, disabledAt: null },
+  /* #1633 review: a disabled account cannot be given access, so it is not offered. */
+  { id: "u-rose", displayName: "Rose Harlow", email: "rose@harlow.example", isInstanceAdmin: false, isPrimaryAdministrator: false, disabledAt: "2026-08-01T09:00:00.000Z" },
 ];
 
 /**
@@ -332,4 +334,119 @@ test("the control is reached by Tab, opens by Enter with focus inside, closes by
   await expect(deskBand(page)).toHaveCount(0);
   await expect(give).toHaveAttribute("aria-expanded", "false");
   await expect.poll(() => focused(give), { message: "Escape gives focus back to give admin access…" }).toBe(true);
+});
+
+/* ── review gaps (#1633) ──────────────────────────────────────────────── */
+
+const WRONG_PASSWORD_WORDS = /^that isn[’']t your current password — nothing was changed$/;
+const RECENT_AUTH = { status: 403, code: "recent_authentication_required", message: "Confirm it is you before making this change" };
+
+test("a disabled user's row offers no way to give administrator access", async ({ page }, testInfo) => {
+  await ownRoster(page);
+  await reach(page);
+
+  if (onPhone(testInfo)) {
+    const rose = await openPhoneRow(page, "Rose Harlow");
+    /* The row opened: its other acts are there, the admin act is not. */
+    await expect(page.getByRole("button", { name: "Enable Rose Harlow" })).toBeVisible();
+    await expect(rose.getByRole("button", { name: /administrator access/ })).toHaveCount(0);
+    await expect(rose.getByRole("button", { name: "make admin" })).toHaveCount(0);
+    return;
+  }
+
+  await expect(deskRow(page, "Rose Harlow")).toBeVisible();
+  await expect(deskRow(page, "Rose Harlow").getByRole("button", { name: /administrator access/ })).toHaveCount(0);
+  await expect(deskRow(page, "Rose Harlow").getByText("give admin access…")).toHaveCount(0);
+});
+
+test("a wrong password says nothing was changed, not that nothing was created", async ({ page }, testInfo) => {
+  const { sent } = await ownRoster(page, [RECENT_AUTH]);
+  await reach(page);
+
+  if (onPhone(testInfo)) {
+    await openPhoneRow(page, "Emma Harlow");
+    await expect(phoneGive(page, "Emma Harlow")).toBeVisible();
+    await phoneGive(page, "Emma Harlow").click();
+    await phoneSheet(page).getByLabel("your current password").fill("not-the-password");
+    await phoneSheet(page).getByRole("button", { name: "give it" }).click();
+    await expect.poll(() => sent).toHaveLength(1);
+    await expect(page.locator(".p-wake.failure .msg")).toHaveText(WRONG_PASSWORD_WORDS);
+    return;
+  }
+
+  await expect(deskGive(page, "Emma Harlow")).toBeVisible();
+  await deskGive(page, "Emma Harlow").click();
+  await deskBand(page).getByLabel("your current password").fill("not-the-password");
+  await deskBand(page).getByRole("button", { name: "give it" }).click();
+  await expect.poll(() => sent).toHaveLength(1);
+  await expect(page.locator(".adminproblem:not(.ok)").filter({ hasText: "current password" })).toHaveText(WRONG_PASSWORD_WORDS);
+});
+
+test("on the desk, cancel and Escape each clear the refusal line the band left under the card", async ({ page }, testInfo) => {
+  test.skip(onPhone(testInfo), "the refusal line under the card is the desk's; the phone's is a wake that goes by itself");
+  await ownRoster(page, [
+    { status: 409, code: "last_administrator", message: LAST_WORDS },
+    { status: 409, code: "last_administrator", message: LAST_WORDS },
+  ]);
+  await reach(page);
+  const refused = page.locator(".adminproblem:not(.ok)").filter({ hasText: LAST_WORDS });
+
+  /** Opens Sue's band and is refused once. */
+  const refuseOnce = async () => {
+    await expect(deskRemove(page, "Sue Harlow")).toBeVisible();
+    await deskRemove(page, "Sue Harlow").click();
+    await deskBand(page).getByLabel("your current password").fill(PASSWORD);
+    await deskBand(page).getByRole("button", { name: "remove it" }).click();
+    await expect(refused).toHaveText(LAST_WORDS);
+  };
+
+  await refuseOnce();
+  await deskBand(page).getByRole("button", { name: "cancel" }).click();
+  await expect(deskBand(page)).toHaveCount(0);
+  await expect(refused, "cancel clears the refusal line").toHaveCount(0);
+
+  await refuseOnce();
+  await deskBand(page).getByLabel("your current password").press("Escape");
+  await expect(deskBand(page)).toHaveCount(0);
+  await expect(refused, "Escape clears the refusal line").toHaveCount(0);
+});
+
+/**
+ * Marks every role="status" region that is in the page, empty, right now, so
+ * a later line can be checked to have arrived in a region that was already
+ * there (a region inserted with its text is not reliably announced).
+ * @param {Page} page
+ */
+const markEmptyStatusRegions = (page) => page.evaluate(() => {
+  for (const el of document.querySelectorAll('[role="status"]')) {
+    if ((el.textContent ?? "").trim() === "") el.setAttribute("data-rig-was-empty", "");
+  }
+});
+
+test("on the desk, the outcome and refusal lines arrive in a status region that was in the page, empty, before the act", async ({ page }, testInfo) => {
+  test.skip(onPhone(testInfo), "the phone says both in the wake, whose live regions stand in the page from the start (Wake.svelte)");
+  await ownRoster(page, [{ status: 409, code: "last_administrator", message: LAST_WORDS }]);
+  await reach(page);
+
+  /* A refusal first: Sue's removal. */
+  await expect(deskRemove(page, "Sue Harlow")).toBeVisible();
+  await markEmptyStatusRegions(page);
+  await deskRemove(page, "Sue Harlow").click();
+  await deskBand(page).getByLabel("your current password").fill(PASSWORD);
+  await deskBand(page).getByRole("button", { name: "remove it" }).click();
+  const refusal = page.locator('[role="status"]').filter({ hasText: LAST_WORDS });
+  await expect(refusal).toHaveCount(1);
+  await expect(refusal, "the refusal arrives in a region that was there before").toHaveAttribute("data-rig-was-empty", "");
+  await deskBand(page).getByRole("button", { name: "cancel" }).click();
+
+  /* Then an outcome: Emma is given access. */
+  await page.reload();
+  await expect(deskGive(page, "Emma Harlow")).toBeVisible();
+  await markEmptyStatusRegions(page);
+  await deskGive(page, "Emma Harlow").click();
+  await deskBand(page).getByLabel("your current password").fill(PASSWORD);
+  await deskBand(page).getByRole("button", { name: "give it" }).click();
+  const outcome = page.locator('[role="status"]').filter({ hasText: "Emma Harlow is now an administrator" });
+  await expect(outcome).toHaveCount(1);
+  await expect(outcome, "the outcome arrives in a region that was there before").toHaveAttribute("data-rig-was-empty", "");
 });
