@@ -965,8 +965,8 @@ describe("a due window arriving during an open one is absorbed (#585)", () => {
 
 /* #1387: the operator-shell start, the counterpart of the emergency end
    (ADR-0015 decision 2). No actor, no version token; the audit row records
-   origin operator_shell. startMaintenanceFromOperatorShell is the assumed name,
-   mirroring endMaintenanceFromOperatorShell; it resolves to { changed }. */
+   origin operator_shell. It mirrors endMaintenanceFromOperatorShell and
+   resolves to { changed }. */
 describe("starting maintenance from the operator shell (#1387)", () => {
   it("opens a window with a null actor and origin operator_shell", async () => {
     const result = await startMaintenanceFromOperatorShell({ body: "Back soon, upgrading.", expectedEndAt: null });
@@ -1007,5 +1007,21 @@ describe("starting maintenance from the operator shell (#1387)", () => {
     expect(after.version).toBe(before.version);
     expect(timeline(after)).toEqual([["started", "First notice."]]);
     expect(await getDb().select().from(auditLog).where(eq(auditLog.entityType, "maintenance_window"))).toHaveLength(auditBefore.length);
+  });
+
+  it("is already active when only a due scheduled window holds the instance closed (ADR-0013 decision 5)", async () => {
+    const fixture = await createIntegrationFixture("maintenance-start-due-scheduled");
+    await scheduleAndLetFallDue(fixture.users.admin.id, 1, { body: "Already due.", expectedEndAt: null });
+    const before = await readMaintenanceState();
+    const auditBefore = await getDb().select().from(auditLog).where(eq(auditLog.entityType, "maintenance_window"));
+
+    const result = await startMaintenanceFromOperatorShell({ body: "Should not open.", expectedEndAt: null });
+    expect(result.changed).toBe(false);
+
+    const after = await readMaintenanceState();
+    expect(after.version).toBe(before.version);
+    expect(after.openWindow).toBeNull();
+    expect(await getDb().select().from(auditLog).where(eq(auditLog.entityType, "maintenance_window"))).toHaveLength(auditBefore.length);
+    await fixture.cleanup();
   });
 });

@@ -226,8 +226,8 @@ always match the version they came with. The directory ends up holding
 `.env-orbit.example`, `config/tika-config.json`, `update.sh` at the top of
 the directory (the one file installed executable), the scripts in `scripts/`:
 `configure.sh`, `backup.sh`, `restore.sh`, `repair.sh`,
-`export-recovery-bundle.sh`, `import-recovery-bundle.sh`, `end-maintenance.sh`
-and `installer-ui.sh`, your settings in `.env-orbit`, and your secrets in
+`export-recovery-bundle.sh`, `import-recovery-bundle.sh`, `start-maintenance.sh`,
+`end-maintenance.sh` and `installer-ui.sh`, your settings in `.env-orbit`, and your secrets in
 `.orbit-secrets/`. Every update replaces these files with the new release's
 copies, `update.sh` included.
 

@@ -1735,7 +1735,11 @@ function commandEndMaintenance(args: string[]): void {
         await closeDatabase().catch(() => {});
         process.exit(1);
       }
-      await closeDatabase();
+      // One event line per run: a failed close after a finished write is not a
+      // second outcome.
+      await closeDatabase().catch(() => {
+        process.stderr.write("orbit: end-maintenance: closing the database connection failed\n");
+      });
     } catch {
       // #1151 O1-R6: the dynamic import() above used to run outside any
       // try/catch, so a module-load failure (a broken image, a missing
@@ -1755,8 +1759,21 @@ function exitOnInterrupt(): void {
 }
 
 const DEFAULT_MAINTENANCE_NOTICE = "Orbit is closed for maintenance and will be back soon.";
-const MAINTENANCE_NOTICE_MAX_LENGTH = 500;
-const RFC3339_TIMESTAMP = /^\d{4}-\d{2}-\d{2}[Tt]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:[Zz]|[+-]\d{2}:\d{2})$/u;
+const RFC3339_TIMESTAMP =
+  /^(\d{4})-(\d{2})-(\d{2})[Tt](\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:[Zz]|[+-](\d{2}):(\d{2}))$/u;
+
+/** An RFC 3339 timestamp whose fields are real: no 02-30, no T24:00:00, no leap second, no offset past 23:59. */
+function parseRfc3339(text: string): Date | null {
+  const match = RFC3339_TIMESTAMP.exec(text);
+  if (!match) return null;
+  const [year, month, day, hour, minute, second] = match.slice(1, 7).map(Number);
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  if (month < 1 || month > 12 || day < 1 || day > daysInMonth) return null;
+  if (hour > 23 || minute > 59 || second > 59) return null;
+  if (match[7] !== undefined && (Number(match[7]) > 23 || Number(match[8]) > 59)) return null;
+  const parsed = new Date(text);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
 
 /**
  * `orbit start-maintenance [--notice <text>] [--until <RFC 3339>]` (#1387):
@@ -1790,20 +1807,16 @@ function commandStartMaintenance(args: string[]): void {
       `maintenance action=start result=${result}${reason ? ` reason=${reason}` : ""} until=${until ? until.toISOString() : "none"}\n`,
     );
   };
-  const refuse = (reason: string, message: string): never => {
+  const refuse: (reason: string, message: string) => never = (reason, message) => {
     process.stderr.write(`orbit: start-maintenance failed; ${message}\n`);
     eventLine("failed", null, reason);
     process.exit(1);
   };
 
-  const body = (notice ?? DEFAULT_MAINTENANCE_NOTICE).trim();
-  if (body.length < 1 || body.length > MAINTENANCE_NOTICE_MAX_LENGTH) {
-    refuse("notice-invalid", `the notice must be 1 to ${MAINTENANCE_NOTICE_MAX_LENGTH} characters`);
-  }
   let until: Date | null = null;
   if (untilText !== undefined) {
-    const parsed = RFC3339_TIMESTAMP.test(untilText) ? new Date(untilText) : null;
-    if (!parsed || Number.isNaN(parsed.getTime())) {
+    const parsed = parseRfc3339(untilText);
+    if (!parsed) {
       refuse("until-invalid", "--until must be an RFC 3339 timestamp with an offset or Z");
     } else if (parsed.getTime() <= Date.now()) {
       refuse("until-in-past", "--until is in the past");
@@ -1814,10 +1827,19 @@ function commandStartMaintenance(args: string[]): void {
 
   void (async () => {
     try {
-      const [{ startMaintenanceFromOperatorShell }, { closeDatabase }] = await Promise.all([
+      const [{ startMaintenanceFromOperatorShell, requireMaintenanceBody }, { closeDatabase }] = await Promise.all([
         import("../server/maintenance"),
         import("../db"),
       ]);
+      // The domain's own notice rules (length, lines, control characters),
+      // checked before the database is opened: nothing connects until the
+      // first query.
+      let body: string;
+      try {
+        body = requireMaintenanceBody(notice ?? DEFAULT_MAINTENANCE_NOTICE);
+      } catch {
+        refuse("notice-invalid", "the notice must be 1 to 500 characters, at most 8 lines, with no control characters");
+      }
       try {
         const { changed } = await startMaintenanceFromOperatorShell({ body, expectedEndAt: until });
         if (changed) {
@@ -1841,7 +1863,11 @@ function commandStartMaintenance(args: string[]): void {
         await closeDatabase().catch(() => {});
         process.exit(1);
       }
-      await closeDatabase();
+      // One event line per run: a failed close after a finished write is not a
+      // second outcome.
+      await closeDatabase().catch(() => {
+        process.stderr.write("orbit: start-maintenance: closing the database connection failed\n");
+      });
     } catch {
       process.stderr.write("orbit: start-maintenance failed; the database could not be updated\n");
       eventLine("failed", null, "database-unavailable");

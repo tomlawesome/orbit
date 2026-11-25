@@ -78,7 +78,7 @@ export interface MaintenanceState {
 }
 
 /** Trims and bounds published text; never logs or echoes the text itself. */
-function requireMaintenanceBody(raw: string): string {
+export function requireMaintenanceBody(raw: string): string {
   const body = raw.trim();
   if (body.length < 1 || body.length > MESSAGE_MAX_LENGTH) {
     throw new AppError(
@@ -734,10 +734,13 @@ export async function startMaintenanceFromOperatorShell(
   const body = requireMaintenanceBody(params.body);
   return getDb().transaction(async (transaction) => {
     const singleton = await lockSingleton(transaction);
-    if (singleton.active || (await readOpenWindow(transaction))) {
+    const now = new Date();
+    // Effective maintenance (ADR-0013 decision 5): active, or a due scheduled window.
+    const [due] = await transaction.select({ id: maintenanceWindows.id }).from(maintenanceWindows)
+      .where(dueScheduledWindows(now)).limit(1);
+    if (singleton.active || due || (await readOpenWindow(transaction))) {
       return { changed: false };
     }
-    const now = new Date();
     const windowId = randomUUID();
     await transaction.insert(maintenanceWindows).values({
       id: windowId,

@@ -493,7 +493,7 @@ describe("orbit end-maintenance/auth commands keep their dynamic imports inside 
 // the failed outcomes need no database; the database-unavailable cases point at
 // a loopback port nothing listens on. The started / already-active outcomes
 // need a database and are proved in tests/integration/maintenance.test.ts.
-// Assumed: validation failures print result=failed with exit 1.
+// Validation failures print result=failed with exit 1.
 describe("orbit start-maintenance and the maintenance event line (#1387)", () => {
   const noDatabase = (): NodeJS.ProcessEnv => ({
     ...process.env,
@@ -542,6 +542,24 @@ describe("orbit start-maintenance and the maintenance event line (#1387)", () =>
       expect(startLine.exec(result.stdout)?.[1]).toBe("until-invalid");
     },
   );
+
+  it.each(["2099-02-30T00:00:00Z", "2099-01-01T24:00:00Z", "2099-13-01T00:00:00Z", "2099-01-01T12:60:00Z", "2099-01-01T12:00:60Z", "2099-01-01T12:00:00+24:00"])(
+    "--until %j (a date or time that rolls over) is reason=until-invalid, exit 1",
+    (until) => {
+      const result = run(["start-maintenance", "--until", until]);
+      expect(result.status).toBe(1);
+      expect(startLine.exec(result.stdout)?.[1]).toBe("until-invalid");
+    },
+  );
+
+  it.each([
+    ["a control character", "bad\u0007bell"],
+    ["more than 8 lines", Array.from({ length: 9 }, (_v, n) => `line ${n}`).join("\n")],
+  ])("a notice with %s is reason=notice-invalid even with the database down", (_label, notice) => {
+    const result = run(["start-maintenance", "--notice", notice]);
+    expect(result.status).toBe(1);
+    expect(startLine.exec(result.stdout)?.[1]).toBe("notice-invalid");
+  });
 
   it("--until in the past is reason=until-in-past, exit 1", () => {
     const result = run(["start-maintenance", "--until", "2000-01-01T00:00:00Z"]);

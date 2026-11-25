@@ -875,8 +875,8 @@ maintenance action=end   result=ended|not-active|failed   [reason=<reason>] canc
   `none` when no end was given and for every result but `started`.
 - `cancelled` is how many due scheduled windows `end` cancelled.
 - `reason` appears only with `result=failed`: `database-unavailable`,
-  `notice-invalid` (empty or over 500 characters), `until-invalid` (not an RFC
-  3339 time with an offset or `Z`) or `until-in-past`. Argument checks run
+  `notice-invalid` (empty or over 500 characters, more than 8 lines, or a control character), `until-invalid` (not an RFC
+  3339 time with an offset or `Z`, or a date that does not exist such as 02-30) or `until-in-past`. Argument checks run
   before the database is used.
 
 Exit codes: `0` for every result except `failed` (running it again is safe),
