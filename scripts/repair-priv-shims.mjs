@@ -128,7 +128,11 @@ export function expectStalledStepsEnded(steps, result, limitSeconds) {
 
 function variantSnippet(variant, pidLog, sigLog) {
   if (!variant) return "";
-  const runFirst = `while [[ $# -gt 0 && "$1" != -- ]]; do shift; done; shift; ( export ORBIT_TEST_PRIVDROP=1; "$@" ) >/dev/null 2>&1`;
+  // #1954: ORBIT_TEST_STEP_SLOWDOWN=<seconds> makes the run-then-* variants wait that long before they run the command,
+  // as a loaded runner would; set it past the owner's step limit to prove a case does not depend on runner speed.
+  const slowdown = Number(process.env.ORBIT_TEST_STEP_SLOWDOWN ?? 0);
+  const slow = slowdown > 0 ? `sleep ${slowdown}; ` : "";
+  const runFirst = `${slow}while [[ $# -gt 0 && "$1" != -- ]]; do shift; done; shift; ( export ORBIT_TEST_PRIVDROP=1; "$@" ) >/dev/null 2>&1`;
   const body = {
     stop: `${stallBody("stop", pidLog, sigLog)}; exit 1`,
     "ignore-term": `${stallBody("ignore-term", pidLog, sigLog)}; exit 1`,
