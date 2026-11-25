@@ -212,40 +212,45 @@ test("household editor (phone): each swatch is a 30px disc with a hit area of at
   for (const [a, b] of [[0, 1], [1, 2], [2, 3]]) expect(measured[b].cx - measured[a].cx, "pitch between swatches").toBeGreaterThanOrEqual(44);
 });
 
-test("household editor: arrow keys move focus only, as Tiles does; Enter or a press picks and saves", async ({ page }) => {
+test("household editor: every arrow, Home and End moves focus, checks the swatch and saves its colour; Enter or a press saves too", async ({ page }) => {
   await signedIn(HOUSEHOLD, "saves-kept")(page);
   const group = swatchesOf(page, "Home");
   await expect(group).toBeVisible({ timeout: RIG_EXPECT_MS });
   const radio = (/** @type {string} */ name) => group.getByRole("radio", { name, exact: true });
-  /** @type {any[]} */
-  const writes = [];
-  page.on("request", (request) => {
-    if (request.url().endsWith("/api/workspace/commands") && request.method() === "POST" && !request.postDataJSON()?.dryRun
-      && request.postDataJSON()?.type === "sections.replace") writes.push(request.postDataJSON());
-  });
+  const savesColour = (/** @type {string} */ colour) => page.waitForRequest((request) => request.url().endsWith("/api/workspace/commands")
+    && request.method() === "POST" && request.postDataJSON()?.type === "sections.replace" && !request.postDataJSON()?.dryRun
+    && request.postDataJSON().sections.some((/** @type {{ id: string, colour?: string }} */ one) => one.id === "s-home" && one.colour === colour));
+  /** Do `act`, then expect focus on `landed`, only `landed` checked, and a save carrying its colour.
+   * @param {() => Promise<void>} act @param {string} landed @param {string} previous */
+  const moves = async (act, landed, previous) => {
+    const saved = savesColour(landed);
+    await act();
+    await saved;
+    await expect(radio(landed)).toBeFocused();
+    await expect(radio(landed)).toHaveAttribute("aria-checked", "true");
+    await expect(radio(previous)).toHaveAttribute("aria-checked", "false");
+    await expect(group.locator('[role="radio"][aria-checked="true"]')).toHaveCount(1);
+  };
+  const key = (/** @type {string} */ name) => () => page.keyboard.press(name);
   await radio("home").focus();
-  await page.keyboard.press("ArrowRight");
-  await expect(radio("vehicles")).toBeFocused();
-  // focus moved, nothing was picked: home is still checked, and nothing was saved
-  await expect(radio("home")).toHaveAttribute("aria-checked", "true");
-  await expect(radio("vehicles")).toHaveAttribute("aria-checked", "false");
-  await page.keyboard.press("ArrowLeft");
-  await expect(radio("home")).toBeFocused();
-  await page.keyboard.press("End");
-  await expect(radio("services")).toBeFocused();
-  await page.keyboard.press("Home");
-  await expect(radio("home")).toBeFocused();
-  expect(writes).toHaveLength(0);
-  // Enter on a focused swatch picks it, and the pick saves
-  const saved = page.waitForRequest((request) => request.url().endsWith("/api/workspace/commands") && request.method() === "POST"
-    && request.postDataJSON()?.type === "sections.replace" && !request.postDataJSON()?.dryRun
-    && request.postDataJSON().sections.some((/** @type {{ id: string, colour?: string }} */ one) => one.id === "s-home" && one.colour === "devices"));
-  await page.keyboard.press("ArrowRight");
-  await page.keyboard.press("ArrowRight");
-  await expect(radio("devices")).toBeFocused();
-  await page.keyboard.press("Enter");
-  await saved;
-  await expect(radio("devices")).toHaveAttribute("aria-checked", "true");
+  await moves(key("ArrowRight"), "vehicles", "home");
+  await moves(key("ArrowLeft"), "home", "vehicles");
+  // wrapping, both ways
+  await moves(key("ArrowLeft"), "services", "home");
+  await moves(key("ArrowRight"), "home", "services");
+  // Home and End
+  await moves(key("End"), "services", "home");
+  await moves(key("Home"), "home", "services");
+  // Up and Down behave as Left and Right, wrapping too
+  await moves(key("ArrowDown"), "vehicles", "home");
+  await moves(key("ArrowUp"), "home", "vehicles");
+  await moves(key("ArrowUp"), "services", "home");
+  await moves(key("ArrowDown"), "home", "services");
+  // Enter on a focused swatch that is not checked picks and saves it
+  await radio("devices").focus();
+  await moves(key("Enter"), "devices", "home");
+  // a press on a swatch picks and saves it
+  await moves(() => radio("vehicles").click(), "vehicles", "devices");
 });
 
 test("household editor: the why line sits under the list, after + add a section", async ({ page }, testInfo) => {
