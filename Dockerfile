@@ -246,6 +246,7 @@ COPY --chown=root:root \
   scripts/export-recovery-bundle.sh \
   scripts/import-recovery-bundle.sh \
   scripts/end-maintenance.sh \
+  scripts/start-maintenance.sh \
   ./deploy/scripts/
 # The bundled engine CLI (single file, no node_modules dependency at
 # runtime — see scripts/bundle-orbit-cli.mjs). Root-owned and read-only,

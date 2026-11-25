@@ -31,6 +31,7 @@ const SCRIPTS = [
   "repair.sh",
   "install.sh",
   "end-maintenance.sh",
+  "start-maintenance.sh",
   "export-recovery-bundle.sh",
   "import-recovery-bundle.sh",
 ];

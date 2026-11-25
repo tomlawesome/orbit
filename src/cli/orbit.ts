@@ -1695,7 +1695,13 @@ function commandInstallOrUpdate(command: "install" | "update", deployDirArg: str
  * unsure whether it worked may simply run it again.
  */
 function commandEndMaintenance(args: string[]): void {
-  if (args.length > 0) fail(`orbit: unknown option ${args[0]} (usage: orbit end-maintenance)`);
+  if (args.length > 0) usageExit(`orbit: unknown option ${args[0]} (usage: orbit end-maintenance)`);
+  exitOnInterrupt();
+  const eventLine = (result: string, cancelled: number, reason?: string): void => {
+    process.stdout.write(
+      `maintenance action=end result=${result}${reason ? ` reason=${reason}` : ""} cancelled=${cancelled}\n`,
+    );
+  };
   void (async () => {
     try {
       const [{ endMaintenanceFromOperatorShell }, { closeDatabase }] = await Promise.all([
@@ -1706,13 +1712,17 @@ function commandEndMaintenance(args: string[]): void {
         const { changed, cancelledWindows } = await endMaintenanceFromOperatorShell();
         if (!changed) {
           process.stdout.write("orbit: maintenance was not active; nothing to change\n");
-        } else if (cancelledWindows > 0) {
-          const plural = cancelledWindows === 1 ? "window" : "windows";
-          process.stdout.write(
-            `orbit: maintenance ended; cancelled ${cancelledWindows} due scheduled ${plural}\n`,
-          );
+          eventLine("not-active", 0);
         } else {
-          process.stdout.write("orbit: maintenance ended\n");
+          if (cancelledWindows > 0) {
+            const plural = cancelledWindows === 1 ? "window" : "windows";
+            process.stdout.write(
+              `orbit: maintenance ended; cancelled ${cancelledWindows} due scheduled ${plural}\n`,
+            );
+          } else {
+            process.stdout.write("orbit: maintenance ended\n");
+          }
+          eventLine("ended", cancelledWindows);
         }
       } catch {
         // Category only, like every other refusal this CLI surfaces: a
@@ -1721,10 +1731,15 @@ function commandEndMaintenance(args: string[]): void {
         // be pasting output to someone else. The container's logs hold the
         // detail if it is needed.
         process.stderr.write("orbit: end-maintenance failed; the database could not be updated\n");
+        eventLine("failed", 0, "database-unavailable");
         await closeDatabase().catch(() => {});
         process.exit(1);
       }
-      await closeDatabase();
+      // One event line per run: a failed close after a finished write is not a
+      // second outcome.
+      await closeDatabase().catch(() => {
+        process.stderr.write("orbit: end-maintenance: closing the database connection failed\n");
+      });
     } catch {
       // #1151 O1-R6: the dynamic import() above used to run outside any
       // try/catch, so a module-load failure (a broken image, a missing
@@ -1732,6 +1747,130 @@ function commandEndMaintenance(args: string[]): void {
       // command's own clean, bounded failure message. There is no
       // closeDatabase to call here -- a failed import never produced one.
       process.stderr.write("orbit: end-maintenance failed; the database could not be updated\n");
+      eventLine("failed", 0, "database-unavailable");
+      process.exit(1);
+    }
+  })();
+}
+
+/** Ctrl-C ends a one-off maintenance command with the shell's own 130. */
+function exitOnInterrupt(): void {
+  process.once("SIGINT", () => process.exit(130));
+}
+
+const DEFAULT_MAINTENANCE_NOTICE = "Orbit is closed for maintenance and will be back soon.";
+const RFC3339_TIMESTAMP =
+  /^(\d{4})-(\d{2})-(\d{2})[Tt](\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:[Zz]|[+-](\d{2}):(\d{2}))$/u;
+
+/** An RFC 3339 timestamp whose fields are real: no 02-30, no T24:00:00, no leap second, no offset past 23:59. */
+function parseRfc3339(text: string): Date | null {
+  const match = RFC3339_TIMESTAMP.exec(text);
+  if (!match) return null;
+  const [year, month, day, hour, minute, second] = match.slice(1, 7).map(Number);
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  if (month < 1 || month > 12 || day < 1 || day > daysInMonth) return null;
+  if (hour > 23 || minute > 59 || second > 59) return null;
+  if (match[7] !== undefined && (Number(match[7]) > 23 || Number(match[8]) > 59)) return null;
+  const parsed = new Date(text);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+/**
+ * `orbit start-maintenance [--notice <text>] [--until <RFC 3339>]` (#1387):
+ * the host-side counterpart of end-maintenance, through the application's own
+ * `startMaintenanceFromOperatorShell` (null actor, `origin: operator_shell`).
+ *
+ * Arguments are checked before the database is touched. The last stdout line
+ * is the machine-readable `maintenance action=start ...` line (see
+ * docs/engine-events.md); `until=` names the end time of the window this
+ * command opened and is `none` otherwise. Idempotent: an instance already in
+ * maintenance exits 0 with `result=already-active`.
+ */
+function commandStartMaintenance(args: string[]): void {
+  let notice: string | undefined;
+  let untilText: string | undefined;
+  for (let index = 0; index < args.length; index += 1) {
+    const flag = args[index];
+    if ((flag === "--notice" || flag === "--until") && index + 1 < args.length) {
+      if (flag === "--notice") notice = args[index + 1];
+      else untilText = args[index + 1];
+      index += 1;
+    } else {
+      usageExit(
+        `orbit: unknown or incomplete option ${flag} (usage: orbit start-maintenance [--notice <text>] [--until <RFC 3339 timestamp>])`,
+      );
+    }
+  }
+  exitOnInterrupt();
+  const eventLine = (result: string, until: Date | null, reason?: string): void => {
+    process.stdout.write(
+      `maintenance action=start result=${result}${reason ? ` reason=${reason}` : ""} until=${until ? until.toISOString() : "none"}\n`,
+    );
+  };
+  const refuse: (reason: string, message: string) => never = (reason, message) => {
+    process.stderr.write(`orbit: start-maintenance failed; ${message}\n`);
+    eventLine("failed", null, reason);
+    process.exit(1);
+  };
+
+  let until: Date | null = null;
+  if (untilText !== undefined) {
+    const parsed = parseRfc3339(untilText);
+    if (!parsed) {
+      refuse("until-invalid", "--until must be an RFC 3339 timestamp with an offset or Z");
+    } else if (parsed.getTime() <= Date.now()) {
+      refuse("until-in-past", "--until is in the past");
+    } else {
+      until = parsed;
+    }
+  }
+
+  void (async () => {
+    try {
+      const [{ startMaintenanceFromOperatorShell, requireMaintenanceBody }, { closeDatabase }] = await Promise.all([
+        import("../server/maintenance"),
+        import("../db"),
+      ]);
+      // The domain's own notice rules (length, lines, control characters),
+      // checked before the database is opened: nothing connects until the
+      // first query.
+      let body: string;
+      try {
+        body = requireMaintenanceBody(notice ?? DEFAULT_MAINTENANCE_NOTICE);
+      } catch {
+        refuse("notice-invalid", "the notice must be 1 to 500 characters, at most 8 lines, with no control characters");
+      }
+      try {
+        const { changed } = await startMaintenanceFromOperatorShell({ body, expectedEndAt: until });
+        if (changed) {
+          process.stdout.write("orbit: maintenance started\n");
+          eventLine("started", until);
+        } else {
+          process.stdout.write("orbit: maintenance was already active; nothing to change\n");
+          eventLine("already-active", null);
+        }
+      } catch (error) {
+        // Category only, as end-maintenance: a driver error can carry the
+        // connection string.
+        const code = (error as { code?: unknown } | null)?.code;
+        if (code === "maintenance_message_invalid") {
+          process.stderr.write("orbit: start-maintenance failed; the notice is not acceptable\n");
+          eventLine("failed", null, "notice-invalid");
+        } else {
+          process.stderr.write("orbit: start-maintenance failed; the database could not be updated\n");
+          eventLine("failed", null, "database-unavailable");
+        }
+        await closeDatabase().catch(() => {});
+        process.exit(1);
+      }
+      // One event line per run: a failed close after a finished write is not a
+      // second outcome.
+      await closeDatabase().catch(() => {
+        process.stderr.write("orbit: start-maintenance: closing the database connection failed\n");
+      });
+    } catch {
+      process.stderr.write("orbit: start-maintenance failed; the database could not be updated\n");
+      eventLine("failed", null, "database-unavailable");
       process.exit(1);
     }
   })();
@@ -1960,6 +2099,9 @@ function main(): void {
       case "end-maintenance":
         commandEndMaintenance(commandArgs);
         break;
+      case "start-maintenance":
+        commandStartMaintenance(commandArgs);
+        break;
       case "auth":
         commandAuth(commandArgs);
         break;
@@ -2000,7 +2142,7 @@ function main(): void {
 
 function failUsage(): never {
   fail(
-    "orbit: supported commands: check, configure [--init|--set-oidc-secret|--set-deployment-profile PRESET [MODEL]|--set-scanner on|off], backup, restore, export-recovery-bundle, import-recovery-bundle, end-maintenance, mail-sending-status, rewrap-kek --next-key-file <path>, auth recovery-link [--dir <deployment>] | install --dir <deployment> | update --dir <deployment> | update --preflight --dir <deployment>",
+    "orbit: supported commands: check, configure [--init|--set-oidc-secret|--set-deployment-profile PRESET [MODEL]|--set-scanner on|off], backup, restore, export-recovery-bundle, import-recovery-bundle, start-maintenance [--notice <text>] [--until <RFC 3339>], end-maintenance, mail-sending-status, rewrap-kek --next-key-file <path>, auth recovery-link [--dir <deployment>] | install --dir <deployment> | update --dir <deployment> | update --preflight --dir <deployment>",
   );
 }
 

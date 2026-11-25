@@ -1,0 +1,191 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+# scripts/start-maintenance.sh — closes the instance for maintenance from the
+# host (issue #1387), the counterpart of scripts/end-maintenance.sh
+# (ADR-0013 decision 4, ADR-0015 decision 2). Host bash remains the only
+# thing that runs `docker`; the logic itself is the application's own domain function, shipped inside the already
+# published image and reached through the bundled CLI — the same in-container
+# one-off pattern as scripts/engine-check.sh (see docs/engine-events.md,
+# "In-container engine invocation").
+#
+# Usage: bash scripts/start-maintenance.sh [--notice <text>] [--until <RFC 3339 timestamp>]
+#
+# It is idempotent: running it against an instance that is already in
+# maintenance changes nothing, writes no audit row, and still exits 0.
+# The last stdout line is the machine-readable `maintenance action=start ...`
+# line (docs/engine-events.md).
+#
+# Unlike engine-check.sh this does NOT pass `--entrypoint node`. The image's
+# own entrypoint is what stages the mounted secrets into /run/orbit-secrets,
+# and this command — unlike the readiness check — needs the database
+# credentials that staging provides. Overriding the entrypoint would skip it
+# and the command could not connect.
+#
+# `--no-deps` means Compose will not start PostgreSQL for this one-off. That
+# is deliberate and safe: maintenance mode only stands between users and a
+# running instance, so the database is already up whenever this script is the
+# thing an operator needs.
+#
+# No secret ever appears in this script's argv or in the composed
+# `docker compose` argv below: the connection details reach the command
+# through the service's own environment and mounted secrets.
+
+usage() {
+  printf 'Usage: %s [--notice <text>] [--until <RFC 3339 timestamp>]\n' "${BASH_SOURCE[0]}" >&2
+}
+
+command_args=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --notice | --until)
+      if [[ $# -lt 2 ]]; then
+        usage
+        exit 2
+      fi
+      command_args+=("$1" "$2")
+      shift 2
+      ;;
+    *)
+      usage
+      exit 2
+      ;;
+  esac
+done
+
+# Force cwd to this script's own containing installation directory, exactly
+# like configure.sh/repair.sh/engine-check.sh, so the script is safe
+# regardless of the caller's working directory.
+repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_dir"
+
+readonly environment_file=".env-orbit"
+readonly compose_file="docker-compose.yml"
+
+if ! command -v docker >/dev/null 2>&1; then
+  printf 'orbit start-maintenance: docker is unavailable\n' >&2
+  exit 5
+fi
+
+if [[ ! -f "$environment_file" || -L "$environment_file" ]]; then
+  printf 'orbit start-maintenance: %s is missing\n' "$environment_file" >&2
+  exit 5
+fi
+
+# Reads a single KEY=value line out of $environment_file, like
+# engine-check.sh's own copy: this script is deliberately standalone and
+# source-less, as repair.sh is.
+read_environment_value() {
+  local requested_key="$1" line value="" found=0 head tail quote
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" == "${requested_key}="* ]]; then
+      # A CRLF .env-orbit is valid; drop the CR.
+      value="${line#*=}"
+      value="${value%$'\r'}"
+      # Compose drops blanks between the "=" and the value; so do we.
+      value="${value#"${value%%[![:blank:]]*}"}"
+      # Read the value the way Compose's env-file parser does: a trailing
+      # comment (spaces or tabs, then "#", to the end) comes off, then
+      # trailing spaces and tabs, then one pair of matching quotes. Otherwise
+      # a quoted or commented COMPOSE_FILE keeps its quote marks or padding
+      # and the overlay appended to it names a file that does not exist.
+      # A "#" inside the quotes is part of the value, so for a quoted value
+      # the comment is looked for only after the closing quote. That is the
+      # first same quote after the opening one, not the last on the line: a
+      # comment may hold an apostrophe or quote marks of its own.
+      head="" tail="$value" quote="${value:0:1}"
+      if [[ ( "$quote" == \" || "$quote" == \' ) && "${value:1}" == *"$quote"* ]]; then
+        tail="${value:1}"
+        head="$quote${tail%%"$quote"*}$quote"
+        tail="${tail#*"$quote"}"
+      fi
+      tail="${tail%%[[:blank:]]#*}"
+      while [[ "$tail" == *[[:blank:]] ]]; do tail="${tail%[[:blank:]]}"; done
+      value="$head$tail"
+      case "$value" in
+        \"*\" | \'*\') value="${value:1:${#value}-2}" ;;
+      esac
+      found=1
+    fi
+  done < "$environment_file"
+  [[ "$found" == 1 ]] || return 1
+  printf '%s' "$value"
+}
+
+# read_compose_project_name <compose-manifest>
+#
+# Prints <compose-manifest>'s own top-level `name:` value and returns 0, or
+# returns 1 with nothing printed when the file has no such line -- the
+# caller's directory-basename fallback then runs exactly as before (#921:
+# docker-compose.yml:1 declares `name: orbit`, but this derivation used to
+# fall from an explicit COMPOSE_PROJECT_NAME straight to a guess from the
+# current directory's basename, never reading the compose file's own name,
+# so a worktree or an operator directory not literally called "orbit"
+# addressed a Compose project that was never created). Deliberately a
+# top-level-key line read, not a YAML parse -- `name:` is Compose's own
+# top-level scalar key, so a line anchored at column 0 is enough, and this
+# must stay dependency-free (no docker, no node) since it runs inside the
+# same standalone, source-less scripts as read_environment_value above.
+# Identical text in repair.sh and install.sh --
+# scripts/compose-project-name-resolution.test.mjs proves that.
+read_compose_project_name() {
+  local compose_manifest="$1" line value
+  [[ -f "$compose_manifest" ]] || return 1
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" =~ ^name:[[:space:]]*(.*)$ ]]; then
+      value="${BASH_REMATCH[1]%%#*}"
+      value="$(printf '%s' "$value" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+      value="${value%\"}"
+      value="${value#\"}"
+      value="${value%\'}"
+      value="${value#\'}"
+      [[ -n "$value" ]] || return 1
+      printf '%s' "$value"
+      return 0
+    fi
+  done < "$compose_manifest"
+  return 1
+}
+
+# Compose project-name derivation, mirroring repair.sh and install.sh
+# precedence exactly: .env-orbit's own COMPOSE_PROJECT_NAME, then the
+# caller's environment, then docker-compose.yml's own `name:` (#921), then a
+# sanitized fallback from the current directory's basename.
+project=""
+candidate="$(read_environment_value COMPOSE_PROJECT_NAME 2>/dev/null || true)"
+if [[ "$candidate" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
+  project="$candidate"
+fi
+if [[ -z "$project" && -n "${COMPOSE_PROJECT_NAME:-}" ]]; then
+  if [[ "$COMPOSE_PROJECT_NAME" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
+    project="$COMPOSE_PROJECT_NAME"
+  fi
+fi
+if [[ -z "$project" ]]; then
+  candidate="$(read_compose_project_name "$compose_file" 2>/dev/null || true)"
+  if [[ "$candidate" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
+    project="$candidate"
+  fi
+fi
+if [[ -z "$project" ]]; then
+  candidate="$(basename -- "$(pwd -P)" 2>/dev/null || true)"
+  candidate="$(printf '%s' "$candidate" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9_-' '-' 2>/dev/null || true)"
+  while [[ "$candidate" == [-_]* ]]; do
+    candidate="${candidate:1}"
+  done
+  if [[ -n "$candidate" && "$candidate" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
+    project="$candidate"
+  fi
+fi
+
+if [[ -z "$project" ]]; then
+  printf 'orbit start-maintenance: could not derive a Compose project name\n' >&2
+  exit 5
+fi
+
+exit_code=0
+docker compose --project-name "$project" --env-file "$environment_file" \
+  run --rm --no-deps -T \
+  orbit-app node /opt/orbit/cli/orbit.js start-maintenance ${command_args[@]+"${command_args[@]}"} || exit_code=$?
+
+exit "$exit_code"
