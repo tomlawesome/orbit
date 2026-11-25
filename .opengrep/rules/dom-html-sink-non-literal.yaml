@@ -1,0 +1,24 @@
+rules:
+  - id: dom-html-sink-non-literal
+    # Why: writing non-literal markup into the DOM is the classic cross-site scripting sink.
+    message: >-
+      Non-literal HTML written to innerHTML / outerHTML / insertAdjacentHTML /
+      document.write; set textContent or build nodes instead, or sanitise first.
+    severity: WARNING
+    languages: [javascript, typescript]
+    patterns:
+      - pattern-either:
+          - pattern: $E.innerHTML = $V
+          - pattern: $E.outerHTML = $V
+          - pattern: $E.innerHTML += $V
+          - pattern: $E.outerHTML += $V
+          - pattern: $E.insertAdjacentHTML($POS, $V)
+          - pattern: document.write($V)
+          - pattern: document.writeln($V)
+      - pattern-not: $E.innerHTML = "..."
+      - pattern-not: $E.outerHTML = "..."
+      - pattern-not: $E.innerHTML += "..."
+      - pattern-not: $E.outerHTML += "..."
+      - pattern-not: $E.insertAdjacentHTML($POS, "...")
+      - pattern-not: document.write("...")
+      - pattern-not: document.writeln("...")

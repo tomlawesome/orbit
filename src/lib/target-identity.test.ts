@@ -657,11 +657,13 @@ describe("validateTarget and isPreprovisionedInput: orbit-install-backups (redes
 
   // #1901 O-R1: a rollback's rename-aside (".<name>.orbit-restore.<pid>.aside") is install.sh's own entry, left only
   // if a restore was interrupted; it must not make the engine refuse an otherwise fresh or pre-provisioned folder.
+  // #1943 O-S1 (ruling note 68569) narrows this: the aside is ignored only while its original is in the folder; a
+  // lone aside means a killed restore, so the folder is not empty and the engine refuses it, as install.sh does.
   it.each([["..env-orbit.orbit-restore.4242.aside"], ["..orbit-secrets.orbit-restore.4242.aside"]])(
-    "a leftover %s is ignored like the installer's backups folder",
+    "a leftover %s is ignored beside its original, and a lone one is refused (#1943 O-S1)",
     (aside) => {
       writeFileSync(join(targetDir, aside), "left by an interrupted restore\n");
-      expect(validateTarget(targetDir)).toEqual({ targetWasEmpty: true });
+      expect(() => validateTarget(targetDir)).toThrow(TargetValidationRefusal);
       rmSync(join(targetDir, aside));
       seedPreprovisioned();
       writeFileSync(join(targetDir, aside), "left by an interrupted restore\n");

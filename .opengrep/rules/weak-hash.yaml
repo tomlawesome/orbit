@@ -1,0 +1,15 @@
+rules:
+  - id: weak-hash
+    # Why: MD5 and SHA-1 have practical collisions, so they must not protect integrity, passwords or tokens.
+    message: >-
+      createHash with MD5 or SHA-1 is collision-prone; use sha256 or stronger (and a
+      password hash such as scrypt for passwords).
+    severity: WARNING
+    languages: [javascript, typescript]
+    patterns:
+      - pattern-either:
+          - pattern: $C.createHash($ALG, ...)
+          - pattern: createHash($ALG, ...)
+      - metavariable-regex:
+          metavariable: $ALG
+          regex: (?i)^["'`](md4|md5|sha1|sha-1|rsa-md5|rsa-sha1)["'`]$

@@ -1,6 +1,7 @@
 <script>
   import { uuid } from "$lib/uuid.js";
   import { tick } from "svelte";
+  import { SvelteMap } from "svelte/reactivity";
   import { plural } from "$lib/format.js";
   import { goto, invalidateAll } from "$app/navigation";
   import { resolve } from "$app/paths";
@@ -17,15 +18,12 @@
   import { wake } from "$lib/pocket/wake.js";
   import { PEN_ORDER, inkOf, nextMark } from "$lib/marks.js";
   import { constellationPlanetsOf, hashId } from "$lib/data/chart.js";
-  import { MAX_SECTIONS, deletionNameMatches, entriesIn, entriesLabel, moveEntriesAway, whereHeadingOf } from "$lib/data/household.js";
+  import { MAX_SECTIONS, entriesIn, entriesLabel, moveEntriesAway, whereHeadingOf } from "$lib/data/household.js";
   import { destinationChoices } from "$lib/editing/item-draft.js";
   import {
     addMember,
-    decideJoinRequest,
     removeMember,
     requestHouseholdDeletion,
-    sendInvitation,
-    transferOwnership,
     withdrawInvitation,
     wordsOf,
     writeHouseholdIdentity,
@@ -37,6 +35,7 @@
   import PocketArchive from "./PocketArchive.svelte";
   import { changesLabel, changesOf, chipBodyOf, commandsFor, moved } from "./edits.js";
   import { roomOf } from "./room.js";
+  import { createActs, createOwnerLeave, nameOk } from "./acts.js";
 
   /*
    * THE HOUSEHOLD ON A PHONE (#1122, proposal §2.10; owner decisions on
@@ -165,34 +164,27 @@
   /* ── members ──────────────────────────────────────────────────────────── */
   /** @type {string | null} */
   let membersProblem = $state(null);
+  const acts = createActs({
+    householdId: () => v.id,
+    clear: () => (membersProblem = null),
+    fail: (words) => {
+      membersProblem = words;
+      wake(words, { failure: true });
+    },
+    refresh: () => invalidateAll(),
+  });
   /**
    * @param {() => Promise<unknown>} run
    * @param {string} said the wake, once it has worked
    */
-  async function act(run, said) {
-    membersProblem = null;
-    try {
-      await run();
-      wake(said);
-      await invalidateAll();
-    } catch (error) {
-      membersProblem = wordsOf(error);
-      wake(membersProblem, { failure: true });
-    }
-  }
+  const actSaying = (run, said) => acts.act(run, () => wake(said));
 
   const iOwn = $derived(v.you?.role === "owner");
 
   /* #481: the owner's row carries "leave" like every "you" row; it answers
      only the person it stops, while it stops them, then fades. */
   let ownerRefused = $state(false);
-  /** @type {ReturnType<typeof setTimeout> | undefined} */
-  let refuseTimer;
-  function ownerLeave() {
-    ownerRefused = true;
-    clearTimeout(refuseTimer);
-    refuseTimer = setTimeout(() => (ownerRefused = false), 6000);
-  }
+  const pressLeave = createOwnerLeave((on) => (ownerRefused = on));
 
   async function leave() {
     const me = v.you;
@@ -214,7 +206,7 @@
    */
   function personActs(person) {
     if (person.you) {
-      if (person.role === "owner") return [{ label: "leave", name: `Leave ${v.name}`, onact: ownerLeave }];
+      if (person.role === "owner") return [{ label: "leave", name: `Leave ${v.name}`, onact: pressLeave }];
       return [{ label: "leave", name: `Leave ${v.name}`, danger: true, onact: leave }];
     }
     if (!v.canManage || person.role === "owner") return [];
@@ -222,27 +214,27 @@
       ...(iOwn ? [{ label: "hand over", name: `Hand ${v.name} over to ${person.name}`, tone: /** @type {const} */ ("accent"),
         onact: () => { heir = person; handoverOpen = true; } }] : []),
       { label: "remove", name: `Remove ${person.name}`, danger: true,
-        onact: () => act(() => removeMember(v.id, person.id), `${person.name} is no longer in ${v.name}`) },
+        onact: () => actSaying(() => removeMember(v.id, person.id), `${person.name} is no longer in ${v.name}`) },
     ];
   }
 
   /** @type {HouseholdView["roster"][number] | null} */
   let heir = $state(null);
   let handoverOpen = $state(false);
-  function handOver() {
+  function giveOver() {
     const taker = heir;
     if (!taker) return;
     handoverOpen = false;
-    act(() => transferOwnership(v.id, taker.id), `${taker.name} owns ${v.name} now · you’re a member`);
+    acts.handOver(taker, () => wake(`${taker.name} owns ${v.name} now · you’re a member`));
   }
 
   /**
    * @param {HouseholdView["joinRequests"][number]} request
    * @param {"approve" | "decline"} action
    */
-  const decide = (request, action) =>
-    act(() => decideJoinRequest(request.id, action),
-      action === "approve" ? `${request.name} is in ${v.name}` : `${request.name} was not let in`);
+  const decideRequest = (request, action) =>
+    acts.decide(request, action,
+      () => wake(action === "approve" ? `${request.name} is in ${v.name}` : `${request.name} was not let in`));
 
   /* ── invitations (#481) ───────────────────────────────────────────────── */
   let inviteOpen = $state(false);
@@ -257,10 +249,9 @@
    * @param {string} email
    * @param {string} said
    */
-  async function offer(email, said) {
-    const address = email.trim();
-    if (!address) return false;
-    const { invitation } = await sendInvitation(v.id, address);
+  async function sendOffer(email, said) {
+    const invitation = await acts.offer(email);
+    if (!invitation) return false;
     wake(invitation.sentAt
       ? `${said} to ${invitation.email}`
       : `${invitation.email} is invited, but the mail could not be sent · try resend`,
@@ -273,7 +264,7 @@
     inviting = true;
     inviteProblem = null;
     try {
-      if (await offer(inviteEmail, "invitation sent")) {
+      if (await sendOffer(inviteEmail, "invitation sent")) {
         inviteEmail = "";
         inviteOpen = false;
       }
@@ -290,9 +281,9 @@
    */
   const invitationActs = (row) => v.canManage ? [
     { label: "resend", name: `Resend the invitation to ${row.email}`, tone: /** @type {const} */ ("accent"),
-      onact: () => offer(row.email, "invitation sent again").catch((error) => wake(wordsOf(error), { failure: true })) },
+      onact: () => sendOffer(row.email, "invitation sent again").catch((error) => wake(wordsOf(error), { failure: true })) },
     { label: "withdraw", name: `Withdraw the invitation to ${row.email}`, danger: true,
-      onact: () => act(() => withdrawInvitation(v.id, row.id), `the invitation to ${row.email} is withdrawn · its link no longer works`) },
+      onact: () => actSaying(() => withdrawInvitation(v.id, row.id), `the invitation to ${row.email} is withdrawn · its link no longer works`) },
   ] : [];
 
   /* ── adding someone who already has an account ────────────────────────── */
@@ -302,7 +293,7 @@
   /** @param {HouseholdView["candidates"][number]} candidate */
   function putMember(candidate) {
     addOpen = false;
-    act(() => addMember(v.id, candidate.id), `${candidate.name} is in ${v.name}`);
+    actSaying(() => addMember(v.id, candidate.id), `${candidate.name} is in ${v.name}`);
   }
 
   /* ── the system's time zone and currency: a list sheet with a filter ─── */
@@ -371,22 +362,40 @@
      back after the reload (the reload resets the draft to the server's list); the
      pick is in both. A row still being named keeps it for the bar's save. */
   /** @param {EditorRow} row @param {string} colour */
-  async function pickColour(row, colour) {
+  function pickColour(row, colour) {
     row.colour = colour;
-    if (row.fresh || saving) return;
+    if (row.fresh || saving) return Promise.resolve();
+    if (!rowsOf(v).some((one) => one.id === row.id)) return Promise.resolve();
+    // #1943 W-R1, as the desk's pickColour: saves run one after another, and a
+    // later pick for a section is what the next save sends, so the last pick wins.
+    pickedColours.set(row.id, colour);
+    colourChain = colourChain.then(() => saveColour(row.id, colour));
+    return colourChain;
+  }
+  const pickedColours = /** @type {SvelteMap<string, string>} */ (new SvelteMap());
+  let colourChain = /** @type {Promise<void>} */ (Promise.resolve());
+  /** @param {string} id @param {string} colour */
+  async function saveColour(id, colour) {
+    if (saving) return;
     const savedRows = rowsOf(v);
-    if (!savedRows.some((one) => one.id === row.id)) return;
+    if (!savedRows.some((one) => one.id === id)) return;
     const draft = { identity: $state.snapshot(identity), rows: $state.snapshot(rows), moveSaid };
     problem = null;
     try {
-      await writeSections(v.id, savedRows.map((one) => (one.id === row.id ? { ...one, colour } : one)));
+      await writeSections(v.id, savedRows.map((one) => (pickedColours.has(one.id) ? { ...one, colour: pickedColours.get(one.id) ?? one.colour } : one)));
       await invalidateAll();
       await tick();
       identity = draft.identity;
       rows = draft.rows;
       moveSaid = draft.moveSaid;
+      for (const row of rows) {
+        const latest = pickedColours.get(row.id);
+        if (latest !== undefined) row.colour = latest;
+      }
     } catch (error) {
       problem = `not saved — ${wordsOf(error)}`;
+    } finally {
+      if (pickedColours.get(id) === colour) pickedColours.delete(id);
     }
   }
 
@@ -468,7 +477,7 @@
   let saidDoom = $state(false);
   /** @type {string | null} */
   let doomProblem = $state(null);
-  const nameOk = $derived(deletionNameMatches(typedName, v.name));
+  const nameIs = $derived(nameOk(typedName, v.name));
   async function requestDeletion() {
     doomProblem = null;
     try {
@@ -603,8 +612,8 @@
           <Row title="{request.name} asked to join" meta={request.waited ?? ""}>
             {#snippet mark()}<span class="p-avatar hh-joiner">{request.initials}</span>{/snippet}
             {#snippet below()}
-              <button class="p-pill act-ok" aria-label="Approve {request.name}" onclick={() => decide(request, "approve")}>approve</button>
-              <button class="p-pill" aria-label="Decline {request.name}" onclick={() => decide(request, "decline")}>decline</button>
+              <button class="p-pill act-ok" aria-label="Approve {request.name}" onclick={() => decideRequest(request, "approve")}>approve</button>
+              <button class="p-pill" aria-label="Decline {request.name}" onclick={() => decideRequest(request, "decline")}>decline</button>
             {/snippet}
           </Row>
         {/each}
@@ -751,7 +760,7 @@
     {#snippet foot()}
       {#if heir}
         <ArmButton label="hand over to {heir.name}" armedLabel="tap again to hand over" danger={false}
-                   class="act-accent" onfire={handOver} />
+                   class="act-accent" onfire={giveOver} />
       {/if}
     {/snippet}
   </Sheet>
@@ -800,7 +809,7 @@
            placeholder={v.name} bind:value={typedName}>
     {#if doomProblem}<p class="p-error" role="alert">{doomProblem}</p>{/if}
     {#snippet foot()}
-      {#if nameOk}
+      {#if nameIs}
         <ArmButton label="delete" armedLabel="tap again to delete {v.name}" onfire={requestDeletion} />
       {:else}
         <button class="p-pill danger" disabled>delete</button>

@@ -33,6 +33,19 @@ if [[ "$run_tests" == true ]]; then
   bash "$repo_dir/scripts/test-load-warning.sh"
 fi
 
+# scripts/greenmail-roots.test.mjs (#1489) reads the GreenMail sidecar image by
+# tag and never builds it, so the build happens here, before the suite, as
+# fast_docker does in CI. No reachable daemon (or ORBIT_TEST_SKIP_DOCKER set):
+# no build, and the test skips and says so. A failed build stops the run: the
+# Dockerfile is code under test. The harnesses that copy this script into a
+# scratch repository (test-backend-*.test.mjs) carry no tests/greenmail.
+if [[ "$run_tests" == true && -z "${ORBIT_TEST_SKIP_DOCKER:-}" && -f "$repo_dir/tests/greenmail/Dockerfile" ]] && docker info > /dev/null 2>&1; then
+  docker build -q -t orbit-greenmail-roots:local "$repo_dir/tests/greenmail" > /dev/null || {
+    echo "test-backend: building tests/greenmail (the GreenMail sidecar image, #1489) failed; see the docker output above." >&2
+    exit 1
+  }
+fi
+
 # The lockfile guard (#901): catches the pnpm 11 -> 12.3.4 handoff writing an
 # @pnpm/exe block back into the lockfile. Runs via `node --test`, not Vitest --
 # see vitest.config.ts's exclude entry for why.
@@ -150,27 +163,32 @@ fi
 # node_modules takes the direct-node path even with pnpm installed (#1557):
 # pnpm refuses a symlinked node_modules as its task-state directory
 # (ERR_PNPM_UNSAFE_TASK_RUN_STATE_PATH) and stops before a test runs.
-# A merge request selects tests with `--changed`, which follows imports only. A
-# test that reads a non-source file (CI YAML, a Dockerfile, a compose file) is
-# not reached that way, so a changed file of any other kind runs the whole
-# suite. A diff that fails or lists nothing keeps `--changed`: CI has already
-# checked the base exists before it sets it. --no-renames lists a renamed
-# file's old name too, so renaming a Dockerfile to x.ts still counts.
+# A merge request selects tests with `--changed`, which follows imports only
+# (#1934): test impact analysis with conservative over-selection by partition.
+# Two tiers widen it, chosen by scripts/ci/changed-test-tier.sh from the changed
+# paths. `whole`: a non-source file changed (CI YAML, a Dockerfile, a compose
+# file), so the whole suite runs. `unit`: app code under web/src/ or src/
+# changed, so the --changed selection runs and then all of tests/unit/, because
+# the tests that read .svelte or fixture files as text are not reached by
+# imports. Markdown stays narrow. A diff that fails or lists nothing keeps
+# `--changed`: CI has already checked the base exists before it sets it.
+# --no-renames lists a renamed file's old name too, so renaming a Dockerfile to
+# x.ts still counts.
 changed_base="${ORBIT_TEST_CHANGED_BASE:-}"
+changed_tier=changed
 if [[ -n "$changed_base" ]]; then
   if changed_files="$(git diff --no-renames --name-only "$changed_base"...HEAD 2>/dev/null)"; then
-    while IFS= read -r changed_file; do
-      case "$changed_file" in
-        # Markdown keeps the narrow run (owner, 2026-11-03, answer 34b): a
-        # docs test it breaks still fails in the whole-suite run on dev.
-        '' | *.js | *.mjs | *.cjs | *.ts | *.mts | *.cts | *.svelte | *.md) ;;
-        *)
-          printf 'Orbit tests: a non-source file changed (%s): the whole suite runs\n' "$changed_file"
-          changed_base=""
-          break
-          ;;
-      esac
-    done <<< "$changed_files"
+    changed_tier="$(printf '%s\n' "$changed_files" | bash scripts/ci/changed-test-tier.sh)"
+    case "$changed_tier" in
+      whole)
+        printf 'Orbit tests: a non-source file changed (%s): the whole suite runs\n' \
+          "$(printf '%s\n' "$changed_files" | grep -Evm1 '^$|\.(js|mjs|cjs|ts|mts|cts|svelte|md)$' || true)"
+        changed_base=""
+        ;;
+      unit)
+        printf 'Orbit tests: app code changed: all of tests/unit runs as well as the changed selection\n'
+        ;;
+    esac
   fi
 fi
 use_pnpm=false
@@ -205,6 +223,11 @@ if [[ "$use_pnpm" == true ]]; then
       # never coverage -- a partial run cannot measure the floors, so neither the
       # coverage run nor the floor check happens, whatever ORBIT_TEST_COVERAGE says.
       pnpm exec vitest run --changed "$changed_base"
+      # vitest intersects --changed with a path filter, so the unit tier is a
+      # second call (a test both changed and in tests/unit runs twice).
+      if [[ "$changed_tier" == unit ]]; then
+        pnpm exec vitest run tests/unit
+      fi
     elif [[ "${ORBIT_TEST_COVERAGE:-false}" == "true" ]]; then
       pnpm test:coverage
       node scripts/ci/coverage-floor-check.mjs
@@ -239,6 +262,9 @@ elif command -v node >/dev/null 2>&1 && [[ -d node_modules ]]; then
     if [[ -n "$changed_base" ]]; then
       # See the pnpm branch above (#1414).
       node node_modules/vitest/vitest.mjs run --changed "$changed_base"
+      if [[ "$changed_tier" == unit ]]; then
+        node node_modules/vitest/vitest.mjs run tests/unit
+      fi
     elif [[ "${ORBIT_TEST_COVERAGE:-false}" == "true" ]]; then
       node node_modules/vitest/vitest.mjs run --coverage
       node scripts/ci/coverage-floor-check.mjs

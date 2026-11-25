@@ -63,8 +63,11 @@ services:
   # so real messages with real attachments travel the real collection pipe.
   # Test-only, like the OIDC provider above; auth disabled because every
   # credential in this overlay is throwaway.
+  # Built from the pinned GreenMail image with the leaked eMudhra roots taken
+  # out of its trust stores (#1489); tests/greenmail/Dockerfile says why.
   orbit-greenmail:
-    image: greenmail/standalone:2.1.15@sha256:309ba544ea482e5d4265d09921cdab07c8dad2cc4481d715c9b8ff5d3f0a149f
+    build:
+      context: ./tests/greenmail
     environment:
       GREENMAIL_OPTS: >-
         -Dgreenmail.setup.test.smtp -Dgreenmail.setup.test.smtps

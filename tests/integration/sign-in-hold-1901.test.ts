@@ -33,7 +33,7 @@
  *  - a refused entry leaves the hold standing, so the person may try again;
  *  - the hold lapses after the approval's own ten minutes.
  */
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { auditLog, instanceAuthority, localCredentials, sessions, signInApprovals, users } from "@/db/schema";
@@ -44,7 +44,7 @@ import * as oidc from "@/lib/auth/oidc";
 import type { OidcMetadata } from "@/lib/auth/oidc";
 import { hashPassword } from "@/lib/auth/password";
 import { getAuthConfig, resetAuthConfigForTests } from "@/lib/env";
-import { createLocalUser, LOCAL_LOCKOUT_CEILING_MS, LOCAL_SIGN_IN_FREE_ATTEMPTS } from "@/server/local-credentials";
+import { createLocalUser, LOCAL_SIGN_IN_FREE_ATTEMPTS } from "@/server/local-credentials";
 import { PASSWORD_CHANGE_HOLD_TTL_MS } from "@/lib/auth/password-change-hold";
 import { ORIGIN } from "./support/auth";
 import { cleanupIntegrationEnvironment } from "./support/fixtures";
@@ -257,20 +257,26 @@ async function markOf(userId: string): Promise<Date | null> {
   return row?.at ?? null;
 }
 
-describe("a retry after a save is told the password is saved, not that the sign-in lapsed (#1901 ruling 1)", () => {
-  it("answers password_change_saved (400) to the hold's second use after a normal save", async () => {
+/* #1943 SEC-H3 (ruling note 68569) reverses #1901 ruling 1: a hold whose mark
+   is gone checks no password at all, so every use of it after the mark was
+   cleared -- by its own save or any other path -- is password_change_lapsed
+   ("sign in again"), never password_change_saved, and is not counted. */
+const LAPSED_MESSAGE = "This sign-in has lapsed; sign in again";
+
+describe("a retry after a save is told to sign in again (#1901 ruling 1, reversed by #1943 SEC-H3)", () => {
+  it("answers password_change_lapsed (400) to the hold's second use after a normal save", async () => {
     const { account, hold } = await landOnTheStep("retry-saved");
     await expectSavedAndSignedIn(await save({ password: NEW_PASSWORD, passwordAgain: NEW_PASSWORD }, hold), account.id);
 
     const retry = await save({ password: NEW_PASSWORD, passwordAgain: NEW_PASSWORD }, hold);
     expect(retry.status).toBe(400);
-    expect(await errorCode(retry)).toBe("password_change_saved");
+    expect(await errorCode(retry)).toBe("password_change_lapsed");
     const body = (await retry.clone().json()) as { error?: { message?: string } };
-    expect(body.error?.message).toBe("Your new password is already saved; sign in with it");
+    expect(body.error?.message).toBe(LAPSED_MESSAGE);
     expect(sessionCookieOf(retry)).toBeUndefined();
   });
 
-  it("a mint that fails after the save answers sign_in_again, clears the hold, and the retry is password_change_saved", async () => {
+  it("a mint that fails after the save answers sign_in_again, clears the hold, and the retry is password_change_lapsed", async () => {
     const { account, hold } = await landOnTheStep("lost-response");
     vi.spyOn(sessionModule, "createSession").mockRejectedValueOnce(new Error("database unavailable"));
 
@@ -286,7 +292,7 @@ describe("a retry after a save is told the password is saved, not that the sign-
 
     const retry = await save({ password: NEW_PASSWORD, passwordAgain: NEW_PASSWORD }, hold);
     expect(retry.status).toBe(400);
-    expect(await errorCode(retry)).toBe("password_change_saved");
+    expect(await errorCode(retry)).toBe("password_change_lapsed");
   });
 
   it("a refusal between save and mint answers saved with a fresh hold that saves", async () => {
@@ -314,7 +320,7 @@ describe("a retry after a save is told the password is saved, not that the sign-
   });
 });
 
-describe("a cleared mark is 'saved' only if the typed password is the stored one (#1901 ruling 1 review)", () => {
+describe("a cleared mark is lapsed whatever is typed (#1901 ruling 1 review, reversed by #1943 SEC-H3)", () => {
   const OTHER_PATH_PASSWORD = "set-by-a-recovery-link-1901";
   const TYPED_BY_HOLD = "typed-by-the-hold-after-clear-1901";
 
@@ -332,12 +338,12 @@ describe("a cleared mark is 'saved' only if the typed password is the stored one
     return hash;
   }
 
-  it("(a) the hold saves P1, a retry with P1 answers password_change_saved", async () => {
+  it("(a) the hold saves P1, a retry with P1 answers password_change_lapsed", async () => {
     const { account, hold } = await landOnTheStep("clear-own-save");
     await expectSavedAndSignedIn(await save({ password: NEW_PASSWORD, passwordAgain: NEW_PASSWORD }, hold), account.id);
     const retry = await save({ password: NEW_PASSWORD, passwordAgain: NEW_PASSWORD }, hold);
     expect(retry.status).toBe(400);
-    expect(await errorCode(retry)).toBe("password_change_saved");
+    expect(await errorCode(retry)).toBe("password_change_lapsed");
   });
 
   it("(b) mark cleared elsewhere with P0, the hold submits P2: password_change_lapsed, stored hash still P0", async () => {
@@ -350,17 +356,29 @@ describe("a cleared mark is 'saved' only if the typed password is the stored one
     expect(await storedHash(account.id)).toBe(before);
   });
 
-  it("(c) mark cleared elsewhere with P0, the hold submits P0: password_change_saved, nothing written", async () => {
+  it("(c) mark cleared elsewhere with P0, the hold submits P0: password_change_lapsed, nothing written (#1943 SEC-H3)", async () => {
     const { account, hold } = await landOnTheStep("clear-elsewhere-same");
     const before = await clearElsewhere(account.id);
+    const [counted] = await getDb().select({ count: localCredentials.failedAttemptCount })
+      .from(localCredentials).where(eq(localCredentials.userId, account.id));
+
     const answered = await save({ password: OTHER_PATH_PASSWORD, passwordAgain: OTHER_PATH_PASSWORD }, hold);
+
     expect(answered.status).toBe(400);
-    expect(await errorCode(answered)).toBe("password_change_saved");
+    expect(await errorCode(answered)).toBe("password_change_lapsed");
     expect(await storedHash(account.id)).toBe(before);
+    const [after] = await getDb().select({ count: localCredentials.failedAttemptCount })
+      .from(localCredentials).where(eq(localCredentials.userId, account.id));
+    expect(after?.count).toBe(counted?.count);
+    const changed = await getDb().select({ id: auditLog.id }).from(auditLog)
+      .where(and(eq(auditLog.entityId, account.id), eq(auditLog.action, "password_changed")));
+    expect(changed).toEqual([]);
+    expect(sessionCookieOf(answered)).toBeUndefined();
+    expect(await sessionCount(account.id)).toBe(0);
   });
 });
 
-describe("a miss on a cleared mark counts as a failed password attempt, as at the door (#1901)", () => {
+describe("a cleared mark checks no password, so nothing is counted (#1901, reversed by #1943 SEC-H3)", () => {
   const OTHER_PATH_PASSWORD = "set-by-a-recovery-link-1901";
 
   async function failureState(userId: string) {
@@ -376,31 +394,27 @@ describe("a miss on a cleared mark counts as a failed password attempt, as at th
       .where(eq(localCredentials.userId, userId));
   }
 
-  it("each wrong password raises failedAttemptCount by one, and past the door's free attempts the account locks as at the door", async () => {
+  it("wrong passwords past the door's free attempts answer lapsed and leave failedAttemptCount and the lock alone", async () => {
     const { account, hold } = await landOnTheStep("miss-counts");
     await clearElsewhere(account.id);
-    const before = (await failureState(account.id))?.count ?? 0;
+    const before = await failureState(account.id);
     const free = LOCAL_SIGN_IN_FREE_ATTEMPTS;
 
     for (let miss = 1; miss <= free + 1; miss += 1) {
       const guess = `a-wrong-guess-number-${miss}-1901`;
       const answered = await save({ password: guess, passwordAgain: guess }, hold);
       expect(await errorCode(answered)).toBe("password_change_lapsed");
-      const after = await failureState(account.id);
-      expect(after?.count, `after miss ${miss}`).toBe(before + miss);
-      if (before + miss <= free) expect(after?.lockedUntil).toBeNull();
+      expect((await failureState(account.id))?.count, `after miss ${miss}`).toBe(before?.count);
     }
-    const locked = await failureState(account.id);
-    expect(locked?.lockedUntil, "the account was not locked past the free attempts").not.toBeNull();
-    expect(locked!.lockedUntil!.getTime()).toBeLessThanOrEqual(Date.now() + LOCAL_LOCKOUT_CEILING_MS);
+    expect((await failureState(account.id))?.lockedUntil).toEqual(before?.lockedUntil ?? null);
   });
 
-  it("a match leaves failedAttemptCount unchanged", async () => {
+  it("the stored password answers lapsed and leaves failedAttemptCount unchanged", async () => {
     const { account, hold } = await landOnTheStep("match-uncounted");
     await clearElsewhere(account.id);
     await getDb().update(localCredentials).set({ failedAttemptCount: 2 }).where(eq(localCredentials.userId, account.id));
     const answered = await save({ password: OTHER_PATH_PASSWORD, passwordAgain: OTHER_PATH_PASSWORD }, hold);
-    expect(await errorCode(answered)).toBe("password_change_saved");
+    expect(await errorCode(answered)).toBe("password_change_lapsed");
     expect((await failureState(account.id))?.count).toBe(2);
   });
 });
@@ -489,5 +503,78 @@ describe("a lost pending answer is re-issued from the spent approval (#1901 ruli
     const claim = claimOf(typed);
     expect(await (await collectWith(claim)).json()).toEqual({ state: "approved", authenticated: true });
     expect(await (await collectWith(claim)).json()).toEqual({ state: "unknown" });
+  });
+});
+
+/* #1943 SEC-H1: a spent approval that minted a session never becomes a hold on
+   replay. The race: a "This wasn't me" press on another pending sign-in of the
+   same account takes its moment, then waits (here, on the credential's row
+   lock, which a test transaction holds); meanwhile the approved tab collects
+   and is minted a session, because the mark is not committed yet; then the
+   mark commits, stamped BEFORE the spend. A replay of the approved claim must
+   still answer `unknown`, never the change-password hold. Written from the
+   finding alone, against the real routes and a real row lock. */
+describe("a spent approval that minted a session never turns into a hold on replay (#1943 SEC-H1)", () => {
+  const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
+
+  async function waitForALockWait(): Promise<void> {
+    for (let waited = 0; waited < 5_000; waited += 25) {
+      const rows = await getDb().execute<{ n: number }>(sql`select count(*)::int as n from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock'`);
+      if (Number(rows[0]!.n) > 0) return;
+      await sleep(25);
+    }
+    throw new Error("the refusal never waited on the credential's row lock, so the race was not staged");
+  }
+
+  it("a mark stamped before the mint and committed after it: the replay is unknown, with no hold", async () => {
+    const account = await seedAccount("mark-straddles-mint");
+
+    // The tab that will be approved and minted.
+    const approvedTab = await typePassword(account.email);
+    expect(approvedTab.status).toBe(200);
+    const approvedToken = mailedToken();
+    // A second pending sign-in for the same account, which somebody refuses.
+    const refusedTab = await typePassword(account.email);
+    expect(refusedTab.status).toBe(200);
+    const refusedToken = mailedToken();
+    expect(refusedToken).not.toBe(approvedToken);
+    expect((await press(approvedToken, "approved")).status).toBe(200);
+
+    let locked!: () => void;
+    const lockTaken = new Promise<void>((resolve) => { locked = resolve; });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const holder = getDb().transaction(async (transaction) => {
+      await transaction.execute(sql`select 1 from local_credentials where user_id = ${account.id} for update`);
+      locked();
+      await gate;
+    });
+    await lockTaken;
+
+    let refusal: Promise<Response> | undefined;
+    try {
+      refusal = press(refusedToken, "denied");
+      await waitForALockWait();
+      // The refusal has taken its moment and is waiting; the approved tab collects now.
+      const collected = await collectWith(claimOf(approvedTab));
+      expect(await collected.clone().json(), "the approved tab was not minted, so the race was not staged").toEqual({ state: "approved", authenticated: true });
+      expect(sessionCookieOf(collected)).toBeDefined();
+    } finally {
+      release();
+      await holder;
+    }
+    expect(await (await refusal!).json()).toEqual({ recorded: true, decision: "denied" });
+
+    const [spent] = await getDb().select({ consumedAt: signInApprovals.consumedAt })
+      .from(signInApprovals).where(eq(signInApprovals.outcome, "approved"));
+    const mark = await markOf(account.id);
+    expect(mark, "the refusal did not mark the account").not.toBeNull();
+    expect(spent?.consumedAt, "the approved sign-in is not spent").toBeTruthy();
+    expect(mark!.getTime(), "the mark was not stamped before the spend, so this is not the SEC-H1 race")
+      .toBeLessThanOrEqual(spent!.consumedAt!.getTime());
+
+    const replay = await collectWith(claimOf(approvedTab));
+    expect(await replay.clone().json(), "a spent approval that minted a session became a change-password hold").toEqual({ state: "unknown" });
+    expect(readSetCookie(replay, passwordChangeCookieName(getAuthConfig()))?.value ?? "").toBe("");
   });
 });

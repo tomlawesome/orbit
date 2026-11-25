@@ -143,7 +143,7 @@ export const SIDECARS = [
   {
     name: "Apache Tika",
     service: "orbit-tika",
-    image: "apache/tika:4.2.0-full",
+    image: "apache/tika:4.2.0-2-full",
     author: "The Apache Software Foundation",
     licence: "Apache License 2.0",
     spdx: "Apache-2.0",
@@ -163,7 +163,7 @@ export const SIDECARS = [
   {
     name: "Ollama",
     service: "orbit-ollama",
-    image: "ollama/ollama:0.40.17",
+    image: "ollama/ollama:0.40.18",
     author: "Ollama",
     licence: "MIT License",
     spdx: "MIT",

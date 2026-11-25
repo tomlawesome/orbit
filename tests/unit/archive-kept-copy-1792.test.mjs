@@ -20,6 +20,7 @@ import { describe, expect, it } from "vitest";
  */
 
 const ROOT = resolve(import.meta.dirname, "../..");
+const CONTROLLER = "web/src/routes/household/[id]/archive-controller.svelte.js";
 const FILES = [
   "web/src/routes/household/[id]/DeskArchive.svelte",
   "web/src/routes/household/[id]/PocketArchive.svelte",
@@ -44,9 +45,12 @@ describe.each(FILES)("%s: what the card says about how long and how many exports
   });
 });
 
-describe("PocketArchive.svelte: the toast after writing", () => {
+describe("the toast after writing (the phone's wake line, from the shared controller, #1354)", () => {
   it("says to download it before the time on the card, not within a day", () => {
-    const source = readFileSync(resolve(ROOT, FILES[1]), "utf8");
+    const source = readFileSync(resolve(ROOT, CONTROLLER), "utf8");
     expect(source).toMatch(/download it before \$\{readyUntil\}/u);
+    expect(source).not.toMatch(/within a day/u);
+    // the phone is the one that passes its wake line in
+    expect(readFileSync(resolve(ROOT, FILES[1]), "utf8")).toMatch(/createArchiveController\(\{[^}]*\bwake\b/u);
   });
 });

@@ -27,8 +27,9 @@ afterEach(() => {
 
 type Fixture = Awaited<ReturnType<typeof createIntegrationFixture>>;
 type Session = Awaited<ReturnType<Fixture["session"]>>;
-/* #1915 W-S1: said from the constant, and never tells the member to delete. */
-const WORDS = `You already have ${STAGED_UPLOADS_PER_MEMBER_LIMIT} uploads waiting to be attached to an item. Add the item they belong to, or wait a day and they are cleared`;
+/* #1915 W-S1: said from the constant, and never tells the member to delete.
+   #1943 A-F1/A-F3: the wait is the configured hold (default 24 h = 1 day), not a fixed "a day". */
+const WORDS = `You already have ${STAGED_UPLOADS_PER_MEMBER_LIMIT} uploads waiting to be attached to an item. Add the item they belong to, or wait up to 1 day and they are cleared`;
 
 async function stage(fixture: Fixture, session: Session, documentId = randomUUID()) {
   const body = createSyntheticPdf(`staged ${documentId}`);

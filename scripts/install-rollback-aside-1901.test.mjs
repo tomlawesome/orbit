@@ -6,7 +6,7 @@
 // aside is moved back and the path is reported by rollback_restore_failed. The
 // aside name is in snapshot_fresh_target's known list. Fixtures: install-test-support.mjs.
 
-import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -31,6 +31,7 @@ import {
   runPasted,
   containersLeft,
   ownTree,
+  treeSnapshot,
 } from "./install-test-support.mjs";
 
 vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
@@ -234,5 +235,42 @@ describe("install.sh: snapshot_fresh_target knows the rollback's aside name (#19
     expect(kept[0]).toContain("/moved/");
     expect(readFileSync(kept[0], "utf8")).toBe("left by an interrupted restore\n");
     expect(originalsIn(ownTree(targetDir))).toEqual(originalsIn(before));
+  });
+});
+
+describe("install.sh: a lone rollback aside stops the run (#1943 O-S1)", () => {
+  // Ruling note 68569: the aside may be ignored only when its original is in the folder. A lone aside (a restore
+  // killed after the original was moved aside) stops the run before anything is written, naming the aside and every
+  // orbit-install-backups/*/originals/<name> found, so "Nothing was changed" still holds.
+  const aside = "..env-orbit.orbit-restore.4242.aside";
+  const stamp = "20261101T120000Z";
+
+  /** A pre-provisioned folder whose .env-orbit a killed restore left only as the aside and a backup's originals copy. */
+  function killedRestoreFolder() {
+    const fixture = recoveryFixture();
+    const originals = join(fixture.targetDir, "orbit-install-backups", stamp, "originals");
+    mkdirSync(originals, { recursive: true });
+    writeFileSync(join(originals, ".env-orbit"), readFileSync(join(fixture.targetDir, ".env-orbit")), { mode: 0o600 });
+    renameSync(join(fixture.targetDir, ".env-orbit"), join(fixture.targetDir, aside));
+    return fixture;
+  }
+
+  it("a folder with the aside and a backup's originals copy but no .env-orbit exits non-zero, names both, and creates nothing", () => {
+    const { targetDir, environment } = killedRestoreFolder();
+    const before = treeSnapshot(targetDir);
+    const result = runInstall(targetDir, { ...environment, ...committedCanned() });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(aside);
+    expect(result.stderr).toContain(`orbit-install-backups/${stamp}/originals/.env-orbit`);
+    expect(result.engineRuns).toEqual([]);
+    expect(treeSnapshot(targetDir)).toEqual(before);
+  });
+
+  it("the same folder with .env-orbit present installs as before", () => {
+    const { targetDir, environment } = killedRestoreFolder();
+    writeFileSync(join(targetDir, ".env-orbit"), readFileSync(join(targetDir, "orbit-install-backups", stamp, "originals", ".env-orbit")), { mode: 0o600 });
+    const result = runInstall(targetDir, { ...environment, ...committedCanned() });
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.engineRuns.length).toBeGreaterThan(0);
   });
 });

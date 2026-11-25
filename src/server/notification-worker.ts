@@ -209,11 +209,14 @@ function isBlockedPushEndpointError(error: unknown): boolean {
 }
 
 /**
- * The one revocation rule for both `sendPush` callers (#1929 part 2): the
- * push service says the subscription is gone (401/403/404/410), or its
- * endpoint resolved to a blocked address. Either way it will never succeed,
- * so it is revoked rather than counted as a transient failure. A blocked
- * address also logs one warn line naming only the subscription id.
+ * The one revocation rule for both `sendPush` callers (#1929 part 2, #1943
+ * A-R4): only the push service saying the subscription is gone revokes it --
+ * 404 or 410, or 401/403 for a VAPID key mismatch (RFC 8030 §7.3). An
+ * endpoint whose lookup answered a blocked address is not revoked: that
+ * answer reflects the resolver and the network, not the push service, so it
+ * is a transient failure under the existing bounded retry. The SSRF guard
+ * still never makes the connection. A blocked address logs one warn line
+ * naming only the subscription id.
  */
 export function isRevokedPushFailure(error: unknown, subscriptionId: string): boolean {
   if (isBlockedPushEndpointError(error)) {
@@ -224,7 +227,7 @@ export function isRevokedPushFailure(error: unknown, subscriptionId: string): bo
       action: "none",
       detail: operationalDetail`subscription=${subscriptionId}`,
     });
-    return true;
+    return false;
   }
   const statusCode = (error as ProviderErrorDetails | undefined)?.statusCode;
   return isRevokedPushStatus(typeof statusCode === "number" ? statusCode : undefined);
@@ -236,7 +239,11 @@ export function isRevokedPushFailure(error: unknown, subscriptionId: string): bo
  */
 export function categorizeProviderError(channel: "email" | "web_push", error: unknown): NotificationFailureCategory {
   const details = error as ProviderErrorDetails | undefined;
-  const code = typeof details?.code === "string" ? details.code : "";
+  // nodemailer wraps a system error (ESOCKET, ECONNECTION, EDNS) and keeps the
+  // system code in `originalCode`, as invitations/send.ts reads it.
+  const rawCode = typeof details?.code === "string" ? details.code : "";
+  const originalCode = (error as { originalCode?: unknown } | undefined)?.originalCode;
+  const code = ["ESOCKET", "ECONNECTION", "EDNS"].includes(rawCode) && typeof originalCode === "string" ? originalCode : rawCode;
   const responseCode = typeof details?.responseCode === "number" ? details.responseCode : undefined;
   const statusCode = typeof details?.statusCode === "number" ? details.statusCode : undefined;
 
@@ -252,8 +259,10 @@ export function categorizeProviderError(channel: "email" | "web_push", error: un
 
   // 401/403 is what a push service answers for a subscription made with a
   // different VAPID key (a recovered host generates a new pair): it will never
-  // succeed, so it is gone, not transient.
-  if (isRevokedPushStatus(statusCode) || code === "EPUSH_ENDPOINT_BLOCKED") return "push_unsubscribed";
+  // succeed, so it is gone, not transient. A blocked lookup answer is the
+  // network's, not the push service's, so it is unavailable (#1943 A-R4).
+  if (isRevokedPushStatus(statusCode)) return "push_unsubscribed";
+  if (code === "EPUSH_ENDPOINT_BLOCKED") return "push_unavailable";
   if (["ECONNREFUSED", "ECONNRESET", "ENETUNREACH", "ENOTFOUND", "ETIMEDOUT", "EHOSTUNREACH"].includes(code)
     || (statusCode !== undefined && statusCode >= 500)) {
     return "push_unavailable";
@@ -481,6 +490,10 @@ function isPrivateOrReservedIPv4(address: string): boolean {
   if (a === 172 && b >= 16 && b <= 31) return true;
   if (a === 192 && b === 168) return true;
   if (a === 192 && b === 0 && parts[2] === 0) return true;
+  // RFC 5737 documentation ranges (TEST-NET-1, -2, -3).
+  if (a === 192 && b === 0 && parts[2] === 2) return true;
+  if (a === 198 && b === 51 && parts[2] === 100) return true;
+  if (a === 203 && b === 0 && parts[2] === 113) return true;
   return false;
 }
 
@@ -844,9 +857,6 @@ async function claimDeliveries(
   });
 }
 
-/** Exported for the fast suite (#1151 SR2-R4): the one place real `nodemailer`
- *  and `web-push` calls are built, and therefore the one place their
- *  outbound timeout can be pinned without a live provider. */
 /**
  * The connect-time address check for push (#1929 part 2, OWASP SSRF second
  * layer): the socket's own lookup, so the addresses checked are the addresses
@@ -870,6 +880,9 @@ const blockedAddressFilteringLookup: LookupFunction = (hostname, options, callba
   });
 };
 
+/** Exported for the fast suite (#1151 SR2-R4): the one place real `nodemailer`
+ *  and `web-push` calls are built, and therefore the one place their
+ *  outbound timeout can be pinned without a live provider. */
 export function createDefaultNotificationProviders(config: NotificationWorkerConfig): NotificationProviders {
   /* One agent per providers object, default keepAlive (off), so every
      connection goes through the lookup again. No servername,

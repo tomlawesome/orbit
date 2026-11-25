@@ -223,7 +223,9 @@ describe("#1245: the desk form reads the document the moment it is picked", () =
   it("starts the picture and the inspection together from the pick, not from the save", () => {
     /* #1279: both requests start in $lib/data/document-read.js, shared
        with the phone's form, and the desk calls it from the pick. */
-    expect(takeFile).toMatch(/readPickedDocument\(/u);
+    /* #1354: the desk's read runs in readDocument, through the shared controller. */
+    expect(behaviour).toMatch(/reader\.start\(file, \{/u);
+    expect(takeFile).toMatch(/readDocument\(file\)/u);
     expect(shared).toMatch(/previewPickedDocument\(/u);
     expect(shared).toMatch(/inspectPickedDocument\(/u);
     const submitHandler = behaviour.slice(behaviour.indexOf('on(card, "submit"'));
@@ -255,8 +257,9 @@ describe("#1245: the desk form reads the document the moment it is picked", () =
     expect(shared).toMatch(/"No viruses found\. Making a preview…"/u);
     expect(shared).toMatch(/"Making a preview…"/u);
     expect(behaviour).toMatch(/focusline\.textContent = FOCUS_SCANNING;/u);
-    expect(behaviour).toMatch(/focusline\.textContent = focusAfterScan\(scanned\);/u);
-    expect(behaviour).toMatch(/readPickedDocument\(householdId, file, \{ signal: controller\.signal, onScanned, documentReading(?:, readAfter: gate\.promise)? \}\)/u);
+    expect(behaviour).toMatch(/focusline\.textContent = lineAfterScan\(scanned\);/u);
+    expect(behaviour).toMatch(/reader\.start\(file, \{ householdId, documentReading, readAfter: gate\.promise/u);
+    expect(here("../../web/src/routes/create/read-controller.svelte.js")).toMatch(/export const lineAfterScan = focusAfterScan;/u);
   });
 
   it("[1316 W1-F3] a second pick clears the first read's suggestions before the lane resets, as the pocket's does", () => {

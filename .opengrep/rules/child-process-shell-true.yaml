@@ -1,0 +1,17 @@
+rules:
+  - id: child-process-shell-true
+    # Why: shell: true turns spawn/execFile back into a shell call, reopening command injection.
+    message: >-
+      spawn/execFile with shell: true passes the command through a shell; drop the
+      shell option and pass arguments as an array.
+    severity: WARNING
+    languages: [javascript, typescript]
+    patterns:
+      - pattern-either:
+          - pattern: '$F($CMD, $ARGS, {..., shell: true, ...})'
+          - pattern: '$F($CMD, {..., shell: true, ...})'
+          - pattern: '$O.$F($CMD, $ARGS, {..., shell: true, ...})'
+          - pattern: '$O.$F($CMD, {..., shell: true, ...})'
+      - metavariable-regex:
+          metavariable: $F
+          regex: ^(spawn|spawnSync|execFile|execFileSync|fork)$
