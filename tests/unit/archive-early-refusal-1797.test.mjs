@@ -53,7 +53,7 @@ const mocks = vi.hoisted(() => ({
   getKeyState: vi.fn(),
   requireRecentAuthentication: vi.fn(),
   requirePortableArchiveAccess: vi.fn(),
-  createPortableArchive: vi.fn(),
+  enqueuePortableArchiveExport: vi.fn(),
   importPortableArchive: vi.fn(),
   inspectPortableArchiveUpload: vi.fn(),
   previewPortableImport: vi.fn(),
@@ -72,6 +72,7 @@ vi.mock("orbit/server/maintenance", () => ({
   readEffectiveMaintenance: mocks.readEffectiveMaintenance,
   assertOutsideMaintenance: mocks.assertOutsideMaintenance,
 }));
+vi.mock("orbit/server/document-maintenance/export-jobs", () => ({ notifyExportWorker: vi.fn() }));
 vi.mock("orbit/server/key-state", async (importOriginal) => ({ ...(await importOriginal()), getKeyState: mocks.getKeyState }));
 vi.mock("orbit/server/upload-limit", () => ({ readEffectiveUploadLimit: async () => 50 * MIB }));
 vi.mock("orbit/lib/auth/recent-auth", () => ({ requireRecentAuthentication: mocks.requireRecentAuthentication }));
@@ -80,7 +81,8 @@ vi.mock("orbit/server/portable-archive-repository", async (importOriginal) => {
   mocks.realSpool = real.spoolPortableArchiveUpload;
   return {
     requirePortableArchiveAccess: mocks.requirePortableArchiveAccess,
-    createPortableArchive: mocks.createPortableArchive,
+    enqueuePortableArchiveExport: mocks.enqueuePortableArchiveExport,
+    readPortableArchiveExportState: async () => ({ export: null, latest: null }),
     importPortableArchive: mocks.importPortableArchive,
     inspectPortableArchiveUpload: mocks.inspectPortableArchiveUpload,
     previewPortableImport: mocks.previewPortableImport,
@@ -219,7 +221,7 @@ beforeEach(() => {
   mocks.requirePortableArchiveAccess.mockImplementation(async (userId, householdId) => {
     if (!people[userId]?.owns.includes(householdId)) throw new AppError("household_not_found", "That household is not available", 404);
   });
-  mocks.createPortableArchive.mockResolvedValue({ id: "archive-1", expiresAt: "2026-11-10T00:00:00.000Z", includesDocuments: false });
+  mocks.enqueuePortableArchiveExport.mockResolvedValue({ id: "job-1", status: "pending" });
   mocks.importPortableArchive.mockImplementation(async (input) => {
     const bytes = await readStream(input.archive);
     engineCalls.push({ userId: input.userId, bytes, slotHeld: slot.archiveSlotHeld() });
@@ -321,12 +323,6 @@ async function requestBytes(route, household, file = FILE, conflictItemIds = [])
   return { bytes: upload.bytes, contentType: upload.contentType, fileStart: fileContentOffset(upload.bytes) };
 }
 
-/** A whole request, answered: the response. */
-async function whole(route, who, household) {
-  const request = await requestBytes(route, household);
-  return run(route, who, household, new Uint8Array(request.bytes), request.contentType);
-}
-
 const END = Symbol("end");
 
 /**
@@ -377,14 +373,13 @@ function gate() {
   return { promise, open };
 }
 
-/** The export engine blocks on the returned gate: an export is processing, holding the archive slot. */
+/** An export is processing: the worker (not the route, design 2.1) holds the archive slot until the gate opens. */
 function blockExport() {
   const blocker = gate();
   blockers.push(blocker);
-  mocks.createPortableArchive.mockImplementation(async () => {
-    await blocker.promise;
-    return { id: "archive-1", expiresAt: "2026-11-10T00:00:00.000Z", includesDocuments: false };
-  });
+  const claim = slot.claimArchiveSlot();
+  if (!claim) throw new Error("the slot was not free for the export worker");
+  blocker.promise.then(() => claim.release());
   return blocker;
 }
 
@@ -492,8 +487,7 @@ describe("#1797 test 8: the inspection gives up when the slot is held until the 
   it("an export holds the slot past the end of the body: the import then takes the slot once and is refused archive_over_quota by the final check", async () => {
     // Regression guard for the give-up path. Passes before and after.
     const blocker = blockExport();
-    const exporting = track(whole(EXPORT, "owner-3", HOUSEHOLD_C));
-    await until(() => slot.archiveSlotHeld() && mocks.createPortableArchive.mock.calls.length === 1, "the export is processing");
+    expect(slot.archiveSlotHeld(), "the export worker is processing").toBe(true);
 
     const file = fakeArchive("v2", "over", 3 * FAKE_P);
     const request = await requestBytes(IMPORT, HOUSEHOLD_A, file);
@@ -508,7 +502,7 @@ describe("#1797 test 8: the inspection gives up when the slot is held until the 
     expect(inspections, "the inspection never had the slot").toEqual([]);
 
     blocker.open();
-    await until(() => exporting.settled && importing.settled, "both answers", 10_000);
+    await until(() => importing.settled, "the import answer", 10_000);
     expect(importing.value.status).toBe(413);
     expect((await errorOf(importing.value)).code).toBe("archive_over_quota");
     expect(importCalls(), "the import took the slot once").toHaveLength(1);

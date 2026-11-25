@@ -67,7 +67,7 @@ import { randomBytes, scryptSync } from "node:crypto";
 import { readdir, utimes } from "node:fs/promises";
 import { join } from "node:path";
 import { eq, sql } from "drizzle-orm";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { auditLog, items, portableArchives } from "@/db/schema";
 import { claimArchiveSlot } from "@/server/archive-slot";
@@ -309,7 +309,7 @@ describe("test 2: one worker pass completes the job, in one commit", () => {
 
     const file = Buffer.from((await readPortableArchive(fixture.users.owner.id, archive.id)).bytes);
     expect(file.subarray(0, 8).toString("latin1")).toBe("ORBITARC");
-    const payload = v2PayloadOf(file, PASSPHRASE) as { items: Array<{ id: string }>; household: { name: string } };
+    const payload = v2PayloadOf(file, PASSPHRASE) as unknown as { items: Array<{ id: string }>; household: { name: string } };
     expect(payload.household.name).toBe(fixture.household.name);
     expect(payload.items.map((item) => item.id)).toContain(fixture.item.id);
   }, SETTLE_MS);

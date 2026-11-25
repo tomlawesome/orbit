@@ -265,6 +265,8 @@ test.describe("the export as a background job (#1774)", () => {
     const server = await exportJobRoutes(page, { export: job("pending"), latest: null });
     const c = await openCard(page, phone);
     const axeCheck = async (/** @type {string} */ state) => {
+      // The card fades in (600 ms, p-landed) after a load or reload; axe reads colour mid-fade, so let every finite running animation finish first (a looping one never ends).
+      await page.evaluate(() => Promise.all(document.getAnimations().filter((a) => Number.isFinite(a.effect?.getComputedTiming().endTime ?? Infinity)).map((a) => a.finished.catch(() => null))));
       const results = await withDecorationHidden(page, () => new AxeBuilder({ page })
         .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
         .include(phone ? 'section[data-hh="archive"]' : ".c-archive")
