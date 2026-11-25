@@ -48,9 +48,14 @@ household screen.
 ![The create form in the belong card's drawer: a name, a time zone and a currency, with a note that four sections come to start](images/first-run-sections-step.png)
 
 Instance administrators can see every household and add any person to any
-household. The People card in Administration shows each person as "admin" or
-"user", but it has no control yet to give or remove administrator access
-(issue #1633).
+household. The People card in Administration shows each person as "admin",
+"user" or "primary admin". To make someone an administrator, press "give admin
+access…" on their row (on a phone, open the row and tap "make admin"); to take
+it away, press "remove admin access…" ("remove admin" on a phone). Orbit asks
+for your current password first, or sends you back to your identity provider
+if you sign in only through one. The primary administrator's access cannot be
+removed, you cannot remove your own, and a disabled account has to be enabled
+before it can be given administrator access.
 
 ## Start, stop and check on it
 

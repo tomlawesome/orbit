@@ -2174,6 +2174,23 @@ export async function setUserDisabled(userId, disabled) {
 }
 
 /**
+ * Give or remove a person's administrator access (`PUT /api/admin/users`,
+ * #1633). Challenged under ADR-0023 §5, intent `administrator_set`:
+ * `currentPassword` is the acting administrator's own, absent for an
+ * OIDC-only administrator who carries a step-up proof cookie instead.
+ *
+ * @param {string} userId
+ * @param {boolean} administrator
+ * @param {string} [currentPassword]
+ */
+export async function setUserAdministrator(userId, administrator, currentPassword) {
+  return json(await csrfFetch("/api/admin/users", {
+    method: "PUT",
+    body: { userId, administrator, ...(currentPassword === undefined ? {} : { currentPassword }) },
+  }));
+}
+
+/**
  * Turn a system's deletion back inside its window (#1001, §19). An instance
  * administrator's act, drawn on administration only ("57 admin only").
  *
