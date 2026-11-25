@@ -2,10 +2,11 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { statfs } from "node:fs/promises";
 import { dirname } from "node:path";
 import { Readable } from "node:stream";
-import { and, asc, eq, gt, inArray, isNotNull, isNull, lt, notInArray, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, notInArray, or, sql } from "drizzle-orm";
+import type { PgUpdateSetSource } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { getDb } from "@/db";
-import { auditLog, documentCrypto, documents, documentStagingObjects, dueEvents, households, items, portableArchiveImports, portableArchives, reminderRules, sections, } from "@/db/schema";
+import { auditLog, documentCrypto, documents, documentStagingObjects, dueEvents, households, items, portableArchiveExports, portableArchiveImports, portableArchives, reminderRules, sections, } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
 import { householdOwnerLockKey } from "@/lib/auth/authority-locks";
 import { CALENDAR_DATE_MESSAGE, calendarDate } from "@/lib/calendar-date";
@@ -14,7 +15,8 @@ import { log, operationalDetail } from "@/lib/logger";
 import { MIN_PASSWORD_LENGTH, passwordLength } from "@/lib/password-length";
 import { currencyCode } from "@/lib/platform-lists";
 import { optionalText } from "@/lib/workspace";
-import { DOCUMENT_MAX_BYTES_CEILING, getDocumentConfig } from "@/server/documents/config";
+import { DOCUMENT_MAX_BYTES_CEILING, getDocumentConfig, keyEncryptionKeyFor, wrappingKey } from "@/server/documents/config";
+import { unwrapKeyWithAad, wrapKeyWithAad, type WrappedKey } from "@/server/documents/crypto";
 import { openDocumentStorage } from "@/server/documents/storage";
 import { PDF_STORED_MAX_PAGES } from "@/server/documents/validation";
 import { openContentHash } from "@/server/documents/content-hash";
@@ -138,19 +140,146 @@ function archiveMetadataLockedError(): AppError {
 }
 
 /**
- * Writes the household out as a format v2 archive (#1390, ADR-0045): the
- * manifest (every row, normalised and decrypted) then, when asked for, every
- * bound document's own bytes, sealed segment by segment straight to a
- * private temporary file that is renamed into place once complete. Bounded
- * by disk, not memory: one segment and one document piece are held at a
- * time, whatever the household holds.
+ * The household export as a leased background job (#1774, ADR-0047). The
+ * route checks who may export and the passphrase, derives the export key and
+ * records a job (`enqueuePortableArchiveExport`); the document worker's
+ * export seam (src/server/document-maintenance/export-jobs.ts) claims it and
+ * runs `runPortableArchiveExportJob`, which writes the file
+ * (`writePortableArchiveForJob`) and completes the job in the same
+ * transaction that records the archive.
  */
-export async function createPortableArchive(input: {
+
+/** The job's lease: renewed with every progress write (ADR-0010's shape). */
+const EXPORT_LEASE = sql`now() + interval '10 minutes'`;
+/** Progress is written at least this often, and after every document. */
+const EXPORT_HEARTBEAT_MS = 1_000;
+const EXPORT_HEARTBEAT_BYTES = 64 * 1_048_576;
+/** An unexpected failure this many claims running ends the job as failed. */
+export const EXPORT_MAX_ATTEMPTS = 3;
+/** How long a failed job keeps its wrapped key, for a retry without a second passphrase. */
+export const EXPORT_KEY_RETENTION = sql`interval '1 hour'`;
+
+export type PortableArchiveExportRow = typeof portableArchiveExports.$inferSelect;
+
+/** What the card is told about a job (design section 2.4). */
+export interface PortableArchiveExportState {
+  id: string;
+  status: string;
+  bytesDone: number | null;
+  bytesTotal: number | null;
+  createdAt: string;
+  failureCode: string | null;
+  failureMessage: string | null;
+  canRetry: boolean;
+}
+
+/** A job as the worker holds it once claimed: every row write is fenced on `leaseToken`. */
+export interface ClaimedPortableArchiveExport {
+  id: string;
+  householdId: string;
+  requestedByUserId: string;
+  includeDocuments: boolean;
+  attempts: number;
+  leaseToken: string;
+  salt: Buffer | null;
+  keyWrapped: WrappedKey | null;
+  keyId: string | null;
+}
+
+/**
+ * Thrown from a test hook to stand in for the process dying: the runner
+ * writes nothing more to the job row, rolls back any open transaction and
+ * rethrows it.
+ */
+export class PortableArchiveExportCrash extends Error {
+  constructor(message = "the export process died") {
+    super(message);
+    this.name = "PortableArchiveExportCrash";
+  }
+}
+
+/** A fenced write changed no row: another claim holds the job now. */
+class ExportLeaseLost extends Error {
+  constructor() {
+    super("the export's lease was lost");
+    this.name = "ExportLeaseLost";
+  }
+}
+
+type ExportHooks = {
+  afterDocument?(context: { jobId: string; index: number }): void | Promise<void>;
+  inCompletion?(context: { jobId: string }): void | Promise<void>;
+};
+let exportHooks: ExportHooks | null = null;
+
+/** Tests only: points in the job's write to pause, observe or crash at. */
+export function setPortableArchiveExportHooksForTests(hooks: ExportHooks | null): void {
+  exportHooks = hooks;
+}
+
+/** The AAD the export key is wrapped under: the key opens for this job only. */
+function exportKeyAad(jobId: string): Buffer {
+  return Buffer.from(`portable-archive-export:${jobId}`, "utf8");
+}
+
+function holdsExportLease(job: Pick<ClaimedPortableArchiveExport, "id" | "leaseToken">) {
+  return and(eq(portableArchiveExports.id, job.id), eq(portableArchiveExports.status, "processing"), eq(portableArchiveExports.leaseToken, job.leaseToken));
+}
+
+/** One fenced write to the job row; false when the lease was lost. */
+async function writeExportRow(
+  executor: Pick<ReturnType<typeof getDb>, "update">,
+  job: ClaimedPortableArchiveExport,
+  values: PgUpdateSetSource<typeof portableArchiveExports>,
+): Promise<boolean> {
+  const changed = await executor.update(portableArchiveExports).set({ ...values, updatedAt: sql`now()` })
+    .where(holdsExportLease(job)).returning({ id: portableArchiveExports.id });
+  return changed.length === 1;
+}
+
+export function portableArchiveExportState(row: PortableArchiveExportRow): PortableArchiveExportState {
+  return {
+    id: row.id,
+    status: row.status,
+    bytesDone: row.bytesDone,
+    bytesTotal: row.bytesTotal,
+    createdAt: row.createdAt.toISOString(),
+    failureCode: row.failureCode,
+    failureMessage: row.failureMessage,
+    canRetry: row.status === "failed" && row.keyWrapped !== null,
+  };
+}
+
+function exportInProgressError(): AppError {
+  return new AppError("archive_export_in_progress", "An export of this household is already being written", 409);
+}
+
+function exportKeyUnavailableError(): AppError {
+  return new AppError("key_unavailable", "Orbit's keys changed while this export waited; write it again", 503);
+}
+
+function isOneLiveViolation(error: unknown): boolean {
+  for (let current = error; current && typeof current === "object"; current = (current as { cause?: unknown }).cause) {
+    const { code, constraint_name: constraint } = current as { code?: unknown; constraint_name?: unknown };
+    if (code === "23505" && constraint === "portable_archive_exports_one_live") return true;
+  }
+  return false;
+}
+
+/**
+ * What the route does once its checks have passed (design section 2.2): the
+ * key is derived here from the passphrase and a fresh salt, wrapped under the
+ * instance KEK with the job's id in the AAD, and zeroed; the passphrase goes
+ * nowhere. The household's finished jobs are deleted in the statement that
+ * inserts the new one, so the one-live index is the only thing that can
+ * refuse it (409 archive_export_in_progress). The audit line says who asked.
+ */
+export async function enqueuePortableArchiveExport(input: {
   userId: string;
   householdId: string;
   passphrase: string;
   includeDocuments: boolean;
-}): Promise<{ id: string; expiresAt: string; includesDocuments: boolean; keepPerHousehold: number }> {
+}): Promise<PortableArchiveExportState> {
   await requireHouseholdAccess(input.userId, input.householdId, true);
   // The floor is held when an archive is made (#1333), counted as a person
   // counts, so a passphrase the route's own length check let through is still
@@ -158,29 +287,223 @@ export async function createPortableArchive(input: {
   if (passwordLength(input.passphrase) < MIN_PASSWORD_LENGTH) {
     throw new AppError("archive_passphrase_too_short", `Use an export passphrase of at least ${MIN_PASSWORD_LENGTH} characters`, 422);
   }
+  const id = randomUUID();
+  const salt = randomBytes(16);
+  const key = await deriveArchiveKey(input.passphrase, salt, { N: 2 ** ARCHIVE_SCRYPT.log2N, r: ARCHIVE_SCRYPT.r, p: ARCHIVE_SCRYPT.p });
+  let wrapped: WrappedKey;
+  let keyId: string;
+  try {
+    const wrapping = wrappingKey(getDocumentConfig());
+    wrapped = wrapKeyWithAad(key, wrapping.keyEncryptionKey, exportKeyAad(id));
+    keyId = wrapping.keyId;
+  } finally {
+    key.fill(0);
+  }
+  try {
+    return await getDb().transaction(async (transaction) => {
+      const rows = await transaction.execute(sql`
+        with finished as (
+          delete from portable_archive_exports
+          where household_id = ${input.householdId} and status in ('completed', 'failed', 'cancelled')
+        )
+        insert into portable_archive_exports (id, household_id, requested_by_user_id, include_documents, status, salt, key_wrapped, key_id)
+        values (${id}, ${input.householdId}, ${input.userId}, ${input.includeDocuments}, 'pending', ${salt}, ${JSON.stringify(wrapped)}::jsonb, ${keyId})
+        returning created_at as "createdAt"
+      `) as unknown as Array<{ createdAt: Date | string }>;
+      await transaction.insert(auditLog).values({
+        householdId: input.householdId, actorUserId: input.userId, entityType: "portable_archive_export", entityId: id,
+        action: "portable_archive_export_started", changes: { includesDocuments: input.includeDocuments },
+      });
+      return {
+        id, status: "pending", bytesDone: 0, bytesTotal: null, createdAt: new Date(rows[0].createdAt).toISOString(),
+        failureCode: null, failureMessage: null, canRetry: false,
+      };
+    });
+  } catch (error) {
+    if (isOneLiveViolation(error)) throw exportInProgressError();
+    throw error;
+  }
+}
+
+/**
+ * The card's read (design section 2.4): the household's most recent job if it
+ * was started in the last 24 hours, and its newest live archive. The owner's,
+ * as the export is.
+ */
+export async function readPortableArchiveExportState(userId: string, householdId: string): Promise<{
+  export: PortableArchiveExportState | null;
+  latest: { id: string; expiresAt: string; includesDocuments: boolean; downloadUrl: string; keepPerHousehold: number } | null;
+}> {
+  await requireHouseholdAccess(userId, householdId, true);
+  const db = getDb();
+  const [job] = await db.select().from(portableArchiveExports)
+    .where(and(eq(portableArchiveExports.householdId, householdId), sql`${portableArchiveExports.createdAt} > now() - interval '24 hours'`))
+    .orderBy(desc(portableArchiveExports.createdAt)).limit(1);
+  const [archive] = await db.select().from(portableArchives)
+    .where(and(eq(portableArchives.householdId, householdId), isNull(portableArchives.purgedAt), gt(portableArchives.expiresAt, new Date())))
+    .orderBy(desc(portableArchives.createdAt), desc(portableArchives.id)).limit(1);
+  const latest = archive
+    ? {
+      id: archive.id,
+      expiresAt: archive.expiresAt.toISOString(),
+      includesDocuments: archive.includesDocuments,
+      downloadUrl: `/api/portable-archives/${archive.id}/download`,
+      keepPerHousehold: (await readEffectiveArchiveRetention()).keepPerHousehold,
+    }
+    : null;
+  return { export: job ? portableArchiveExportState(job) : null, latest };
+}
+
+/**
+ * "Try again" (design section 2.5): a compare-and-swap on the status the card
+ * last saw, which must be `failed`, with the key still on the row and inside
+ * its hour. The job goes back to `pending` with its attempts reset.
+ */
+export async function retryPortableArchiveExport(userId: string, householdId: string, jobId: string, expectedStatus: string): Promise<PortableArchiveExportState> {
+  await requireHouseholdAccess(userId, householdId, true);
+  if (!z.string().uuid().safeParse(jobId).success) throw new AppError("archive_export_not_found", "That export is not available", 404);
+  const db = getDb();
+  const owned = and(eq(portableArchiveExports.id, jobId), eq(portableArchiveExports.householdId, householdId));
+  let retried: PortableArchiveExportRow[] = [];
+  if (expectedStatus === "failed") {
+    try {
+      retried = await db.update(portableArchiveExports).set({
+        status: "pending", attempts: 0, nextAttemptAt: sql`now()`, failureCode: null, failureMessage: null, lastError: null,
+        bytesDone: 0, bytesTotal: null, lockedAt: null, leaseExpiresAt: null, leaseToken: null, updatedAt: sql`now()`,
+      }).where(and(owned, eq(portableArchiveExports.status, "failed"), isNotNull(portableArchiveExports.keyWrapped),
+        sql`${portableArchiveExports.updatedAt} > now() - ${EXPORT_KEY_RETENTION}`)).returning();
+    } catch (error) {
+      if (isOneLiveViolation(error)) throw exportInProgressError();
+      throw error;
+    }
+  }
+  if (retried[0]) return portableArchiveExportState(retried[0]);
+  const [row] = await db.select({ status: portableArchiveExports.status }).from(portableArchiveExports).where(owned).limit(1);
+  if (!row) throw new AppError("archive_export_not_found", "That export is not available", 404);
+  if (row.status === "failed" && expectedStatus === "failed") {
+    throw new AppError("archive_export_key_gone", "This export can no longer be tried again; write it again", 409);
+  }
+  throw new AppError("archive_export_conflict", "This export has moved on; reload the archive card", 409);
+}
+
+function unwrapExportKey(job: ClaimedPortableArchiveExport): Buffer | null {
+  if (!job.salt || job.salt.length !== 16 || !job.keyWrapped || !job.keyId) return null;
+  try {
+    const keyEncryptionKey = keyEncryptionKeyFor(getDocumentConfig(), job.keyId);
+    if (!keyEncryptionKey) return null;
+    return unwrapKeyWithAad(job.keyWrapped, keyEncryptionKey, exportKeyAad(job.id));
+  } catch {
+    return null;
+  }
+}
+
+/** Ends the job as failed in the person's words. The key stays for an hour, unless it is useless. */
+async function failExport(job: ClaimedPortableArchiveExport, error: AppError, options: { dropKey?: boolean } = {}): Promise<void> {
+  await writeExportRow(getDb(), job, {
+    status: "failed", failureCode: error.code, failureMessage: error.message, lastError: error.code,
+    lockedAt: null, leaseExpiresAt: null, leaseToken: null,
+    ...(options.dropKey ? { salt: null, keyWrapped: null, keyId: null } : {}),
+  });
+}
+
+export type PortableArchiveExportOutcome =
+  | { status: "completed"; archiveId: string }
+  | { status: "failed" | "retry" | "lease_lost" };
+
+/**
+ * One claimed job, run to its end: the key unwrapped, the file written, the
+ * job completed with the archive, or ended. A refusal the export already
+ * knows (an AppError: no room, a damaged field, a locked key ...) fails the
+ * job at once; nothing automatic retries it. Anything else is retried, and
+ * fails after EXPORT_MAX_ATTEMPTS claims. A lost lease ends quietly: the job
+ * is another claim's now. The key is zeroed however it ends.
+ */
+export async function runPortableArchiveExportJob(job: ClaimedPortableArchiveExport): Promise<PortableArchiveExportOutcome> {
+  const key = unwrapExportKey(job);
+  if (key === null) {
+    await failExport(job, exportKeyUnavailableError(), { dropKey: true });
+    return { status: "failed" };
+  }
+  try {
+    const written = await writePortableArchiveForJob(job, key);
+    return { status: "completed", archiveId: written.id };
+  } catch (error) {
+    if (error instanceof PortableArchiveExportCrash) throw error;
+    if (error instanceof ExportLeaseLost) {
+      log.warn({ event: "document.job", state: "degraded", reason: "invalid_state", action: "none", impact: "none", detail: operationalDetail`portable archive export lease lost; another claim holds it` });
+      return { status: "lease_lost" };
+    }
+    if (error instanceof AppError) {
+      await failExport(job, error);
+      return { status: "failed" };
+    }
+    log.error({ event: "document.job", state: "retrying", reason: "unexpected_failure", action: "inspect_admin_diagnostics", impact: "worker_degraded", detail: operationalDetail`portable archive export failed (${error instanceof Error ? error.name : "unknown"})` });
+    if (job.attempts >= EXPORT_MAX_ATTEMPTS) {
+      await failExport(job, new AppError("archive_export_failed", "Orbit couldn't write this archive; try again", 500));
+      return { status: "failed" };
+    }
+    await writeExportRow(getDb(), job, {
+      status: "retry", lastError: "archive_export_failed", lockedAt: null, leaseExpiresAt: null, leaseToken: null, bytesDone: 0,
+      nextAttemptAt: sql`now() + ${`${60 * 2 ** Math.max(0, job.attempts - 1)} seconds`}::interval`,
+    });
+    return { status: "retry" };
+  } finally {
+    key.fill(0);
+  }
+}
+
+/**
+ * Writes the household out as a format v2 archive for a claimed job (#1390,
+ * ADR-0045, ADR-0047): the manifest (every row, normalised and decrypted)
+ * then, when asked for, every bound document's own bytes, sealed segment by
+ * segment under the job's key straight to a private temporary file that is
+ * renamed into place once complete. Bounded by disk, not memory: one segment
+ * and one document piece are held at a time, whatever the household holds.
+ *
+ * Every write to the job row is fenced on the lease (`holdsExportLease`):
+ * one that changes nothing means another claim holds the job, and the write
+ * stops, its temporary file removed, nothing recorded. The completing
+ * transaction records the archive, the audit line and the job's completion
+ * (its key columns nulled) in one commit.
+ */
+export async function writePortableArchiveForJob(
+  job: ClaimedPortableArchiveExport,
+  key: Buffer,
+): Promise<{ id: string; expiresAt: string; includesDocuments: boolean; keepPerHousehold: number }> {
+  // The person who asked is gone by now: their role is checked again, and
+  // one who lost the household meanwhile gets no file.
+  try {
+    await requireHouseholdAccess(job.requestedByUserId, job.householdId, true);
+  } catch (error) {
+    if (error instanceof AppError) throw new AppError("archive_forbidden", "The member who started this export can no longer export this household", 403);
+    throw error;
+  }
+  const userId = job.requestedByUserId;
+  const householdId = job.householdId;
+  const includeDocuments = job.includeDocuments;
   const db = getDb();
   // One snapshot for every read (#1390 review, ruling 8): REPEATABLE READ and
   // read-only, so the rows agree with one another -- a document never ships
   // without its item, whatever commits while the export reads. The documents'
   // bytes are read by id afterwards; one deleted meanwhile fails the export.
   const [[household], householdSections, householdItems, events, reminders, documentRows] = await db.transaction(async (snapshot) => Promise.all([
-    snapshot.select().from(households).where(eq(households.id, input.householdId)).limit(1),
-    snapshot.select().from(sections).where(eq(sections.householdId, input.householdId)).orderBy(asc(sections.position), asc(sections.id)),
-    snapshot.select().from(items).where(eq(items.householdId, input.householdId)).orderBy(asc(items.createdAt), asc(items.id)),
-    snapshot.select().from(dueEvents).where(eq(dueEvents.householdId, input.householdId)).orderBy(asc(dueEvents.createdAt), asc(dueEvents.id)),
+    snapshot.select().from(households).where(eq(households.id, householdId)).limit(1),
+    snapshot.select().from(sections).where(eq(sections.householdId, householdId)).orderBy(asc(sections.position), asc(sections.id)),
+    snapshot.select().from(items).where(eq(items.householdId, householdId)).orderBy(asc(items.createdAt), asc(items.id)),
+    snapshot.select().from(dueEvents).where(eq(dueEvents.householdId, householdId)).orderBy(asc(dueEvents.createdAt), asc(dueEvents.id)),
     snapshot.select({
       id: reminderRules.id,
       itemId: reminderRules.itemId,
       daysBefore: reminderRules.daysBefore,
       emailEnabled: reminderRules.emailEnabled,
       pushEnabled: reminderRules.pushEnabled,
-    }).from(reminderRules).innerJoin(items, eq(reminderRules.itemId, items.id)).where(eq(items.householdId, input.householdId)).orderBy(asc(items.createdAt), asc(items.id), asc(reminderRules.id)),
+    }).from(reminderRules).innerJoin(items, eq(reminderRules.itemId, items.id)).where(eq(items.householdId, householdId)).orderBy(asc(items.createdAt), asc(items.id), asc(reminderRules.id)),
     // Bound documents only (#1605 PR-5/PR-52): a staged upload no item has
     // claimed yet is a draft, not the household's, and never ships.
-    snapshot.select().from(documents).where(and(eq(documents.householdId, input.householdId), eq(documents.lifecycle, "available"), isNotNull(documents.itemId))).orderBy(asc(documents.createdAt), asc(documents.id)),
+    snapshot.select().from(documents).where(and(eq(documents.householdId, householdId), eq(documents.lifecycle, "available"), isNotNull(documents.itemId))).orderBy(asc(documents.createdAt), asc(documents.id)),
   ]), { isolationLevel: "repeatable read", accessMode: "read only" });
   if (!household) throw new AppError("household_not_found", "That household is not available", 404);
-  const metadata = await openExportMetadataReader(input.householdId);
+  const metadata = await openExportMetadataReader(householdId);
   // No key minted is only harmless while nothing was ever encrypted under
   // it. A row carrying ciphertext with no key row to read it (a lost or
   // deleted metadata_keys row, a partial restore) would export blank the
@@ -232,7 +555,7 @@ export async function createPortableArchive(input: {
     reminderRules: reminders,
     documents: documentRows.map((document) => ({ id: document.id, itemId: document.itemId, displayName: document.displayName, mediaType: document.mediaType, sizeBytes: document.sizeBytes, contentSha256: exportedDocumentHashes.get(document.id), lifecycle: document.lifecycle, scanStatus: document.scanStatus, failureCode: document.failureCode, deleteAfter: document.deleteAfter, deletedAt: document.deletedAt, availableAt: document.availableAt, version: document.version })),
   };
-  const included = input.includeDocuments ? documentRows : [];
+  const included = includeDocuments ? documentRows : [];
   manifest.body = included.map((document) => ({ id: document.id, sizeBytes: document.sizeBytes, contentSha256: exportedDocumentHashes.get(document.id) as string }));
   const manifestBytes = Buffer.from(JSON.stringify(manifest), "utf8");
   // The importer reads at most this much manifest; a household whose rows
@@ -269,46 +592,67 @@ export async function createPortableArchive(input: {
     const retention = await readEffectiveArchiveRetention().catch((error: unknown) => { throw refused(error); });
     if (fileBytes > retention.maxTotalBytes) throw refused(archiveStoreFullError(retention.maxTotalBytes, fileBytes));
 
+    // The card's total, before the first segment (design section 2.3).
+    if (!await writeExportRow(db, job, { bytesTotal: fileBytes, bytesDone: 0, leaseExpiresAt: EXPORT_LEASE })) throw refused(new ExportLeaseLost());
+
+    // The salt the key was derived with in the request; a fresh nonce prefix every run.
     const header = encodeHeader({
       log2N: ARCHIVE_SCRYPT.log2N, r: ARCHIVE_SCRYPT.r, p: ARCHIVE_SCRYPT.p,
-      salt: randomBytes(16), noncePrefix: randomBytes(7),
+      salt: job.salt as Buffer, noncePrefix: randomBytes(7),
       segmentBytes: SEGMENT_BYTES, manifestBytes: manifestBytes.length, plaintextBytes,
     });
-    const key = await deriveArchiveKey(input.passphrase, header.subarray(13, 29), { N: 2 ** ARCHIVE_SCRYPT.log2N, r: ARCHIVE_SCRYPT.r, p: ARCHIVE_SCRYPT.p })
-      .catch((error: unknown) => { throw refused(error); });
+    // Progress, counted on plaintext pushed to the writer: one fenced write
+    // that also renews the lease, at least every second or 64 MiB, and after
+    // every document.
+    let done = 0;
+    let reportedAt = Date.now();
+    let reportedBytes = 0;
+    const heartbeat = async (force: boolean) => {
+      if (!force && Date.now() - reportedAt < EXPORT_HEARTBEAT_MS && done - reportedBytes < EXPORT_HEARTBEAT_BYTES) return;
+      if (!await writeExportRow(db, job, { bytesDone: done, leaseExpiresAt: EXPORT_LEASE })) throw new ExportLeaseLost();
+      reportedAt = Date.now();
+      reportedBytes = done;
+    };
     try {
       written = await storage().writeStream(storageKey, async (write) => {
         await write(header);
         const writer = new SegmentWriter(header, key, write);
         try {
+          const manifestLength = manifestBytes.length;
           await writer.push(manifestBytes);
           // The household's details are sealed: not held a moment longer (ruling 7).
           manifestBytes.fill(0);
-          for (const document of included) {
+          done += manifestLength;
+          await heartbeat(false);
+          for (const [index, document] of included.entries()) {
             // Verified, then decrypted in pieces (#1571): never held whole.
-            const download = await openDocumentDownload(input.userId, document.id);
+            const download = await openDocumentDownload(userId, document.id);
             const reader = download.body.getReader();
             let count = 0;
             try {
               for (;;) {
-                const { done, value } = await reader.read();
-                if (done) break;
+                const { done: finished, value } = await reader.read();
+                if (finished) break;
                 try {
                   count += value.length;
                   // Never padded or truncated: a document that is not the size its
                   // row records fails the export rather than shifting every body after it.
                   if (count > document.sizeBytes) throw archiveIntegrityError();
                   await writer.push(value);
+                  done += value.length;
                 } finally {
                   // Decrypted document bytes, used or refused: zeroed (ruling 7).
                   value.fill(0);
                 }
+                await heartbeat(false);
               }
               if (count !== document.sizeBytes) throw archiveIntegrityError();
             } catch (error) {
               await reader.cancel().catch(() => undefined);
               throw error;
             }
+            await heartbeat(true);
+            await exportHooks?.afterDocument?.({ jobId: job.id, index });
           }
           await writer.finish();
         } finally {
@@ -319,7 +663,6 @@ export async function createPortableArchive(input: {
     } catch (error) {
       throw storageFullError(error, fileBytes);
     } finally {
-      key.fill(0);
       manifestBytes.fill(0);
     }
   } finally {
@@ -327,29 +670,38 @@ export async function createPortableArchive(input: {
   }
   // Only once the file is safely written are older exports given up, in
   // the transaction that records the new one (#1792), so a failed write
-  // never costs anyone an archive.
+  // never costs anyone an archive. The job completes in the same commit:
+  // never a finished file without a finished job, or the reverse.
   let givenUp: string[];
   let expiresAt = new Date();
   let keepPerHousehold = 0;
   try {
     givenUp = await db.transaction(async (transaction) => {
-      await acquireActiveHouseholdLock(transaction, input.householdId);
+      await acquireActiveHouseholdLock(transaction, householdId);
       // Read here, not before the write, so an administrator's change while
       // the file was written sets this export's expiry and bounds (#1799).
-      const current = await readEffectiveArchiveRetention(transaction).catch((error: unknown) => { throw refused(error); });
-      if (fileBytes > current.maxTotalBytes) throw refused(archiveStoreFullError(current.maxTotalBytes, fileBytes));
+      const current = await readEffectiveArchiveRetention(transaction);
+      if (fileBytes > current.maxTotalBytes) throw archiveStoreFullError(current.maxTotalBytes, fileBytes);
       expiresAt = new Date(Date.now() + current.retentionMs);
       keepPerHousehold = current.keepPerHousehold;
       await transaction.insert(portableArchives).values({
-        id, householdId: input.householdId, requestedByUserId: input.userId, storageKey,
+        id, householdId, requestedByUserId: userId, storageKey,
         contentSha256: written.sha256, sizeBytes: written.sizeBytes,
-        includesDocuments: input.includeDocuments, expiresAt,
+        includesDocuments: includeDocuments, expiresAt,
       });
       await transaction.insert(auditLog).values({
-        householdId: input.householdId, actorUserId: input.userId, entityType: "portable_archive", entityId: id,
-        action: "portable_archive_requested", changes: { includesDocuments: input.includeDocuments, expiresAt: expiresAt.toISOString() },
+        householdId, actorUserId: userId, entityType: "portable_archive", entityId: id,
+        action: "portable_archive_requested", changes: { includesDocuments: includeDocuments, expiresAt: expiresAt.toISOString() },
       });
-      return boundKeptArchives(transaction, { id, householdId: input.householdId, userId: input.userId }, current);
+      const completed = await writeExportRow(transaction, job, {
+        status: "completed", archiveId: id, completedAt: sql`now()`, bytesTotal: written.sizeBytes, bytesDone: written.sizeBytes,
+        salt: null, keyWrapped: null, keyId: null, lockedAt: null, leaseExpiresAt: null, leaseToken: null,
+        failureCode: null, failureMessage: null, lastError: null,
+      });
+      if (!completed) throw new ExportLeaseLost();
+      const kept = await boundKeptArchives(transaction, { id, householdId, userId }, current);
+      await exportHooks?.inCompletion?.({ jobId: job.id });
+      return kept;
     });
   } catch (error) {
     await storage().delete(storageKey).catch(() => undefined);
@@ -357,8 +709,46 @@ export async function createPortableArchive(input: {
   }
   // Best effort: reconcilePortableArchiveStorage removes any file left behind.
   // A download already streaming keeps reading through its open handle.
-  for (const key of givenUp) await storage().delete(key).catch(() => undefined);
-  return { id, expiresAt: expiresAt.toISOString(), includesDocuments: input.includeDocuments, keepPerHousehold };
+  for (const storageKey of givenUp) await storage().delete(storageKey).catch(() => undefined);
+  return { id, expiresAt: expiresAt.toISOString(), includesDocuments: includeDocuments, keepPerHousehold };
+}
+
+/**
+ * Tests only (design section 2.6): the export written inline, as the POST
+ * once did. Records the job as the route does, claims that one job and runs
+ * it here, so the many export tests keep their call site and assertions.
+ * Production exports go through the route and the worker.
+ */
+export async function createPortableArchive(input: {
+  userId: string;
+  householdId: string;
+  passphrase: string;
+  includeDocuments: boolean;
+}): Promise<{ id: string; expiresAt: string; includesDocuments: boolean; keepPerHousehold: number }> {
+  const { id: jobId } = await enqueuePortableArchiveExport(input);
+  const [claimed] = await getDb().update(portableArchiveExports).set({
+    status: "processing", attempts: sql`${portableArchiveExports.attempts} + 1`, lockedAt: sql`now()`,
+    leaseExpiresAt: EXPORT_LEASE, leaseToken: randomUUID(), updatedAt: sql`now()`,
+  }).where(and(eq(portableArchiveExports.id, jobId), eq(portableArchiveExports.status, "pending"))).returning();
+  if (!claimed?.leaseToken) throw exportInProgressError();
+  const job: ClaimedPortableArchiveExport = {
+    id: claimed.id, householdId: claimed.householdId, requestedByUserId: claimed.requestedByUserId, includeDocuments: claimed.includeDocuments,
+    attempts: claimed.attempts, leaseToken: claimed.leaseToken, salt: claimed.salt, keyWrapped: claimed.keyWrapped, keyId: claimed.keyId,
+  };
+  const key = unwrapExportKey(job);
+  if (key === null) {
+    await failExport(job, exportKeyUnavailableError(), { dropKey: true });
+    throw exportKeyUnavailableError();
+  }
+  try {
+    return await writePortableArchiveForJob(job, key);
+  } catch (error) {
+    if (error instanceof AppError) await failExport(job, error);
+    else if (!(error instanceof PortableArchiveExportCrash)) await failExport(job, new AppError("archive_export_failed", "Orbit couldn't write this archive; try again", 500));
+    throw error;
+  } finally {
+    key.fill(0);
+  }
 }
 
 type Transaction = Parameters<Parameters<ReturnType<typeof getDb>["transaction"]>[0]>[0];

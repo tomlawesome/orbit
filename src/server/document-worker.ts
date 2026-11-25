@@ -28,6 +28,7 @@ import { backfillDocumentContentIndexes } from "@/server/document-maintenance/co
 import { backfillImapAttachmentHashes } from "@/server/document-maintenance/imap-attachment-hash-backfill";
 import { DOCUMENT_WORKER_POLL_MS } from "@/server/document-maintenance/backfill-rate";
 import { startPreviewWorker } from "@/server/document-maintenance/preview-jobs";
+import { requeueInterruptedExportsAtBoot, startExportWorker, sweepPortableArchiveExports } from "@/server/document-maintenance/export-jobs";
 
 export { purgeClaimOutcome } from "@/server/document-maintenance/claims";
 export { getDocumentWorkerHealth, type DocumentWorkerHealth } from "@/server/document-maintenance/worker-state";
@@ -59,6 +60,8 @@ async function scannerHealthCheckIfDue(scanner: { scanning: boolean; reachable: 
 }
 
 export async function runDocumentMaintenanceCycle(): Promise<void> {
+  /* #1774: an export left `processing` by a process that died goes back to the queue (once per process). */
+  await requeueInterruptedExportsAtBoot();
   await rejectInterruptedDocuments();
   /* #1437: the documents stored before their fingerprint existed, a batch a cycle. */
   await backfillDocumentContentIndexes();
@@ -74,6 +77,8 @@ export async function runDocumentMaintenanceCycle(): Promise<void> {
   /* #1786: refused uploads go after their retention, once their staged bytes have. */
   await purgeExpiredRejectedDocuments(getDb(), { now: new Date() });
   await purgeExpiredPortableArchives();
+  /* #1774: a failed export's key after an hour, a finished export job after a day. */
+  await sweepPortableArchiveExports();
   await purgeExpiredHouseholds();
   const lastReconciliation = workerState.__orbitDocumentWorkerLastReconciliationAt
     ? Date.parse(workerState.__orbitDocumentWorkerLastReconciliationAt)
@@ -138,12 +143,13 @@ export { DOCUMENT_WORKER_POLL_MS };
 
 /**
  * Starts one maintenance loop per process, and beside it the kept-preview
- * loop (#1433 D13); PostgreSQL leases coordinate replicas.
+ * loop (#1433 D13) and the export loop (#1774); PostgreSQL leases coordinate replicas.
  */
 export function startDocumentWorker(pollMilliseconds = DOCUMENT_WORKER_POLL_MS): void {
   if (workerState.__orbitDocumentWorkerStarted) return;
   workerState.__orbitDocumentWorkerStarted = true;
   startPreviewWorker();
+  startExportWorker();
 
   const poll = async () => {
     workerState.__orbitDocumentWorkerRunning = true;
