@@ -257,9 +257,14 @@ case "$1" in
     case "\${@: -1}" in *:*) exit 0 ;; esac
     echo "docker cp out is not available: the report must come out on stdout" >&2; exit 1 ;;
   create) echo fakecontainer ;;
-  start) report; exit "\${FAKE_DOCKER_RUN_EXIT:-0}" ;;
+  start)
+    if [[ "$FAKE_DOCKER_FLOOD" == 1 ]]; then exec yes '{"files":[]}'; fi
+    report; exit "\${FAKE_DOCKER_RUN_EXIT:-0}" ;;
   logs) report ;;
-  wait) echo "\${FAKE_DOCKER_RUN_EXIT:-0}" ;;
+  kill|stop|rm) touch "$FAKE_DOCKER_LOG.stopped"; exit 0 ;;
+  wait)
+    if [[ "$FAKE_DOCKER_HANG" == 1 && ! -e "$FAKE_DOCKER_LOG.stopped" ]]; then sleep 60; fi
+    echo "\${FAKE_DOCKER_RUN_EXIT:-0}" ;;
   run)
     if [[ "$detached" == 1 ]]; then echo fakecontainer; exit 0; fi
     report; exit "\${FAKE_DOCKER_RUN_EXIT:-0}" ;;
@@ -318,6 +323,22 @@ describe("scan-knip.sh", () => {
     expect(existsSync(join(w.reports, "knip.json"))).toBe(false);
   });
 
+  it("bounds the wait for a container that floods stdout and then never exits", () => {
+    const w = knipWorld({ dockerExit: 0 });
+    const started = Date.now();
+    const r = spawnSync("bash", [at("scripts/ci/scan-knip.sh")], {
+      encoding: "utf8",
+      cwd: tmpdir(),
+      timeout: 30_000,
+      killSignal: "SIGKILL",
+      env: { PATH: `${join(w.dir, "bin")}:${process.env.PATH}`, HOME: process.env.HOME ?? tmpdir(), ...w.env({ FAKE_DOCKER_FLOOD: "1", FAKE_DOCKER_HANG: "1" }) },
+    });
+    // Not a hung wait: the script ended by itself, well inside the fake's 60 s hang, and failed.
+    expect(r.error?.code, "scan-knip waited on the container without a bound").not.toBe("ETIMEDOUT");
+    expect(Date.now() - started).toBeLessThan(25_000);
+    expect(r.status).not.toBe(0);
+  });
+
   describe("the container it builds", () => {
     const secrets = {
       CI_JOB_TOKEN: "job-token-value-1f3a",
@@ -368,6 +389,10 @@ describe("scan-knip.sh", () => {
       expect(launch.some((a) => a === "-v" || a === "--volume" || a.startsWith("--volume=") || /^-v./.test(a))).toBe(false);
       expect(launch.some((a) => a === "--volumes-from" || a.startsWith("--volumes-from="))).toBe(false);
       expect(launch.some((a) => /type=(volume|bind)/.test(a))).toBe(false);
+    });
+    it("keeps nothing knip prints in the daemon's log (--log-driver none)", () => {
+      expect(launch).toBeDefined();
+      expect(flagValue(launch, "--log-driver")).toBe("none");
     });
     it("is not privileged and has no docker socket", () => {
       expect(launch).toBeDefined();
