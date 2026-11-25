@@ -121,8 +121,10 @@ export function prepareRepair(
   if (mailStatusExit !== undefined) writeFileSync(join(stateDir, "mail-status-exit"), String(mailStatusExit));
   // #1834: the answer once .orbit-secrets/smtp-password is deleted (the re-check after the retirement).
   if (mailStatusAfterSecretGone !== undefined) writeFileSync(join(stateDir, "mail-status-after-secret-gone"), `${mailStatusAfterSecretGone}\n`);
-  // Records every `timeout` invocation, then runs the real one.
-  writeFileSync(join(binDir, "timeout"), `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >> '${join(stateDir, "timeout.log")}'\nexec /usr/bin/timeout "$@"\n`);
+  // Records every `timeout` invocation, then runs the next `timeout` on the PATH it was given (#1954: a privShims
+  // timeout shim when there is one, else the real one).
+  const nextTimeout = spawnSync("bash", ["-c", "command -v timeout"], { encoding: "utf8", env: { PATH: env?.PATH ?? process.env.PATH } }).stdout.trim() || "/usr/bin/timeout";
+  writeFileSync(join(binDir, "timeout"), `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >> '${join(stateDir, "timeout.log")}'\nexec '${nextTimeout}' "$@"\n`);
   chmodSync(join(binDir, "timeout"), 0o755);
   writeFileSync(
     join(binDir, "docker"),
