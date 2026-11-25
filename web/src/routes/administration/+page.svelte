@@ -474,7 +474,12 @@
     /* With no password, the step-up proof was spent by that request: close the
        band, so the next try starts a fresh step-up rather than a PUT that
        carries nothing. */
-    refused: () => { if (!actorHasPassword) { provenIntent = ""; adminFor = null; } },
+    refused: () => {
+      if (actorHasPassword) return;
+      provenIntent = ""; adminFor = null;
+      /* The refusal line stays; focus goes back to the control, as cancel does. */
+      tick().then(() => document.getElementById(`admin-access-${person.id}`)?.focus());
+    },
     wake: (text, options) => { if (!options?.failure) adminSaid = text; },
     });
   };
