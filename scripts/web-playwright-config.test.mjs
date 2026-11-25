@@ -134,6 +134,50 @@ function projectsOf(name, seen = new Set()) {
   return projects;
 }
 
+/*
+ * #1964 step 1 (owner decisions 110a, 111a): a hung rig test fails fast. Every
+ * rig project carries the same limits, so no spec has to: expect timeout
+ * 15 s (RIG_EXPECT_MS), test timeout 60 s (RIG_TEST_MS), reduced motion on.
+ * The projects keep their own `use`; the others keep their limits and motion.
+ */
+describe("web/playwright.config.js rig time limits and motion (#1964)", () => {
+  it.each(RIG)("%s expects within 15 s and times a test out at 60 s", async (name) => {
+    const { config, byName } = await loadConfig();
+    const project = byName.get(name);
+    expect(project.expect?.timeout ?? config.expect?.timeout, "expect.timeout").toBe(15_000);
+    expect(setting(config, project, "timeout"), "timeout").toBe(60_000);
+  });
+
+  it.each(RIG)("%s reduces motion", async (name) => {
+    const { config, byName } = await loadConfig();
+    const project = byName.get(name);
+    expect(project.use?.reducedMotion ?? config.use?.reducedMotion).toBe("reduce");
+  });
+
+  it("keeps each rig project's own browser, device and service-worker setting", async () => {
+    const { byName } = await loadConfig();
+    expect(byName.get("rig-desktop").use.browserName).toBe("chromium");
+    expect(byName.get("rig-phone").use.browserName).toBe("chromium");
+    expect(byName.get("rig-phone").use.isMobile).toBe(true);
+    expect(byName.get("rig-firefox").use.browserName).toBe("firefox");
+    expect(byName.get("rig-webkit-desktop").use.browserName).toBe("webkit");
+    expect(byName.get("rig-webkit-desktop").use.serviceWorkers).toBe("block");
+    expect(byName.get("rig-webkit-phone").use.browserName).toBe("webkit");
+    expect(byName.get("rig-webkit-phone").use.isMobile).toBe(true);
+    expect(byName.get("rig-webkit-phone").use.serviceWorkers).toBe("block");
+  });
+
+  it.each(UNCHANGED)("%s keeps its timeouts and motion", async (name) => {
+    const { config, byName } = await loadConfig();
+    const project = byName.get(name);
+    expect(project.use?.reducedMotion ?? config.use?.reducedMotion).toBe("no-preference");
+    expect(project.expect?.timeout ?? config.expect?.timeout, "expect.timeout").not.toBe(15_000);
+    // pocket-measure sets 60 s itself; the rest take the config's, which is not the rig's.
+    if (name === "pocket-measure") expect(project.timeout).toBe(60_000);
+    else expect(setting(config, project, "timeout")).not.toBe(60_000);
+  });
+});
+
 describe("web/package.json rig scripts", () => {
   const cases = [
     ["rig", ["rig-desktop", "rig-phone"]],
