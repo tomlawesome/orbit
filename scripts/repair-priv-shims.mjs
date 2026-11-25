@@ -81,6 +81,7 @@ exec '__REAL__' "\${args[@]}"
 //   run-then-stop  runs the command it was asked to (as the owner), then SIGSTOPs itself: the step made its
 //               change and then timed out (#1872 V10)
 //   run-then-ignore-term  runs the command it was asked to, then ignores TERM and waits (at most 40 s) (#1873)
+//   (#1954: both run-then-stop and run-then-ignore-term run the command before the step's clock starts, timeoutShim)
 //   run-then-flood  runs the command it was asked to (its output discarded), then writes 8 MiB to stdout and exits 1 (#1873)
 //   flood       writes 8 MiB (no newline) to stdout and to stderr, and exits 1
 /**
@@ -126,13 +127,52 @@ export function expectStalledStepsEnded(steps, result, limitSeconds) {
   expect(lines.some((line) => line.includes(`timed out after ${limitSeconds} s and was stopped`)), `no line says a step timed out after ${limitSeconds} s and was stopped:\n${result.stderr.slice(0, 1500)}`).toBe(true);
 }
 
+// #1954: ORBIT_TEST_STEP_SLOWDOWN=<seconds> makes a run-then-stop or run-then-ignore-term step wait that long before it
+// runs its command, as a loaded runner would. Off by default.
+function slowSleep() {
+  const slowdown = Number(process.env.ORBIT_TEST_STEP_SLOWDOWN ?? 0);
+  return slowdown > 0 ? `sleep ${slowdown}; ` : "";
+}
+
+// #1954: the timeout shim of a run-then-stop or run-then-ignore-term variant. repair.sh starts every owner step as
+// `timeout -k <grace> <limit> setsid --wait setpriv <options> -- <command>`, so the step's clock covers the command.
+// For a setpriv call the setpriv shim would accept (the same user/group/no-new-privs check, not setprivFail) that
+// matches the variant, this shim runs <command> as the owner first (after any slowdown) and only then starts the real
+// timeout, telling the setpriv shim (ORBIT_TEST_RAN_FIRST=1) to only stall. The command has therefore landed before
+// the clock starts, whatever the runner's speed: the limit decides only how long the stall lasts, not the outcome.
+// Every other timeout call passes through unchanged.
+function timeoutShim(variant, dbGid, setprivFail) {
+  return String.raw`args=("$@")
+while [[ $# -gt 0 && "$1" != setpriv ]]; do shift; done
+if [[ $# -gt 0 ]]; then
+  shift
+  ok=0
+  [[ " $* " == *" --reuid=__UID__ "* && " $* " == *" --regid=__GID__ "* && " $* " == *" --no-new-privs "* ]] && ok=1
+  case "$*" in __FAIL__) ok=0;; esac
+  if [[ $ok -eq 1 ]]; then
+    case "$*" in __MATCH__)
+      __SLOW__while [[ $# -gt 0 && "$1" != -- ]]; do shift; done; shift
+      ( export ORBIT_TEST_PRIVDROP=1; "$@" ) >/dev/null 2>&1
+      export ORBIT_TEST_RAN_FIRST=1;;
+    esac
+  fi
+fi
+exec '__REAL__' "\${args[@]}"
+`
+    .replaceAll("\\${", "${")
+    .replaceAll("__UID__", String(UID))
+    .replaceAll("__GID__", String(dbGid))
+    .replaceAll("__FAIL__", setprivFail ?? "__never__")
+    .replaceAll("__MATCH__", variant.match ?? "*")
+    .replaceAll("__SLOW__", slowSleep())
+    .replaceAll("__REAL__", realTool("timeout"));
+}
+
 function variantSnippet(variant, pidLog, sigLog) {
   if (!variant) return "";
-  // #1954: ORBIT_TEST_STEP_SLOWDOWN=<seconds> makes the run-then-* variants wait that long before they run the command,
-  // as a loaded runner would; set it past the owner's step limit to prove a case does not depend on runner speed.
-  const slowdown = Number(process.env.ORBIT_TEST_STEP_SLOWDOWN ?? 0);
-  const slow = slowdown > 0 ? `sleep ${slowdown}; ` : "";
-  const runFirst = `${slow}while [[ $# -gt 0 && "$1" != -- ]]; do shift; done; shift; ( export ORBIT_TEST_PRIVDROP=1; "$@" ) >/dev/null 2>&1`;
+  // #1954: a run-then-stop or run-then-ignore-term step normally ran its command already, in the timeout shim
+  // (timeoutShim), before the step's clock started; it then only stalls. Run here only when no timeout shim did.
+  const runFirst = `if [[ "\${ORBIT_TEST_RAN_FIRST:-}" != 1 ]]; then ${slowSleep()}while [[ $# -gt 0 && "$1" != -- ]]; do shift; done; shift; ( export ORBIT_TEST_PRIVDROP=1; "$@" ) >/dev/null 2>&1; fi`;
   const body = {
     stop: `${stallBody("stop", pidLog, sigLog)}; exit 1`,
     "ignore-term": `${stallBody("ignore-term", pidLog, sigLog)}; exit 1`,
@@ -189,6 +229,7 @@ export ORBIT_TEST_PRIVDROP=1
 exec "$@"
 `,
     );
+    if (variant?.kind === "run-then-stop" || variant?.kind === "run-then-ignore-term") write("timeout", timeoutShim(variant, dbGid, setprivFail));
   }
   for (const tool of [...TOOLS, ...extraTools]) {
     const rule = toolFail?.tool === tool ? `if [[ "\${ORBIT_TEST_PRIVDROP:-0}" == 1 ]]; then case "$*" in ${toolFail.match}) ${toolFail.emit}${toolFail.pass ? "" : "; exit 1"};; esac; fi` : "";
