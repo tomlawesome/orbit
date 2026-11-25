@@ -675,3 +675,7 @@ timeout on this one case rather than a global raise.
 ## scripts/install.model-and-restarts.test.mjs "install.sh: one or two restarts are not a crash loop; three are (O-S2) > the database running, restart count +3 since the earlier sample: a crash loop, rolled back, `retry`"
 
 - 2026-11-24 · !1469 274bfc7b3 · pipeline 5325 / fast (job 64148) · the result did not deeply equal the expected 3-field outcome, on a loaded runner (load average about 52); the change is CI-only. The file passed locally. First sighting.
+
+## tests/unit/inbox-screens-landed-then-reread.test.mjs (whole file: beforeAll compiling the inbox page, 10 s hook limit)
+
+- 2026-11-25 · !1478 batch-a 24ea50a2 · pipeline 5427 / fast (job 65419) · `Hook timed out in 10000ms` at line 159 (the beforeAll that compiles `routes/inbox/+page.svelte`), on a runner slow enough that the same job hit its 30-minute limit on two earlier runs; the change touches nothing the inbox draws. The file passed locally on the same commit. First sighting.
