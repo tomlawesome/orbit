@@ -97,7 +97,8 @@ control.
 Coverage is collected for diagnostic visibility. The initial baseline does not
 fail on a global percentage.
 
-1. Publish text and machine-readable coverage from the fast test job.
+1. Publish text and machine-readable coverage from `fast_coverage`, which
+   merges the coverage of `fast`'s two shards (#1933).
 2. Use uncovered critical modules and branches to refine risk-ranked issues.
 3. Exclude generated declarations, tests, and intentionally declarative assets;
    do not exclude difficult production code merely to improve a number.
@@ -106,12 +107,18 @@ fail on a global percentage.
    directory drops below its floor, and also when it sits more than 5 points
    above it, so a gain is locked in by raising the floor. Floors only go up and
    are set at the measured value rounded down; a change that needs a lower
-   floor needs more tests. To get numbers that match CI, run what the `fast`
-   job runs on the push to `dev`:
+   floor needs more tests. CI measures the floors once, in `fast_coverage`:
+   `fast` runs as two shards (`ORBIT_TEST_SHARD`, #1933), each writes its
+   coverage into a Vitest blob with the thresholds off (Vitest enforces them
+   per run, and a shard sees half the suite), and `fast_coverage` merges the
+   blobs with `vitest --merge-reports`, which enforces the thresholds on the
+   merged map, then runs the floor check. The merge gives the same totals as
+   one unsharded run. To get numbers that match CI, run the unsharded
+   equivalent locally:
    `ORBIT_TEST_COVERAGE=true ORBIT_TEST_SKIP_DOCKER=true bash scripts/test-backend.sh`
-   with `ORBIT_TEST_CHANGED_BASE` unset, and read
-   `coverage/coverage-summary.json`, or download the `fast` job's `coverage/`
-   artifact. Only `scripts/test-backend.sh` reads `ORBIT_TEST_COVERAGE`; it
+   with `ORBIT_TEST_CHANGED_BASE` and `ORBIT_TEST_SHARD` unset, and read
+   `coverage/coverage-summary.json`, or download the `fast_coverage` job's
+   `coverage/` artifact. Only `scripts/test-backend.sh` reads `ORBIT_TEST_COVERAGE`; it
    narrows to the tests a change touches only when `ORBIT_TEST_CHANGED_BASE`
    is set (CI sets it on merge requests), and then measures no coverage at
    all. A local run with the Docker suites moves the numbers
@@ -628,8 +635,11 @@ part of what used to be one job: type-check, lint, the coverage-bearing
 Vitest run and the web build, on the unprivileged `big` lane. Since #1831
 that is itself split by phase (`ORBIT_TEST_PHASE` in `scripts/test-backend.sh`):
 `fast_checks` runs type-check, lint, the web build and the render proof and
-publishes `web/build/`; `fast` runs the guards and the Vitest run and publishes
-`coverage/`. Every check runs in exactly one of them. `fast_docker`
+publishes `web/build/`; `fast` runs the guards and the Vitest run. Since #1933
+`fast` is two `parallel:` shards (the guards run in shard 1 only), each
+publishing a Vitest blob, and `fast_coverage` merges the blobs, publishes
+`coverage/` and runs the floor check; every wait that names `fast` names it
+too. Every check runs in exactly one of them. `fast_docker`
 is the other half, on the privileged `orbit-build` lane, and runs the
 suites, of everything that mentions Docker, actually confirmed (by running
 the candidate set with `docker` entirely absent from PATH, matching `big`'s

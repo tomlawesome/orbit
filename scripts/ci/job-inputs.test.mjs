@@ -566,7 +566,8 @@ describe("sharded candidates (#1546)", () => {
 
   it("shards nothing else, and screens_chromium runs alone", () => {
     const sharded = Object.entries(raw.jobs).filter(([, job]) => job.shards !== undefined).map(([name]) => name).sort();
-    expect(sharded).toEqual(["film_webkit", "integration", "rig_chromium", "rig_firefox", "rig_webkit"]);
+    // #1933 (103a): `fast` is two Vitest shards.
+    expect(sharded).toEqual(["fast", "film_webkit", "integration", "rig_chromium", "rig_firefox", "rig_webkit"]);
     expect(raw.jobs.screens_chromium.shards).toBeUndefined();
   });
 
@@ -586,7 +587,7 @@ describe("sharded candidates (#1546)", () => {
   });
 
   it("names an unsharded job as itself", () => {
-    expect(shardNames(config, "fast")).toEqual(["fast"]);
+    expect(shardNames(config, "fast_checks")).toEqual(["fast_checks"]);
     expect(shardNames(config, "screens_chromium")).toEqual(["screens_chromium"]);
     expect(shardNames(config, "smoke")).toEqual(["smoke"]);
   });
