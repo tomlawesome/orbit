@@ -527,6 +527,16 @@ function sampleTransport() {
     classes: [...pill.classList],
     sheets: [...document.querySelectorAll(".p-sheet-layer")].map((l) => [...l.classList].join(" ")),
     bodyClasses: [...document.body.classList],
+    /* The effective opacity includes every ancestor's, but `moving` only
+       looks at the pill's own transitions: list any ancestor below 1. */
+    ancestors: (() => {
+      const out = [];
+      for (let node = pill.parentElement; node; node = node.parentElement) {
+        const o = getComputedStyle(node).opacity;
+        if (o !== "1") out.push({ el: `${node.tagName.toLowerCase()}${node.id ? `#${node.id}` : ""}.${[...node.classList].join(".")}`, opacity: o, animations: node.getAnimations().map((a) => ({ kind: a.constructor.name, playState: a.playState })) });
+      }
+      return out;
+    })(),
     animations: pill.getAnimations().map((a) => {
       const t = /** @type {any} */ (a);
       return { kind: a.constructor.name, property: t.transitionProperty ?? t.animationName ?? null,
