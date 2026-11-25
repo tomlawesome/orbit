@@ -518,8 +518,24 @@ function sampleTransport() {
     }
   }
   const clock = pill.querySelector(".clock")?.getBoundingClientRect();
+  /* #1960: what the pill looked like when it read faint, kept apart from the
+     fault key (which stays as it was) so a failure shows its figures. */
+  const detail = faults.some((f) => f.startsWith("pill faint")) ? {
+    opacity: Number(opacity.toFixed(3)),
+    computedOpacity: getComputedStyle(pill).opacity,
+    inlineOpacity: pill.style.opacity,
+    classes: [...pill.classList],
+    sheets: [...document.querySelectorAll(".p-sheet-layer")].map((l) => [...l.classList].join(" ")),
+    bodyClasses: [...document.body.classList],
+    animations: pill.getAnimations().map((a) => {
+      const t = /** @type {any} */ (a);
+      return { kind: a.constructor.name, property: t.transitionProperty ?? t.animationName ?? null,
+        playState: a.playState, currentTime: a.currentTime == null ? null : Number(a.currentTime) };
+    }).filter((a) => a.property === null || /opacity|fade|dock|pill/iu.test(String(a.property))),
+  } : null;
   return {
     faults,
+    detail,
     cursor: reading.cursor,
     total: reading.total,
     chapter: reading.chapter,
@@ -682,7 +698,7 @@ test.describe("the pocket film in WebKit (#1174)", () => {
        judges what is there. Nothing here counts frames or seconds; the only
        clocks are the generous bounds that end a film that never finishes.
        Speed is logged, not asserted. */
-    test(`plays ${phone.through === "yours" ? "end to end" : "through chapter 3"} at ${phone.width}x${phone.height} under normal motion: the clock keeps moving through a reader's tap, the pill stays in front and readable, nothing flashes, and every mark is where it belongs`, async ({ browser }) => {
+    test(`plays ${phone.through === "yours" ? "end to end" : "through chapter 3"} at ${phone.width}x${phone.height} under normal motion: the clock keeps moving through a reader's tap, the pill stays in front and readable, nothing flashes, and every mark is where it belongs`, async ({ browser }, testInfo) => {
       test.setTimeout(600_000); // hang guard only; the film runs on the faked clock (#1914)
       const size = { width: phone.width, height: phone.height };
       const context = await browser.newContext({
@@ -715,6 +731,8 @@ test.describe("the pocket film in WebKit (#1174)", () => {
       const faults = {};
       /** @type {string[]} */
       const flicker = [];
+      /** @type {object[]} what the pill looked like at each "pill faint" fault (#1960); never part of the fault key */
+      const faintDetails = [];
       /** @type {{ at: string, ratio: number, url: string }[]} */
       const contrast = [];
       /** @type {number[]} */
@@ -769,11 +787,14 @@ test.describe("the pocket film in WebKit (#1174)", () => {
           const over = s.ended ? [] : s.faults.filter(isOver);
           /** @type {string[]} */
           let pillFaults = [];
+          /** @type {any} */
+          let restedDetail = null;
           if (!s.ended && s.faults.some((f) => !isOver(f))) {
             for (let round = 0; round < 3; round++) {
               await pillSettled(page);
               const rested = await page.evaluate(sampleTransport);
               pillFaults = rested && !rested.ended ? rested.faults.filter((f) => !isOver(f)) : [];
+              restedDetail = rested && !rested.ended ? rested.detail : null;
               if (!pillFaults.some((f) => f.startsWith("pill moving"))) break;
             }
           }
@@ -784,6 +805,7 @@ test.describe("the pocket film in WebKit (#1174)", () => {
                a fade in progress is one fault lasting, not several */
             const key = `${pillFaults.includes(f) ? f.replace(/\(opacity [\d.]+, /u, "(") : f} · ${s.url} · ch${s.chapter + 1}`;
             faults[key] = (faults[key] ?? 0) + 1;
+            if (f.startsWith("pill faint")) faintDetails.push({ key, chapter: s.chapter + 1, route: s.url, at: mmssOf(s.cursor), rested: restedDetail, sampled: s.detail });
           }
           for (const one of s.flicker) flicker.push(`${one} · ${s.url} · ch${s.chapter + 1}`);
           if (chapters.at(-1) !== s.chapter) chapters.push(s.chapter);
@@ -851,7 +873,8 @@ test.describe("the pocket film in WebKit (#1174)", () => {
       expect.soft(tapped, "the reader's tap on the form was made").toBe(true);
       expect.soft(tapRead, "the chip was on the form when the tap was read (aria-pressed present)").not.toBeNull();
       expect.soft(tapTook, "the reader's tap on the form landed on the film, not the form").toBe(false);
-      expect.soft(faults, "the pill in front and never faint; the callouts and rings where the design puts them").toEqual({});
+      if (faintDetails.length) await testInfo.attach("pill-faint-detail.json", { body: JSON.stringify(faintDetails, null, 2), contentType: "application/json" });
+      expect.soft(faults, `the pill in front and never faint; the callouts and rings where the design puts them${faintDetails.length ? ` — pill faint detail: ${JSON.stringify(faintDetails)}` : ""}`).toEqual({});
       expect.soft(unreadable, "the pill's readout reads at 4.5:1 or better wherever it stands, on either pack").toEqual([]);
       expect.soft(flicker, "no hole or ring snaps on or off between one frame and the next").toEqual([]);
     });
