@@ -11,12 +11,15 @@ import { useFixtureScenes } from "../fidelity/pocket-states.js";
  */
 test.use({ baseURL: APP });
 
+/* The tour's transport after a cold home load, as v19-tour-inert gives it; it moves to the fake clock in #1964 step 3. */
+const TOUR_WAIT_MS = 30_000;
+
 /** @param {import("@playwright/test").Page} page */
 const pill = (page) => page.getByRole("status").filter({ hasText: /no importance yet/ });
 
 test("no importance pill while the tour runs", async ({ page }) => {
   await signedIn("/home", "film-rest")(page);
-  await expect(page.locator("#orbit-tour-transport")).toBeVisible();
+  await expect(page.locator("#orbit-tour-transport")).toBeVisible({ timeout: TOUR_WAIT_MS });
   await expect(page.locator("#orbit-tour-veil")).toBeAttached({ timeout: RIG_EXPECT_MS });
   await page.locator("body[data-home-ready]").waitFor({ state: "attached" });
   await expect(pill(page), "#1730: the importance pill is drawn over the tour").toHaveCount(0, { timeout: RIG_EXPECT_MS });

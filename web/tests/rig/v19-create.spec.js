@@ -34,7 +34,7 @@ import { pickKeyDate, pickPocketDate } from "./chooser-support.js";
  * tests/unit/v19-create-partial-landing-words.test.mjs, on both forms.
  */
 
-/* Reduced motion: nothing breathes under Playwright's actionability wait. The
+/* Reduced motion (the rig's default, #1964): nothing breathes under Playwright's actionability wait. The
    assertions hold in either mode. */
 test.use({
   /* #1196, #1235: the tests that hold, abort or refuse a request do it with

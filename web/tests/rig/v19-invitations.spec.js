@@ -28,6 +28,9 @@ import { door } from "./a11y-support.js";
  */
 test.use({ reducedMotion: "no-preference" });
 
+/* The WebGL world hold before `showwarp` (#1962); it moves to the fake clock in #1964 step 3. */
+const WARP_WAIT_MS = 20_000;
+
 test("an invited reader's arrival never draws the chooser: the sky moves to the household instead (#871)", async ({ page }) => {
   test.setTimeout(120_000);
   await witnessBodyClasses(page);
@@ -42,7 +45,7 @@ test("an invited reader's arrival never draws the chooser: the sky moves to the 
     : route.fallback());
 
   /* THE ONE CLIMB, on `/` (#1263). */
-  await expect.poll(() => bodyClassSeen(page, "showwarp")).toBe(true);
+  await expect.poll(() => bodyClassSeen(page, "showwarp"), { timeout: WARP_WAIT_MS }).toBe(true);
   await expect(page).toHaveURL(/\/$/);
 
   /* NO CHOOSER, AT ANY FRAME: not merely hidden -- absent from the DOM for the

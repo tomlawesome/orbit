@@ -48,7 +48,7 @@ import { completeLikeTheEngine, guardedRoute, ownWorkspace, snoozeLikeTheEngine,
  *     `archived-proving.pdf`.
  */
 
-/* Reduced motion: the preview's 900ms focus beat is instant, and nothing
+/* Reduced motion (the rig's default, #1964): the preview's 900ms focus beat is instant, and nothing
    breathes under Playwright's actionability wait. The assertions hold in
    either mode. */
 

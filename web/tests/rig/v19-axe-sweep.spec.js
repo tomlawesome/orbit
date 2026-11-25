@@ -3,7 +3,7 @@ import { expect as baseExpect, test } from "@playwright/test";
 
 import { APP, onPhone, RIG_EXPECT_MS, settle, signedIn, withDecorationHidden, withoutKnownFaults } from "./a11y-support.js";
 
-/* The rig's waits (a11y-support.js RIG_EXPECT_MS, RIG_TEST_MS): the stack's explicit long waits are gone with its sign-in, but the host is shared. */
+/* The rig's waits (RIG_EXPECT_MS here; the 60 s test limit is the config's, #1964): the stack's explicit long waits are gone with its sign-in, but the host is shared. */
 const expect = baseExpect.configure({ timeout: RIG_EXPECT_MS });
 
 /*
