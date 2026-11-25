@@ -138,18 +138,23 @@ describe("#1279: the phone's create form shows page one and the read, as the des
   const pocket = read("web/src/routes/create/pocket.svelte");
   const form = read("web/src/routes/create/EntryForm.svelte");
   const desk = read("web/src/routes/create/create.behaviour.js");
+  const controller = read("web/src/routes/create/read-controller.svelte.js");
   const markup = form.slice(form.indexOf('<div class="pc-form">'));
 
   it("starts the shared read from the pick, on both forms", () => {
-    expect(pocket).toMatch(/import \{[^}]*\breadPickedDocument\b[^}]*\} from "\$lib\/data\/document-read\.js"/u);
-    expect(desk).toMatch(/import \{[^}]*\breadPickedDocument\b[^}]*\} from "\$lib\/data\/document-read\.js"/u);
+    /* #1354: both forms start it through the one controller over document-read.js. */
+    expect(controller).toMatch(/import \{[^}]*\breadPickedDocument\b[^}]*\} from "\$lib\/data\/document-read\.js"/u);
+    expect(pocket).toMatch(/import \{[^}]*\bcreateReadController\b[^}]*\} from "\.\/read-controller\.svelte\.js"/u);
+    expect(desk).toMatch(/import \{[^}]*\bcreateReadController\b[^}]*\} from "\.\/read-controller\.svelte\.js"/u);
     expect(desk).not.toMatch(/\bpreviewPickedDocument\(|\binspectPickedDocument\(/u);
   });
 
   it("moves the phone card's focus line from the virus check to the preview (ADR-0033 step 5)", () => {
     expect(pocket).toMatch(/line: FOCUS_SCANNING,/u);
-    expect(pocket).toMatch(/picked\.line = focusAfterScan\(scanned\);/u);
-    expect(pocket).toMatch(/readPickedDocument\(householdId, file, \{ signal: controller\.signal, onScanned, documentReading(?:, readAfter: gate\.promise)? \}\)/u);
+    expect(pocket).toMatch(/picked\.line = lineAfterScan\(scanned\);/u);
+    expect(pocket).toMatch(/reader\.start\(file, \{/u);
+    expect(controller).toMatch(/export const lineAfterScan = focusAfterScan;/u);
+    expect(controller).toMatch(/readPicked\(householdId, file, \{\s*signal: pick\.abort\.signal,\s*documentReading,\s*readAfter,\s*onScanned:/u);
   });
 
   it("lands the reading card straight under TYPE, in place of the row that picked the file", () => {

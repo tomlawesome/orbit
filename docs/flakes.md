@@ -578,6 +578,18 @@ timeout on this one case rather than a global raise.
 ## scripts/repair.test.mjs "scripts/repair.sh --execute --dangerous: regenerate-secret (#530 slice) > a permissions change on the secrets directory during the approval window fails the step cleanly: reason=step-failed, exit 4, secret still absent and recoverable on retry"
 
 - 2026-11-21 · !1450 692921fe0 · pipeline 5077 / fast (job 60776) · `Timed out waiting for stderr predicate`, then spawnRepair killed the child after 20 s without output, at the `type 'regenerate'` prompt, in a 1523 s full run on a loaded runner. The change touches none of repair.sh. Passed in job 60770 (pipeline 5076, same batch-a base) and locally. First sighting.
+
+## scripts/repair-retire-privdrop-1848.test.mjs "#1848 FIX-S1 addendum 2, item 3: the group is U's own, not the folder's > with the folder in U's own group, the calls are the same shape (U's gid, --init-groups, no --clear-groups)"
+
+- 2026-11-21 · !1454 51b164933 · pipeline 5109 / fast (job 61066) · the repair diagnosed the retirable SMTP lines but executed nothing (`execution result=empty done=0`), so the expected `execute action=retire-smtp-lines ... result=done` line was missing, in a 1557 s full run on a loaded runner (8.4 s for the test). Passed 3 of 3 locally on unchanged code straight after. First sighting.
+
+## scripts/repair.test.mjs "scripts/repair.sh --export-diagnostics (issue #531, ADR-0014 decision 10) > tolerates --plain in either order around --export-diagnostics"
+
+- 2026-11-21 · !1454 51b164933 · pipeline 5109 / fast (job 61066) · the two runs' output differed: the first reported `finding class=docker-unavailable` (checked=19 skipped=1), the second did not (checked=20), so the docker probe answered differently between two runs a moment apart, in the same 1557 s loaded run (7.2 s for the test). Passed 3 of 3 locally on unchanged code straight after. First sighting.
+
+## tests/integration/mail-relay-sender-check-failures.test.ts:687 "M-R8: a send attempt counts when it starts, and the mailer call holds no lock > the relay settings read for that member resolves within 2 s while the mailer is stuck"
+
+- 2026-11-23 · !1462 b9629da38 (release record only: CHANGELOG, release notes, docs/releases; nothing near mail) · pipeline 5245 / integration 3/4 (job 62806) · `expected 'hung' to be 'read'`: the settings read did not settle inside the test's 2 s window, in a 252 s integration run on a loaded runner; the other 154 tests in the job passed. Wall-clock-under-load shape. First sighting.
 ## scripts/ci/carry-previous-release.test.mjs "sign_evidence still running: a bounded wait on an in-flight dependency (#1607 note 48548, item 3) > a sign_evidence that stays preparing past the poll cap fails, saying it is still running and to run this job again"
 
 - 2026-11-21 · !1447 8264fee23 · pipeline 5072 / fast (job 60738) · the child was killed at its 30 s deadline without exiting, in a 1446 s full run on a loaded runner. The audit fixes don't touch this script or its test. Passed locally at 8264fee23 (377/377), and in job 60610 on the same script. First sighting.
@@ -643,3 +655,11 @@ timeout on this one case rather than a global raise.
 
 - 2026-11-24 · !1453 fa64d9d8b · pipeline 5319 / fast (job 64034) · `the owner's mv was never run` on a loaded runner: the test gives the owner step 2 s; the change only alters how names are printed in other repair.sh messages. Passed three times in a row locally on the same commit. First sighting.
 - 2026-11-24 · !1453 fffd1ee45 · pipeline 5323 / fast (job 64105) · the file's sibling test, "#1915 O-S2: discard_staging_root counts a timed-out rename that landed as done", failed the same way (`the owner's rename never ran`) in a 30-minute fast job on a loaded runner. Same 2 s step limit; the change touches neither code path. Second sighting of the file.
+
+## tests/unit/v19-create-check-unavailable.test.mjs: the file's `beforeAll` (compiles the pocket component)
+
+- 2026-11-24 · !1469 274bfc7b3 · pipeline 5325 / fast (job 64148) · `Hook timed out in 10000ms` at line 196 on a loaded runner (load average about 52); the change is CI-only. The file passed locally. First sighting.
+
+## scripts/install.model-and-restarts.test.mjs "install.sh: one or two restarts are not a crash loop; three are (O-S2) > the database running, restart count +3 since the earlier sample: a crash loop, rolled back, `retry`"
+
+- 2026-11-24 · !1469 274bfc7b3 · pipeline 5325 / fast (job 64148) · the result did not deeply equal the expected 3-field outcome, on a loaded runner (load average about 52); the change is CI-only. The file passed locally. First sighting.

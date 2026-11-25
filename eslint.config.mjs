@@ -63,6 +63,9 @@ export default defineConfig([
   // Sibling worktrees: a second checkout of this codebase, plus its build
   // output. Linting it reports another branch's errors as this one's (#769)
   ".claude/worktrees/**",
+  // opengrep's rule fixtures (#1592): deliberately unsafe snippets that each
+  // rule must flag, not code anything runs or imports.
+  ".opengrep/**",
   // web/ build artefacts: gitignored output, not source (#419)
   "web/build/**", "web/.svelte-kit/**", "web/.preview/**", "web/test-results/**", "coverage/**", "drizzle/**", "dist/**",
   // Scratch prototypes (#995). docs/extraction-method.md and the extraction

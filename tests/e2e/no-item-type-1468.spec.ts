@@ -140,6 +140,18 @@ test("editing an existing MOT's date keeps it a service whose completion is stil
     // The edit drawer has no type row.
     await expect(page.getByText(/^type$/iu)).toHaveCount(0);
 
+    // Completing records the activity named for the schedule kind that was kept (a renewal renewed,
+    // anything else serviced: completionActivity in src/lib/workspace.ts, #1325).
+    await page.goto(`/home?item=${household.itemId}`);
+    await page.getByRole("button", { name: "Complete MOT proving" }).filter({ visible: true }).first().click();
+    await page.getByRole("button", { name: "record", exact: true }).filter({ visible: true }).first().click();
+    const expectedKind = before?.scheduleKind === "renewal" ? "renewal_completed" : "service_completed";
+    await expect.poll(async () => {
+      const response = await page.request.get("/api/workspace", { maxRetries: 2 });
+      const { workspace } = (await response.json()) as { workspace: { households: Array<{ id: string; activities: Array<{ itemId: string; kind: string }> }> } };
+      return workspace.households.find((one) => one.id === household.id)?.activities
+        .filter((one) => one.itemId === household.itemId && /_completed$/u.test(one.kind)).map((one) => one.kind);
+    }, { timeout: SETTLE }).toEqual([expectedKind]);
   } finally {
     await households.sweep(page);
   }
