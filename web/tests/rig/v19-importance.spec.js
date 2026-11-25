@@ -132,10 +132,13 @@ async function saveUnset(page, item) {
 async function showImportanceSizes(page) {
   await signedIn("/settings", "rest")(page);
   await expect(sizeGroup(page)).toBeVisible({ timeout: RIG_EXPECT_MS });
-  const saved = page.waitForRequest((request) => request.url().endsWith("/api/preferences") && request.method() === "PUT");
+  /* the response, not the request: home loads next and must find the save stored */
+  const saved = page.waitForResponse((response) => response.url().endsWith("/api/preferences") && response.request().method() === "PUT");
   await importanceButton(page).click();
   await expect(importanceButton(page)).toHaveAttribute("aria-pressed", "true");
-  expect((await saved).postDataJSON().planetSize).toBe("importance");
+  const response = await saved;
+  expect(response.request().postDataJSON().planetSize).toBe("importance");
+  expect(response.ok(), "the planet-size preference save is stored before home loads").toBe(true);
 }
 
 /** The colour a section wears, read the way the page paints it. @param {import("@playwright/test").Page} page @param {string} name */
