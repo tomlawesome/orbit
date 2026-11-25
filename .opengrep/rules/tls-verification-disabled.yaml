@@ -1,0 +1,18 @@
+rules:
+  - id: tls-verification-disabled
+    # Why: switching certificate checks off lets anyone on the path impersonate the server.
+    message: >-
+      TLS certificate verification is switched off (rejectUnauthorized: false or
+      NODE_TLS_REJECT_UNAUTHORIZED=0); trust the right CA instead.
+    severity: ERROR
+    languages: [javascript, typescript]
+    pattern-either:
+      - pattern: |
+          {..., rejectUnauthorized: false, ...}
+      - pattern: $O.rejectUnauthorized = false
+      - patterns:
+          - pattern-either:
+              - pattern: process.env.NODE_TLS_REJECT_UNAUTHORIZED = $V
+              - pattern: process.env["NODE_TLS_REJECT_UNAUTHORIZED"] = $V
+          - pattern-not: process.env.NODE_TLS_REJECT_UNAUTHORIZED = "1"
+          - pattern-not: process.env["NODE_TLS_REJECT_UNAUTHORIZED"] = "1"
