@@ -606,3 +606,7 @@ timeout on this one case rather than a global raise.
 ## scripts/repair-retire-privdrop-1848.test.mjs "owned by the folder's owner (the shim lies about nothing): not refused"
 
 - 2026-11-22 · !1457 batch-b 3d2a694c · pipeline for !1457 / fast (job 62291) · failed after 33 s on a loaded runner; the change touches none of it. First sighting.
+
+## scripts/install.readiness.test.mjs "install.sh: a service still running at the deadline is left in place (#1456 decision) > the database running with its probe still failing: no rollback, `repair`, left running, and an Update is accepted"
+
+- 2026-11-23 · !1333 bf57751bf · pipeline 5229 / fast (job 62669) · `expected 1 to be +0` at line 247 (the Update's exit status) on a loaded host; the change is a @sveltejs/kit bump only. First sighting.
