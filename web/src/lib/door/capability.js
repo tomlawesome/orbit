@@ -14,7 +14,7 @@
  */
 import { note, compiledWithin } from "./chores.js";
 import { settings, flag } from "./settings.js";
-import { gpu } from "./fitness.js";
+import { gpu, WEEK } from "./fitness.js";
 
 const VERT = `#version 300 es
 void main(){ vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2); gl_Position=vec4(p*2.0-1.0,0.0,1.0); }`;
@@ -47,8 +47,7 @@ void main(){
   o=vec4(1.0-exp(-L*0.35),1.0);
 }`;
 
-/* kept a week, for this browser on this screen */
-const WEEK = 7 * 24 * 3600e3;
+/* kept a week (WEEK, fitness.js: the one week the folder keeps anything), for this browser on this screen */
 /**
  * @typedef {{ ok: true, background: boolean, compileMs: number, msPerMpx: number }} Probed the probe's measures
  * @typedef {{ ok: false, background: null, compileMs: null, msPerMpx: null }} NotProbed no probe could be had
@@ -63,7 +62,7 @@ const FAILED = { background: null, compileMs: null, msPerMpx: null, ok: false };
 /* the salt is code, not a comment (Safari hashes the source without its comments): no cache answers for the compiler */
 /** @param {string} src */
 const salted = (src) => src.replace(/out vec4 o;/, `out vec4 o; const float SALT=${Math.random().toFixed(6)};`)
-  .replace(/o=vec4\(([^;]*)\);\s*}\s*$/, (m, inner) => `o=vec4(${inner})+vec4(SALT*1e-6); }`);
+  .replace(/o=vec4\(([^;]*)\);\s*}\s*$/, (_m, inner) => `o=vec4(${inner})+vec4(SALT*1e-6); }`);
 /* a small texture of noise, for the probe's maps */
 /** @param {WebGL2RenderingContext} gl @param {number} w @param {number} h @param {number} seed */
 function noise(gl, w, h, seed) {
@@ -147,7 +146,7 @@ export function probe() {
   if (!g) { got = FAILED; return (memo = Promise.resolve(FAILED)); }
   return (memo = (async () => {
     let /** @type {Probe | null} */ r = null, how = "fresh";
-    try { const s = JSON.parse(localStorage.getItem(KEY()) || "null"); if (s?.r?.ok && Date.now() - s.t < WEEK) { r = s.r; how = "stored"; } } catch { /* probed afresh */ }
+    try { const s = JSON.parse(localStorage.getItem(KEY()) || "null"); if (s?.r?.ok && typeof s.t === "number" && s.t <= Date.now() && Date.now() - s.t < WEEK) { r = s.r; how = "stored"; } } catch { /* probed afresh */ }
     if (!r) {
       r = await measure(g.gl).catch(() => FAILED);
       if (r.ok) try { localStorage.setItem(KEY(), JSON.stringify({ t: Date.now(), r })); } catch { /* this visit only */ }
