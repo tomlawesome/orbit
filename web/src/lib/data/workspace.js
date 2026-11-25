@@ -3924,23 +3924,55 @@ export async function discardStagedDocument(documentId) {
  */
 
 /**
- * Write this household into an encrypted archive, kept on the server for the
- * owner to download (POST /api/households/{id}/portable-archives). Synchronous:
- * the answer arrives once the file is written. Documents travel with it, as the
- * ratified card says (#1002 round 2).
+ * The export as a background job (#1774, ADR-0047): the job the card shows.
+ * @typedef {{ id: string, status: "pending" | "processing" | "retry" | "completed" | "failed" | "cancelled", bytesDone: number | null, bytesTotal: number | null, createdAt: string, failureCode: string | null, failureMessage: string | null, canRetry: boolean }} ArchiveExportJob
+ * @typedef {{ export: ArchiveExportJob | null, latest: WrittenArchive | null }} ArchiveExportState
+ */
+
+/**
+ * Start writing this household into an encrypted archive, kept on the server
+ * for the owner to download (POST /api/households/{id}/portable-archives).
+ * The answer is the queued job (202), not the file: the document worker
+ * writes it, and the card follows it with `fetchPortableArchiveState`.
+ * Documents travel with it, as the ratified card says (#1002 round 2).
  *
  * `currentPassword` is the recent-authentication proof (§17) for a reader who
- * has a password. The route does not ask for one today; it is sent so the
- * phone's challenge works the day the route does (#1122).
+ * has a password (#1132).
  * @param {string} householdId
  * @param {{ passphrase: string, currentPassword?: string }} request
- * @returns {Promise<WrittenArchive>}
+ * @returns {Promise<ArchiveExportJob>}
  */
-export async function writePortableArchive(householdId, { passphrase, currentPassword }) {
+export async function startPortableArchive(householdId, { passphrase, currentPassword }) {
   const body = await json(await csrfFetch(`/api/households/${householdId}/portable-archives`, {
     body: { passphrase, includeDocuments: true, ...(currentPassword ? { currentPassword } : {}) },
   }));
-  return body.archive;
+  return body.export;
+}
+
+/**
+ * The household's export job (one under a day old, any status) and its
+ * newest kept archive (GET /api/households/{id}/portable-archives).
+ * @param {string} householdId
+ * @returns {Promise<ArchiveExportState>}
+ */
+export async function fetchPortableArchiveState(householdId) {
+  const body = await json(await fetch(`/api/households/${householdId}/portable-archives`, { credentials: "same-origin" }));
+  return { export: body?.export ?? null, latest: body?.latest ?? null };
+}
+
+/**
+ * Runs a failed export again with the key its start left on the job, within
+ * the hour (POST .../portable-archives/{jobId}/retry): no second passphrase.
+ * @param {string} householdId
+ * @param {string} jobId
+ * @param {{ currentPassword?: string }} [request]
+ * @returns {Promise<ArchiveExportJob>}
+ */
+export async function retryPortableArchive(householdId, jobId, { currentPassword } = {}) {
+  const body = await json(await csrfFetch(`/api/households/${householdId}/portable-archives/${jobId}/retry`, {
+    body: { expectedStatus: "failed", ...(currentPassword ? { currentPassword } : {}) },
+  }));
+  return body.export;
 }
 
 /**

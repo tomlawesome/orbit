@@ -14,8 +14,9 @@
    * heading at this width.
    *
    *   take it with you   a sentence, `export this system`, the passphrase
-   *                      twice, `write the archive` (arms), a progress row
-   *                      while the server writes it, then the download row
+   *                      twice, `write the archive` (arms), then the job
+   *                      (#1774): queued, writing with its numbers, the
+   *                      download row, or why it failed and its one control
    *   bring one in       `choose a file`, the passphrase, `look inside`, the
    *                      preview (what it holds, what is already here and
    *                      stays out), `bring in N entries` (arms)
@@ -59,6 +60,14 @@
 
     {#if a.outPhase === "rest"}
       <button class="p-pill act-accent wide" onclick={a.startExport}>export this system</button>
+    {:else if a.outPhase === "form" && a.failure}
+      <!-- #1774: a failed job says why and offers one control. -->
+      <p class="p-error hh-failed" role="alert">{a.outProblem}</p>
+      {#if a.failure.canRetry}
+        <button class="p-pill act-accent wide" disabled={a.sending} onclick={a.retryExport}>try again</button>
+      {:else}
+        <button class="p-pill act-accent wide" onclick={a.writeAgain}>write it again</button>
+      {/if}
     {:else if a.outPhase === "form"}
       <div class="hh-fields">
         <label class="hh-label" for="hh-pass-out">a passphrase for the file</label>
@@ -76,10 +85,16 @@
         <ArmButton label="write the archive" danger={false} wide class="act-accent" onfire={a.writeArchive} />
       {/if}
       {#if a.outProblem}<p class="p-error" role="alert">{a.outProblem}</p>{/if}
+    {:else if a.outPhase === "queued"}
+      <div class="hh-progress" role="status">
+        <span class="p-body accent breathing" aria-hidden="true"></span>
+        <span><b>queued</b><small>Orbit is finishing another archive first</small></span>
+        <i aria-hidden="true"></i>
+      </div>
     {:else if a.outPhase === "writing"}
       <div class="hh-progress" role="status">
         <span class="p-body accent breathing" aria-hidden="true"></span>
-        <span><b>writing the archive</b><small>encrypting {plural(entries, "entry", "entries")} and their documents</small></span>
+        <span><b>writing the archive</b><small>{a.writingWords || `encrypting ${plural(entries, "entry", "entries")} and their documents`}</small></span>
         <i aria-hidden="true"></i>
       </div>
     {:else if a.written}
@@ -192,6 +207,7 @@
   .hh-label:first-child{margin-top:0}
   .hh-note{margin:8px 0 0;font:var(--p-type-meta)/1.5 var(--ui);color:var(--ink-quiet)}
   .hh-note.warm{color:var(--warm-text)}
+  .hh-failed{margin:0 0 12px}
   .p-pill:disabled{opacity:.45;cursor:default}
 
   .hh-progress{display:flex;align-items:center;gap:12px;min-height:var(--p-row-min);padding:0 4px;position:relative;overflow:hidden}

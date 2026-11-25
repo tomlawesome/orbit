@@ -132,3 +132,50 @@ export async function previewSlice(file) {
 export function exportFileName(archive) {
   return `orbit-export-${archive.id}.orbit`;
 }
+
+/**
+ * The export as a background job (#1774, ADR-0047): the card's phase for the
+ * GET's answer. A job under a day old decides it; with none, a kept archive
+ * opens the card on its download, and nothing at all leaves it at rest. A
+ * failed job opens the form (the card shows why, and its one control).
+ * @param {{ export: { status: string } | null, latest: object | null }} state
+ * @returns {"rest" | "form" | "queued" | "writing" | "written"}
+ */
+export function nextPhase(state) {
+  switch (state.export?.status) {
+    case "pending":
+    case "retry":
+      return "queued";
+    case "processing":
+      return "writing";
+    case "completed":
+      return "written";
+    case "failed":
+      return "form";
+    default:
+      return state.latest ? "written" : "rest";
+  }
+}
+
+/**
+ * Whether the card keeps reading the job: only while it is live.
+ * @param {{ export: { status: string } | null } | null} state
+ */
+export function exportLive(state) {
+  const status = state?.export?.status;
+  return status === "pending" || status === "processing" || status === "retry";
+}
+
+/**
+ * The writing line's words: "<done> of <total> · <percent>%", the percent
+ * rounded down and held to 0..100; `fallback` until the total is known.
+ * @param {number | null} bytesDone
+ * @param {number | null} bytesTotal
+ * @param {string} fallback
+ */
+export function progressWords(bytesDone, bytesTotal, fallback) {
+  if (!bytesTotal) return fallback;
+  const done = Math.max(0, bytesDone ?? 0);
+  const percent = Math.min(100, Math.max(0, Math.floor((done / bytesTotal) * 100)));
+  return `${sizeLabel(done)} of ${sizeLabel(bytesTotal)} · ${percent}%`;
+}
