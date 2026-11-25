@@ -56,10 +56,11 @@ export type AuthErrorCode =
      change-password hold rather than answering it. `password_unchanged` is a
      new password that is the refused one; `password_mismatch` is the two
      entries disagreeing (or the second missing). `password_change_lapsed` is
-     a hold that has run out, been spent, or never existed: one word for all
-     three, as a setup link has, except a live hold whose mark a save already
-     cleared, which is `password_change_saved` (#1901): the retry after a
-     lost answer. `password_recovery_required` is a marked
+     a hold that has run out, been spent, or never existed, or whose mark was
+     cleared by any path: one word for all, as a setup link has.
+     `password_change_saved` is no longer sent (#1943 SEC-H3 reversed #1901's
+     retry answer, which checked a password outside the sign-in door); it is
+     kept so a browser still showing it reads it. `password_recovery_required` is a marked
      password typed on an instance with no mail relay: with no verified
      channel to renew it through, it signs nobody in and the way back is a
      setup link from an administrator (OWASP/NIST: a known-compromised
