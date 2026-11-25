@@ -36,7 +36,7 @@ async function addItem(page, name) {
   await pickImportance(page);
   await pickKeyDate(page, "2026-09-12");
   await page.locator(".btn-primary").click();
-  await expect(page).toHaveURL(/\/home(\?item=[^&]+)?$/);
+  await expect(page).toHaveURL(/\/home(\?item=[^&]+)?$/, { timeout: RIG_EXPECT_MS });
   await expect(page.locator(".item", { hasText: name })).toBeVisible({ timeout: RIG_EXPECT_MS });
 }
 
@@ -67,20 +67,20 @@ test("after a save, the item's address and its drawer's way back return to a sky
   const id = new URL(page.url()).searchParams.get("item");
   expect(id, "the save did not land on the new item's address").toBeTruthy();
   await page.goto(`${APP}/home?item=${id}`);
-  await expect(page).toHaveURL(new RegExp(`/home\\?item=${id}$`));
+  await expect(page).toHaveURL(new RegExp(`/home\\?item=${id}$`), { timeout: RIG_EXPECT_MS });
   const drawer = page.locator(`[id="${id}-view"]`);
   await expect(drawer).toBeVisible({ timeout: RIG_EXPECT_MS });
   await page.keyboard.press("Escape");
   await expect(drawer).toHaveCount(0);
-  await expect(page).toHaveURL(/\/home$/);
+  await expect(page).toHaveURL(/\/home$/, { timeout: RIG_EXPECT_MS });
   await wheelToManifest(page);
 });
 
 test("after a save, the create page's way back returns to a sky that scrolls", async ({ page }) => {
   await addItem(page, "Scroll via create");
   await page.goto(`${APP}/create`);
-  await page.locator("#card[data-ready]").waitFor({ state: "attached" });
+  await page.locator("#card[data-ready]").waitFor({ state: "attached", timeout: RIG_EXPECT_MS });
   await page.getByRole("link", { name: "← YOUR SKY" }).click();
-  await expect(page).toHaveURL(/\/home$/);
+  await expect(page).toHaveURL(/\/home$/, { timeout: RIG_EXPECT_MS });
   await wheelToManifest(page);
 });

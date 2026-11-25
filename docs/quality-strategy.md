@@ -427,7 +427,7 @@ per-spec isolation is not built.
 Sharded browser jobs (#1546, design note 52876, owner decision 97a). The
 the nightly runs ten rig-lane jobs where there were four (the promotion runs
 only `screens_chromium` of them since #1763):
-`rig_chromium` 2, `rig_firefox` 2, `rig_webkit` 3 and `film_webkit` 2 shards,
+`rig_chromium` 2, `rig_firefox` 2, `rig_webkit` 4 and `film_webkit` 2 shards,
 plus `screens_chromium`. The shard rule: GitLab's `parallel:` gives each job
 `CI_NODE_INDEX` and `CI_NODE_TOTAL`, `web/playwright.config.js` turns them
 into Playwright's own `--shard` when the total is above one, and Playwright
@@ -587,7 +587,7 @@ everything), and, for the six jobs that test the image (`smoke`,
 `fidelity` has no artefact axis — it is keyed on the whole checkout, a
 deliberate simplification rather than hashing the built `web/build` site.
 The shard is the unit (#1546): a sharded job (`shards` in
-`job-inputs.json`) is the GitLab jobs `rig_webkit 1/3` … `rig_webkit 3/3`,
+`job-inputs.json`) is the GitLab jobs `rig_webkit 1/4` … `rig_webkit 4/4`,
 each looked up and recorded under its full name, with one key for all of them.
 One shard's pass never stands for another's, and changing the count orphans
 the old evidence because the names no longer match. The evidence file is named

@@ -2277,7 +2277,7 @@ exit 0
    * machinery expands to `name 1/N` ... `name N/N`, so the two must agree or
    * evidence would name jobs the pipeline never runs.
    */
-  const BROWSER_SHARDED = { rig_chromium: 2, rig_firefox: 2, rig_webkit: 3, film_webkit: 2 };
+  const BROWSER_SHARDED = { rig_chromium: 2, rig_firefox: 2, rig_webkit: 4, film_webkit: 2 };
   // #1933 (103a): `fast` is Vitest shards; its blobs go to fast_coverage, not browser_report.
   const SHARDED = { ...BROWSER_SHARDED, fast: 2 };
   const inputsJson = () => JSON.parse(readFileSync(new URL("./ci/job-inputs.json", import.meta.url), "utf8"));
