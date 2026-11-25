@@ -493,6 +493,7 @@ timeout on this one case rather than a global raise.
 ## tour-pocket-webkit.spec.js:685 "the pocket film in WebKit (#1174) › plays end to end at 430x932 under normal motion" — pocket-webkit
 
 - 2026-11-19 · bed6d036 (batch-b) · local run in the Playwright image, no pipeline · `locator.tap` on `#pocket-entry .pc-chip[data-imp="low"]` (line 818) retried "element was detached from the DOM" until the 600 s test timeout. 27 others passed. Rerun of the same case on unchanged code: passed (3.4m). First sighting.
+- 2026-11-25 · dev cd403cae · nightly 5441 / `film_webkit` 1/2 (job 65559) · pocket-webkit 430x932, failed at :854 with faults `{"pill faint (dim top) · /home · ch7": 1}`; no trace kept and the key holds no figures. #1960 (pill faint, diagnostics): diagnostics added; no fix yet. First sighting of this symptom.
 
 ## upgrade_cell: [latest-3, all-keys] "Could not download the release manifest for channel v0.3.7" (image-registry)
 
