@@ -74,10 +74,12 @@ describe("completePasswordRenewal", () => {
     expect(state.writes).toEqual([]);
   });
 
-  it("answers saved and writes nothing when the mark was cleared by a saved password and the typed one is the stored one (#1901)", async () => {
+  /* #1943 SEC-H3 (ruling note 68569) reverses #1901: a cleared mark checks
+     no password, so the stored one typed again is lapsed too. */
+  it("answers lapsed and writes nothing when the mark was cleared by a saved password and the typed one is the stored one (#1943 SEC-H3)", async () => {
     state.answers = [[{ requiredAt: null, disabledAt: null, passwordHash: await hashPassword("typed-password-P1-1901") }]];
     await expect(completePasswordRenewal(USER, MARK, "new-hash", "typed-password-P1-1901")).rejects.toMatchObject({
-      code: "password_change_saved",
+      code: "password_change_lapsed",
       status: 400,
     });
     expect(state.writes).toEqual([]);
@@ -92,10 +94,10 @@ describe("completePasswordRenewal", () => {
     expect(state.writes).toEqual([]);
   });
 
-  it("answers saved and writes nothing when the mark was cleared elsewhere but the typed password matches the stored one (#1901)", async () => {
+  it("answers lapsed and writes nothing when the mark was cleared elsewhere but the typed password matches the stored one (#1943 SEC-H3)", async () => {
     state.answers = [[{ requiredAt: null, disabledAt: null, passwordHash: await hashPassword("stored-password-P0-1901") }]];
     await expect(completePasswordRenewal(USER, MARK, "new-hash", "stored-password-P0-1901")).rejects.toMatchObject({
-      code: "password_change_saved",
+      code: "password_change_lapsed",
       status: 400,
     });
     expect(state.writes).toEqual([]);
