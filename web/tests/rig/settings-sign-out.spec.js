@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { APP, onPhone, signedIn } from "./a11y-support.js";
+import { APP, onPhone, RIG_EXPECT_MS, signedIn } from "./a11y-support.js";
 
 /** @typedef {import("@playwright/test").Page} Page */
 /** @typedef {import("@playwright/test").Locator} Locator */
@@ -47,7 +47,7 @@ async function thisDeviceControl(page, phone) {
     await face.click();
     const panel = page.locator(`[id="${await face.getAttribute("aria-controls")}"]`);
     const act = panel.locator("[data-row-acts] button").first();
-    await expect(act).toBeVisible();
+    await expect(act).toBeVisible({ timeout: RIG_EXPECT_MS });
     await act.evaluate((el) => el.setAttribute("data-e2e-row", "target"));
     return page.locator('[data-e2e-row="target"]');
   }
@@ -139,7 +139,7 @@ for (const leaving of LEAVING) {
     }).catch(() => "navigating"), { message: "#1439: the dusk never arrived", timeout: 30_000 }).toBe("1");
     await expect(page, "#1439: the sign-out never came back from the provider to /logout").toHaveURL(/\/logout$/u, { timeout: 30_000 });
     expect(new URL(page.url()).origin, "the way back is Orbit's own /logout, not the provider's").toBe(new URL(APP).origin);
-    await expect(page.getByRole("link", { name: "Sign back in" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Sign back in" })).toBeVisible({ timeout: RIG_EXPECT_MS });
 
     expect(signOuts, "one sign-out was sent").toEqual(["POST"]);
     expect(providerAsked.length, "#1439: the browser should have been handed to the provider exactly once").toBe(1);
