@@ -21,6 +21,8 @@ import { describe, expect, it } from "vitest";
  */
 
 const ROOT = resolve(import.meta.dirname, "../..");
+const CONTROLLER = "web/src/routes/household/[id]/archive-controller.svelte.js";
+// #1354: one controller holds `guarded` for both layouts; each must call it.
 const FILES = [
   "web/src/routes/household/[id]/DeskArchive.svelte",
   "web/src/routes/household/[id]/PocketArchive.svelte",
@@ -34,8 +36,18 @@ function guardedOf(source) {
   return source.slice(start, end);
 }
 
-describe.each(FILES)("%s: the archive challenge opens once, in its final place", (file) => {
-  const source = readFileSync(resolve(ROOT, file), "utf8");
+describe.each(FILES)("%s: uses the shared controller", (file) => {
+  it("takes its acts from createArchiveController", () => {
+    expect(readFileSync(resolve(ROOT, file), "utf8")).toMatch(/createArchiveController\(/);
+  });
+
+  it("holds no guarded() of its own", () => {
+    expect(readFileSync(resolve(ROOT, file), "utf8")).not.toMatch(/function guarded\(/);
+  });
+});
+
+describe(`${CONTROLLER}: the archive challenge opens once, in its final place`, () => {
+  const source = readFileSync(resolve(ROOT, CONTROLLER), "utf8");
   const guarded = guardedOf(source);
 
   it("knows how the reader proves it is them before it opens the challenge", () => {
@@ -54,6 +66,9 @@ describe.each(FILES)("%s: the archive challenge opens once, in its final place",
 
   it("no act moves its phase after guarded() settles, which would redraw an open challenge", () => {
     expect(source).not.toMatch(/"archive_(export|import)"\)\.then\(/);
+    for (const file of FILES) {
+      expect(readFileSync(resolve(ROOT, file), "utf8")).not.toMatch(/"archive_(export|import)"\)\.then\(/);
+    }
     expect(source).not.toMatch(/"archive_import"\);\s*\n\s*if \(inPhase === "looking"\)/);
   });
 });

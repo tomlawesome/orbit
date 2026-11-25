@@ -1,17 +1,8 @@
 <script>
-  import { clockOf, dayMonth, localZone, plural, sizeLabel } from "$lib/format.js";
-  import { onMount } from "svelte";
+  import { plural, sizeLabel } from "$lib/format.js";
   import { createArm } from "$lib/arm.js";
-  import {
-    importPortableArchive,
-    previewPortableArchive,
-    readSignInMethods,
-    startStepUp,
-    wordsOf,
-    writePortableArchive,
-  } from "$lib/data/workspace.js";
-  import { archiveFileProblem, checkFileReadable, exportFileName, FILE_CHANGED_WORDS, fileChangedSincePicked, passphraseFloor, passphraseLength, passphraseProblem, previewSlice } from "./archive.js";
-  import { tabArrows } from "$lib/tabs.js";
+  import { exportFileName, passphraseLength } from "./archive.js";
+  import { createArchiveController } from "./archive-controller.svelte.js";
 
   /*
    * THE ARCHIVE ON THE DESK (#1002). The phone's own build is #1122's
@@ -42,40 +33,11 @@
    * modal component).
    */
 
-  /* #1151 W2-R1: set just before the step-up redirect, cleared on the way
-     back in. sessionStorage, not a query param — the identity provider owns
-     `returnTo` and this reader's own tab is the only place this needs to be
-     read. */
-  const STEPUP_RETURN_FLAG = "orbit-archive-stepup-return";
-
   /** @type {{ householdId: string, householdName: string, entries: number, sections: number, limits?: import("$lib/data/engine-limits.js").EngineLimits | null }} */
   let { householdId, householdName, entries, sections, limits = null } = $props();
 
-  /* The engine's numbers (#1336): the passphrase floor the buttons wait for. */
-  const passphraseMin = $derived(passphraseFloor(limits));
-
-  let tab = $state(/** @type {"out" | "in"} */ ("out"));
-
-  /* ── take it with you ─────────────────────────────────────────────────── */
-  let outPhase = $state(/** @type {"rest" | "form" | "writing" | "written"} */ ("rest"));
-  let passOut = $state("");
-  let passAgain = $state("");
-  let written = $state(/** @type {import('$lib/data/workspace.js').WrittenArchive | null} */ (null));
-  /** @type {string | null} */
-  let outProblem = $state(null);
-  const outRefusal = $derived(passphraseProblem(passOut, passAgain, limits));
-
-  /* ── bring one in ─────────────────────────────────────────────────────── */
-  let inPhase = $state(/** @type {"rest" | "chosen" | "looking" | "preview" | "bringing" | "done"} */ ("rest"));
-  /** @type {File | null} */
-  let file = $state(null);
-  let passIn = $state("");
-  let preview = $state(/** @type {import('$lib/data/workspace.js').ArchivePreview | null} */ (null));
-  let brought = $state(0);
-  /** @type {string | null} */
-  let inProblem = $state(null);
-  /** @type {HTMLInputElement | undefined} */
-  let picker = $state();
+  /* The one state machine (archive-controller.svelte.js), shared with the phone's card. */
+  const a = createArchiveController({ householdId: () => householdId, limits: () => limits, tabIdPrefix: "arch-tab-" });
 
   /* ── two-tap (lib/arm.js): an arm, then a fire, 4s to change your mind ── */
   let armed = $state(/** @type {string | boolean} */ (false));
@@ -88,201 +50,6 @@
   function twoTap(key, fire, button) {
     if (arm.tap(key, button)) fire();
   }
-
-  /* ── the recent-authentication challenge (#1132) ──────────────────────── */
-  let challengeOpen = $state(false);
-  /** @type {boolean | null} */
-  let hasPassword = $state(null);
-  let currentPassword = $state("");
-  let proving = $state(false);
-  /** @type {string | null} */
-  let challengeProblem = $state(null);
-  /** @type {((proof: string) => Promise<void>) | null} */
-  let retry = null;
-  /** The step-up intent the held act needs: one each way, so a proof for one cannot pay for the other.
-      Reactive (unlike the phone's Sheet-based copy of this field): the panels below branch on it to
-      show the challenge under whichever act is actually holding it. */
-  let retryIntent = $state(/** @type {"archive_export" | "archive_import"} */ ("archive_export"));
-
-  /** @param {unknown} error */
-  const needsProof = (error) => /** @type {{ code?: string }} */ (error)?.code === "recent_authentication_required";
-  /** A refusal in the server's words, but a file that is not an archive (#1566), or one that changed
-      after it was chosen (#1605 W-R12), in the card's own. @param {unknown} error */
-  const refusalWords = (error) => fileChangedSincePicked(error)
-    ? FILE_CHANGED_WORDS
-    : /** @type {{ code?: string }} */ (error)?.code === "archive_invalid"
-      ? "this file is not an Orbit archive"
-      : wordsOf(error);
-
-  /**
-   * Runs an archive act; if the server wants proof first, holds the act and
-   * opens the challenge, which runs it again carrying the proof.
-   * @param {(proof: string) => Promise<void>} act
-   * @param {(words: string) => void} fail
-   * @param {"archive_export" | "archive_import"} intent
-   * @param {() => void} hold steps the act back to the screen the challenge sits on
-   */
-  async function guarded(act, fail, intent, hold) {
-    try {
-      await act("");
-    } catch (error) {
-      if (!needsProof(error)) { fail(refusalWords(error)); return; }
-      /* How this reader proves it is them is asked BEFORE the challenge
-         opens, and the act steps back to its screen in the same turn, so
-         the challenge is drawn once, in its final place. Opened first and
-         moved once the answer came, its field was rebuilt under a reader
-         already typing in it, and what they typed was lost (pipeline 2382). */
-      if (hasPassword === null) {
-        hasPassword = await readSignInMethods().then((methods) => methods.local.set, () => true);
-      }
-      retry = act;
-      retryIntent = intent;
-      currentPassword = "";
-      challengeProblem = null;
-      hold();
-      challengeOpen = true;
-    }
-  }
-
-  function cancelChallenge() {
-    challengeOpen = false;
-    retry = null;
-    currentPassword = "";
-    challengeProblem = null;
-  }
-
-  async function prove() {
-    if (!retry || proving) return;
-    proving = true;
-    challengeProblem = null;
-    try {
-      await retry(currentPassword);
-      challengeOpen = false;
-      retry = null;
-    } catch (error) {
-      challengeProblem = needsProof(error) ? "that password did not match · try again" : wordsOf(error);
-    } finally {
-      proving = false;
-    }
-  }
-
-  async function toProvider() {
-    challengeProblem = null;
-    try {
-      /* The redirect below leaves this page entirely — the chosen file, its
-         passphrase and the preview cannot survive that, browser-held state
-         has nowhere to live across it. A flag saying only "an archive act
-         sent this reader to the provider" can, and sessionStorage is the
-         right shelf for it: gone the moment the tab closes, never the
-         passphrase itself. */
-      try { sessionStorage.setItem(STEPUP_RETURN_FLAG, "1"); } catch { /* storage refused: the redirect still happens, just without the notice on return */ }
-      await startStepUp({ intent: retryIntent, returnTo: location.pathname });
-    } catch (error) {
-      try { sessionStorage.removeItem(STEPUP_RETURN_FLAG); } catch { /* nothing to clear */ }
-      challengeProblem = wordsOf(error);
-    }
-  }
-
-  /** @type {string | null} */
-  let stepUpNotice = $state(null);
-
-  /* Read, not consumed: the desk card and the phone card are both on the page (CSS
-     picks which shows), so whichever mounted first and took the flag would
-     leave the visible one with no notice. Both read it in their onMount and
-     the flag is cleared a tick later, once both have. */
-  onMount(() => {
-    let returning = null;
-    try { returning = sessionStorage.getItem(STEPUP_RETURN_FLAG); } catch { /* unreadable: treat as not returning */ }
-    if (!returning) return;
-    setTimeout(() => {
-      try { sessionStorage.removeItem(STEPUP_RETURN_FLAG); } catch { /* already gone, or unreadable */ }
-    }, 0);
-    stepUpNotice = "back from signing in again · choose the file once more to carry on";
-  });
-
-  /* ── acts ─────────────────────────────────────────────────────────────── */
-  function writeArchiveNow() {
-    if (outRefusal) return;
-    outProblem = null;
-    outPhase = "writing";
-    guarded(async (proof) => {
-      written = await writePortableArchive(householdId, { passphrase: passOut, currentPassword: proof || undefined });
-      passOut = "";
-      passAgain = "";
-      outPhase = "written";
-    }, (words) => {
-      outProblem = `not written — ${words}`;
-      outPhase = "form";
-    }, "archive_export", () => { outPhase = "form"; });
-  }
-
-  /** @param {Event} event */
-  async function chose(event) {
-    const input = /** @type {HTMLInputElement} */ (event.currentTarget);
-    const next = input.files?.[0] ?? null;
-    input.value = "";
-    if (inPhase === "bringing") return;
-    if (!next) return;
-    inProblem = archiveFileProblem(next, limits);
-    preview = null;
-    file = next;
-    inPhase = inProblem ? "rest" : "chosen";
-  }
-
-  async function lookInside() {
-    if (!file || passphraseLength(passIn) < passphraseMin) return;
-    inProblem = null;
-    inPhase = "looking";
-    /* The file is never parsed here (#1566): the server says whether it is
-       an archive, and `refusalWords` puts that in the card's words. Only its
-       first 64 bytes are read, to send a v2 archive's head alone (#1390). */
-    const chosen = file;
-    await guarded(async (proof) => {
-      preview = await previewPortableArchive(householdId, { file: await previewSlice(chosen), passphrase: passIn, currentPassword: proof || undefined });
-      inPhase = "preview";
-    }, (words) => {
-      inProblem = words;
-      inPhase = "chosen";
-    }, "archive_import", () => { inPhase = "chosen"; });
-  }
-
-  const bringCount = $derived(preview ? preview.items - preview.conflicts.length : 0);
-
-  function bringInNow() {
-    if (!preview) return;
-    const skip = preview.conflicts.map((one) => one.id);
-    const chosen = file;
-    if (!chosen) return;
-    inProblem = null;
-    inPhase = "bringing";
-    guarded(async (proof) => {
-      await checkFileReadable(chosen); // a file changed since it was picked stops here, not in the upload
-      const result = await importPortableArchive(householdId, { file: chosen, passphrase: passIn, skip, currentPassword: proof || undefined });
-      brought = result.importedItems;
-      inPhase = "done";
-      passIn = "";
-    }, (words) => {
-      inProblem = `not brought in — ${words}`;
-      inPhase = "preview";
-    }, "archive_import", () => { inPhase = "preview"; });
-  }
-
-  function startOver() {
-    file = null;
-    preview = null;
-    passIn = "";
-    inProblem = null;
-    inPhase = "rest";
-  }
-
-  /* §22's keyboard: one tab in the Tab order, ← → between them. */
-  const tabKey = tabArrows(["out", "in"], {
-    get: () => tab, set: (key) => (tab = key), id: (key) => `arch-tab-${key}`,
-  });
-
-  const readyUntil = $derived(written
-    ? `${dayMonth(written.expiresAt, localZone())}, ${clockOf(written.expiresAt, localZone())}`
-    : "");
 </script>
 
 <div class="card c-archive">
@@ -293,24 +60,24 @@
   {#snippet challenge()}
     <div class="challenge">
       <p>The archive carries everything in {householdName}, so Orbit asks you to sign in again first.</p>
-      {#if hasPassword !== false}
-        <form onsubmit={(event) => { event.preventDefault(); prove(); }}>
+      {#if a.hasPassword !== false}
+        <form onsubmit={(event) => { event.preventDefault(); a.prove(); }}>
           <div class="field">
             <label for="arch-proof">your password</label>
-            <input id="arch-proof" class="pw" type="password" autocomplete="current-password" bind:value={currentPassword}>
+            <input id="arch-proof" class="pw" type="password" autocomplete="current-password" bind:value={a.currentPassword}>
           </div>
-          {#if challengeProblem}<p class="refuse">{challengeProblem}</p>{/if}
+          {#if a.challengeProblem}<p class="refuse">{a.challengeProblem}</p>{/if}
           <div class="act">
-            <button class="btn" type="submit" disabled={!currentPassword || proving}>
-              {proving ? "confirming…" : "confirm and carry on"}</button>
-            <button class="ghost" type="button" onclick={cancelChallenge}>cancel</button>
+            <button class="btn" type="submit" disabled={!a.currentPassword || a.proving}>
+              {a.proving ? "confirming…" : "confirm and carry on"}</button>
+            <button class="ghost" type="button" onclick={a.cancelChallenge}>cancel</button>
           </div>
         </form>
       {:else}
-        {#if challengeProblem}<p class="refuse">{challengeProblem}</p>{/if}
+        {#if a.challengeProblem}<p class="refuse">{a.challengeProblem}</p>{/if}
         <div class="act">
-          <button class="btn" onclick={toProvider}>confirm with your identity provider →</button>
-          <button class="ghost" onclick={cancelChallenge}>cancel</button>
+          <button class="btn" onclick={a.toProvider}>confirm with your identity provider →</button>
+          <button class="ghost" onclick={a.cancelChallenge}>cancel</button>
         </div>
       {/if}
     </div>
@@ -319,17 +86,17 @@
   <div class="cardhead">
     <h2 id="arch-h">The archive</h2>
     <div class="tabs" role="tablist" aria-labelledby="arch-h">
-      <button role="tab" id="arch-tab-out" aria-selected={tab === "out"} aria-controls="arch-panel-out"
-              tabindex={tab === "out" ? 0 : -1} onclick={() => (tab = "out")} onkeydown={tabKey}>take it with you</button>
-      <button role="tab" id="arch-tab-in" aria-selected={tab === "in"} aria-controls="arch-panel-in"
-              tabindex={tab === "in" ? 0 : -1} onclick={() => (tab = "in")} onkeydown={tabKey}>bring one in</button>
+      <button role="tab" id="arch-tab-out" aria-selected={a.tab === "out"} aria-controls="arch-panel-out"
+              tabindex={a.tab === "out" ? 0 : -1} onclick={() => (a.tab = "out")} onkeydown={a.tabKey}>take it with you</button>
+      <button role="tab" id="arch-tab-in" aria-selected={a.tab === "in"} aria-controls="arch-panel-in"
+              tabindex={a.tab === "in" ? 0 : -1} onclick={() => (a.tab = "in")} onkeydown={a.tabKey}>bring one in</button>
     </div>
   </div>
 
-  {#if stepUpNotice}<p class="note top">{stepUpNotice}</p>{/if}
+  {#if a.stepUpNotice}<p class="note top">{a.stepUpNotice}</p>{/if}
 
   <div class="arch">
-    <div id="arch-panel-out" role="tabpanel" aria-labelledby="arch-tab-out" hidden={tab !== "out"}>
+    <div id="arch-panel-out" role="tabpanel" aria-labelledby="arch-tab-out" hidden={a.tab !== "out"}>
       <ul class="man" aria-label="What the file holds">
         <li><b>{entries}</b>{entries === 1 ? "entry" : "entries"}</li>
         <li><b>{sections}</b>{sections === 1 ? "section" : "sections"}</li>
@@ -337,117 +104,117 @@
         <li><span class="lab">people</span><small class="zero">never in the file</small></li>
       </ul>
 
-      {#if outPhase === "rest"}
-        <div class="act"><button class="ghost" onclick={() => (outPhase = "form")}>write an archive →</button></div>
-      {:else if outPhase === "form"}
+      {#if a.outPhase === "rest"}
+        <div class="act"><button class="ghost" onclick={a.startExport}>write an archive →</button></div>
+      {:else if a.outPhase === "form"}
         <div class="step open">
           <div class="field">
             <label for="arch-pp-out">a passphrase for the file</label>
-            <input id="arch-pp-out" class="pw" type="password" autocomplete="new-password" bind:value={passOut}>
+            <input id="arch-pp-out" class="pw" type="password" autocomplete="new-password" bind:value={a.passOut}>
           </div>
           <div class="field">
             <label for="arch-pp-out2">the passphrase again</label>
-            <input id="arch-pp-out2" class="pw" type="password" autocomplete="new-password" bind:value={passAgain}>
+            <input id="arch-pp-out2" class="pw" type="password" autocomplete="new-password" bind:value={a.passAgain}>
           </div>
           <p class="never"><b>Orbit never keeps this passphrase.</b> Lose it and the file can never be opened — not
             by you, not by anyone, and Orbit holds nothing that changes that.</p>
-          {#if outRefusal && (passOut || passAgain)}<p class="refuse">{outRefusal}</p>{/if}
+          {#if a.outRefusal && (a.passOut || a.passAgain)}<p class="refuse">{a.outRefusal}</p>{/if}
           <div class="act">
-            <button class="ghost" class:armed={armed === "arch-out"} disabled={Boolean(outRefusal)}
-                    onclick={(event) => twoTap("arch-out", writeArchiveNow, event.currentTarget)}>
+            <button class="ghost" class:armed={armed === "arch-out"} disabled={Boolean(a.outRefusal)}
+                    onclick={(event) => twoTap("arch-out", a.writeArchive, event.currentTarget)}>
               {armed === "arch-out" ? "tap again to write the archive" : "write the archive"}</button>
             <button class="ghost" type="button"
-                    onclick={() => { outPhase = "rest"; passOut = ""; passAgain = ""; outProblem = null; }}>cancel</button>
+                    onclick={a.cancelExport}>cancel</button>
           </div>
         </div>
-        {#if outProblem}<p class="refuse">{outProblem}</p>{/if}
-        {#if challengeOpen && retryIntent === "archive_export"}{@render challenge()}{/if}
-      {:else if outPhase === "writing"}
+        {#if a.outProblem}<p class="refuse">{a.outProblem}</p>{/if}
+        {#if a.challengeOpen && a.retryIntent === "archive_export"}{@render challenge()}{/if}
+      {:else if a.outPhase === "writing"}
         <p class="moment" role="status">
           writing the archive · encrypting {plural(entries, "entry", "entries")} and their documents</p>
-        {#if challengeOpen}{@render challenge()}{/if}
-      {:else if written}
-        <p class="said show">written · {exportFileName(written)} · ready until {readyUntil} ·
-          {written.includesDocuments ? "documents included" : "no documents"}</p>
+        {#if a.challengeOpen}{@render challenge()}{/if}
+      {:else if a.written}
+        <p class="said show">written · {exportFileName(a.written)} · ready until {a.readyUntil} ·
+          {a.written.includesDocuments ? "documents included" : "no documents"}</p>
         <div class="act">
           <!-- The server hands back a one-time storage-scoped address; this only draws it. -->
           <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
-          <a class="btn" href={written.downloadUrl}>download the file</a>
+          <a class="btn" href={a.written.downloadUrl}>download the file</a>
         </div>
         <!-- #1792: Orbit keeps a household's last few exports (the export's answer says how many). -->
-        {#if written.keepPerHousehold === 1}
+        {#if a.written.keepPerHousehold === 1}
           <p class="note top">kept here until then · Orbit keeps only your latest; writing another replaces it</p>
         {:else}
-          <p class="note top">kept here until then · Orbit keeps your last {written.keepPerHousehold ?? 2}; writing more replaces the oldest</p>
+          <p class="note top">kept here until then · Orbit keeps your last {a.written.keepPerHousehold ?? 2}; writing more replaces the oldest</p>
         {/if}
       {/if}
     </div>
 
-    <div id="arch-panel-in" role="tabpanel" aria-labelledby="arch-tab-in" hidden={tab !== "in"}>
+    <div id="arch-panel-in" role="tabpanel" aria-labelledby="arch-tab-in" hidden={a.tab !== "in"}>
       <input class="sr-only" type="file" accept=".orbit,.json,application/octet-stream,application/json" tabindex="-1" aria-hidden="true"
-             bind:this={picker} onchange={chose}>
-      {#if inPhase === "done"}
-        <p class="said show">brought in {plural(brought, "entry", "entries")} from {preview?.householdName ?? "the archive"}</p>
-        <div class="act"><button class="ghost" onclick={startOver}>bring in another</button></div>
+             bind:this={a.picker} onchange={a.chose}>
+      {#if a.inPhase === "done"}
+        <p class="said show">brought in {plural(a.brought, "entry", "entries")} from {a.preview?.householdName ?? "the archive"}</p>
+        <div class="act"><button class="ghost" onclick={a.startOver}>bring in another</button></div>
       {:else}
         <p>An archive from another Orbit — or an older one of this — merges into <b>{householdName}</b>. Entries
           and their documents come in; people never do, so nothing in a file can give anyone access here.</p>
-        {#if file}
-          <p class="fname"><b>{file.name}</b> <small>{sizeLabel(file.size)}</small></p>
+        {#if a.file}
+          <p class="fname"><b>{a.file.name}</b> <small>{sizeLabel(a.file.size)}</small></p>
         {/if}
-        {#if inPhase === "rest"}
-          <div class="act"><button class="ghost" onclick={() => picker?.click()}>bring in an archive →</button></div>
+        {#if a.inPhase === "rest"}
+          <div class="act"><button class="ghost" onclick={() => a.picker?.click()}>bring in an archive →</button></div>
           <p class="note top">an Orbit archive{limits ? `, up to ${sizeLabel(limits.archiveFileBytes)}` : ""}</p>
-        {:else if inPhase === "chosen" || inPhase === "looking"}
+        {:else if a.inPhase === "chosen" || a.inPhase === "looking"}
           <div class="step open">
             <div class="field">
               <label for="arch-pp-in">the file's passphrase</label>
-              <input id="arch-pp-in" class="pw" type="password" autocomplete="off" bind:value={passIn}
-                     onkeydown={(event) => { if (event.key === "Enter") lookInside(); }}>
+              <input id="arch-pp-in" class="pw" type="password" autocomplete="off" bind:value={a.passIn}
+                     onkeydown={(event) => { if (event.key === "Enter") a.lookInside(); }}>
             </div>
             <div class="act">
-              <button class="ghost" onclick={startOver}>another file</button>
-              <button class="ghost" disabled={passphraseLength(passIn) < passphraseMin || inPhase === "looking"} onclick={lookInside}>
-                {inPhase === "looking" ? "looking…" : "look inside"}</button>
+              <button class="ghost" onclick={a.startOver}>another file</button>
+              <button class="ghost" disabled={passphraseLength(a.passIn) < a.passphraseMin || a.inPhase === "looking"} onclick={a.lookInside}>
+                {a.inPhase === "looking" ? "looking…" : "look inside"}</button>
             </div>
           </div>
-          {#if challengeOpen && retryIntent === "archive_import"}{@render challenge()}{/if}
-        {:else if preview && inPhase !== "bringing"}
+          {#if a.challengeOpen && a.retryIntent === "archive_import"}{@render challenge()}{/if}
+        {:else if a.preview && a.inPhase !== "bringing"}
           <div class="inside">
             <ul class="man" aria-label="What the file holds">
-              <li class="head"><b>{preview.householdName}</b></li>
-              <li><b>{preview.items}</b>{preview.items === 1 ? "entry" : "entries"}</li>
-              <li><b>{preview.sections}</b>{preview.sections === 1 ? "section" : "sections"}</li>
+              <li class="head"><b>{a.preview.householdName}</b></li>
+              <li><b>{a.preview.items}</b>{a.preview.items === 1 ? "entry" : "entries"}</li>
+              <li><b>{a.preview.sections}</b>{a.preview.sections === 1 ? "section" : "sections"}</li>
               <li><span class="lab">documents</span>
-                <small class:warm={preview.documentsExcluded}>{preview.documentsExcluded ? `${preview.documents} · stay out for now` : preview.documents}</small></li>
+                <small class:warm={a.preview.documentsExcluded}>{a.preview.documentsExcluded ? `${a.preview.documents} · stay out for now` : a.preview.documents}</small></li>
             </ul>
-            {#if preview.conflicts.length}
+            {#if a.preview.conflicts.length}
               <ul class="dup" aria-label="Entries already here">
-                {#each preview.conflicts as clash (clash.id)}
+                {#each a.preview.conflicts as clash (clash.id)}
                   <li>{clash.title}<span>already here · stays out</span></li>
                 {/each}
               </ul>
             {/if}
-            {#if bringCount > 0}
+            {#if a.bringCount > 0}
               <div class="act">
                 <button class="ghost" class:armed={armed === "arch-in"}
-                        onclick={(event) => twoTap("arch-in", bringInNow, event.currentTarget)}>
+                        onclick={(event) => twoTap("arch-in", a.bringIn, event.currentTarget)}>
                   {armed === "arch-in"
-                    ? `tap again to bring in ${plural(bringCount, "entry", "entries")}`
-                    : `bring in ${plural(bringCount, "entry", "entries")}`}</button>
+                    ? `tap again to bring in ${plural(a.bringCount, "entry", "entries")}`
+                    : `bring in ${plural(a.bringCount, "entry", "entries")}`}</button>
               </div>
               <p class="moment warn">this can’t be undone as one act — each entry would have to go separately</p>
             {:else}
               <p class="note top">everything in this archive is already here</p>
             {/if}
-            <div class="act"><button class="ghost" onclick={startOver}>choose another file</button></div>
+            <div class="act"><button class="ghost" onclick={a.startOver}>choose another file</button></div>
           </div>
-          {#if challengeOpen && retryIntent === "archive_import"}{@render challenge()}{/if}
-        {:else if inPhase === "bringing"}
-          <p class="moment" role="status">bringing it in · {plural(bringCount, "entry", "entries")}</p>
-          {#if challengeOpen}{@render challenge()}{/if}
+          {#if a.challengeOpen && a.retryIntent === "archive_import"}{@render challenge()}{/if}
+        {:else if a.inPhase === "bringing"}
+          <p class="moment" role="status">bringing it in · {plural(a.bringCount, "entry", "entries")}</p>
+          {#if a.challengeOpen}{@render challenge()}{/if}
         {/if}
-        {#if inProblem}<p class="refuse">{inProblem}</p>{/if}
+        {#if a.inProblem}<p class="refuse">{a.inProblem}</p>{/if}
       {/if}
     </div>
   </div>
