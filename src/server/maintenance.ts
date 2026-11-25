@@ -720,6 +720,54 @@ export async function endMaintenanceFromOperatorShell(): Promise<{
 }
 
 /**
+ * Opens a maintenance window from the host (#1387), the counterpart of
+ * `endMaintenanceFromOperatorShell` and ADR-0015 decision 2's emergency path.
+ *
+ * Same rules as `openMaintenanceWindow` (a 1-500 character body), but with no
+ * actor and no version token: the singleton is read under its own lock. The
+ * audit row records `origin: operator_shell`. Idempotent: when maintenance is
+ * already active nothing changes and no audit row is written.
+ */
+export async function startMaintenanceFromOperatorShell(
+  params: { body: string; expectedEndAt: Date | null },
+): Promise<{ changed: boolean }> {
+  const body = requireMaintenanceBody(params.body);
+  return getDb().transaction(async (transaction) => {
+    const singleton = await lockSingleton(transaction);
+    if (singleton.active || (await readOpenWindow(transaction))) {
+      return { changed: false };
+    }
+    const now = new Date();
+    const windowId = randomUUID();
+    await transaction.insert(maintenanceWindows).values({
+      id: windowId,
+      status: "open",
+      startedAt: now,
+      expectedEndAt: params.expectedEndAt,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await appendUpdate(transaction, { windowId, kind: "started", body, publishedAt: now });
+    await bumpSingleton(transaction, singleton.version, {
+      active: true,
+      currentWindowId: windowId,
+      expectedEndAt: params.expectedEndAt,
+    }, now);
+    await auditWindow(transaction, {
+      actorUserId: null,
+      windowId,
+      action: "maintenance_window_opened",
+      changes: {
+        body,
+        expectedEndAt: params.expectedEndAt?.toISOString() ?? null,
+        origin: "operator_shell",
+      },
+    });
+    return { changed: true };
+  });
+}
+
+/**
  * Schedules a future window with its opening text.
  *
  * There is no cap. The retired 12-notice bound and its "which message wins"

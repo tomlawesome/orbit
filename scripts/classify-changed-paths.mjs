@@ -105,7 +105,7 @@ const launcherCompatPatterns = [
   /^docker-compose\.scanner-off\.yml$/u,
   /^\.env-orbit\.example$/u,
   /^config\/tika-config\.json$/u,
-  /^scripts\/(?:configure|installer-ui|backup|restore|repair|export-recovery-bundle|import-recovery-bundle|end-maintenance|update)\.sh$/u,
+  /^scripts\/(?:configure|installer-ui|backup|restore|repair|export-recovery-bundle|import-recovery-bundle|end-maintenance|start-maintenance|update)\.sh$/u,
   /^launcher\/pin\.json$/u,
   /^scripts\/ci\/build-launcher\.sh$/u,
   /^scripts\/ci\/checkout-launcher-source\.sh$/u,
