@@ -138,6 +138,10 @@ export interface Journey {
   warm: (how?: { prove?: boolean }) => Promise<unknown>;
   warmDocs: (how?: { prove?: boolean }) => Promise<unknown>;
   compiled: () => Promise<unknown>;
+  /** whether the flight is drawn in a worker that came up, settled at the first need */
+  aside: () => Promise<boolean>;
+  /** the verdict on the flight's world */
+  verdict: () => unknown;
 }
 
 export interface Door {
@@ -218,6 +222,46 @@ export const compiledWithin: (
   every?: number,
   stop?: () => boolean,
 ) => Promise<boolean>;
+/** a picture fetched once and decoded as an ImageBitmap (an image loader, createImageBitmap or the page's decoder, by thread) */
+export const fetchBitmap: (url: string, options?: ImageBitmapOptions) => Promise<ImageBitmap>;
+/** a blob this thread has, decoded as fetchBitmap does (a host answering a worker's ask) */
+export const decodeBlob: (blob: Blob, options?: ImageBitmapOptions) => Promise<ImageBitmap>;
+/** something moves on the page's thread; returns its release, safe to call twice */
+export const moving: () => () => void;
+/** how the chores queue is paced: "page" (the default) or "none" (run unpaced, as the flight's worker does) */
+export const pace: (how: "page" | "none") => void;
+/** a worker's way to the page's decoder: `decode` posts a blob up as an ask, `heard` is given each `decoded` message */
+export const askPage: (post: (message: object) => void) => {
+  decode: (blob: Blob, options?: ImageBitmapOptions) => Promise<ImageBitmap>;
+  heard: (m: { id: number; bitmap?: ImageBitmap }) => void;
+};
+/** what answers for the page on this thread, given once before anything is drawn */
+export const setPage: (over: Record<string, unknown>) => void;
+/** the canvas with its getContext answering once per kind, so a second ask gets the first context */
+export const askedOnce: <C extends { getContext: (...a: never[]) => unknown }>(canvas: C) => C;
+/** where an exception was thrown: the first lines of its stack without the line that repeats its message ("" where none) */
+export const stoppedAt: (e: unknown) => string;
+/** the host's word that its first work is done, given once for the life of the page (or worker) */
+export const statusGo: () => void;
+/** another thread's busy ledger, as it said it (a bad number is 0) */
+export const busyHeard: (source: string, b: { n?: number; gen?: number } | null | undefined) => void;
+/** a thread gone: nothing of it is under way any more */
+export const busyGone: (source: string) => void;
+/** hears a peer and tells everyone else's busy to it: posted as it changes, never its own back; gone() drops what it said */
+export const busyPeer: (
+  source: string,
+  post: (m: { type: "busy"; n: number; gen: number }) => void,
+) => { heard: (m: { n?: number; gen?: number }) => void; gone: () => void };
+/** a WebGL context watched (once, however often asked): its compiles and uploads counted as busy; returns what it was given, null and undefined pass through */
+export const watch: <G extends WebGLRenderingContext | WebGL2RenderingContext | null | undefined>(gl: G) => G;
+/** a week, in milliseconds: how long a remembered verdict and the probe's are kept */
+export const WEEK: number;
+/** the verdict this device was given within the week, or null */
+export const rememberedFit: () => { t: number; fit: boolean; ms: number } | null;
+/** whether the flight is drawn in a worker */
+export const drawnAside: () => boolean;
+/** whether the pictures are decoded by the browser's image loader */
+export const decodeAside: () => boolean;
 export const uploadBanded: (...args: unknown[]) => unknown;
 
 export const probe: (...args: unknown[]) => Promise<{ ok: boolean }>;

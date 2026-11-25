@@ -133,8 +133,14 @@ beforeEach(() => {
   }
 });
 
+/*
+ * #1943 A-R4 (ruling note 68569) reverses item 6: a blocked resolver answer
+ * reflects the network, not the push service (RFC 8030 section 7.3), so the
+ * approval notice's revoked list leaves it out and it counts as transient
+ * under the existing bounded retry. Only a 404/410 (or 401/403) revokes.
+ */
 describe("#1929 part 2: a blocked push address in the approval notice", () => {
-  it("item 6: revokes only the blocked subscription, delivers the next one, marks sent and schedules no retry", async () => {
+  it("item 6 (flipped by #1943 A-R4): revokes nothing, delivers the next subscription and marks sent", async () => {
     const p = providers();
     p.sendPush.mockRejectedValueOnce(new BlockedPushEndpointError());
     const { db, ops } = notice({ row: { userEmailEnabled: false }, subs: [subA, subB] });
@@ -142,29 +148,32 @@ describe("#1929 part 2: a blocked push address in the approval notice", () => {
 
     expect(p.sendPush).toHaveBeenCalledTimes(2);
     expect((p.sendPush.mock.calls[1]![0] as { target: { endpoint: string } }).target.endpoint).toBe(subB.endpoint);
-
-    const revoked = revocations(ops);
-    expect(revoked).toHaveLength(1);
-    expect(revoked[0]!.args.set![0]).toEqual({ revokedAt: NOW });
-    const where = render(revoked[0]!.args.where![0]);
-    expect(where.params).toContain(subA.id);
-    expect(where.params).not.toContain(subB.id);
-    expect(where.sql.toLowerCase()).toContain("is null");
+    expect(revocations(ops)).toHaveLength(0);
 
     const recorded = noticeUpdates(ops)[1]!;
     expect(recorded).toMatchObject({ push: "sent", pushAttempts: 0, nextAttemptAt: null });
-    expect(JSON.stringify(recorded)).not.toMatch(/push_unavailable|retry/u);
   });
 
-  it("item 6: a blocked address is not a transient failure when it is the only subscription", async () => {
+  it("item 6 (flipped by #1943 A-R4): a blocked address on the only subscription is a transient failure: no revocation, a retry with pushAttempts + 1", async () => {
     const p = providers();
     p.sendPush.mockRejectedValue(new BlockedPushEndpointError());
     const { db, ops } = notice({ row: { userEmailEnabled: false }, subs: [subA] });
     await deliverApprovalNotices(db, config, NOW, p as never, retryDelay);
-    expect(revocations(ops)).toHaveLength(1);
+    expect(revocations(ops)).toHaveLength(0);
     const recorded = noticeUpdates(ops)[1]!;
-    expect(recorded.push).not.toBe("pending");
-    expect(recorded.pushAttempts).toBe(0);
+    expect(recorded.push).toBe("pending");
+    expect(recorded.pushAttempts).toBe(1);
+    expect(recorded.nextAttemptAt).not.toBeNull();
+  });
+
+  it("#1943 A-R4: the push service's 410 still revokes the subscription", async () => {
+    const p = providers();
+    p.sendPush.mockRejectedValue(Object.assign(new Error("push subscription gone"), { statusCode: 410 }));
+    const { db, ops } = notice({ row: { userEmailEnabled: false }, subs: [subA] });
+    await deliverApprovalNotices(db, config, NOW, p as never, retryDelay);
+    const revoked = revocations(ops);
+    expect(revoked).toHaveLength(1);
+    expect(render(revoked[0]!.args.where![0]).params).toContain(subA.id);
   });
 
   it("item 7: logs one warn line with the subscription id and push_endpoint_blocked, never the host or address", async () => {
