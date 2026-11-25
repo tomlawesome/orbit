@@ -33,9 +33,14 @@
  *            <report dir>/jscpd.json. argv names the targets src, web/src, scripts, the formats
  *            typescript/javascript/svelte, and ignores for tests, drizzle and tmp.
  *    docker: scan-knip.sh calls `docker` found on PATH (no absolute path). The container is made by
- *            `docker run` or `docker create` (the hardening flags go on that call) and the report
- *            leaves by `docker cp <container>:<path> <host path>`. A non-zero knip exit with a valid
- *            report is "findings" (scan exits 0); no valid report copied out means scan exits non-zero.
+ *            `docker run` or `docker create` (the hardening flags go on that call). The report leaves
+ *            on STDOUT, never by `docker cp` (which would need an uncapped volume): knip writes its
+ *            JSON to stdout and scan-knip.sh reads it from `docker run` (no -d), `docker start
+ *            --attach`, or `docker logs`, with a size cap, and writes <report dir>/knip.json.
+ *            The fake refuses `docker cp` out of a container (copying in is allowed). A non-zero knip exit with a valid JSON report is
+ *            "findings" (scan exits 0); no valid report on stdout means scan exits non-zero.
+ *            Writable space is a --tmpfs (or --mount type=tmpfs) with a size cap; no -v/--volume
+ *            and no --mount type=volume.
  *
  *  Files: tools/knip/package.json + a lockfile (pnpm-lock.yaml or package-lock.json) with integrity
  *  hashes, outside the pnpm workspace; knip.json at the repo root; renovate.json ignorePaths names
@@ -243,15 +248,21 @@ function knipWorld({ dockerExit = 0, report = true, ensureOk = true } = {}) {
   executable(
     join(bin, "docker"),
     `node -e 'require("fs").appendFileSync(process.env.FAKE_DOCKER_LOG, JSON.stringify(process.argv.slice(1)) + "\\n")' -- "$@"
+report() { [[ "$FAKE_DOCKER_REPORT" == 1 ]] && printf '%s' '${KNIP_REPORT}'; }
+detached=0
+for a in "$@"; do case "$a" in -d|--detach) detached=1 ;; esac; done
 case "$1" in
   cp)
-    [[ "$FAKE_DOCKER_REPORT" == 1 ]] || { echo "no such file" >&2; exit 1; }
-    dest="\${@: -1}"
-    if [[ -d "$dest" ]]; then dest="$dest/knip.json"; fi
-    printf '%s' '${KNIP_REPORT}' > "$dest" ;;
+    # Copying IN (destination is container:path) is fine; copying OUT is refused.
+    case "\${@: -1}" in *:*) exit 0 ;; esac
+    echo "docker cp out is not available: the report must come out on stdout" >&2; exit 1 ;;
   create) echo fakecontainer ;;
+  start) report; exit "\${FAKE_DOCKER_RUN_EXIT:-0}" ;;
+  logs) report ;;
   wait) echo "\${FAKE_DOCKER_RUN_EXIT:-0}" ;;
-  run) echo fakecontainer; exit "\${FAKE_DOCKER_RUN_EXIT:-0}" ;;
+  run)
+    if [[ "$detached" == 1 ]]; then echo fakecontainer; exit 0; fi
+    report; exit "\${FAKE_DOCKER_RUN_EXIT:-0}" ;;
   *) exit 0 ;;
 esac`,
   );
@@ -283,6 +294,7 @@ describe("scan-knip.sh", () => {
     const r = run("scripts/ci/scan-knip.sh", w.env(), "scan-knip");
     expect(r.status, r.stderr).toBe(0);
     expect(JSON.parse(readFileSync(join(w.reports, "knip.json"), "utf8")).files).toEqual(["src/unused.ts"]);
+    expect(w.calls().some((c) => c[0] === "cp" && !/:/.test(c[c.length - 1]))).toBe(false);
   });
 
   it("exits 0 and writes knip.json when knip finds nothing", () => {
@@ -299,7 +311,7 @@ describe("scan-knip.sh", () => {
     expect(w.calls().filter((c) => ["run", "create"].includes(c[0]))).toEqual([]);
   });
 
-  it("exits non-zero when the container fails and no report comes out", () => {
+  it("exits non-zero when the container fails and no report is on stdout", () => {
     const w = knipWorld({ dockerExit: 125, report: false });
     const r = run("scripts/ci/scan-knip.sh", w.env(), "scan-knip");
     expect(r.status).not.toBe(0);
@@ -336,6 +348,26 @@ describe("scan-knip.sh", () => {
       expect(user).toBeTruthy();
       expect(user).not.toMatch(/^(0|root)(:|$)/);
       expect(launch.some((a) => a === "--tmpfs" || a.startsWith("--tmpfs="))).toBe(true);
+    });
+    it("has only capped tmpfs writable space and no volumes", () => {
+      expect(launch).toBeDefined();
+      const tmpfs = [];
+      const mounts = [];
+      launch.forEach((a, i) => {
+        if (a === "--tmpfs") tmpfs.push(launch[i + 1]);
+        else if (a.startsWith("--tmpfs=")) tmpfs.push(a.slice(8));
+        else if (a === "--mount") mounts.push(launch[i + 1]);
+        else if (a.startsWith("--mount=")) mounts.push(a.slice(8));
+      });
+      expect(tmpfs.length + mounts.length).toBeGreaterThan(0);
+      for (const t of tmpfs) expect(t, t).toMatch(/(^|[:,])size=\d+[kKmMgG]?\b/);
+      for (const m of mounts) {
+        expect(m, m).toMatch(/type=tmpfs/);
+        expect(m, m).toMatch(/(tmpfs-size|size)=\d+/);
+      }
+      expect(launch.some((a) => a === "-v" || a === "--volume" || a.startsWith("--volume=") || /^-v./.test(a))).toBe(false);
+      expect(launch.some((a) => a === "--volumes-from" || a.startsWith("--volumes-from="))).toBe(false);
+      expect(launch.some((a) => /type=(volume|bind)/.test(a))).toBe(false);
     });
     it("is not privileged and has no docker socket", () => {
       expect(launch).toBeDefined();
