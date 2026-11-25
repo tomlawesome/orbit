@@ -238,7 +238,7 @@ export const askPage: (post: (message: object) => void) => {
 /** what answers for the page on this thread, given once before anything is drawn */
 export const setPage: (over: Record<string, unknown>) => void;
 /** the canvas with its getContext answering once per kind, so a second ask gets the first context */
-export const askedOnce: <C extends { getContext: (...a: any[]) => any }>(canvas: C) => C;
+export const askedOnce: <C extends { getContext: (...a: never[]) => unknown }>(canvas: C) => C;
 /** where an exception was thrown: the first lines of its stack without the line that repeats its message ("" where none) */
 export const stoppedAt: (e: unknown) => string;
 /** the host's word that its first work is done, given once for the life of the page (or worker) */
