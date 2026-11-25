@@ -93,6 +93,7 @@ cid="$(docker create \
   --security-opt no-new-privileges \
   --user 1000:1000 \
   --pids-limit 1024 \
+  --log-driver none \
   --tmpfs /tmp:rw,nosuid,nodev,size=64m \
   --tmpfs /home/node:rw,nosuid,nodev,size=64m,uid=1000,gid=1000 \
   --tmpfs /work/web/.svelte-kit:rw,nosuid,nodev,size=64m,uid=1000,gid=1000 \
@@ -112,14 +113,25 @@ cid="$(docker create \
 # The report is read with a cap: one byte over it means a runaway or hostile
 # stream, which fails the scan rather than filling the job's disk.
 readonly report_cap=$((8 * 1024 * 1024))
+# --log-driver none keeps the daemon from storing that stream a second time.
 docker start --attach "$cid" | head -c "$((report_cap + 1))" > "${work}/knip.json" || :
-knip_rc="$(docker wait "$cid" 2> /dev/null || echo '?')"
-elapsed=$(($(date +%s) - start))
 
+# Once the read ends, never wait without a limit: over the cap the container
+# is killed at once; otherwise its stdout has closed, so knip has finished or
+# is about to, and a container still running after the grace period is
+# killed. A kill of an already-exited container fails harmlessly. The EXIT
+# trap removes the container either way.
+stop_container() { docker kill "$cid" > /dev/null 2>&1 || :; }
 if (($(wc -c < "${work}/knip.json") > report_cap)); then
-  printf 'scan-knip: knip report over the %s-byte cap; failing.\n' "$report_cap" >&2
+  stop_container
+  printf 'scan-knip: knip report over the %s-byte cap; container killed; failing.\n' "$report_cap" >&2
   exit 1
 fi
+if ! knip_rc="$(timeout 20 docker wait "$cid" 2> /dev/null)" || [[ -z "$knip_rc" ]]; then
+  stop_container
+  knip_rc='?'
+fi
+elapsed=$(($(date +%s) - start))
 if ! node -e '
 const r = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
 if (!r || !(Array.isArray(r.issues) || Array.isArray(r.files))) process.exit(1);
