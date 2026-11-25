@@ -77,6 +77,8 @@ export const EXPECTED_TABLE_COLUMNS: Record<string, string[]> = {
   notification_deliveries: ["id", "household_id", "event_id", "user_id", "channel", "scheduled_for", "status", "attempts", "locked_at", "lease_token", "last_error", "sent_at", "created_at", "updated_at"],
   notification_states: ["user_id", "household_id", "notification_id", "read_at", "dismissed_at", "updated_at"],
   portable_archives: ["id", "household_id", "requested_by_user_id", "storage_key", "content_sha256", "size_bytes", "includes_documents", "expires_at", "downloaded_at", "purged_at", "created_at"],
+  // The household export as a leased background job (#1774, 0024).
+  portable_archive_exports: ["id", "household_id", "requested_by_user_id", "include_documents", "status", "attempts", "next_attempt_at", "locked_at", "lease_expires_at", "lease_token", "last_error", "failure_code", "failure_message", "bytes_total", "bytes_done", "salt", "key_wrapped", "key_id", "archive_id", "completed_at", "created_at", "updated_at"],
   portable_archive_imports: ["id", "household_id", "actor_user_id", "started_at", "finished_at", "outcome", "created_section_ids", "created_item_ids", "lease_renewed_at"],
   push_subscriptions: ["id", "user_id", "endpoint", "p256dh", "auth", "user_agent", "expires_at", "revoked_at", "created_at"],
   reminder_rules: ["id", "item_id", "days_before", "email_enabled", "push_enabled"],
@@ -201,6 +203,7 @@ export const EXPECTED_INDEXES: Record<string, ExpectedIndex> = {
   notification_state_household_idx: { table: "notification_states", columns: ["household_id", "user_id"], unique: false },
   portable_archive_expiry_idx: { table: "portable_archives", columns: ["expires_at"], unique: false },
   portable_archive_household_created_idx: { table: "portable_archives", columns: ["household_id", "created_at"], unique: false },
+  portable_archive_exports_one_live: { table: "portable_archive_exports", columns: ["household_id"], unique: true },
   portable_archive_import_household_idx: { table: "portable_archive_imports", columns: ["household_id", "finished_at"], unique: false },
   reminder_item_offset: { table: "reminder_rules", columns: ["item_id", "days_before"], unique: true },
   section_household_position: { table: "sections", columns: ["household_id", "position"], unique: false },
