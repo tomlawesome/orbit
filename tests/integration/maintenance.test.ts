@@ -16,6 +16,7 @@ import {
   rescheduleMaintenanceWindow,
   reviseMaintenanceExpectedEnd,
   scheduleMaintenanceWindow,
+  startMaintenanceFromOperatorShell,
   type MaintenanceState,
 } from "@/server/maintenance";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
@@ -959,5 +960,52 @@ describe("a due window arriving during an open one is absorbed (#585)", () => {
     expect(after.effectivelyActive).toBe(false);
 
     await fixture.cleanup();
+  });
+});
+
+/* #1387: the operator-shell start, the counterpart of the emergency end
+   (ADR-0015 decision 2). No actor, no version token; the audit row records
+   origin operator_shell. startMaintenanceFromOperatorShell is the assumed name,
+   mirroring endMaintenanceFromOperatorShell; it resolves to { changed }. */
+describe("starting maintenance from the operator shell (#1387)", () => {
+  it("opens a window with a null actor and origin operator_shell", async () => {
+    const result = await startMaintenanceFromOperatorShell({ body: "Back soon, upgrading.", expectedEndAt: null });
+    expect(result.changed).toBe(true);
+
+    const state = await readMaintenanceState();
+    expect(state.active).toBe(true);
+    expect(state.effectivelyActive).toBe(true);
+    expect(state.version).toBe(2);
+    expect(timeline(state)).toEqual([["started", "Back soon, upgrading."]]);
+    expect(state.openWindow?.expectedEndAt ?? null).toBeNull();
+
+    const rows = await getDb().select().from(auditLog).where(eq(auditLog.entityType, "maintenance_window"));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].actorUserId).toBeNull();
+    expect(rows[0].changes).toMatchObject({ origin: "operator_shell" });
+  });
+
+  it("honours until as the window's expected end", async () => {
+    const until = new Date(Date.now() + 3_600_000);
+    await startMaintenanceFromOperatorShell({ body: "Short window.", expectedEndAt: until });
+
+    const state = await readMaintenanceState();
+    expect(new Date(state.openWindow!.expectedEndAt!).getTime()).toBe(until.getTime());
+    await expectDenormalisedEndConsistent();
+  });
+
+  it("is idempotent when maintenance is already active: nothing changes, no audit row", async () => {
+    const first = await startMaintenanceFromOperatorShell({ body: "First notice.", expectedEndAt: null });
+    expect(first.changed).toBe(true);
+    const before = await readMaintenanceState();
+    const auditBefore = await getDb().select().from(auditLog).where(eq(auditLog.entityType, "maintenance_window"));
+
+    const second = await startMaintenanceFromOperatorShell({ body: "Second notice.", expectedEndAt: new Date(Date.now() + 60_000) });
+    expect(second.changed).toBe(false);
+
+    const after = await readMaintenanceState();
+    expect(after.version).toBe(before.version);
+    expect(timeline(after)).toEqual([["started", "First notice."]]);
+    expect(await getDb().select().from(auditLog).where(eq(auditLog.entityType, "maintenance_window"))).toHaveLength(auditBefore.length);
   });
 });

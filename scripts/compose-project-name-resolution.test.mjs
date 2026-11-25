@@ -56,7 +56,7 @@ import { failOnProcessDeadline, processGuard } from "./process-budget.mjs";
 // text, and join the pinned set.
 const OPERATOR_SCRIPTS = ["backup.sh", "restore.sh", "export-recovery-bundle.sh", "import-recovery-bundle.sh"];
 // #1842: install.sh's update readiness check names the project with the same text.
-const SCRIPTS = ["end-maintenance.sh", "repair.sh", "install.sh", ...OPERATOR_SCRIPTS];
+const SCRIPTS = ["end-maintenance.sh", "start-maintenance.sh", "repair.sh", "install.sh", ...OPERATOR_SCRIPTS];
 
 function extractFunction(source, name) {
   const match = source.match(new RegExp(`^${name}\\(\\) \\{\\n[\\s\\S]*?\\n\\}\\n`, "mu"));
@@ -230,6 +230,58 @@ describe("the operator scripts carry byte-identical shared functions (#1345)", (
   it("compose() names the project, so the caller's COMPOSE_PROJECT_NAME cannot pick another", () => {
     for (const script of OPERATOR_SCRIPTS) {
       assert.match(extractFunction(sourceOf(script), "compose"), /--project-name/u, `${script} runs compose without --project-name`);
+    }
+  });
+});
+
+// #1387: start-maintenance.sh has end-maintenance.sh's shape.
+describe("start-maintenance.sh (#1387)", () => {
+  function runStart(args) {
+    const dir = makeMinimalDeployment("start-maintenance.sh");
+    const argvLogPath = join(dir, "docker-argv.log");
+    const binDir = makeFakeDockerBin(argvLogPath);
+    const result = failOnProcessDeadline(
+      spawnSync("bash", [join(dir, "scripts", "start-maintenance.sh"), ...args], {
+        cwd: dir,
+        encoding: "utf8",
+        env: { PATH: `${binDir}:${process.env.PATH}`, HOME: process.env.HOME ?? tmpdir() },
+        ...processGuard(),
+      }),
+      { label: "run start-maintenance.sh" },
+    );
+    const argv = (() => {
+      try { return readFileSync(argvLogPath, "utf8").split("\n").filter((line) => line.length > 0); } catch { return []; }
+    })();
+    return { result, argv };
+  }
+
+  it("resolves the project from docker-compose.yml's name: and runs the one-off start-maintenance", () => {
+    const { result, argv } = runStart([]);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(argv[argv.indexOf("--project-name") + 1], "orbit");
+    const tail = argv.slice(argv.indexOf("run"));
+    assert.deepEqual(tail, ["run", "--rm", "--no-deps", "-T", "orbit-app", "node", "/opt/orbit/cli/orbit.js", "start-maintenance"]);
+  });
+
+  it("passes --notice and --until through unchanged, as separate arguments", () => {
+    const { result, argv } = runStart(["--notice", "Back at noon; thanks", "--until", "2099-01-01T12:00:00Z"]);
+    assert.equal(result.status, 0, result.stderr);
+    const tail = argv.slice(argv.indexOf("start-maintenance"));
+    assert.deepEqual(tail, ["start-maintenance", "--notice", "Back at noon; thanks", "--until", "2099-01-01T12:00:00Z"]);
+  });
+
+  it("exits 2 on an unknown argument, without running docker", () => {
+    const { result, argv } = runStart(["--bogus"]);
+    assert.equal(result.status, 2);
+    assert.match(result.stderr, /Usage/);
+    assert.deepEqual(argv, []);
+  });
+
+  it("exits 2 when --notice or --until has no value", () => {
+    for (const flag of ["--notice", "--until"]) {
+      const { result, argv } = runStart([flag]);
+      assert.equal(result.status, 2, flag);
+      assert.deepEqual(argv, [], flag);
     }
   });
 });

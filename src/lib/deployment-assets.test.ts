@@ -85,6 +85,11 @@ describe("the deployment asset list (guarantee #45)", () => {
     expect(DEPLOYMENT_ASSETS).toContain("scripts/end-maintenance.sh");
   });
 
+  // #1387: the launcher and administrators start maintenance from the host.
+  it("includes scripts/start-maintenance.sh, the host-side start counterpart (#1387)", () => {
+    expect(DEPLOYMENT_ASSETS).toContain("scripts/start-maintenance.sh");
+  });
+
   // The document-key rotation overlay is run from the deployment directory,
   // so a deployment that lacks it cannot finish or abort a rotation (#1316).
   it("includes docker-compose.kek-rotation.yml, the document-key rotation overlay", () => {
