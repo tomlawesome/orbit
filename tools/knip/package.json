@@ -1,0 +1,10 @@
+{
+  "name": "orbit-knip-tool",
+  "version": "0.0.0",
+  "private": true,
+  "description": "knip, pinned for the report-only knip_scan CI job (#1596). Outside the pnpm workspace and ignored by Renovate: upgrade by hand, a version at least 3 days old, with its diff read first. See scripts/ci/ensure-knip.sh.",
+  "license": "AGPL-3.0-or-later",
+  "dependencies": {
+    "knip": "6.47.0"
+  }
+}
