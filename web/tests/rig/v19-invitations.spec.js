@@ -1,7 +1,6 @@
 import { expect, test } from "@playwright/test";
 
 import { bodyClassAdds, bodyClassSeen, witnessBodyClasses } from "../../../tests/e2e/support/arrival";
-import { SETTLE } from "../../../tests/e2e/support/settle";
 import { door } from "./a11y-support.js";
 
 /*
@@ -43,7 +42,7 @@ test("an invited reader's arrival never draws the chooser: the sky moves to the 
     : route.fallback());
 
   /* THE ONE CLIMB, on `/` (#1263). */
-  await expect.poll(() => bodyClassSeen(page, "showwarp"), { timeout: SETTLE }).toBe(true);
+  await expect.poll(() => bodyClassSeen(page, "showwarp")).toBe(true);
   await expect(page).toHaveURL(/\/$/);
 
   /* NO CHOOSER, AT ANY FRAME: not merely hidden -- absent from the DOM for the

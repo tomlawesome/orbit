@@ -19,7 +19,6 @@ import { guardedRoute } from "./workspace-writes.js";
 
 const RESTORE = "Aunt May’s Cottage";
 const DELETE = "Uncle Bob’s Allotment";
-const SETTLE = 20_000;
 
 /* Takes 54-59 s on a loaded WebKit runner (#1695), too close to the rig budget alone. */
 test.describe.configure({ timeout: RIG_TEST_MS * 2 });
@@ -77,8 +76,8 @@ test("restores a household within its window, then hard-deletes another by the t
   await expect.poll(() => lifecycle).toEqual([{ id: "hh-gone-1", action: "restore" }]);
 
   // The row returns to normal -- no longer on the clock, on either dialect.
-  if (phone) await expect(page.getByRole("button", { name: `Restore ${RESTORE}` })).toHaveCount(0, { timeout: SETTLE });
-  else await expect(page.locator(".system.doomed").filter({ hasText: RESTORE })).toHaveCount(0, { timeout: SETTLE });
+  if (phone) await expect(page.getByRole("button", { name: `Restore ${RESTORE}` })).toHaveCount(0);
+  else await expect(page.locator(".system.doomed").filter({ hasText: RESTORE })).toHaveCount(0);
 
   // ---- hard delete (the household page's own danger protocol) ----------
   if (phone) {
@@ -96,6 +95,6 @@ test("restores a household within its window, then hard-deletes another by the t
     await arm.click();
     await row.getByRole("button", { name: "tap again to delete for good" }).click();
   }
-  await expect(page.getByText(`deleted · ${DELETE} is gone for good · its members keep their accounts`)).toBeVisible({ timeout: SETTLE });
+  await expect(page.getByText(`deleted · ${DELETE} is gone for good · its members keep their accounts`)).toBeVisible();
   expect(lifecycle[1]).toEqual({ id: "hh-gone-2", action: "hard_delete", confirmation: DELETE });
 });

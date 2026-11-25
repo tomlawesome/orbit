@@ -51,7 +51,6 @@ import { completeLikeTheEngine, guardedRoute, ownWorkspace, snoozeLikeTheEngine,
 /* Reduced motion: the preview's 900ms focus beat is instant, and nothing
    breathes under Playwright's actionability wait. The assertions hold in
    either mode. */
-test.use({ reducedMotion: "reduce" });
 
 /* #1196, #1235: the tests that hold, abort or refuse a request do it with
    `page.route`, and on WebKit a request from a page Orbit's service worker
@@ -70,7 +69,6 @@ const BOILER = { id: "i-boiler", title: "Boiler service" };
 const NOTED_ITEM = MOT;
 const ARCHIVED_ITEM = { id: "i-archived", paper: "archived-proving.pdf" };
 const NOTE = "Book the early slot.";
-const SETTLE = 20_000;
 
 const onPhone = () => test.info().project.name.includes("phone");
 
@@ -168,7 +166,7 @@ async function editTheTitle(page, item) {
   await expect(page.locator("body[data-home-ready]")).toBeAttached({ timeout: RIG_EXPECT_MS });
   await page.locator(`a.item[id="${item.id}"]`).click();
   const drawer = drawerOf(page, item.id);
-  await expect(drawer).toBeVisible({ timeout: SETTLE });
+  await expect(drawer).toBeVisible();
   await expect(page).toHaveURL(new RegExp(`/home\\?item=${item.id}$`), { timeout: RIG_EXPECT_MS });
   await drawer.getByRole("button", { name: "Edit this item" }).click();
   const title = page.locator(`[id="${item.id}"]`).getByRole("textbox", { name: "title" });
@@ -208,11 +206,11 @@ test.describe("an item in another of the reader's households", () => {
 
     await openAt(page, OTHER.id);
     if (onPhone()) {
-      await expect(rowOf(page, OTHER.id)).toHaveAttribute("data-open", "", { timeout: SETTLE });
+      await expect(rowOf(page, OTHER.id)).toHaveAttribute("data-open", "");
       await expect(rowOf(page, MOT.id)).toHaveCount(0);
     } else {
       const drawer = drawerOf(page, OTHER.id);
-      await expect(drawer).toBeVisible({ timeout: SETTLE });
+      await expect(drawer).toBeVisible();
       /* the manifest is that household's now: its row, not the first's */
       await expect(page.locator(`a.item[id="${OTHER.id}"]`)).toContainText(OTHER.title);
       await expect(page.locator(`[id="${MOT.id}"]`)).toHaveCount(0);
@@ -235,7 +233,7 @@ test.describe("on the desk", () => {
   test("the dial's documents chip opens the item's drawer at its real documents", async ({ page }) => {
     await page.goto(`${APP}/home`, { waitUntil: "load" });
     const body = page.locator(`.body-link[data-body="${MOT.id}"]`);
-    await expect(body).toHaveAttribute("data-docs", "2", { timeout: SETTLE });
+    await expect(body).toHaveAttribute("data-docs", "2");
     /* The markup is drawn before home's listeners are bound (#1064): a
        synthetic mouseenter sent in that gap is heard by nobody, and there is
        no second one. Wait for the screen to be able to answer. */
@@ -246,7 +244,7 @@ test.describe("on the desk", () => {
     await chip.click();
 
     const drawer = drawerOf(page, MOT.id);
-    await expect(drawer).toBeVisible({ timeout: SETTLE });
+    await expect(drawer).toBeVisible();
     await expect(page).toHaveURL(new RegExp(`/home\\?item=${MOT.id}$`), { timeout: RIG_EXPECT_MS });
     const paper = drawer.getByRole("button", { name: `Open ${MOT.paper.displayName}` });
     await expect(paper).toBeFocused();
@@ -288,7 +286,7 @@ test.describe("on the desk", () => {
 
     const useTheChip = async () => {
       const body = page.locator(`.body-link[data-body="${MOT.id}"]`);
-      await expect(body).toHaveAttribute("data-docs", "2", { timeout: SETTLE });
+      await expect(body).toHaveAttribute("data-docs", "2");
       // The callout is fixed beside the body; a body scrolled off-screen puts it
       // off-screen too. A member scrolls to the dial before pointing at it.
       await body.scrollIntoViewIfNeeded();
@@ -313,7 +311,7 @@ test.describe("on the desk", () => {
     await openAt(page, NOTED_ITEM.id);
     const row = page.locator(`a.item[id="${MOT.id}"]`);
     const drawer = drawerOf(page, MOT.id);
-    await expect(drawer).toBeVisible({ timeout: SETTLE });
+    await expect(drawer).toBeVisible();
     /* the drawer is the item now: no way onward to the belt */
     await expect(drawer.getByRole("link", { name: "manage this item →" })).toHaveCount(0);
     /* notes above documents (owner, 2026-10-08) */
@@ -331,7 +329,7 @@ test.describe("on the desk", () => {
     await expect(card).toBeVisible({ timeout: RIG_EXPECT_MS });
     await expect(paper).toHaveAttribute("aria-current", "true");
     const pageButton = card.getByRole("button", { name: `Read ${name}` });
-    await expect(pageButton).toBeEnabled({ timeout: SETTLE });
+    await expect(pageButton).toBeEnabled();
     await expect(card.getByRole("img", { name: `Page one of ${name}` })).toBeVisible({ timeout: RIG_EXPECT_MS });
 
     /* the page opens the reader over home */
@@ -364,7 +362,7 @@ test.describe("on the desk", () => {
     await useFixtureScenes(page, "noted-item");
     await openAt(page, NOTED_ITEM.id);
     const drawer = drawerOf(page, MOT.id);
-    await expect(drawer).toBeVisible({ timeout: SETTLE });
+    await expect(drawer).toBeVisible();
     const acts = drawer.getByRole("group", { name: `Actions for ${MOT.title}` });
     await expect(acts.getByRole("button")).toHaveText(["snooze", "complete", "attach a document", "retire"]);
     await expect(drawer.getByRole("button", { name: "Edit this item" })).toBeVisible({ timeout: RIG_EXPECT_MS });
@@ -398,7 +396,7 @@ test.describe("on the desk", () => {
     const writes = await ownWorkspace(page, { "item.upsert": upsertCheckingTheVersion });
     await openAt(page, BOILER.id);
     const drawer = drawerOf(page, BOILER.id);
-    await expect(drawer).toBeVisible({ timeout: SETTLE });
+    await expect(drawer).toBeVisible();
     const pencil = drawer.getByRole("button", { name: "Edit this item" });
     await pencil.click();
     await expect(pencil).toHaveAttribute("aria-pressed", "true");
@@ -465,7 +463,7 @@ test.describe("on the desk", () => {
     test("Escape twice during a save in flight keeps the rows; a refused save reads under them", async ({ page }) => {
       await openAt(page, BOILER.id);
       const drawer = drawerOf(page, BOILER.id);
-      await expect(drawer).toBeVisible({ timeout: SETTLE });
+      await expect(drawer).toBeVisible();
       const typed = `${BOILER.title}, renamed`;
       await drawer.getByRole("button", { name: "Edit this item" }).click();
       const title = page.locator(`[id="${BOILER.id}"]`).getByRole("textbox", { name: "title" });
@@ -497,7 +495,7 @@ test.describe("on the desk", () => {
     test("Escape twice during a completion being recorded keeps the rows; a refused record reads under them", async ({ page }) => {
       await openAt(page, BOILER.id);
       const drawer = drawerOf(page, BOILER.id);
-      await expect(drawer).toBeVisible({ timeout: SETTLE });
+      await expect(drawer).toBeVisible();
       await drawer.getByRole("group", { name: `Actions for ${BOILER.title}` })
         .getByRole("button", { name: `Complete ${BOILER.title}` }).click();
       const completing = drawer.getByRole("group", { name: `Completing ${BOILER.title}` });
@@ -537,7 +535,7 @@ test.describe("on the phone", () => {
   test("a document in the drawer opens the preview as the bottom sheet", async ({ page }) => {
     await openAt(page, MOT.id);
     const row = rowOf(page, MOT.id);
-    await expect(row).toHaveAttribute("data-open", "", { timeout: SETTLE });
+    await expect(row).toHaveAttribute("data-open", "");
     /* the foot row, as the desk's */
     await expect(row.getByRole("group", { name: `Actions for ${MOT.title}` }).getByRole("button"))
       .toHaveText(["snooze", "complete", "attach a document", "retire"]);
@@ -545,11 +543,11 @@ test.describe("on the phone", () => {
 
     const name = MOT.paper.displayName;
     const paper = row.getByRole("button", { name: `Open ${name}` });
-    await expect(paper).toBeVisible({ timeout: SETTLE });
+    await expect(paper).toBeVisible();
     await paper.tap();
     const sheet = page.getByRole("dialog", { name: new RegExp(`^${name}`) });
     await expect(sheet).toBeVisible({ timeout: RIG_EXPECT_MS });
-    await expect(sheet.getByRole("button", { name: `Read ${name}` })).toBeEnabled({ timeout: SETTLE });
+    await expect(sheet.getByRole("button", { name: `Read ${name}` })).toBeEnabled();
     /* the bottom sheet: fixed to the foot of the screen */
     const box = await sheet.boundingBox();
     const height = page.viewportSize()?.height ?? 0;
@@ -584,8 +582,8 @@ test.describe("on the phone", () => {
     await useFixtureScenes(page, "archived-item");
     await openAt(page, ARCHIVED_ITEM.id);
     const row = rowOf(page, ARCHIVED_ITEM.id);
-    await expect(row).toHaveAttribute("data-open", "", { timeout: SETTLE });
-    await expect(row.getByRole("heading", { name: /^documents$/i })).toBeVisible({ timeout: SETTLE });
+    await expect(row).toHaveAttribute("data-open", "");
+    await expect(row.getByRole("heading", { name: /^documents$/i })).toBeVisible();
     await expect(row.getByRole("button", { name: `Open ${ARCHIVED_ITEM.paper}` })).toBeVisible({ timeout: RIG_EXPECT_MS });
   });
 
@@ -596,7 +594,7 @@ test.describe("on the phone", () => {
     await papersAnswered(page, BOILER.id);
     await openAt(page, BOILER.id);
     const row = rowOf(page, BOILER.id);
-    await expect(row).toHaveAttribute("data-open", "", { timeout: SETTLE });
+    await expect(row).toHaveAttribute("data-open", "");
     /* the item starts with no papers: nothing to list, no heading */
     await expect(row.getByRole("heading", { name: /^documents$/i })).toHaveCount(0);
     await expect(row.getByRole("button", { name: /^Open .*\.pdf$/ })).toHaveCount(0);
@@ -608,7 +606,7 @@ test.describe("on the phone", () => {
     });
 
     await expect(page.getByRole("status").filter({ hasText: "attached-late.pdf attached" }))
-      .toHaveText("attached-late.pdf attached", { timeout: SETTLE });
+      .toHaveText("attached-late.pdf attached");
     /* the row has stayed open throughout: no close, no reopen */
     await expect(row).toHaveAttribute("data-open", "");
     await expect(row.getByRole("heading", { name: /^documents$/i })).toBeVisible({ timeout: 10_000 });
@@ -623,7 +621,7 @@ test.describe("on the phone", () => {
     test("Escape twice during a save in flight keeps the rows; a refused save reads under them", async ({ page }) => {
       await openAt(page, BOILER.id);
       const row = rowOf(page, BOILER.id);
-      await expect(row).toHaveAttribute("data-open", "", { timeout: SETTLE });
+      await expect(row).toHaveAttribute("data-open", "");
       const typed = `${BOILER.title}, renamed`;
       await row.getByRole("button", { name: "Edit this item" }).tap();
       const title = row.getByRole("textbox", { name: "title" });
@@ -652,7 +650,7 @@ test.describe("on the phone", () => {
     test("Escape twice during a completion being recorded keeps the rows; a refused record reads under them", async ({ page }) => {
       await openAt(page, BOILER.id);
       const row = rowOf(page, BOILER.id);
-      await expect(row).toHaveAttribute("data-open", "", { timeout: SETTLE });
+      await expect(row).toHaveAttribute("data-open", "");
       await row.getByRole("group", { name: `Actions for ${BOILER.title}` })
         .getByRole("button", { name: `Complete ${BOILER.title}` }).tap();
       const completing = row.getByRole("group", { name: `Completing ${BOILER.title}` });

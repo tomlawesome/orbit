@@ -11,11 +11,10 @@ import {
   tabTo,
   uncheckedRadiosOf,
 } from "../../../tests/e2e/support/keyboard";
-import { APP, door, onPhone, rememberWrites, RIG_EXPECT_MS, RIG_TEST_MS, signedIn } from "./a11y-support.js";
+import { APP, door, onPhone, rememberWrites, RIG_EXPECT_MS, signedIn } from "./a11y-support.js";
 
 /* The rig's waits (a11y-support.js RIG_EXPECT_MS, RIG_TEST_MS): the stack's explicit long waits are gone with its sign-in, but the host is shared. */
 const expect = baseExpect.configure({ timeout: RIG_EXPECT_MS });
-test.describe.configure({ timeout: RIG_TEST_MS });
 
 /** @typedef {import("@playwright/test").Locator} Locator */
 /** @typedef {import("@playwright/test").Page} Page */
@@ -85,7 +84,6 @@ test.beforeEach(({}, testInfo) => {
  * @param {Page} page
  */
 async function arriveAtHome(page) {
-  await page.emulateMedia({ reducedMotion: "reduce" });
   await installKeyboardAudit(page);
   await signedIn("/home", "rest")(page);
   await settled(page);
@@ -162,7 +160,6 @@ async function openSettingsFromHome(page) {
  * ──────────────────────────────────────────────────────────────────────── */
 
 test("arrive: the sign-in door opens by Tab and Enter alone", async ({ page }) => {
-  await page.emulateMedia({ reducedMotion: "reduce" });
   await installKeyboardAudit(page);
   /* The hand-off goes to the provider through /api/auth/login: answer it, and
      see which address the press asked for. */
@@ -211,7 +208,6 @@ test("home: the account panel and the three drawers are light-dismiss by keyboar
  * screen goes live, or the wait was never needed.
  */
 test("home: an Enter on the avatar before home goes live still opens the account panel", async ({ page }) => {
-  await page.emulateMedia({ reducedMotion: "reduce" });
   await installKeyboardAudit(page);
   /* The read is held until the test has pressed, not for a stretch of real
      time: `release` is called right after the press. The 20 s timer is only a
@@ -334,7 +330,6 @@ test("item drawer: rescheduling, snooze and the way back work by keyboard", asyn
 });
 
 test("create: the whole form is reachable in order", async ({ page }) => {
-  await page.emulateMedia({ reducedMotion: "reduce" });
   await installKeyboardAudit(page);
   await fillCreateForm(page, "Keyboard-only proving ground (audit)");
   /* #1463: the Importance tiles are a radiogroup, one Tab stop on the pressed tile */
@@ -343,7 +338,6 @@ test("create: the whole form is reachable in order", async ({ page }) => {
 
 test("create: fillable and submittable by keyboard alone", async ({ page }) => {
   const writes = await rememberWrites(page);
-  await page.emulateMedia({ reducedMotion: "reduce" });
   await installKeyboardAudit(page);
   const name = "Keyboard-only proving ground";
   await fillCreateForm(page, name);
@@ -531,7 +525,6 @@ test("settings: the sign-in-methods challenge arms by keyboard and is reachable"
 });
 
 test("administration: the local-user controls are reachable and announced", async ({ page }) => {
-  await page.emulateMedia({ reducedMotion: "reduce" });
   await installKeyboardAudit(page);
   await signedIn("/administration", "any-dialect")(page);
   await expect(page.locator(".card").first()).toBeVisible();

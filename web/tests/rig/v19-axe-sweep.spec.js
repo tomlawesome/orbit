@@ -1,11 +1,10 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect as baseExpect, test } from "@playwright/test";
 
-import { APP, onPhone, RIG_EXPECT_MS, RIG_TEST_MS, settle, signedIn, withDecorationHidden, withoutKnownFaults } from "./a11y-support.js";
+import { APP, onPhone, RIG_EXPECT_MS, settle, signedIn, withDecorationHidden, withoutKnownFaults } from "./a11y-support.js";
 
 /* The rig's waits (a11y-support.js RIG_EXPECT_MS, RIG_TEST_MS): the stack's explicit long waits are gone with its sign-in, but the host is shared. */
 const expect = baseExpect.configure({ timeout: RIG_EXPECT_MS });
-test.describe.configure({ timeout: RIG_TEST_MS });
 
 /*
  * #496, moved to the rig (ADR-0039, #1609): a full axe sweep across every
@@ -201,9 +200,7 @@ test.describe("the signed-in v19 sweep", () => {
      up beside it (the bottom sheet on a phone), and with its rows in edit and
      the chooser up (the due date's calendar). */
   test("/home with an item's drawer open, its preview up, then its chooser up, has no automated WCAG A/AA violations", async ({ page }, testInfo) => {
-    test.setTimeout(60_000);
-    /* The preview and the chooser slide in; sweep them drawn, not mid-fade. */
-    await page.emulateMedia({ reducedMotion: "reduce" });
+    /* The preview and the chooser slide in; under the rig's reduced motion (#1964) they are drawn at once, not swept mid-fade. */
     /* The fixture's Car MOT carries two papers (fixtures/workspace.js). */
     await page.goto(`${APP}/home?item=i-mot`, { waitUntil: "load" });
     const drawer = onPhone(testInfo)

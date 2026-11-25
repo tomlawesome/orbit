@@ -16,8 +16,6 @@ import { nameTheEntry } from "./chooser-support.js";
  * engine does and asserts the form does not show it before submit.
  */
 
-test.use({ reducedMotion: "reduce" });
-
 const onPhone = () => test.info().project.name.includes("phone");
 
 test("naming the entry and picking a section shows no 'submitted data is invalid' before submit", async ({ page }) => {

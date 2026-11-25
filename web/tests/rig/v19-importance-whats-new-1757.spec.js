@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { APP, RIG_EXPECT_MS, RIG_TEST_MS } from "./a11y-support.js";
+import { APP, RIG_EXPECT_MS } from "./a11y-support.js";
 import { useFixtureScenes } from "../fidelity/pocket-states.js";
 
 /*
@@ -10,10 +10,7 @@ import { useFixtureScenes } from "../fidelity/pocket-states.js";
  * With no notice it shows at once. Same fixture as #1730 (Harlow Home, one
  * unset item). End states only. Runs under both rig projects.
  */
-test.use({ baseURL: APP, reducedMotion: "reduce" });
-test.describe.configure({ timeout: RIG_TEST_MS });
-
-const SETTLE = 30_000;
+test.use({ baseURL: APP });
 
 /* The notice GET /api/whats-new answers for a member (as fidelity/screens.spec.js). */
 const NOTICE = {
@@ -35,7 +32,7 @@ async function openHome(page, withNotice) {
     );
   }
   await page.goto(`${APP}/home`);
-  await page.locator("body[data-home-ready]").waitFor({ state: "attached", timeout: SETTLE });
+  await page.locator("body[data-home-ready]").waitFor({ state: "attached" });
 }
 
 test("no importance pill while the What's new sheet is open; back once it is closed", async ({ page }) => {

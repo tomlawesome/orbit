@@ -32,7 +32,9 @@ import { APP, onPhone, signedIn } from "./a11y-support.js";
  * the page loads, the ascent waited out, so the world is readied on the page
  * that signs out. /settings is reached plainly, as it was.
  */
-test.use({ baseURL: APP });
+/* "With the motion on": the descent is what is judged, so this file opts out
+   of the rig's reduced-motion default (#1964). */
+test.use({ baseURL: APP, reducedMotion: "no-preference" });
 
 /* Desk from 840px (home/+page.svelte DESK); below it the pocket's hatch,
    whose sign-out plays the same descent (owner, 2026-10-07, on an iPhone:

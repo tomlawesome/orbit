@@ -12,7 +12,6 @@ import { signedIn } from "./a11y-support.js";
  *
  * Reduced motion, so the arrival animation does not scale the dial mid-measure.
  */
-test.use({ reducedMotion: "reduce" });
 
 const DIAL = ".desk .dialwrap>svg";
 

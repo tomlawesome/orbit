@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { APP, onPhone, RIG_EXPECT_MS, RIG_TEST_MS, signedIn } from "./a11y-support.js";
+import { APP, onPhone, RIG_EXPECT_MS, signedIn } from "./a11y-support.js";
 import { pickImportance } from "./importance-support.js";
 import { pickKeyDate } from "./chooser-support.js";
 
@@ -23,7 +23,6 @@ import { pickKeyDate } from "./chooser-support.js";
  * fixture's own answer to a sections save is the workspace with it kept.
  */
 test.use({ baseURL: APP });
-test.describe.configure({ timeout: RIG_TEST_MS });
 
 test.beforeEach(({}, testInfo) => {
   test.skip(onPhone(testInfo), "desktop Sections card only; the pocket dialect is #849's own file");

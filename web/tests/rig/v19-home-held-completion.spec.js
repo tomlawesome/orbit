@@ -25,11 +25,9 @@ import { completeLikeTheEngine, ownWorkspace } from "./workspace-writes.js";
  * the page loads, and the engine's side of the send is this test's own answer
  * (ownWorkspace with completeLikeTheEngine; a 409 where the stash is stale).
  */
-test.use({ reducedMotion: "reduce" });
 
 const MOT = { id: "i-mot", title: "Car MOT — Volvo V60", household: "hh-harlow-1", version: 5, dueDate: "2026-08-29" };
 const STASH_KEY = "orbit:pending-completion";
-const SETTLE = 20_000;
 
 /** The completion the drawer would have stashed (commands.js completeCommand). @param {number} expectedVersion */
 function stashedCompletion(expectedVersion) {
@@ -62,7 +60,7 @@ const stashOf = (page) => page.evaluate((key) => localStorage.getItem(key), STAS
 
 /** The page has taken the stash and every send it made has been answered. @param {import("@playwright/test").Page} page */
 async function untilStashIsFinished(page) {
-  await expect.poll(() => stashOf(page), { timeout: SETTLE }).toBeNull();
+  await expect.poll(() => stashOf(page)).toBeNull();
   await page.waitForLoadState("networkidle");
 }
 
@@ -72,7 +70,7 @@ test.describe("a completion an earlier visit stashed", () => {
     await stashBeforeLoad(page, [stashedCompletion(MOT.version)]);
 
     await signedIn("/home", "rest")(page);
-    await expect.poll(async () => (await writes.itemOf(MOT.id))?.item.dueDate, { timeout: SETTLE }).not.toBe(MOT.dueDate);
+    await expect.poll(async () => (await writes.itemOf(MOT.id))?.item.dueDate).not.toBe(MOT.dueDate);
     await untilStashIsFinished(page);
 
     expect(writes.sent("item.complete")).toHaveLength(1);
@@ -94,7 +92,7 @@ test.describe("a completion an earlier visit stashed", () => {
         pocket: matchMedia("(max-width: 839.98px), (max-height: 479.98px)").matches,
       }));
       expect(matches).toEqual({ desk: dialect === "desk", pocket: dialect === "pocket" });
-      await expect.poll(async () => (await writes.itemOf(MOT.id))?.item.dueDate, { timeout: SETTLE }).not.toBe(MOT.dueDate);
+      await expect.poll(async () => (await writes.itemOf(MOT.id))?.item.dueDate).not.toBe(MOT.dueDate);
       await untilStashIsFinished(page);
 
       expect(writes.sent("item.complete")).toHaveLength(1);

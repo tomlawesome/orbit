@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { APP, RIG_EXPECT_MS, RIG_TEST_MS, onPhone, signedIn } from "./a11y-support.js";
+import { APP, RIG_EXPECT_MS, onPhone, signedIn } from "./a11y-support.js";
 import { warningHint } from "../../src/lib/data/sky-words.js";
 import { useFixtureScenes } from "../fidelity/pocket-states.js";
 
@@ -35,7 +35,6 @@ import { useFixtureScenes } from "../fidelity/pocket-states.js";
  *    `[data-row-key=<id>]` (the row's first `.trail`). Neither changes.
  */
 test.use({ baseURL: APP });
-test.describe.configure({ timeout: RIG_TEST_MS });
 
 const HINT = warningHint(14);
 
