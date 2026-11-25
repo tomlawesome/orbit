@@ -103,7 +103,7 @@
     "rig_webkit": {
       "deny": [],
       "definitionCoversPipeline": true,
-      "shards": 3
+      "shards": 4
     },
     "film_webkit": {
       "deny": [],
