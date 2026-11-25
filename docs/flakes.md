@@ -601,6 +601,7 @@ timeout on this one case rather than a global raise.
 ## src/server/documents/pdf-structure-sandbox-poppler.test.ts "page draws are pdftoppm (real pdftoppm/pdfinfo) > §1.5 line 10: the tiny-step tiling pattern is stopped by the clock (500 ms) with stop timeout ..." (:345)
 
 - 2026-11-21 · !1457 batch-b 1eb93654 · pipeline 5167 / fast (job 61981) · `expected 5194 to be less than 2000` in a 1445 s run on a loaded runner; the change touches none of it. First sighting.
+- 2026-11-25 · !1478 batch-a 767c273f · pipeline 5390 / fast (job 65086) · failed after 2193 ms on a loaded runner, three other pipelines running; the job then hit its 30-minute limit before printing the assertion. The change touches none of it.
 
 ## tests/integration/document-kept-previews.test.ts "pages drawn once and kept, encrypted (#1433 §2.6) (real pdftoppm/pdfinfo) > line 5: a view before the worker ran draws on demand ..." (:277)
 
