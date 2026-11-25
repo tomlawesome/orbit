@@ -344,7 +344,10 @@ async function releaseSend(transaction: Transaction, reservationId: string): Pro
  * last mail that actually went. The hour's count row stays (#1879), unless
  * `releaseReservation` names it because no mail was ever handed to the
  * mailer (#1915 A-F1); then it is released in this same locked transaction.
- * The staged link only while it is still this resend's, and the time only
+ * The staged link is put back to the one read under the lock before this
+ * resend staged its own (#1943 A-R3), so an earlier maybe-delivered link
+ * keeps resolving; null when there was none. The staged link only while it
+ * is still this resend's, and the time only
  * while the row still carries this resend's own stamp, so a later resend
  * that committed meanwhile is never undone. Under the same lock as the
  * stamp. A maybe-delivered send never comes here: its link and its minute
@@ -356,13 +359,14 @@ async function restoreSendTime(
   stagedDigest: string,
   stampedAt: Date,
   previousLastSentAt: Date | null,
+  previousStagedDigest: string | null,
   releaseReservation: string | null,
 ): Promise<boolean> {
   return getDb().transaction(async (transaction) => {
     await lockUser(transaction, userId);
     if (releaseReservation) await releaseSend(transaction, releaseReservation);
     await transaction.update(signInApprovals)
-      .set({ stagedTokenHash: null })
+      .set({ stagedTokenHash: previousStagedDigest })
       .where(and(eq(signInApprovals.id, approvalId), eq(signInApprovals.stagedTokenHash, stagedDigest)));
     const restored = await transaction.update(signInApprovals)
       .set({ lastSentAt: previousLastSentAt })
@@ -931,6 +935,7 @@ export async function resendSignInApproval(
     id: signInApprovals.id,
     userId: signInApprovals.userId,
     tokenHash: signInApprovals.tokenHash,
+    stagedTokenHash: signInApprovals.stagedTokenHash,
     userAgent: signInApprovals.userAgent,
     clientAddress: signInApprovals.clientAddress,
     createdAt: signInApprovals.createdAt,
@@ -1032,13 +1037,16 @@ export async function resendSignInApproval(
       ));
   } else if (!maybeDelivered) {
     /* The provider refused it or was never reached: the new link never
-       arrived and the old one was never replaced, so the staged link is
-       cleared and the send time goes back. The count row stays (#1879)
+       arrived and the old one was never replaced, so the staged link goes
+       back to the one staged before it (#1943 A-R3: an earlier
+       maybe-delivered link keeps resolving), or is cleared when there was
+       none, and the send time goes back. The count row stays (#1879)
        unless no mail was ever handed to the mailer (#1915 A-F1). Once the
        earlier time is back, the next resend runs from it (#1915 A-F2); a
        row with no earlier send may be resent at once. */
     const restored = await restoreSendTime(
-      row.userId, row.id, tokenHash, now, row.lastSentAt, handedOver ? null : reservation,
+      row.userId, row.id, tokenHash, now, row.lastSentAt, row.stagedTokenHash,
+      handedOver ? null : reservation,
     );
     if (restored) sentAt = row.lastSentAt ?? new Date(now.getTime() - APPROVAL_RESEND_INTERVAL_MS);
   }

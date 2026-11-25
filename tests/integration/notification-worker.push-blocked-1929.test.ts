@@ -73,8 +73,15 @@ beforeEach(() => {
   }
 });
 
+/*
+ * #1943 A-R4 (ruling note 68569) reverses #1929 part 2 item 6: a blocked
+ * resolver answer reflects the network, not the push service (RFC 8030
+ * section 7.3), so it is a transient failure under the existing bounded
+ * retry, never a revocation. The connection is still never made, and the one
+ * warn line stays. Only the push service's 404/410 (or 401/403) revokes.
+ */
 describe("#1929 part 2: a blocked push address in the worker's dispatch loop", () => {
-  it("items 6 and 7: revokes the blocked subscription, delivers the next, marks sent, schedules no retry, and logs without host or address", async () => {
+  it("items 6 and 7 (flipped by #1943 A-R4): keeps the blocked subscription, delivers the next, marks sent, and logs one line without host or address", async () => {
     const { fixture, eventId } = await pushFixture("push-blocked-1929");
     const userId = fixture.users.owner.id;
     const endpointA = `https://${BLOCKED_HOST}/${userId}`;
@@ -91,10 +98,11 @@ describe("#1929 part 2: a blocked push address in the worker's dispatch loop", (
     });
 
     expect(seen.sort()).toEqual([endpointA, endpointB].sort());
-    expect(await revokedAt(endpointA)).not.toBeNull();
+    expect(await revokedAt(endpointA)).toBeNull();
     expect(await revokedAt(endpointB)).toBeNull();
     const [delivery] = await getDb().select().from(notificationDeliveries).where(eq(notificationDeliveries.eventId, eventId));
-    expect(delivery).toMatchObject({ status: "sent", lastError: null });
+    expect(delivery).toMatchObject({ status: "sent" });
+    expect(delivery!.lastError).not.toBe("push_unsubscribed");
     expect(delivery!.attempts).toBeLessThanOrEqual(1);
 
     const warns = (log.warn as unknown as { mock: { calls: unknown[][] } }).mock.calls
@@ -106,6 +114,40 @@ describe("#1929 part 2: a blocked push address in the worker's dispatch loop", (
     expect(columns).not.toContain("blocked-host");
     expect(columns).not.toContain(BLOCKED_ADDRESS);
     expect(JSON.stringify(logged)).toContain(await subscriptionId(endpointA));
+  });
+
+  it("#1943 A-R4: a blocked lookup on the only subscription leaves revokedAt null and makes the delivery a retry with attempts + 1, not push_unsubscribed", async () => {
+    const { fixture, eventId } = await pushFixture("push-blocked-retry-1943");
+    const userId = fixture.users.owner.id;
+    const endpoint = `https://${BLOCKED_HOST}/${userId}`;
+    await subscribe(userId, endpoint);
+    const attemptsBefore = (await getDb().select({ attempts: notificationDeliveries.attempts })
+      .from(notificationDeliveries).where(eq(notificationDeliveries.eventId, eventId)))[0]?.attempts ?? 0;
+
+    await runNotificationCycle(workerConfig(), {
+      now: () => cycleTime,
+      providers: providersFor(() => { throw new BlockedPushEndpointError(); }),
+    });
+
+    expect(await revokedAt(endpoint)).toBeNull();
+    const [delivery] = await getDb().select().from(notificationDeliveries).where(eq(notificationDeliveries.eventId, eventId));
+    expect(delivery).toMatchObject({ status: "retry", attempts: attemptsBefore + 1 });
+    expect(delivery!.lastError).not.toBe("push_unsubscribed");
+    expect(delivery!.lastError).toBe("push_unavailable");
+  });
+
+  it("#1943 A-R4: the push service's 410 still revokes the subscription", async () => {
+    const { fixture } = await pushFixture("push-gone-1943");
+    const userId = fixture.users.owner.id;
+    const endpoint = `https://push.invalid.example/gone/${userId}`;
+    await subscribe(userId, endpoint);
+
+    await runNotificationCycle(workerConfig(), {
+      now: () => cycleTime,
+      providers: providersFor(() => { throw Object.assign(new Error("push subscription gone"), { statusCode: 410 }); }),
+    });
+
+    expect(await revokedAt(endpoint)).not.toBeNull();
   });
 
   it("item 10: an IP-literal endpoint never reaches providers.sendPush", async () => {
