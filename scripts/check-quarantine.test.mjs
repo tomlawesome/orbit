@@ -198,13 +198,13 @@ describe("check-quarantine", () => {
   });
 
   it("fails an entry with no issue ref", () => {
-    const root = fixture({ [A]: specA }, `${A} 2\n`);
-    expectFails(run(root), A);
+    const root = fixture({ [A]: specA }, `${A} 2 2099-01-01\n`);
+    expectFails(run(root), A, "needs an issue ref");
   });
 
   it("fails an entry whose issue ref is not of the form #123", () => {
-    const root = fixture({ [A]: specA }, `${A} 2 issue-1085\n`);
-    expectFails(run(root), A);
+    const root = fixture({ [A]: specA }, `${A} 2 issue-1085 2099-01-01\n`);
+    expectFails(run(root), A, "needs an issue ref", "issue-1085");
   });
 
   it("fails a non-numeric count", () => {
@@ -213,8 +213,8 @@ describe("check-quarantine", () => {
   });
 
   it("fails a missing count", () => {
-    const root = fixture({ [A]: specA }, `${A} #1085\n`);
-    expectFails(run(root), A);
+    const root = fixture({ [A]: specA }, `${A} #1085 2099-01-01\n`);
+    expectFails(run(root), A, "must be a positive whole number");
   });
 
   it("fails a zero count", () => {
