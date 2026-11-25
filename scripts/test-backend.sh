@@ -33,6 +33,19 @@ if [[ "$run_tests" == true ]]; then
   bash "$repo_dir/scripts/test-load-warning.sh"
 fi
 
+# scripts/greenmail-roots.test.mjs (#1489) reads the GreenMail sidecar image by
+# tag and never builds it, so the build happens here, before the suite, as
+# fast_docker does in CI. No reachable daemon (or ORBIT_TEST_SKIP_DOCKER set):
+# no build, and the test skips and says so. A failed build stops the run: the
+# Dockerfile is code under test. The harnesses that copy this script into a
+# scratch repository (test-backend-*.test.mjs) carry no tests/greenmail.
+if [[ "$run_tests" == true && -z "${ORBIT_TEST_SKIP_DOCKER:-}" && -f "$repo_dir/tests/greenmail/Dockerfile" ]] && docker info > /dev/null 2>&1; then
+  docker build -q -t orbit-greenmail-roots:local "$repo_dir/tests/greenmail" > /dev/null || {
+    echo "test-backend: building tests/greenmail (the GreenMail sidecar image, #1489) failed; see the docker output above." >&2
+    exit 1
+  }
+fi
+
 # The lockfile guard (#901): catches the pnpm 11 -> 12.3.4 handoff writing an
 # @pnpm/exe block back into the lockfile. Runs via `node --test`, not Vitest --
 # see vitest.config.ts's exclude entry for why.
