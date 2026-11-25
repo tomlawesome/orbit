@@ -680,3 +680,7 @@ timeout on this one case rather than a global raise.
 ## tests/unit/inbox-screens-landed-then-reread.test.mjs (whole file: beforeAll compiling the inbox page, 10 s hook limit)
 
 - 2026-11-25 · !1478 batch-a 24ea50a2 · pipeline 5427 / fast (job 65419) · `Hook timed out in 10000ms` at line 159 (the beforeAll that compiles `routes/inbox/+page.svelte`), on a runner slow enough that the same job hit its 30-minute limit on two earlier runs; the change touches nothing the inbox draws. The file passed locally on the same commit. First sighting.
+
+## scripts/repair-root-left-1897.test.mjs "repair blocked opening the FIFO" (line 247)
+
+- 2026-11-25 · 6bb43c996 (feat/1387-start-maintenance; repair.sh only gained one path in an array) · pipeline 5449 / fast 65681 · `result.hung` was true; the file passed 17/17 three times locally on the same commit and once on batch-a
