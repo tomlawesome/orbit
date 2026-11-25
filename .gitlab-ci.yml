@@ -1654,6 +1654,10 @@ fast_checks:
     - *drop_to_node
     # No cosign telemetry, and no Rekor upload except the marked public proof (#1841).
     - orbit_as_node 'node scripts/ci/check-cosign-calls.mjs'
+    # The GitHub workflows parse as GitHub parses them (#1592; owner answers
+    # 96 and 99a): GitHub's own @actions/workflow-parser, a devDependency
+    # pinned in the lockfile. Any parse or expression error fails the job.
+    - orbit_as_node 'node scripts/check-workflows.mjs'
     - orbit_as_node 'ORBIT_TEST_PHASE=checks bash scripts/test-backend.sh'
     # The render proof, run here as well as inside the image: the container
     # build is the authoritative gate but it is minutes away, and this fails in
