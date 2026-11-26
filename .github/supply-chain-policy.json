@@ -796,6 +796,61 @@
       "expiresOn": "2026-12-08",
       "trackingIssue": 1950,
       "rationale": "Upstream has not yet rebuilt ollama/ollama:0.40.18 with libudev1 255.4-1ubuntu8.19; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced. Renewed 2026-11-25 to 2026-12-08: the pinned image's tag head still carries the package (no upstream rebuild)."
+    },
+    {
+      "kind": "stale-package",
+      "image": "apache/tika:4.2.0-full",
+      "package": "libexpat1",
+      "installedVersion": "2.7.4-1ubuntu0.2",
+      "availableVersion": "2.7.4-1ubuntu0.3",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-12-02",
+      "trackingIssue": 1950,
+      "rationale": "Upstream has not yet rebuilt apache/tika:4.2.0-full with libexpat1 2.7.4-1ubuntu0.3; the pin is the newest build of the tag (checked 2026-11-25). Owner decision 114a (2026-11-25): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+    },
+    {
+      "kind": "stale-package",
+      "image": "apache/tika:4.2.0-full",
+      "package": "libspeex1",
+      "installedVersion": "1.2.1-3build1",
+      "availableVersion": "1.2.1-3ubuntu0.26.04.1",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-12-02",
+      "trackingIssue": 1950,
+      "rationale": "Upstream has not yet rebuilt apache/tika:4.2.0-full with libspeex1 1.2.1-3ubuntu0.26.04.1; the pin is the newest build of the tag (checked 2026-11-25). Owner decision 114a (2026-11-25): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+    },
+    {
+      "kind": "stale-package",
+      "image": "apache/tika:4.2.0-full",
+      "package": "libxrender1",
+      "installedVersion": "1:0.9.12-1build1",
+      "availableVersion": "1:0.9.12-1ubuntu0.26.04.1",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-12-02",
+      "trackingIssue": 1950,
+      "rationale": "Upstream has not yet rebuilt apache/tika:4.2.0-full with libxrender1 1:0.9.12-1ubuntu0.26.04.1; the pin is the newest build of the tag (checked 2026-11-25). Owner decision 114a (2026-11-25): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+    },
+    {
+      "kind": "stale-package",
+      "image": "ollama/ollama:0.40.18",
+      "package": "libexpat1",
+      "installedVersion": "2.6.1-2ubuntu0.6",
+      "availableVersion": "2.6.1-2ubuntu0.7",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-12-02",
+      "trackingIssue": 1950,
+      "rationale": "Upstream has not yet rebuilt ollama/ollama:0.40.18 with libexpat1 2.6.1-2ubuntu0.7; the pin is the newest build of the tag (checked 2026-11-25). Owner decision 114a (2026-11-25): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+    },
+    {
+      "kind": "stale-package",
+      "image": "ollama/ollama:0.40.18",
+      "package": "libelf1t64",
+      "installedVersion": "0.190-1.1ubuntu0.1",
+      "availableVersion": "0.190-1.1ubuntu0.2",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-12-02",
+      "trackingIssue": 1950,
+      "rationale": "Upstream has not yet rebuilt ollama/ollama:0.40.18 with libelf1t64 0.190-1.1ubuntu0.2; the pin is the newest build of the tag (checked 2026-11-25). Owner decision 89a (#1856), as applied in 114a (2026-11-25): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
     }
   ],
   "containerImages": [
