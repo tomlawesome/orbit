@@ -2843,18 +2843,18 @@ backup_drill:
 # pinned digest and the suite is driven directly with the environment
 # scripts/test-integration.mjs builds.
 #
-# Four shards (#1806): `vitest --shard` splits the files across four parallel
+# Five shards (#1806): `vitest --shard` splits the files across five parallel
 # jobs. Each job has its own postgres service, so its own database, migrated
 # by that job; no shard can collide with another. `needs: integration` waits
-# for all four, and each shard has its own reuse key (job-inputs.json
-# `shards`).
+# for all five, and each shard has its own reuse key (job-inputs.json
+# `shards`). At four, a shard ran 760-905 s against the 15m limit (#1971).
 integration:
   stage: acceptance
   tags: [light]
   extends: .node
-  parallel: 4
+  parallel: 5
   # One shard's budget, not a hang guard: each test fails on its own 15 s
-  # limit (vitest.config.ts). The single job reached 873 s (#1805); a quarter
+  # limit (vitest.config.ts). The single job reached 873 s (#1805); a fifth
   # of that plus install and migration leaves room to grow (#1806).
   timeout: 15m
   rules:
