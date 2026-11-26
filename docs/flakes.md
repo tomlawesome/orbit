@@ -502,6 +502,10 @@ timeout on this one case rather than a global raise.
 
 - 2026-11-26 · !1487 fix/1933-fast-shards 1415c6f7 (CI shard layout; install.sh unchanged) · pipeline 5531 / fast 2/2 (job 66647) · "expected [ 'orbit_orbit-db-data' ] to deeply equal []": a volume was still listed after the rollback; a 900 s shard on a loaded runner. Retried as job 66783. First sighting.
 
+## `fast` shards: many timeouts at once on an overloaded runner (host)
+
+- 2026-11-26 · !1498 test/1964-step1-release 1b1c9ea6 (rig config and a dev merge; no installer or document code) · pipeline 5549 / fast 1/2 (job 66944, 1292 s) and fast 2/2 (job 66945, 1636 s, against about 900 s normally) · about a dozen unrelated failures, nearly all "killed after its 30000ms deadline ... a hang or a slow runner", "Test timed out in 45000ms" or ECONNREFUSED to a test server, across install, repair and document-preview tests. !1499's pipeline 5547 ran its own fast shards at the same time. Retried as jobs 67058 and 67059. First sighting.
+
 ## tour-pocket-webkit.spec.js:685 "the pocket film in WebKit (#1174) › plays end to end at 430x932 under normal motion" — pocket-webkit
 
 - 2026-11-19 · bed6d036 (batch-b) · local run in the Playwright image, no pipeline · `locator.tap` on `#pocket-entry .pc-chip[data-imp="low"]` (line 818) retried "element was detached from the DOM" until the 600 s test timeout. 27 others passed. Rerun of the same case on unchanged code: passed (3.4m). First sighting.
