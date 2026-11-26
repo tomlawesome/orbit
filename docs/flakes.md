@@ -301,6 +301,7 @@ timeout on this one case rather than a global raise.
 ## install.backups.test.mjs:358 "a slow but healthy `compose down` (4 s) is not a timeout: the rollback completes, no cause line, all three volumes removed (guards FR2)"
 
 - 2026-10-23 · c1d9a453 (!1088, which changes no installer code) · pipeline 2932 / `fast` job 38895 · the output carried "Docker did not finish within": the fake's 4 s `compose down` overran its 6 s cap. The `fast` job took 584 s, near its limit, so the runner was loaded. Wall-clock-under-load shape (#1447). First sighting.
+- 2026-11-26 · !1498 test/1964-step1-release 6c3c402f (rig config and a dev merge; no installer code) · pipeline 5558 / fast 1/2 (job 67132, 737 s) · the output carried "Docker did not finish within 8 s": the fake's 4 s `compose down` overran the 8 s limit on a busy runner. Retried as job 67159. Second sighting.
 
 ## document-lifecycle.test.ts "recovers an outage-staged upload after the bounded retry delay without re-upload" (integration)
 
@@ -501,6 +502,22 @@ timeout on this one case rather than a global raise.
 ## src/server/documents/image-sandbox.test.ts "accepts a 1x1 JPEG/PNG padded to the size limit ..." (:185)
 
 - 2026-11-18 · !1371 batch-a 5866edd4 (the batch-a dev gate: pins and exceptions only, nowhere near the image sandbox) · pipeline 4563 / fast (job 55116) · "expected 'structure_check_unavailable' to be 'supported_structure'" in a 1320 s job on a loaded runner: the child decode did not answer in time. The image-sandbox files are unchanged since, and the fast job passed on !1371's next pipeline and on !1395. First sighting.
+
+## src/server/documents/validation.test.ts "structural document classification > answers an image's page count as 1 (#1436 D8)" (:80)
+
+- 2026-11-26 · !1487 fix/1933-fast-shards 1415c6f7 (CI shard layout, integration shards and a base-image re-pin; nowhere near the image sandbox) · pipeline 5531 / fast 1/2 (job 66646) · received `{ reason: "structure_check_unavailable" }` instead of `supported_structure` with `pageCount: 1`, in a 774 s shard on a loaded runner: the child decode did not answer in time, the same symptom as the image-sandbox entry above. Retried as job 66729, which failed on a different test (below). First sighting.
+
+## scripts/web-deploy.test.mjs "scripts/web-deploy.sh serializes concurrent runs (#1151 D1-S3) > never lets a second run start its own deploy before the first one's cleanup finishes" (:199)
+
+- 2026-11-26 · !1487 fix/1933-fast-shards 1415c6f7 (CI shard layout; web-deploy.sh unchanged) · pipeline 5531 / fast 1/2 retry (job 66729) · "expected '' to contain 'another web-deploy is already running…'": both runs exited 0, but the second never reported waiting, so it started after the first had finished; an 865 s shard on a loaded runner. Retried as job 66782. First sighting.
+
+## scripts/install.readiness.test.mjs "install.sh: a service that is not running at the deadline rolls a fresh install back (#1456 decision) > when the application container is missing: rolls back ..." (:201)
+
+- 2026-11-26 · !1487 fix/1933-fast-shards 1415c6f7 (CI shard layout; install.sh unchanged) · pipeline 5531 / fast 2/2 (job 66647) · "expected [ 'orbit_orbit-db-data' ] to deeply equal []": a volume was still listed after the rollback; a 900 s shard on a loaded runner. Retried as job 66783. First sighting.
+
+## `fast` shards: many timeouts at once on an overloaded runner (host)
+
+- 2026-11-26 · !1498 test/1964-step1-release 1b1c9ea6 (rig config and a dev merge; no installer or document code) · pipeline 5549 / fast 1/2 (job 66944, 1292 s) and fast 2/2 (job 66945, 1636 s, against about 900 s normally) · about a dozen unrelated failures, nearly all "killed after its 30000ms deadline ... a hang or a slow runner", "Test timed out in 45000ms" or ECONNREFUSED to a test server, across install, repair and document-preview tests. !1499's pipeline 5547 ran its own fast shards at the same time. Retried as jobs 67058 and 67059. First sighting.
 
 ## tour-pocket-webkit.spec.js:685 "the pocket film in WebKit (#1174) › plays end to end at 430x932 under normal motion" — pocket-webkit
 
