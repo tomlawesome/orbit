@@ -686,3 +686,7 @@ timeout on this one case rather than a global raise.
 ## Fast job hits the 30-minute job limit on a loaded runner, no test failing (host)
 
 - 2026-11-26 · !1497 a0971112 · pipeline 5497 / fast (job 66247) · `job_execution_timeout` at 1807 s, no summary: 17,231 of 17,235 started tests done, none failed. Passed on retry (job 66391, 1333 s). First sighting.
+
+## upgrade_cell: [latest-1, mail] and [latest-1, secrets-file] hit the 8-minute job limit on a loaded runner, no step failing (host)
+
+- 2026-11-26 · !1499 168be281 · pipeline 5547 / upgrade_cell: [latest-1, mail] (job 66903) and [latest-1, secrets-file] (job 66904) · `execution took longer than 8m0s` at 496 s and 483 s, while the pipeline's other 13 cells took 220-464 s; the change is the installer's key reader, and the cells run the installer with --plain, which reads no keys. Both passed on retry (jobs 67084, 67085, 250 s and 234 s). First sighting.
