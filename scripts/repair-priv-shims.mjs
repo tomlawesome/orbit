@@ -129,6 +129,8 @@ export function expectStalledStepsEnded(steps, result, limitSeconds) {
 
 // #1954: ORBIT_TEST_STEP_SLOWDOWN=<seconds> makes a run-then-stop or run-then-ignore-term step wait that long before it
 // runs its command, as a loaded runner would. Off by default.
+// ORBIT_TEST_SETPRIV_SLOWDOWN=<seconds> likewise delays the first three setpriv shim calls (start-up of the shim,
+// not the command).
 function slowSleep() {
   const slowdown = Number(process.env.ORBIT_TEST_STEP_SLOWDOWN ?? 0);
   return slowdown > 0 ? `sleep ${slowdown}; ` : "";
@@ -140,9 +142,13 @@ function slowSleep() {
 // matches the variant, this shim runs <command> as the owner first (after any slowdown) and only then starts the real
 // timeout, telling the setpriv shim (ORBIT_TEST_RAN_FIRST=1) to only stall. The command has therefore landed before
 // the clock starts, whatever the runner's speed: the limit decides only how long the stall lasts, not the outcome.
-// Every other timeout call passes through unchanged.
-function timeoutShim(variant, dbGid, setprivFail) {
+// The setpriv call is logged here, before anything else, so a slow start of the setpriv shim cannot lose it.
+// Every other accepted setpriv step has its clock replaced by a 600 s hang guard: its own work is not what is
+// under test, and a loaded runner must not cut it short (a cut-short earlier step also keeps the run from ever
+// reaching the stalled one, #1954). Calls that are not setpriv steps pass through unchanged.
+function timeoutShim(variant, dbGid, setprivFail, privLog) {
   return String.raw`args=("$@")
+relax=0
 while [[ $# -gt 0 && "$1" != setpriv ]]; do shift; done
 if [[ $# -gt 0 ]]; then
   shift
@@ -151,11 +157,18 @@ if [[ $# -gt 0 ]]; then
   case "$*" in __FAIL__) ok=0;; esac
   if [[ $ok -eq 1 ]]; then
     case "$*" in __MATCH__)
+      printf '%s\n' "$*" >> '__PRIVLOG__'
       __SLOW__while [[ $# -gt 0 && "$1" != -- ]]; do shift; done; shift
       ( export ORBIT_TEST_PRIVDROP=1; "$@" ) >/dev/null 2>&1
       export ORBIT_TEST_RAN_FIRST=1;;
+    *) relax=1;;
     esac
   fi
+fi
+if [[ "$relax" == 1 ]]; then
+  i=0
+  while [[ "\${args[$i]}" == -* ]]; do case "\${args[$i]}" in -k|-s) i=$((i + 2));; *) i=$((i + 1));; esac; done
+  args[$i]=__HANG__
 fi
 exec '__REAL__' "\${args[@]}"
 `
@@ -164,6 +177,8 @@ exec '__REAL__' "\${args[@]}"
     .replaceAll("__GID__", String(dbGid))
     .replaceAll("__FAIL__", setprivFail ?? "__never__")
     .replaceAll("__MATCH__", variant.match ?? "*")
+    .replaceAll("__PRIVLOG__", privLog)
+    .replaceAll("__HANG__", "600")
     .replaceAll("__SLOW__", slowSleep())
     .replaceAll("__REAL__", realTool("timeout"));
 }
@@ -217,7 +232,8 @@ export function privShims(targetDir, { root = true, setpriv = true, setprivFail 
       "setpriv",
       `# A setpriv call with only --pdeathsig is not a privilege drop (#1893): pass it through, unlogged.
 case " $* " in *" --reuid"*|*" --regid"*|*" --init-groups "*|*" --clear-groups "*) ;; *" --pdeathsig"*) while [[ $# -gt 0 && "$1" != -- ]]; do shift; done; shift; exec "$@";; esac
-printf '%s\\n' "$*" >> '${privLog}'
+[[ $(wc -l < '${privLog}' 2>/dev/null || echo 0) -lt 3 ]] && sleep ${Number(process.env.ORBIT_TEST_SETPRIV_SLOWDOWN ?? 0)}
+[[ "\${ORBIT_TEST_RAN_FIRST:-}" == 1 ]] || printf '%s\\n' "$*" >> '${privLog}'
 ok=0
 [[ " $* " == *" --reuid=${UID} "* && " $* " == *" --regid=${dbGid} "* && " $* " == *" --no-new-privs "* ]] && ok=1
 if [[ $ok -ne 1 ]]; then printf 'BAD %s\\n' "$*" >> '${privLog}'; exit 99; fi
@@ -229,7 +245,7 @@ export ORBIT_TEST_PRIVDROP=1
 exec "$@"
 `,
     );
-    if (variant?.kind === "run-then-stop" || variant?.kind === "run-then-ignore-term") write("timeout", timeoutShim(variant, dbGid, setprivFail));
+    if (variant?.kind === "run-then-stop" || variant?.kind === "run-then-ignore-term") write("timeout", timeoutShim(variant, dbGid, setprivFail, privLog));
   }
   for (const tool of [...TOOLS, ...extraTools]) {
     const rule = toolFail?.tool === tool ? `if [[ "\${ORBIT_TEST_PRIVDROP:-0}" == 1 ]]; then case "$*" in ${toolFail.match}) ${toolFail.emit}${toolFail.pass ? "" : "; exit 1"};; esac; fi` : "";
