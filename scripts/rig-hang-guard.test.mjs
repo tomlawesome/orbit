@@ -129,3 +129,16 @@ describe("web/tests/rig specs leave the limits to the config (#1964)", () => {
     expect(found, `remove these (the config default is ${RIG_TEST_MS} ms):\n${found.join("\n")}`).toEqual([]);
   });
 });
+
+describe("web/playwright.config.js hang guard covers actions too (#1964)", () => {
+  it("every rig project's use.actionTimeout equals its expect timeout", async () => {
+    const config = (await import("../web/playwright.config.js")).default;
+    const rigProjects = config.projects.filter((project) => project.name.startsWith("rig-"));
+    expect(rigProjects.length).toBeGreaterThan(0);
+    for (const project of rigProjects) {
+      const expectMs = project.expect?.timeout ?? config.expect?.timeout;
+      expect(expectMs, `${project.name} expect.timeout`).toBe(15_000);
+      expect(project.use?.actionTimeout ?? config.use?.actionTimeout, `${project.name} use.actionTimeout`).toBe(expectMs);
+    }
+  });
+});
