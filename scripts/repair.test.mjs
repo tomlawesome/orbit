@@ -3842,7 +3842,7 @@ describe("scripts/repair.sh --execute --safe-only", () => {
     "docker-compose.yml", "docker-compose.mail.yml", "docker-compose.kek-rotation.yml", "docker-compose.no-document-key.yml",
     "docker-compose.scanner-off.yml", ".env-orbit.example", "config/tika-config.json", "scripts/configure.sh",
     "scripts/installer-ui.sh", "scripts/backup.sh", "scripts/restore.sh", "scripts/repair.sh",
-    "scripts/export-recovery-bundle.sh", "scripts/import-recovery-bundle.sh", "scripts/end-maintenance.sh", "update.sh",
+    "scripts/export-recovery-bundle.sh", "scripts/import-recovery-bundle.sh", "scripts/end-maintenance.sh", "scripts/start-maintenance.sh", "update.sh",
     ".env-orbit", ".orbit-secrets", ".orbit-files",
   ];
   // A staging folder whose rollback/original holds a `cp -a` copy (bytes and modes) of every

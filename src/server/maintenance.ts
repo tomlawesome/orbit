@@ -78,7 +78,7 @@ export interface MaintenanceState {
 }
 
 /** Trims and bounds published text; never logs or echoes the text itself. */
-function requireMaintenanceBody(raw: string): string {
+export function requireMaintenanceBody(raw: string): string {
   const body = raw.trim();
   if (body.length < 1 || body.length > MESSAGE_MAX_LENGTH) {
     throw new AppError(
@@ -716,6 +716,57 @@ export async function endMaintenanceFromOperatorShell(): Promise<{
     });
 
     return { changed: true, cancelledWindows: cancelled.length };
+  });
+}
+
+/**
+ * Opens a maintenance window from the host (#1387), the counterpart of
+ * `endMaintenanceFromOperatorShell` and ADR-0015 decision 2's emergency path.
+ *
+ * Same rules as `openMaintenanceWindow` (a 1-500 character body), but with no
+ * actor and no version token: the singleton is read under its own lock. The
+ * audit row records `origin: operator_shell`. Idempotent: when maintenance is
+ * already active nothing changes and no audit row is written.
+ */
+export async function startMaintenanceFromOperatorShell(
+  params: { body: string; expectedEndAt: Date | null },
+): Promise<{ changed: boolean }> {
+  const body = requireMaintenanceBody(params.body);
+  return getDb().transaction(async (transaction) => {
+    const singleton = await lockSingleton(transaction);
+    const now = new Date();
+    // Effective maintenance (ADR-0013 decision 5): active, or a due scheduled window.
+    const [due] = await transaction.select({ id: maintenanceWindows.id }).from(maintenanceWindows)
+      .where(dueScheduledWindows(now)).limit(1);
+    if (singleton.active || due || (await readOpenWindow(transaction))) {
+      return { changed: false };
+    }
+    const windowId = randomUUID();
+    await transaction.insert(maintenanceWindows).values({
+      id: windowId,
+      status: "open",
+      startedAt: now,
+      expectedEndAt: params.expectedEndAt,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await appendUpdate(transaction, { windowId, kind: "started", body, publishedAt: now });
+    await bumpSingleton(transaction, singleton.version, {
+      active: true,
+      currentWindowId: windowId,
+      expectedEndAt: params.expectedEndAt,
+    }, now);
+    await auditWindow(transaction, {
+      actorUserId: null,
+      windowId,
+      action: "maintenance_window_opened",
+      changes: {
+        body,
+        expectedEndAt: params.expectedEndAt?.toISOString() ?? null,
+        origin: "operator_shell",
+      },
+    });
+    return { changed: true };
   });
 }
 

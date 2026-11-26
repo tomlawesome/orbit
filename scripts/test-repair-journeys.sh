@@ -1502,7 +1502,7 @@ journey_successful_rollback() {
       scripts/backup.sh scripts/restore.sh \
       scripts/repair.sh \
       scripts/export-recovery-bundle.sh scripts/import-recovery-bundle.sh \
-      scripts/end-maintenance.sh update.sh \
+      scripts/end-maintenance.sh scripts/start-maintenance.sh update.sh \
       .env-orbit .orbit-secrets .orbit-files; do
     [[ -e "$target/$managed" ]] || continue
     mkdir -p -- "$staging/rollback/original/$(dirname -- "$managed")"

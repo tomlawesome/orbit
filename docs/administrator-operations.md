@@ -231,6 +231,22 @@ While the instance is closed but healthy, `/api/health` answers `200` with
 `status: maintenance`. Orchestrators keep routing traffic to it and do not
 restart it. Only a real dependency failure answers `503 degraded`.
 
+### Starting and ending maintenance from the host
+
+You can also close the instance from the host, with no one signed in:
+
+```sh
+bash scripts/start-maintenance.sh [--notice "Back at noon"] [--until 2026-12-01T12:00:00Z]
+```
+
+`--notice` is the text users see (1 to 500 characters; the default says Orbit
+is closed for maintenance and will be back soon). `--until` is the expected
+end, as an RFC 3339 time with an offset or `Z`, and must be in the future.
+Running it while maintenance is already on changes nothing and succeeds. It is
+audited like the ending script below, with no actor and `origin: operator_shell`.
+Both scripts end by printing one `maintenance action=...` line that programs
+read; see `docs/engine-events.md`.
+
 ### The emergency path, when OIDC itself is down
 
 If no administrator can sign in, reopen the instance from the host:
