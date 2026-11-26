@@ -1,7 +1,6 @@
 import { expect, test } from "@playwright/test";
 
 import { renderedFrames } from "../../../tests/e2e/support/frames";
-import { SETTLE } from "../../../tests/e2e/support/settle";
 import { APP, onPhone, signedIn } from "./a11y-support.js";
 
 /** @typedef {import("@playwright/test").Locator} Locator */
@@ -33,7 +32,7 @@ import { APP, onPhone, signedIn } from "./a11y-support.js";
  * So "the tour is up" in the titles means the veil, the catch pane and the
  * transport are on, with the film held at its first chapter, not running.
  */
-test.use({ baseURL: APP, reducedMotion: "reduce" });
+test.use({ baseURL: APP });
 
 const SHORT = 3_000;
 
@@ -71,7 +70,7 @@ async function pressAndLetThePageTakeItIn(page, event, press) {
     addEventListener(type, () => { seen.__pressSeen += 1; }, { capture: true, once: true });
   }, event);
   await press();
-  await page.waitForFunction(() => /** @type {any} */ (window).__pressSeen >= 1, undefined, { timeout: SETTLE });
+  await page.waitForFunction(() => /** @type {any} */ (window).__pressSeen >= 1, undefined);
   await renderedFrames(page);
 }
 
@@ -99,7 +98,7 @@ test("a pointer press on the menu opener does nothing while the tour is up", asy
   await withTourPlaying(page, onPhone(testInfo), async ({ orb, about }) => {
     /* force skips Playwright's wait for the opener to be hittable (what burnt
        120 s in the report); the press goes to whatever is on top at that spot. */
-    await pressAndLetThePageTakeItIn(page, "click", () => orb.click({ force: true, timeout: SETTLE }));
+    await pressAndLetThePageTakeItIn(page, "click", () => orb.click({ force: true }));
     await expect(about, "#1473: the menu opened while the tour is up").toBeHidden({ timeout: SHORT });
   });
 });
@@ -145,7 +144,7 @@ test("after the tour is skipped the menu opens and About reaches /about", async 
       return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ tour: { tourSeenAt: "2026-11-01T09:00:00.000Z" } }) });
     });
     await transport.locator(".skp").click({ timeout: SHORT });
-    await expect.poll(() => recorded.length, { message: "skipping records the tour as taken", timeout: SETTLE }).toBe(1);
+    await expect.poll(() => recorded.length, { message: "skipping records the tour as taken" }).toBe(1);
     expect(recorded[0], "the record names a time it was taken").toMatchObject({ tourSeenAt: expect.any(String) });
     await expect(page.locator("#orbit-tour-veil")).toBeHidden({ timeout: SHORT });
     await expect(page.locator("#orbit-tour-catch")).toHaveCount(0, { timeout: 10_000 });

@@ -2455,7 +2455,7 @@ flake_check:
 # The Chromium pixel screens are their own job, `screens_chromium` (#1546).
 #
 # Sharded (#1546, design note 52876, owner decision 97a): each rig job is a
-# `parallel:` matrix, `rig_chromium` 2, `rig_firefox` 2, `rig_webkit` 4,
+# `parallel:` matrix, `rig_chromium` 3, `rig_firefox` 2, `rig_webkit` 4,
 # `film_webkit` 2, about eight minutes a shard. web/playwright.config.js turns
 # GitLab's CI_NODE_INDEX and CI_NODE_TOTAL into Playwright's own `--shard`, so
 # every `rig:*` script shards itself. The count here must equal `shards` in
@@ -2482,9 +2482,10 @@ rig_chromium:
   image:
     name: $PLAYWRIGHT_IMAGE
     pull_policy: if-not-present
-  # Two shards of about 6 minutes each (#1546); the screens are `screens_chromium`.
+  # Two shards of about 6 minutes each (#1546); three since #1964; the screens
+  # are `screens_chromium`.
   timeout: 15m
-  parallel: 2
+  parallel: 3
   variables:
     ORBIT_RIG_WORKERS: "3"
   # Nightly only (owner answer 125, #1763).

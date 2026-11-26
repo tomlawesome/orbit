@@ -20,7 +20,7 @@ import { completeLikeTheEngine, ownWorkspace, upsertCheckingTheVersion } from ".
  * judged on what it makes of the answer. Reduced motion, as v19-home-drawer
  * does for the same drawer.
  */
-test.use({ reducedMotion: "reduce", baseURL: APP });
+test.use({ baseURL: APP });
 
 const HOUSEHOLD = "hh-harlow-1";
 const ITEM = { id: "i-boiler", title: "Boiler service" };

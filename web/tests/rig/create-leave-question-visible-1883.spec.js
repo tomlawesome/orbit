@@ -14,7 +14,6 @@ import { APP } from "../fidelity/pocket-states.js";
  */
 test.skip(({ isMobile }) => isMobile, "the spec resizes a desktop window between the two dialects");
 
-const SETTLE = 20_000;
 const NARROW = { width: 600, height: 900 };
 const WIDE = { width: 1280, height: 900 };
 const CONFIRM = "Discard this entry? What you've typed will be lost.";
@@ -23,7 +22,7 @@ const NAME = "Gutter clearing proving";
 /** @param {import("@playwright/test").Page} page */
 async function gotoCreate(page) {
   await page.goto(`${APP}/create`, { waitUntil: "load" });
-  await page.locator("#card[data-ready]").waitFor({ state: "attached", timeout: SETTLE });
+  await page.locator("#card[data-ready]").waitFor({ state: "attached" });
 }
 
 /** The phone's name field. @param {import("@playwright/test").Page} page */
@@ -71,7 +70,7 @@ test("typed on narrow, then widened: accepting the confirm navigates with no sec
 
   await page.setViewportSize(WIDE);
   await navigate(page);
-  await expect(page).toHaveURL(/\/home(\?.*)?$/, { timeout: SETTLE });
+  await expect(page).toHaveURL(/\/home(\?.*)?$/);
   await handled(page);
   expect(asked, "exactly one question, the layout's confirm").toEqual([CONFIRM]);
 });

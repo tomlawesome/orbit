@@ -12,8 +12,6 @@ import { signedIn } from "./a11y-support.js";
  */
 test.skip(({ isMobile }) => isMobile, "the north star's drawer is the desk's; the pocket creates from its own sheet");
 
-const SETTLE = 20_000;
-
 /** On home as it stands (no reload): the drawer opened from the north star. @param {import("@playwright/test").Page} page */
 async function openDrawerHere(page) {
   await page.locator("#nstar").click();
@@ -29,7 +27,7 @@ function drawerControl(page, label) {
 /** @param {import("@playwright/test").Page} page @param {string} why */
 async function addIsOpen(page, why) {
   await expect(page, why).toHaveURL(/\/create(\?.*)?$/);
-  await page.locator("#card[data-ready]").waitFor({ state: "attached", timeout: SETTLE });
+  await page.locator("#card[data-ready]").waitFor({ state: "attached" });
 }
 
 /** Any "Discard this entry?" asking, native or drawn in the page. @param {import("@playwright/test").Page} page */
@@ -49,7 +47,7 @@ async function expectNoDiscardQuestion(page, asked) {
      completes. Back has landed on home (the callers wait for its address);
      wait for home to be live and the page to draw its frames, so the absence is
      judged after the Back was handled, not after a guess at how long that takes. */
-  await page.waitForSelector("body[data-home-ready]", { timeout: SETTLE });
+  await page.waitForSelector("body[data-home-ready]");
   await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
   expect(asked, "Back from an untouched Add asked a question").toEqual([]);
   await expect(page.getByText(/discard this entry/i), "Back from an untouched Add drew a discard question").toHaveCount(0);

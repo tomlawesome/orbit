@@ -96,7 +96,7 @@
     "rig_chromium": {
       "deny": [],
       "definitionCoversPipeline": true,
-      "shards": 2
+      "shards": 3
     },
     "screens_chromium": {
       "deny": [],

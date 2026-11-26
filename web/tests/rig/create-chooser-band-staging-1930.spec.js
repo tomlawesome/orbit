@@ -13,7 +13,6 @@ import { nameTheEntry } from "./chooser-support.js";
  */
 
 test.use({
-  reducedMotion: "reduce",
   serviceWorkers: async ({}, use, testInfo) => {
     await use(testInfo.project.use.browserName === "webkit" ? "block" : "allow");
   },
@@ -23,12 +22,10 @@ test.beforeEach(() => {
   test.skip(test.info().project.name.includes("phone"), "the desk's lane, as create-chooser-1468.spec.js");
 });
 
-const SETTLE = 20_000;
-
 test.describe("desk Add: the repeat band stages in the chooser card (#1930)", () => {
   test("arrows check a cell but pick nothing and keep the card open; Esc drops it, a reopen starts from the stored value", async ({ page }) => {
     await page.goto(`${APP}/create`, { waitUntil: "load" });
-    await page.locator("#card[data-ready]").waitFor({ state: "attached", timeout: SETTLE });
+    await page.locator("#card[data-ready]").waitFor({ state: "attached" });
     await nameTheEntry(page);
     const value = page.locator("button#f-recur");
     const card = page.getByRole("dialog", { name: /^Choose repeat/i });
@@ -59,7 +56,7 @@ test.describe("desk Add: the repeat band stages in the chooser card (#1930)", ()
 
   test("Enter lands the cell the arrows reached and closes the card", async ({ page }) => {
     await page.goto(`${APP}/create`, { waitUntil: "load" });
-    await page.locator("#card[data-ready]").waitFor({ state: "attached", timeout: SETTLE });
+    await page.locator("#card[data-ready]").waitFor({ state: "attached" });
     await nameTheEntry(page);
     const value = page.locator("button#f-recur");
     const card = page.getByRole("dialog", { name: /^Choose repeat/i });
@@ -80,7 +77,7 @@ test.describe("desk Add: the repeat band stages in the chooser card (#1930)", ()
 
   test("a press on a cell lands it and closes the card", async ({ page }) => {
     await page.goto(`${APP}/create`, { waitUntil: "load" });
-    await page.locator("#card[data-ready]").waitFor({ state: "attached", timeout: SETTLE });
+    await page.locator("#card[data-ready]").waitFor({ state: "attached" });
     await nameTheEntry(page);
     const value = page.locator("button#f-recur");
     const card = page.getByRole("dialog", { name: /^Choose repeat/i });

@@ -24,8 +24,6 @@ import { signedIn } from "./a11y-support.js";
  * deleted from under a signed-in session. Sign-out is not pressed.
  */
 
-const SETTLE = 20_000;
-
 /** The live theme, which both dialects' THEME rows write to <html>. @param {import("@playwright/test").Page} page */
 const liveTheme = (page) => page.evaluate(() => document.documentElement.dataset.theme ?? null);
 
@@ -33,8 +31,8 @@ test("home (desk, empty sky): the account panel opens and its controls answer", 
   test.skip(testInfo.project.name.endsWith("phone"), "the desk dialect; the pocket has its own journey below");
 
   await signedIn("/home", "empty-sky")(page);
-  await expect(page.getByRole("heading", { name: "you’re adrift" })).toBeVisible({ timeout: SETTLE });
-  await page.waitForSelector("body[data-home-ready]", { timeout: SETTLE });
+  await expect(page.getByRole("heading", { name: "you’re adrift" })).toBeVisible();
+  await page.waitForSelector("body[data-home-ready]");
 
   /* The orb is drawn for this reader -- the panel's whole contents are chrome,
      not household data -- so the press below lands on something real. */
@@ -64,8 +62,8 @@ test("home (pocket, empty sky): the account menu opens and its controls answer",
   test.skip(!testInfo.project.name.endsWith("phone"), "the pocket dialect; the desk has its own journey above");
 
   await signedIn("/home", "empty-sky")(page);
-  await expect(page.locator(".mgroup.adrift")).toBeVisible({ timeout: SETTLE });
-  await page.waitForSelector("body[data-home-ready]", { timeout: SETTLE });
+  await expect(page.locator(".mgroup.adrift")).toBeVisible();
+  await page.waitForSelector("body[data-home-ready]");
 
   const morb = page.locator("#morb");
   /* #1120: the pocket's account menu is the kit's hatch, a sheet portalled to

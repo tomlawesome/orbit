@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { APP, RIG_EXPECT_MS, RIG_TEST_MS, onPhone, signedIn } from "./a11y-support.js";
+import { APP, RIG_EXPECT_MS, onPhone, signedIn } from "./a11y-support.js";
 import { useFixtureScenes } from "../fidelity/pocket-states.js";
 
 /*
@@ -34,7 +34,6 @@ import { useFixtureScenes } from "../fidelity/pocket-states.js";
  *    `keep-saves` scene, and answers the session (and so home) with it.
  */
 test.use({ baseURL: APP });
-test.describe.configure({ timeout: RIG_TEST_MS });
 
 const NEAR = ["i-gutter", "i-mot", "i-boiler"];
 const FAR = ["i-chimney", "i-roof", "i-smoke", "i-svc"];

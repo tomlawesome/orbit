@@ -43,7 +43,7 @@ async function drawn(locator) {
 for (const [name, path] of PAGES) {
   for (const [size, viewport] of Object.entries(SIZES)) {
     test(`${name}: the server page on a ${size} ${size === "phone" ? "has no" : "shows the"} sky and vignette (#1727)`, async ({ browser }) => {
-      const context = await browser.newContext({ viewport, javaScriptEnabled: false, reducedMotion: "reduce" });
+      const context = await browser.newContext({ viewport, javaScriptEnabled: false });
       try {
         const page = await context.newPage();
         await page.goto(`${APP}${path}`, { waitUntil: "load" });

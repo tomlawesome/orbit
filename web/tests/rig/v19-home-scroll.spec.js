@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { settled } from "../../../tests/e2e/support/keyboard";
-import { APP, onPhone, rememberWrites, RIG_EXPECT_MS, RIG_TEST_MS, signedIn } from "./a11y-support.js";
+import { APP, onPhone, rememberWrites, RIG_EXPECT_MS, signedIn } from "./a11y-support.js";
 import { pickImportance } from "./importance-support.js";
 import { pickKeyDate } from "./chooser-support.js";
 
@@ -20,7 +20,6 @@ import { pickKeyDate } from "./chooser-support.js";
  * new item), and the save itself is this test's own write (rememberWrites).
  */
 test.use({ baseURL: APP });
-test.describe.configure({ timeout: RIG_TEST_MS });
 
 test.beforeEach(({}, testInfo) => {
   test.skip(onPhone(testInfo), "the desk's sky and manifest; the pocket scrolls its own sheet");

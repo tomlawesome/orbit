@@ -2,18 +2,17 @@ import { expect, test } from "@playwright/test";
 
 import { bodyClassSeen, witnessBodyClasses } from "../../../tests/e2e/support/arrival";
 import { cardLayerSamples, watchCardLayer } from "../../../tests/e2e/support/card-layer";
-import { SETTLE } from "../../../tests/e2e/support/settle";
-import { APP, door } from "./a11y-support.js";
+import { APP, door, RIG_EXPECT_MS } from "./a11y-support.js";
 
 /** @typedef {import("@playwright/test").Page} Page */
 /** @typedef {import("@playwright/test").Locator} Locator */
 
 /* #1962 (owner 109a): on WebKit the flight holds for up to 8 s while the 3-D
    world builds (journey.js WORLD_WAIT) before `showwarp`, and a busy runner
-   paints slowly, so the poll for it gets longer there than SETTLE. The hold
-   is unchanged; only the bound on the wait grows. */
+   paints slowly, so the poll for it gets longer there than the rig's 15 s
+   (RIG_EXPECT_MS). The hold is unchanged; only the bound on the wait grows. */
 /** @param {string} browserName */
-const warpWait = (browserName) => (browserName === "webkit" ? 45_000 : SETTLE);
+const warpWait = (browserName) => (browserName === "webkit" ? 45_000 : RIG_EXPECT_MS);
 
 /*
  * NO SIGN-IN CARD OVER ANY ARRIVAL STAGE (#1271), moved to the rig
@@ -46,7 +45,9 @@ const warpWait = (browserName) => (browserName === "webkit" ? 45_000 : SETTLE);
  * the drawer is opened by `drawer=1` where an empty instance opens it itself.
  * The assertions are the stack version's own.
  */
-test.use({ baseURL: APP });
+/* About the climb mid-motion (`showwarp`), which reduced motion, the rig's
+   default (#1964), does not fly: the motion is on. */
+test.use({ baseURL: APP, reducedMotion: "no-preference" });
 
 /**
  * No sign-in card layer is drawn, now, and none was drawn at any change while

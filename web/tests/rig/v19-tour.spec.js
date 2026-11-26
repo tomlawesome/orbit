@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { APP, RIG_EXPECT_MS, RIG_TEST_MS, onPhone, signedIn } from "./a11y-support.js";
+import { APP, RIG_EXPECT_MS, onPhone, signedIn } from "./a11y-support.js";
 
 /** @typedef {import("@playwright/test").Page} Page */
 
@@ -37,8 +37,7 @@ import { APP, RIG_EXPECT_MS, RIG_TEST_MS, onPhone, signedIn } from "./a11y-suppo
  * web/tests/rig/v19-invitations.spec.js (#1611), which answers the tour record
  * "never taken" the same way.
  */
-test.use({ baseURL: APP, reducedMotion: "reduce" });
-test.describe.configure({ timeout: RIG_TEST_MS });
+test.use({ baseURL: APP });
 
 /** film.js's own review hook: the clock's cursor, the film's total, the chapter playing, and its name.
  * @param {Page} page */

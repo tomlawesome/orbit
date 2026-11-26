@@ -28,7 +28,6 @@ import { guardedRoute } from "./workspace-writes.js";
 
 test.use({ baseURL: APP, serviceWorkers: "block" });
 
-const SETTLE = 20_000;
 const { id: RECEIPT, title: TITLE, attachmentId: ATTACHMENT } = SUGGESTION;
 const HELD_MOT = {
   documentId: "d-mot-2025", displayName: "MOT certificate 2025.pdf", addedAt: "2025-08-29T12:00:00.000Z",
@@ -92,7 +91,7 @@ async function openInbox(page, alreadyHeld) {
   const mail = await rememberMailDecisions(page);
   await markHeld(page, alreadyHeld);
   await page.goto("/inbox");
-  await expect(addToOrbit(page).first()).toBeVisible({ timeout: SETTLE });
+  await expect(addToOrbit(page).first()).toBeVisible();
   await settle(page);
   return mail;
 }
@@ -125,7 +124,7 @@ test("Add to orbit keeps it as a second copy: it asks twice, then approves with 
   /* Both dialects ask twice (v19-feedback-recovery): the desk relabels the button, the phone keeps its label. */
   if (!onPhone(testInfo)) await expect(page.getByRole("button", { name: "tap again to approve" })).toBeVisible();
   await addToOrbit(page).first().click();
-  await expect.poll(() => mail.approvals.length, { timeout: SETTLE }).toBe(1);
+  await expect.poll(() => mail.approvals.length).toBe(1);
   expect(mail.approvals[0]).toMatchObject({ source: { receiptId: RECEIPT }, attachmentIds: [ATTACHMENT] });
 });
 

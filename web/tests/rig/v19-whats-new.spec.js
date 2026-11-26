@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { APP, RIG_EXPECT_MS, RIG_TEST_MS, onPhone } from "./a11y-support.js";
+import { APP, RIG_EXPECT_MS, onPhone } from "./a11y-support.js";
 
 /** @typedef {import("@playwright/test").Page} Page */
 
@@ -19,8 +19,7 @@ import { APP, RIG_EXPECT_MS, RIG_TEST_MS, onPhone } from "./a11y-support.js";
  * tests/unit/whats-new-card.test.mjs; what is here is what needs a browser:
  * real layout, real focus and Tab, real keys, and the second arrival.
  */
-test.use({ baseURL: APP, reducedMotion: "reduce" });
-test.describe.configure({ timeout: RIG_TEST_MS });
+test.use({ baseURL: APP });
 
 const NEWS = {
   version: "v0.3.7",
