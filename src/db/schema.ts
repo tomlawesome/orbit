@@ -1030,6 +1030,42 @@ export const portableArchives = pgTable("portable_archives", {
 ]);
 
 /**
+ * The household export as a leased background job (#1774, ADR-0047): one row
+ * per export, in `document_jobs`' shape (ADR-0010), claimed by the document
+ * worker's export seam. The export key is derived in the request and kept
+ * here only wrapped under the instance KEK (AAD "portable-archive-export:" +
+ * id): nulled when the job completes, kept one hour after a failure for a
+ * one-tap retry. `portable_archive_exports_one_live` is "one export per
+ * household at a time", true across a restart.
+ */
+export const portableArchiveExports = pgTable("portable_archive_exports", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  householdId: uuid("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
+  requestedByUserId: uuid("requested_by_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  includeDocuments: boolean("include_documents").notNull().default(false),
+  status: documentJobStatus("status").notNull().default("pending"),
+  attempts: integer("attempts").notNull().default(0),
+  nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+  lockedAt: timestamp("locked_at", { withTimezone: true }),
+  leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+  leaseToken: uuid("lease_token"),
+  lastError: text("last_error"),
+  failureCode: text("failure_code"),
+  failureMessage: text("failure_message"),
+  bytesTotal: bigint("bytes_total", { mode: "number" }),
+  bytesDone: bigint("bytes_done", { mode: "number" }).notNull().default(0),
+  salt: bytea("salt"),
+  keyWrapped: jsonb("key_wrapped").$type<{ wrappedDek: string; wrapIv: string; wrapAuthTag: string }>(),
+  keyId: text("key_id"),
+  archiveId: uuid("archive_id").references(() => portableArchives.id, { onDelete: "set null" }),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+  ...auditColumns,
+}, (table) => [
+  uniqueIndex("portable_archive_exports_one_live").on(table.householdId).where(sql`${table.status} in ('pending', 'processing', 'retry')`),
+  index("portable_archive_exports_claim_idx").on(table.status, table.nextAttemptAt),
+]);
+
+/**
  * One row per portable-archive import attempt, open from the moment its
  * metadata transaction commits until the document-restore phase finishes or
  * is rolled back (#1151 RANGE-R2). The import is all-or-nothing: a row left

@@ -16,8 +16,9 @@
    *
    *   take it with you   the manifest, `write an archive →`, the passphrase
    *                      twice, `write the archive` (two-tap, matching the
-   *                      phone's ArmButton), a progress line while the
-   *                      server writes it, then the download line
+   *                      phone's ArmButton), then the job (#1774): queued,
+   *                      writing with its numbers, the download line, or
+   *                      why it failed and its one control
    *   bring one in       `bring in an archive →`, a file, its passphrase,
    *                      `look inside`, the preview (what it holds, what
    *                      stays out), `bring in N entries` (two-tap)
@@ -106,6 +107,18 @@
 
       {#if a.outPhase === "rest"}
         <div class="act"><button class="ghost" onclick={a.startExport}>write an archive →</button></div>
+      {:else if a.outPhase === "form" && a.failure}
+        <!-- #1774: a failed job says why and offers one control: again with the
+             kept key, or (once the key is gone) the form for a new passphrase. -->
+        <p class="refuse" role="alert">{a.outProblem}</p>
+        <div class="act">
+          {#if a.failure.canRetry}
+            <button class="ghost" disabled={a.sending} onclick={a.retryExport}>try again</button>
+          {:else}
+            <button class="ghost" onclick={a.writeAgain}>write it again</button>
+          {/if}
+        </div>
+        {#if a.challengeOpen && a.retryIntent === "archive_export"}{@render challenge()}{/if}
       {:else if a.outPhase === "form"}
         <div class="step open">
           <div class="field">
@@ -120,7 +133,7 @@
             by you, not by anyone, and Orbit holds nothing that changes that.</p>
           {#if a.outRefusal && (a.passOut || a.passAgain)}<p class="refuse">{a.outRefusal}</p>{/if}
           <div class="act">
-            <button class="ghost" class:armed={armed === "arch-out"} disabled={Boolean(a.outRefusal)}
+            <button class="ghost" class:armed={armed === "arch-out"} disabled={Boolean(a.outRefusal) || a.sending}
                     onclick={(event) => twoTap("arch-out", a.writeArchive, event.currentTarget)}>
               {armed === "arch-out" ? "tap again to write the archive" : "write the archive"}</button>
             <button class="ghost" type="button"
@@ -129,10 +142,12 @@
         </div>
         {#if a.outProblem}<p class="refuse">{a.outProblem}</p>{/if}
         {#if a.challengeOpen && a.retryIntent === "archive_export"}{@render challenge()}{/if}
+      {:else if a.outPhase === "queued"}
+        <p class="moment" role="status">queued · Orbit is finishing another archive first</p>
+        {#if a.challengeOpen}{@render challenge()}{/if}
       {:else if a.outPhase === "writing"}
         <p class="moment" role="status">
-          writing the archive · encrypting {plural(entries, "entry", "entries")} and their documents</p>
-        {#if a.challengeOpen}{@render challenge()}{/if}
+          writing the archive · {a.writingWords || `encrypting ${plural(entries, "entry", "entries")} and their documents`}</p>
       {:else if a.written}
         <p class="said show">written · {exportFileName(a.written)} · ready until {a.readyUntil} ·
           {a.written.includesDocuments ? "documents included" : "no documents"}</p>

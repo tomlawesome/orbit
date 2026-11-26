@@ -178,11 +178,19 @@ vi.mock("@/server/document-repository", () => ({
 const {
   previewPortableImport,
   importPortableArchive,
-  createPortableArchive,
+  writePortableArchiveForJob,
+  enqueuePortableArchiveExport,
   rollBackPortableImport,
   rollBackUnfinishedPortableImports,
   rollBackStaleUnfinishedPortableImports,
 } = await import("./portable-archive-repository");
+
+/** #1774: the refusals below live in the job's write step; the queueing before it (key wrap, one-live index) is the integration tests' ground. */
+const writeExport = (input: { userId: string; householdId: string; passphrase: string; includeDocuments: boolean }) =>
+  writePortableArchiveForJob({
+    id: "job-1", householdId: input.householdId, requestedByUserId: input.userId, includeDocuments: input.includeDocuments,
+    attempts: 1, leaseToken: "lease-1", salt: null, keyWrapped: null, keyId: null,
+  }, Buffer.alloc(32, 1));
 
 const userId = "39a5fac9-38cb-4178-b68a-a8d8db97ed3b";
 const householdId = "66a1f3d8-b79d-47a5-92fe-a4824270aa9a";
@@ -254,7 +262,7 @@ describe("portable archive export refusal (#1151 A2-F2)", () => {
 
     let caught: unknown;
     try {
-      await createPortableArchive({ userId, householdId, passphrase, includeDocuments: false });
+      await writeExport({ userId, householdId, passphrase, includeDocuments: false });
     } catch (error) {
       caught = error;
     }
@@ -271,7 +279,7 @@ describe("portable archive export refusal (#1151 A2-F2)", () => {
     queue(mocks.selectQueues, "reminder_rules", []);
     queue(mocks.selectQueues, "documents", []);
 
-    await expect(createPortableArchive({ userId, householdId, passphrase, includeDocuments: false }))
+    await expect(writeExport({ userId, householdId, passphrase, includeDocuments: false }))
       .rejects.toMatchObject({ code: "archive_metadata_locked", status: 503 });
   });
 
@@ -286,7 +294,7 @@ describe("portable archive export refusal (#1151 A2-F2)", () => {
     const { MetadataKeyLockedError } = await import("@/server/metadata/keys");
     mocks.loadMetadataKey.mockRejectedValueOnce(new MetadataKeyLockedError());
 
-    await expect(createPortableArchive({ userId, householdId, passphrase, includeDocuments: false }))
+    await expect(writeExport({ userId, householdId, passphrase, includeDocuments: false }))
       .rejects.toMatchObject({ code: "archive_metadata_locked", status: 503 });
   });
 });
@@ -334,7 +342,7 @@ describe("portable archive import error (#1151 A2-F2)", () => {
 describe("portable archive export holds the passphrase floor (#1333)", () => {
   it("refuses a passphrase of twelve UTF-16 units but six characters, in words, before reading the household", async () => {
     seedHouseholdAccess();
-    await expect(createPortableArchive({ userId, householdId, passphrase: "\u{1F44D}".repeat(6), includeDocuments: false }))
+    await expect(enqueuePortableArchiveExport({ userId, householdId, passphrase: "\u{1F44D}".repeat(6), includeDocuments: false }))
       .rejects.toMatchObject({ code: "archive_passphrase_too_short", status: 422 });
   });
 });

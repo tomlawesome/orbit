@@ -45,7 +45,7 @@ const mocks = vi.hoisted(() => ({
   getKeyState: vi.fn(),
   requireRecentAuthentication: vi.fn(),
   requirePortableArchiveAccess: vi.fn(),
-  createPortableArchive: vi.fn(),
+  enqueuePortableArchiveExport: vi.fn(),
   importPortableArchive: vi.fn(),
   previewPortableImport: vi.fn(),
   realSpool: /** @type {undefined | ((file: ReadableStream<Uint8Array>, declaredBytes: number) => Promise<unknown>)} */ (undefined),
@@ -62,6 +62,7 @@ vi.mock("orbit/server/maintenance", () => ({
   readEffectiveMaintenance: mocks.readEffectiveMaintenance,
   assertOutsideMaintenance: mocks.assertOutsideMaintenance,
 }));
+vi.mock("orbit/server/document-maintenance/export-jobs", () => ({ notifyExportWorker: vi.fn() }));
 vi.mock("orbit/server/key-state", async (importOriginal) => ({ ...(await importOriginal()), getKeyState: mocks.getKeyState }));
 vi.mock("orbit/server/upload-limit", () => ({ readEffectiveUploadLimit: async () => 50 * MIB }));
 vi.mock("orbit/lib/auth/recent-auth", () => ({ requireRecentAuthentication: mocks.requireRecentAuthentication }));
@@ -70,7 +71,8 @@ vi.mock("orbit/server/portable-archive-repository", async (importOriginal) => {
   mocks.realSpool = real.spoolPortableArchiveUpload;
   return {
     requirePortableArchiveAccess: mocks.requirePortableArchiveAccess,
-    createPortableArchive: mocks.createPortableArchive,
+    enqueuePortableArchiveExport: mocks.enqueuePortableArchiveExport,
+    readPortableArchiveExportState: async () => ({ export: null, latest: null }),
     importPortableArchive: mocks.importPortableArchive,
     previewPortableImport: mocks.previewPortableImport,
     spoolPortableArchiveUpload: (...args) => mocks.spool(...args),
@@ -84,6 +86,7 @@ mocks.spool = vi.fn((...args) => {
 
 const PREVIEW = "/api/portable-archives/preview";
 const IMPORT = "/api/portable-archives/import";
+/** What a whole, allowed request answers: the export now only queues its job (design 2.6), so 202. */ const okStatus = (route) => (route === EXPORT ? 202 : 200);
 const EXPORT = "/api/households/[householdId]/portable-archives";
 
 /** Who is signed in, by the session cookie's value. */
@@ -158,7 +161,7 @@ beforeEach(() => {
   mocks.requirePortableArchiveAccess.mockImplementation(async (userId) => {
     if (userId !== "owner-1") throw new AppError("household_not_found", "That household is not available", 404);
   });
-  mocks.createPortableArchive.mockResolvedValue({ id: "archive-1", expiresAt: "2026-09-27T00:00:00.000Z", includesDocuments: false });
+  mocks.enqueuePortableArchiveExport.mockResolvedValue({ id: "job-1", status: "pending" });
   mocks.importPortableArchive.mockImplementation(async (input) => { await new Response(input.archive).arrayBuffer(); return { importedItems: 1, documentsExcluded: 0 }; });
   mocks.previewPortableImport.mockImplementation(async (_user, _household, archive) => { await new Response(archive).arrayBuffer(); return { householdName: "Home", items: 1 }; });
 });
@@ -229,7 +232,7 @@ describe("ruling 4: a signed-in person with no right to the household cannot tak
     const owner = await run(route, "owner", request.body, request.contentType);
 
     expect(owner.status, "the owner is allowed and nobody allowed is using the slot").not.toBe(429);
-    expect(owner.status).toBe(200);
+    expect(owner.status).toBe(okStatus(route));
     cleanups.forEach((clean) => clean());
     await outsider;
   });
@@ -295,11 +298,11 @@ async function expectFreeFor(route) {
   expect(slot.archiveSlotHeld(), "nothing holds the slot").toBe(false);
   const request = await completeRequest(route);
   const next = await run(route, "owner", request.body, request.contentType);
-  expect(next.status, "the next request is not refused as busy").toBe(200);
+  expect(next.status, "the next request is not refused as busy").toBe(okStatus(route));
 }
 
 /** Each route's engine, by route. */
-const engine = () => ({ [PREVIEW]: mocks.previewPortableImport, [IMPORT]: mocks.importPortableArchive, [EXPORT]: mocks.createPortableArchive });
+const engine = () => ({ [PREVIEW]: mocks.previewPortableImport, [IMPORT]: mocks.importPortableArchive, [EXPORT]: mocks.enqueuePortableArchiveExport });
 
 describe("the route frees the slot however its request ends", () => {
   it.each([PREVIEW, IMPORT, EXPORT])("%s: when its work fails with an error it answers (422)", async (route) => {
@@ -357,7 +360,7 @@ describe("a caller who is not signed in", () => {
 
     const request = await completeRequest(route);
     const owner = await run(route, "owner", request.body, request.contentType);
-    expect(owner.status).toBe(200);
+    expect(owner.status).toBe(okStatus(route));
     cleanups.forEach((clean) => clean());
     await signedOut;
   });

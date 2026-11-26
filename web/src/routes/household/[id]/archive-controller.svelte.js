@@ -5,10 +5,12 @@ import {
   previewPortableArchive,
   readSignInMethods,
   startStepUp,
+  fetchPortableArchiveState,
+  retryPortableArchive,
+  startPortableArchive,
   wordsOf,
-  writePortableArchive,
 } from "$lib/data/workspace.js";
-import { archiveFileProblem, checkFileReadable, FILE_CHANGED_WORDS, fileChangedSincePicked, passphraseFloor, passphraseLength, passphraseProblem, previewSlice } from "./archive.js";
+import { archiveFileProblem, checkFileReadable, exportLive, FILE_CHANGED_WORDS, fileChangedSincePicked, nextPhase, passphraseFloor, passphraseLength, passphraseProblem, previewSlice, progressWords } from "./archive.js";
 import { tabArrows } from "$lib/tabs.js";
 
 /*
@@ -32,6 +34,14 @@ import { tabArrows } from "$lib/tabs.js";
 const STEPUP_RETURN_FLAG = "orbit-archive-stepup-return";
 
 const quiet = () => {};
+
+/* #1774: how often the card reads a live export job. */
+const EXPORT_POLL_MS = 2_000;
+/* The failed line when the job carries no words of its own. */
+const EXPORT_FAILED_WORDS = "Orbit could not write the archive";
+
+/** @param {unknown} error */
+const codeOf = (error) => /** @type {{ code?: string }} */ (error)?.code;
 
 /** @param {unknown} error */
 const needsProof = (error) => /** @type {{ code?: string }} */ (error)?.code === "recent_authentication_required";
@@ -59,7 +69,13 @@ export function createArchiveController({ householdId, limits, tabIdPrefix, wake
   let tab = $state(/** @type {"out" | "in"} */ ("out"));
 
   /* ── take it with you ─────────────────────────────────────────────────── */
-  let outPhase = $state(/** @type {"rest" | "form" | "writing" | "written"} */ ("rest"));
+  let outPhase = $state(/** @type {"rest" | "form" | "queued" | "writing" | "written"} */ ("rest"));
+  /* #1774: the export is a background job; the card follows the last one it read. */
+  let job = $state(/** @type {import('$lib/data/workspace.js').ArchiveExportJob | null} */ (null));
+  /* A failed job the card is showing: its words and its one control, in place of the form's fields. */
+  let failure = $state(/** @type {import('$lib/data/workspace.js').ArchiveExportJob | null} */ (null));
+  /* A start or a retry is on its way: a read must not move the card under it. */
+  let sending = $state(false);
   let passOut = $state("");
   let passAgain = $state("");
   let written = $state(/** @type {import('$lib/data/workspace.js').WrittenArchive | null} */ (null));
@@ -126,6 +142,7 @@ export function createArchiveController({ householdId, limits, tabIdPrefix, wake
 
   /** The desk's cancel: closes the challenge and forgets the proof typed. */
   function cancelChallenge() {
+    sending = false;
     challengeOpen = false;
     retry = null;
     currentPassword = "";
@@ -134,6 +151,7 @@ export function createArchiveController({ householdId, limits, tabIdPrefix, wake
 
   /** The phone's Sheet closes itself; this only drops the held act. */
   function dropRetry() {
+    sending = false;
     retry = null;
   }
 
@@ -190,30 +208,190 @@ export function createArchiveController({ householdId, limits, tabIdPrefix, wake
     ? `${dayMonth(written.expiresAt, localZone())}, ${clockOf(written.expiresAt, localZone())}`
     : "");
 
+  /* ── the export job (#1774): read on mount, every 2 s while it is live, once on return to the tab ── */
+  const writingWords = $derived(progressWordsOf(job));
+  /** @param {typeof job} current */
+  function progressWordsOf(current) {
+    return progressWords(current?.bytesDone ?? null, current?.bytesTotal ?? null, "");
+  }
+
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let pollTimer = null;
+  let mounted = false;
+
+  /** The next read, while the job is live and the card is on the page. */
+  function schedule() {
+    if (pollTimer !== null) clearTimeout(pollTimer);
+    pollTimer = null;
+    if (mounted && exportLive({ export: job })) pollTimer = setTimeout(readExport, EXPORT_POLL_MS);
+  }
+
+  /* Latest request wins: a read's answer counts only if no read, start or
+     retry began after it, so an older answer landing late can never move the
+     card back (or fire the wake twice). */
+  let readSeq = 0;
+
+  async function readExport() {
+    pollTimer = null;
+    const seq = ++readSeq;
+    try {
+      const state = await fetchPortableArchiveState(householdId());
+      if (seq !== readSeq) return;
+      apply(state);
+    } catch {
+      /* Unread this time: the card keeps what it showed and reads again on the next tick. */
+    }
+    schedule();
+  }
+
+  /**
+   * Moves the card to what the read says, unless the reader is in the middle
+   * of something (typing a passphrase, a challenge, a send on its way).
+   * @param {import('$lib/data/workspace.js').ArchiveExportState} state
+   */
+  function apply(state) {
+    if (sending || challengeOpen || (outPhase === "form" && failure === null)) return;
+    const before = job;
+    job = state.export;
+    written = state.latest;
+    let phase = nextPhase(state);
+    if (phase === "written" && !written) phase = "rest";
+    if (phase === "form" && state.export) {
+      failure = state.export;
+      outProblem = `not written — ${state.export.failureMessage || EXPORT_FAILED_WORDS}`;
+    } else {
+      failure = null;
+      outProblem = null;
+    }
+    outPhase = phase;
+    /* The wake only for a job this page saw live, never for one found finished. */
+    if (phase === "written" && before && exportLive({ export: before }) && before.id === state.export?.id) {
+      wake(`the archive is written · download it before ${readyUntil}`);
+    }
+  }
+
+  onMount(() => {
+    mounted = true;
+    const onVisible = () => { if (document.visibilityState === "visible") readExport(); };
+    document.addEventListener("visibilitychange", onVisible);
+    readExport();
+    return () => {
+      mounted = false;
+      if (pollTimer !== null) clearTimeout(pollTimer);
+      pollTimer = null;
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  });
+
   /* ── acts ─────────────────────────────────────────────────────────────── */
-  function startExport() { outPhase = "form"; }
+  function startExport() {
+    failure = null;
+    outProblem = null;
+    outPhase = "form";
+  }
 
   function cancelExport() {
     outPhase = "rest";
     passOut = "";
     passAgain = "";
     outProblem = null;
+    failure = null;
   }
 
-  function writeArchive() {
-    if (outRefusal) return;
+  /** A failed job whose key is gone: the form again, for a new passphrase. */
+  function writeAgain() {
+    failure = null;
     outProblem = null;
-    outPhase = "writing";
+    outPhase = "form";
+  }
+
+  /** @param {import('$lib/data/workspace.js').ArchiveExportJob} started */
+  function queued(started) {
+    readSeq += 1; // a read sent before this answer is older than it
+    job = started;
+    failure = null;
+    outProblem = null;
+    passOut = "";
+    passAgain = "";
+    outPhase = "queued";
+    schedule();
+  }
+
+  /** Another export of this household is already live: the card shows that one. */
+  async function followLive() {
+    sending = false;
+    passOut = "";
+    passAgain = "";
+    failure = null;
+    outPhase = "queued";
+    await readExport();
+  }
+
+  /* The start stays on the form, its button held by `sending`, until the
+     POST is answered: "queued" only once a job exists (never under the
+     step-up challenge). `sending` spans the whole act, the challenge
+     included, and is let go when it fails, holds for the challenge, or the
+     challenge is left. */
+  function writeArchive() {
+    if (outRefusal || sending) return;
+    outProblem = null;
+    sending = true;
     guarded(async (proof) => {
-      written = await writePortableArchive(householdId(), { passphrase: passOut, currentPassword: proof || undefined });
-      passOut = "";
-      passAgain = "";
-      outPhase = "written";
-      wake(`the archive is written · download it before ${readyUntil}`);
+      sending = true;
+      let started;
+      try {
+        started = await startPortableArchive(householdId(), { passphrase: passOut, currentPassword: proof || undefined });
+      } catch (error) {
+        if (codeOf(error) !== "archive_export_in_progress") throw error;
+        await followLive();
+        return;
+      }
+      sending = false;
+      queued(started);
     }, (words) => {
+      sending = false;
       outProblem = `not written — ${words}`;
       outPhase = "form";
-    }, "archive_export", () => { outPhase = "form"; });
+    }, "archive_export", () => { sending = false; outPhase = "form"; });
+  }
+
+  /** A failed job, again, with the key its start left (within the hour): no second passphrase. */
+  function retryExport() {
+    const failed = failure;
+    if (!failed || sending) return;
+    sending = true;
+    guarded(async (proof) => {
+      sending = true;
+      let again;
+      try {
+        again = await retryPortableArchive(householdId(), failed.id, { currentPassword: proof || undefined });
+      } catch (error) {
+        const code = codeOf(error);
+        if (code === "archive_export_key_gone") {
+          /* The hour has passed: the form, for a new passphrase. */
+          sending = false;
+          failure = null;
+          outProblem = `not written — ${wordsOf(error)}`;
+          outPhase = "form";
+          return;
+        }
+        if (code === "archive_export_conflict") {
+          /* The job moved (another tab retried it): show what it is now. */
+          sending = false;
+          failure = null;
+          outPhase = "queued";
+          await readExport();
+          return;
+        }
+        throw error;
+      }
+      sending = false;
+      queued(again);
+    }, (words) => {
+      sending = false;
+      outProblem = `not written — ${words}`;
+      outPhase = "form";
+    }, "archive_export", () => { sending = false; outPhase = "form"; });
   }
 
   /** @param {Event} event */
@@ -291,6 +469,9 @@ export function createArchiveController({ householdId, limits, tabIdPrefix, wake
     get picker() { return picker; }, set picker(next) { picker = next; },
     get passphraseMin() { return passphraseMin; },
     get outPhase() { return outPhase; },
+    get failure() { return failure; },
+    get sending() { return sending; },
+    get writingWords() { return writingWords; },
     get written() { return written; },
     get outProblem() { return outProblem; },
     get outRefusal() { return outRefusal; },
@@ -306,7 +487,7 @@ export function createArchiveController({ householdId, limits, tabIdPrefix, wake
     get stepUpNotice() { return stepUpNotice; },
     get bringCount() { return bringCount; },
     get readyUntil() { return readyUntil; },
-    tabKey, startExport, cancelExport, writeArchive, chose, lookInside, bringIn, startOver,
+    tabKey, startExport, cancelExport, writeArchive, retryExport, writeAgain, chose, lookInside, bringIn, startOver,
     cancelChallenge, dropRetry, prove, toProvider,
   };
 }

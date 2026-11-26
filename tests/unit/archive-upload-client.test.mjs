@@ -149,10 +149,10 @@ describe("importPortableArchive sends the chosen file, unread, as the last part 
 });
 
 describe("csrfFetch still sends an object body as JSON (#1566)", () => {
-  it("writePortableArchive keeps content-type application/json and a JSON body", async () => {
+  it("startPortableArchive keeps content-type application/json and a JSON body", async () => {
     // Catches: the FormData change spilling into every other mutating call.
-    const { writePortableArchive } = await workspace();
-    await writePortableArchive(HOUSEHOLD, { passphrase: PASSPHRASE });
+    const { startPortableArchive } = await workspace();
+    await startPortableArchive(HOUSEHOLD, { passphrase: PASSPHRASE });
 
     const call = calls.find((candidate) => candidate.url === `/api/households/${HOUSEHOLD}/portable-archives`);
     expect(headersOf(call).get("content-type")).toBe("application/json");

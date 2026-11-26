@@ -26,6 +26,12 @@ vi.mock("@/server/portable-archive-repository", () => ({
   reconcilePortableArchiveStorage: m.none,
   rollBackStaleUnfinishedPortableImports: m.none,
 }));
+/* #1774: the export job's own sweeps are tested with it. */
+vi.mock("@/server/document-maintenance/export-jobs", () => ({
+  requeueInterruptedExportsAtBoot: m.none,
+  sweepPortableArchiveExports: m.none,
+  startExportWorker: vi.fn(),
+}));
 vi.mock("@/server/household-lifecycle", () => ({ purgeExpiredHouseholds: m.none }));
 vi.mock("@/server/document-maintenance/scan-recovery", () => ({
   claimScannerRecoveryJobs: async () => [],

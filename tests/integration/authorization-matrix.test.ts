@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { documents, households, portableArchives, sessions, users } from "@/db/schema";
 import { getAuthConfig } from "@/lib/env";
+import { runExportWorkerOnce } from "@/server/document-maintenance/export-jobs";
 import { sessionCookieName } from "@/lib/auth/cookies";
 import { sealStepUpProof, stepUpProofCookieName } from "@/lib/auth/recent-auth";
 import { sealedArchiveFile } from "../support/sealed-archive";
@@ -387,9 +388,14 @@ describe("portable archive and administrator authorization", () => {
       body: JSON.stringify({ passphrase: "integration-passphrase", includeDocuments: false }),
       params: context,
     });
-    expect(created.status).toBe(200);
+    // #1774 (design 2.6): the start answers 202 with the job; the worker writes the file.
+    expect(created.status).toBe(202);
     expect(created.headers.get("cache-control")).toBe("no-store");
-    expect((await json(created)).archive).toEqual(expect.objectContaining({ includesDocuments: false }));
+    expect((await json(created)).export).toEqual(expect.objectContaining({ status: "pending" }));
+    await runExportWorkerOnce();
+    expect(await getDb().select({ includes: portableArchives.includesDocuments }).from(portableArchives)
+      .where(and(eq(portableArchives.householdId, fixture.household.id), eq(portableArchives.requestedByUserId, fixture.users.owner.id), ne(portableArchives.id, fixture.archive.id))))
+      .toEqual([{ includes: false }]);
 
     const beforeDeniedArchiveIds = (await getDb().select({ id: portableArchives.id }).from(portableArchives)
       .where(eq(portableArchives.householdId, fixture.household.id))).map(({ id }) => id).sort();

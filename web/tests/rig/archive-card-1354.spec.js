@@ -27,6 +27,13 @@ import { guardedRoute } from "./workspace-writes.js";
 const HARLOW = "hh-harlow-1";
 const PASSPHRASE = "correct-horse-battery-staple";
 const SETTLE = 15_000;
+/* #1774: the write is a background job. The POST answers 202 with the job; the
+   card then reads GET {export, latest}, which here says the job is done. */
+const ACCEPTED = { status: 202, json: { export: { id: "job-1", status: "pending", bytesDone: null, bytesTotal: null, createdAt: "2026-11-25T10:00:00Z", failureCode: null, failureMessage: null, canRetry: true } } };
+const WRITTEN_STATE = {
+  export: { id: "job-1", status: "completed", bytesDone: 10, bytesTotal: 10, createdAt: "2026-11-25T10:00:00Z", failureCode: null, failureMessage: null, canRetry: true },
+  latest: { id: "abc-123", expiresAt: "2026-12-01T00:00:00Z", includesDocuments: true, downloadUrl: "/api/portable-archives/abc-123", keepPerHousehold: 2 },
+};
 const CHALLENGE_REFUSAL = { error: { code: "recent_authentication_required", message: "Confirm it is you before making this change" } };
 
 test.describe.configure({ timeout: 60_000 });
@@ -73,14 +80,20 @@ async function archiveRoutes(page, answers = {}) {
   const imports = [];
   /** @type {string[]} */
   const previews = [];
+  let accepted = false;
   await page.route(`${APP}/api/households/${HARLOW}/portable-archives`, guardedRoute(async (route) => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({ json: accepted ? WRITTEN_STATE : { export: null, latest: null } });
+      return;
+    }
     const proof = Boolean(route.request().postDataJSON().currentPassword);
     writes.push({ proof });
     const answer = answers.write
       ? await answers.write(proof, writes.length)
       : proof
-        ? { status: 200, json: { archive: { id: "abc-123", expiresAt: "2026-12-01T00:00:00Z", includesDocuments: true, downloadUrl: "/api/portable-archives/abc-123" } } }
+        ? ACCEPTED
         : { status: 403, json: CHALLENGE_REFUSAL };
+    if (answer.status === 202) accepted = true;
     await route.fulfill(answer);
   }));
   await page.route(`${APP}/api/portable-archives/preview`, guardedRoute(async (route) => {
@@ -153,7 +166,7 @@ test("writing an archive: tap, tap again, confirm it is you, work in progress, w
     write: async (proof) => {
       if (!proof) return { status: 403, json: CHALLENGE_REFUSAL };
       await held;
-      return { status: 200, json: { archive: { id: "abc-123", expiresAt: "2026-12-01T00:00:00Z", includesDocuments: true, downloadUrl: "/api/portable-archives/abc-123" } } };
+      return ACCEPTED;
     },
   });
   const c = await openExportForm(page, phone);
@@ -200,7 +213,7 @@ test("a wrong password is refused in the card's words, the challenge stays, and 
   const seen = await archiveRoutes(page, {
     write: async (proof, count) => (count < 3
       ? { status: 403, json: CHALLENGE_REFUSAL }
-      : { status: 200, json: { archive: { id: "abc-123", expiresAt: "2026-12-01T00:00:00Z", includesDocuments: true, downloadUrl: "/api/portable-archives/abc-123" } } }),
+      : ACCEPTED),
   });
   const c = await openExportForm(page, phone);
   await typePassphrases(c);
@@ -273,7 +286,7 @@ test("a quick double tap sends one write, and confirming twice answers one", asy
         return { status: 403, json: CHALLENGE_REFUSAL };
       }
       await proofHeld;
-      return { status: 200, json: { archive: { id: "abc-123", expiresAt: "2026-12-01T00:00:00Z", includesDocuments: true, downloadUrl: "/api/portable-archives/abc-123" } } };
+      return ACCEPTED;
     },
   });
   const c = await openExportForm(page, phone);
