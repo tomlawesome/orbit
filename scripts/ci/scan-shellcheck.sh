@@ -6,7 +6,8 @@
 # sh/bash shebang, minus vendored and build directories. Writes shellcheck's
 # json1 report to .orbit-code-scan/shellcheck.json and prints a summary.
 # Exits 0 whatever shellcheck finds (report first, then block); exits non-zero
-# only when the pinned tool cannot be installed and verified.
+# when the pinned tool cannot be installed and verified, or leaves no readable
+# json1 report.
 #
 # Usage (from anywhere): bash scripts/ci/scan-shellcheck.sh
 set -Eeuo pipefail
@@ -50,9 +51,15 @@ if ((count > 0)); then
 else
   printf '{"comments":[]}\n' > "$report"
 fi
-if [[ ! -s "$report" ]]; then
-  printf 'scan-shellcheck: no report produced (exit %s)\n' "$rc" >&2
-  printf '{"comments":[]}\n' > "$report"
+# A run that leaves no readable json1 report is a broken tool, not a clean
+# result: fail, as the other scanners do, and leave no report saying 0 findings.
+if ! node -e '
+const r = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+if (!r || !Array.isArray(r.comments)) process.exit(1);
+' "$report" 2> /dev/null; then
+  printf 'scan-shellcheck: shellcheck exit %s and no readable report; failing. Findings never fail this scan, a broken run does.\n' "$rc" >&2
+  rm -f "$report"
+  exit 1
 fi
 
 node -e '
