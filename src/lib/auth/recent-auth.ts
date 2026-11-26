@@ -77,6 +77,9 @@ export const stepUpIntents = [
      retires their pending links and approvals, so a proof for the setup link
      cannot pay for it. */
   "email_address_set",
+  /* Giving or removing an account's administrator access (#1633): an
+     elevation hands the instance over, so it has its own intent. */
+  "administrator_set",
 ] as const;
 export type StepUpIntent = typeof stepUpIntents[number];
 

@@ -505,6 +505,7 @@ timeout on this one case rather than a global raise.
 ## tour-pocket-webkit.spec.js:685 "the pocket film in WebKit (#1174) › plays end to end at 430x932 under normal motion" — pocket-webkit
 
 - 2026-11-19 · bed6d036 (batch-b) · local run in the Playwright image, no pipeline · `locator.tap` on `#pocket-entry .pc-chip[data-imp="low"]` (line 818) retried "element was detached from the DOM" until the 600 s test timeout. 27 others passed. Rerun of the same case on unchanged code: passed (3.4m). First sighting.
+- 2026-11-25 · dev cd403cae · nightly 5441 / `film_webkit` 1/2 (job 65559) · pocket-webkit 430x932, failed at :854 with faults `{"pill faint (dim top) · /home · ch7": 1}`; no trace kept and the key holds no figures. #1960 (pill faint, diagnostics): diagnostics added; no fix yet. First sighting of this symptom.
 
 ## upgrade_cell: [latest-3, all-keys] "Could not download the release manifest for channel v0.3.7" (image-registry)
 
@@ -613,6 +614,7 @@ timeout on this one case rather than a global raise.
 ## src/server/documents/pdf-structure-sandbox-poppler.test.ts "page draws are pdftoppm (real pdftoppm/pdfinfo) > §1.5 line 10: the tiny-step tiling pattern is stopped by the clock (500 ms) with stop timeout ..." (:345)
 
 - 2026-11-21 · !1457 batch-b 1eb93654 · pipeline 5167 / fast (job 61981) · `expected 5194 to be less than 2000` in a 1445 s run on a loaded runner; the change touches none of it. First sighting.
+- 2026-11-25 · !1478 batch-a 767c273f · pipeline 5390 / fast (job 65086) · failed after 2193 ms on a loaded runner, three other pipelines running; the job then hit its 30-minute limit before printing the assertion. The change touches none of it.
 
 ## tests/integration/document-kept-previews.test.ts "pages drawn once and kept, encrypted (#1433 §2.6) (real pdftoppm/pdfinfo) > line 5: a view before the worker ran draws on demand ..." (:277)
 
@@ -679,3 +681,8 @@ timeout on this one case rather than a global raise.
 ## tests/unit/inbox-screens-landed-then-reread.test.mjs (whole file: beforeAll compiling the inbox page, 10 s hook limit)
 
 - 2026-11-25 · !1478 batch-a 24ea50a2 · pipeline 5427 / fast (job 65419) · `Hook timed out in 10000ms` at line 159 (the beforeAll that compiles `routes/inbox/+page.svelte`), on a runner slow enough that the same job hit its 30-minute limit on two earlier runs; the change touches nothing the inbox draws. The file passed locally on the same commit. First sighting.
+
+## tests/unit/workspace-commands-dry-run-route.test.mjs "answers an empty success when the engine would accept, and writes nothing" (5 s test limit), and the next test in the file
+
+- 2026-11-25 · #1633 branch 4e1164f1a · local full gate (not CI) · the first test timed out at 5 s on a loaded host (load average about 22); the next test then saw the engine mock already called once, by the timed-out test. The change touches nothing this route uses. The file passed on its own on the same commit. First sighting.
+

@@ -23,7 +23,7 @@
     SENDING_HOW_HREF, SENDING_NOT_SET, blankSendDraft, importSkippedWords, mailboxSubmissionHost, sendDraftOf, sendingOutcomeWords, sendingRowsOf,
   } from "./words.js";
   import {
-    card, commandMail, deleteSystemNow, inviteLocalUser, issueSetupLink, makeSystem, placePerson, restoreSystem, setAddress,
+    card, commandMail, deleteSystemNow, inviteLocalUser, issueSetupLink, makeSystem, placePerson, restoreSystem, setAddress, setAdministrator,
     runMailTest, retryJob, saveSending, setArchiveStorage, setContact, setMailLimit, setUploadLimit,
   } from "./acts.svelte.js";
   import {
@@ -325,6 +325,8 @@
   /** The same for an "email_address_set" step-up (#1869): whose address,
       and what was typed, so the phone reopens its own sheet. */
   let resumedAddress = $state(/** @type {{ personId: string, email: string } | null} */ (null));
+  /** The same for an "administrator_set" step-up (#1633): whose access. */
+  let resumedAdminPersonId = $state(/** @type {string | null} */ (null));
 
   /**
    * The typed draft, carried across a step-up (#915). Leaving for the provider
@@ -344,7 +346,7 @@
   /** @param {string} intent */
   /**
    * @param {string} intent
-   * @param {{ resend?: { personId: string, days: number } | null, address?: { personId: string, email: string } | null }} [about]
+   * @param {{ resend?: { personId: string, days: number } | null, address?: { personId: string, email: string } | null, admin?: { personId: string } | null }} [about]
    */
   function stashDraft(intent, about = {}) {
     // `about` names what the challenged tap was opening: it is stashed
@@ -356,6 +358,7 @@
       systemName: systemName ?? "",
       resend: about.resend ?? (resendFor ? { personId: resendFor, days: resendDays } : null),
       ...(about.address ?? addressFor ? { address: about.address ?? { personId: addressFor, email: addressDraft } } : {}),
+      ...(about.admin ?? adminFor ? { admin: about.admin ?? { personId: adminFor } } : {}),
       // #1604 G11-FR1: a stale draft is an abandoned errand; see restoreDraft.
       at: Date.now(),
     };
@@ -393,6 +396,10 @@
         addressDraft = draft.address.email ?? "";
         resumedAddress = { personId: draft.address.personId, email: draft.address.email ?? "" };
       }
+      if (draft.intent === "administrator_set" && draft.admin?.personId) {
+        adminFor = draft.admin.personId;
+        resumedAdminPersonId = draft.admin.personId;
+      }
     } catch { /* nothing held, or unreadable: the form starts empty */ }
   }
 
@@ -425,6 +432,57 @@
     wake: (text, options) => (addressSaid = { text, failure: options?.failure === true }),
     });
   };
+  /* GIVING OR REMOVING ADMINISTRATOR ACCESS (#1633): one more row action,
+     the resend band's shape, behind its own intent `administrator_set` so a
+     proof for a setup link cannot pay for an elevation (ADR-0023 §5). */
+  /** Which person's administrator-access band is open, by user id. @type {string | null} */
+  let adminFor = $state(null);
+  let adminPassword = $state("");
+  const adminCard = $state(card());
+  /** What the last change said, for the line under the roster. @type {string | null} */
+  let adminSaid = $state(null);
+  /** Closes the band and hands focus back to the control that opened it. @param {string} personId */
+  const closeAdmin = (personId) => {
+    adminFor = null;
+    adminPassword = "";
+    adminCard.problem = null;
+    tick().then(() => document.getElementById(`admin-access-${personId}`)?.focus());
+  };
+  /** Escape anywhere in the band closes it, as cancel does. @param {string} personId */
+  const escapeAdmin = (personId) => (/** @type {KeyboardEvent} */ event) => {
+    if (event.key === "Escape") { event.preventDefault(); closeAdmin(personId); }
+  };
+  /** Opens the band for one person, behind its own challenge. @param {{ id: string }} person */
+  const openAdmin = (person) => { adminCard.problem = null; return challengeThen("administrator_set", () => {
+    adminFor = adminFor === person.id ? null : person.id;
+    adminPassword = "";
+    adminSaid = null;
+    if (adminFor) {
+      tick().then(() => /** @type {HTMLElement | null} */ (document.querySelector("#admin-band input, #admin-band button[type=submit]"))?.focus());
+    }
+  }, (message) => (adminCard.problem = message), { admin: { personId: person.id } }); };
+  /** @param {{ id: string, displayName: string, isInstanceAdmin?: boolean }} person */
+  const setAdministratorNow = (person) => {
+    /* Never a PUT with neither a password nor a live proof: it can only be
+       refused. Once the proof is spent, the press starts a fresh step-up. */
+    if (!actorHasPassword && provenIntent !== "administrator_set") {
+      return challengeThen("administrator_set", () => {}, (message) => (adminCard.problem = message), { admin: { personId: person.id } });
+    }
+    return setAdministrator(person, !person.isInstanceAdmin, adminPassword, {
+    card: adminCard, actorHasPassword, reread,
+    landed: () => { adminFor = null; adminPassword = ""; provenIntent = ""; },
+    /* With no password, the step-up proof was spent by that request: close the
+       band, so the next try starts a fresh step-up rather than a PUT that
+       carries nothing. */
+    refused: () => {
+      if (actorHasPassword) return;
+      provenIntent = ""; adminFor = null;
+      /* The refusal line stays; focus goes back to the control, as cancel does. */
+      tick().then(() => document.getElementById(`admin-access-${person.id}`)?.focus());
+    },
+    wake: (text, options) => { if (!options?.failure) adminSaid = text; },
+    });
+  };
   /** @type {import("./acts.svelte.js").Delivery | null} */
   let resendDelivery = $state(null);
 
@@ -440,7 +498,7 @@
    * @param {string} intent
    * @param {() => void} openField
    * @param {(message: string) => void} [report]
-   * @param {{ resend?: { personId: string, days: number } | null, address?: { personId: string, email: string } | null }} [about] what the tap is opening, for stashDraft
+   * @param {{ resend?: { personId: string, days: number } | null, address?: { personId: string, email: string } | null, admin?: { personId: string } | null }} [about] what the tap is opening, for stashDraft
    */
   async function challengeThen(intent, openField, report = (message) => (localCard.problem = message), about = {}) {
     localCard.problem = null;
@@ -832,7 +890,7 @@
 <!-- #1123, proposal §2.12: administration on a phone, chosen by CSS. It
      shares this page's state and acts (the step-up challenge, the re-read),
      so both dialects answer the server the same way. -->
-<Pocket {view} fixtures={Boolean(data?.fixtures)} {actorHasPassword} {provenIntent} {resumedResendPersonId} {resumedAddress} bind:draft={localDraft}
+<Pocket {view} fixtures={Boolean(data?.fixtures)} {actorHasPassword} {provenIntent} {resumedResendPersonId} {resumedAddress} {resumedAdminPersonId} bind:draft={localDraft}
         challenge={challengeThen} {reread}
         spent={() => (provenIntent = "")} {screenProblem} {screenRefused} onretry={loadScreen} />
 
@@ -1047,7 +1105,7 @@
               <b>{person.displayName}{person.id === view.user?.id ? " · you" : ""}</b>
               <span>{[person.email ?? (person.metadataStatus?.email === "metadata_integrity_failed" ? "address can't be read" : null), view.peopleMeta[person.id]].filter(Boolean).join(" · ")}</span>
             </div>
-            <span class="role" class:admin={person.isInstanceAdmin}>{person.isInstanceAdmin ? "admin" : "user"}</span>
+            <span class="role" class:admin={person.isInstanceAdmin}>{person.isPrimaryAdministrator ? "primary admin" : person.isInstanceAdmin ? "admin" : "user"}</span>
             {#if !view.failed.session && !view.metadata?.locked
                  && person.metadataStatus?.email === "metadata_integrity_failed"}
               <!-- #1869: a stored address that cannot be read has no other way
@@ -1085,6 +1143,17 @@
                  && person.metadataStatus?.email !== "metadata_integrity_failed"}
               <button class="place" onclick={() => openAddress(person)} aria-expanded={addressFor === person.id}
                       aria-label={person.id === view.user?.id ? "change your address" : `change the address of ${person.displayName}`}>{person.id === view.user?.id ? "change my address…" : "change address…"}</button>
+            {/if}
+            {#if !view.failed.session && person.id !== view.user?.id && !person.isPrimaryAdministrator
+                 && (person.isInstanceAdmin || !person.disabledAt)}
+              <!-- #1633: giving or removing administrator access. Never on the
+                   primary's row, nor giving to a disabled account: a button
+                   that can only be refused would be inert. The pill beside
+                   stays a status, never this control (#1624). -->
+              <button class="place" id={`admin-access-${person.id}`} onclick={() => openAdmin(person)}
+                      aria-expanded={adminFor === person.id}
+                      aria-label={person.isInstanceAdmin ? `remove ${person.displayName}'s administrator access` : `give ${person.displayName} administrator access`}
+                      >{person.isInstanceAdmin ? "remove admin access…" : "give admin access…"}</button>
             {/if}
           </div>
           {#if placing === person.id}
@@ -1132,11 +1201,31 @@
               </div>
             </form>
           {/if}
+          {#if adminFor === person.id}
+            <form class="localuser resend" id="admin-band" onsubmit={(event) => { event.preventDefault(); setAdministratorNow(person); }}>
+              <p class="mailboxnote">{person.isInstanceAdmin
+                ? `Removes ${person.displayName}'s administrator access. They keep their account and their households.`
+                : `Gives ${person.displayName} administrator access: they will see every household and every person on this instance, and can change who else is an administrator.`}</p>
+              {#if actorHasPassword}
+                <label for="admin-current">your current password</label>
+                <input id="admin-current" type="password" autocomplete="current-password"
+                       onkeydown={escapeAdmin(person.id)} bind:value={adminPassword} required />
+              {/if}
+              <div class="placerow localuserrow">
+                <button type="submit" disabled={adminCard.busy} onkeydown={escapeAdmin(person.id)}>{person.isInstanceAdmin ? "remove it" : "give it"}</button>
+                <button type="button" onclick={() => closeAdmin(person.id)} onkeydown={escapeAdmin(person.id)}>cancel</button>
+              </div>
+            </form>
+          {/if}
         {/each}
         {#if addressSaid}
           <div class="adminproblem" class:ok={!addressSaid.failure}>{addressSaid.text}</div>
         {/if}
         {#if addressCard.problem}<div class="adminproblem">{addressCard.problem}</div>{/if}
+        <!-- In the page before any text arrives, so a screen reader hears it
+             (a region inserted with its text is not reliably announced). -->
+        <div class="adminproblem" class:ok={Boolean(adminSaid)} role="status">{adminSaid ?? ""}</div>
+        <div class="adminproblem" role="status">{adminCard.problem ?? ""}</div>
         {#if resendDelivery}
           {#if resendDelivery.sendError}
             <div class="adminproblem">{sendWords(resendDelivery.sendError)}</div>

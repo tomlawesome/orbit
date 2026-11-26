@@ -52,9 +52,10 @@ describe("the type check sees the shared door through a declaration stub (item 2
     const start = text.indexOf(from);
     expect(start, `${from} not found in the folder`).toBeGreaterThan(-1);
     const end = until ? text.indexOf(until, start) : text.length;
-    const returns = [...text.slice(start, end).matchAll(/^\s*return \{(.*)\};?\s*$/gm)];
+    /* the returned object may run over several lines (createJourney at e73b515); comments inside it are dropped */
+    const returns = [...text.slice(start, end).matchAll(/^\s*return \{([\s\S]*?)\};?\s*$/gm)];
     expect(returns.length, `no returned object after ${from}`).toBeGreaterThan(0);
-    const body = returns.at(-1)[1];
+    const body = returns.at(-1)[1].replace(/\/\*[\s\S]*?\*\//g, "").replace(/\s+/g, " ");
     const members = new Set();
     for (const m of body.matchAll(/get\s+([A-Za-z_$][\w$]*)\s*\(\)/g)) members.add(m[1]);
     /* drop getters' bodies and call arguments before reading the plain members */
