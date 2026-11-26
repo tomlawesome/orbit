@@ -146,11 +146,13 @@ test("settings: my warning date moves the planets nearer the sun, saves, and hom
   for (const id of known(phone)) previewDue[id] = await previewRadius(page, id);
 
   /* press "my warning date": pressed, saved, and the live sky draws the planets nearer */
-  const saved = page.waitForRequest((request) => request.url().endsWith("/api/preferences") && request.method() === "PUT");
+  const saved = page.waitForResponse((response) => response.url().endsWith("/api/preferences") && response.request().method() === "PUT");
   await warningButton(page).click();
   await expect(warningButton(page)).toHaveAttribute("aria-pressed", "true");
   await expect(dueButton(page)).toHaveAttribute("aria-pressed", "false");
-  expect((await saved).postDataJSON().skyDriver).toBe("warning");
+  const savedResponse = await saved;
+  expect(savedResponse.request().postDataJSON().skyDriver).toBe("warning");
+  expect(savedResponse.ok(), "the preference save is stored before the page loads again").toBe(true);
   for (const id of known(phone)) {
     await expect.poll(() => previewRadius(page, id), { timeout: RIG_EXPECT_MS, message: `${id} in the preview` }).toBeLessThan(previewDue[id] - 1);
   }
@@ -170,11 +172,13 @@ test("settings: my warning date moves the planets nearer the sun, saves, and hom
   await expect(dueButton(page)).toHaveAttribute("aria-pressed", "false");
 
   /* press "due date": back where they were */
-  const savedBack = page.waitForRequest((request) => request.url().endsWith("/api/preferences") && request.method() === "PUT");
+  const savedBack = page.waitForResponse((response) => response.url().endsWith("/api/preferences") && response.request().method() === "PUT");
   await dueButton(page).click();
   await expect(dueButton(page)).toHaveAttribute("aria-pressed", "true");
   await expect(warningButton(page)).toHaveAttribute("aria-pressed", "false");
-  expect((await savedBack).postDataJSON().skyDriver).toBe("due");
+  const savedBackResponse = await savedBack;
+  expect(savedBackResponse.request().postDataJSON().skyDriver).toBe("due");
+  expect(savedBackResponse.ok(), "the preference save is stored before the page loads again").toBe(true);
   for (const id of known(phone)) {
     await expect.poll(() => previewRadius(page, id), { timeout: RIG_EXPECT_MS, message: `${id} in the preview` }).toBeCloseTo(previewDue[id], 0);
   }
