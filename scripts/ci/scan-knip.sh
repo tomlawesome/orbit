@@ -41,7 +41,7 @@ tools="$(bash "${ORBIT_KNIP_ENSURE:-scripts/ci/ensure-knip.sh}")" || {
   exit 1
 }
 
-image="${NODE_IMAGE:-$(sed -n 's/^  NODE_IMAGE: *//p' .gitlab-ci.yml | head -n 1)}"
+image="${NODE_IMAGE:-$(sed -n '/^  NODE_IMAGE: */{s///p;q;}' .gitlab-ci.yml)}"
 [[ -n "$image" ]] || { printf 'scan-knip: no NODE_IMAGE to run knip in; failing.\n' >&2; exit 1; }
 
 out_dir="${ORBIT_CODE_SCAN_DIR:-.orbit-code-scan}"
