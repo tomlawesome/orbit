@@ -682,12 +682,6 @@ timeout on this one case rather than a global raise.
 
 - 2026-11-26 · !1487 039cb685 · pipeline 5489 / integration 4/4 (job 66206) · both `Test timed out in 15000ms` on a loaded runner; the change touches none of it. First sighting.
 
-## Integration shard hits the 15-minute job limit on a loaded runner, no test failing (#1971)
-
-- 2026-11-26 · !1487 039cb685 · pipeline 5489 / integration 1/4 (job 66289) · `job_execution_timeout` at 908 s, no summary: 661 of 663 started tests done, last running document-staged-limit-system-staging-1605.test.ts; no test failed. First sighting.
-- 2026-11-26 · !1487 039cb685 · pipeline 5489 / integration 4/4 (job 66291) · `job_execution_timeout` at 904 s: all 564 tests passed and the summary printed, then the job was killed 26 s later. Second sighting.
-- 2026-11-26 · !1487 039cb685 · pipeline 5489 / integration 1/4 (job 66389) · `job_execution_timeout` at 905 s, no summary: 583 of 585 started tests done, last running update-preflight.test.ts; no test failed. Third sighting: #1971.
-
 ## scripts/install-retire-lock-1855.test.mjs "install.sh --plain --update: the SMTP retirement takes the backup/restore lock (#1855) > flock exiting 1 with an error on stderr is untestable, not held: the could-not-be-tested line names the lock file and flock's words"
 
 - 2026-11-26 · !1497 a0971112 · pipeline 5496 / fast (job 66225) · `expected 1 to be +0` after 9.3 s in a 1656 s run on a loaded runner, one of four load failures in the job; the change (a base image re-pin) touches none of it. First sighting.
