@@ -30,7 +30,7 @@
  *     boundary meaningless; following the anchors is what makes it sound.
  *     `pipelineOwned` names the paths this axis owns; a job marked
  *     `definitionCoversPipeline` drops them from its checkout axis, so a CI
- *     edit reaches its key through this axis alone. `fast`, `fast_checks` and
+ *     edit reaches its key through this axis alone. `fast`, `fast_coverage`, `fast_checks` and
  *     `fast_docker` are not marked: their suites read the pipeline file and every ci
  *     script, so any CI edit still reruns them.
  *
@@ -235,7 +235,7 @@ export function pipelineOwnedGlobs(config) {
 /*
  * Whether a job reaches the pipeline file and scripts/ci only through its own
  * definition (`definitionCoversPipeline` in job-inputs.json). The stack jobs
- * do; `fast`, `fast_checks` and `fast_docker` do not, because their suites read the whole
+ * do; `fast`, `fast_coverage`, `fast_checks` and `fast_docker` do not, because their suites read the whole
  * pipeline file and every ci script, so for them those paths stay in the
  * checkout axis and any CI edit still reruns them.
  */

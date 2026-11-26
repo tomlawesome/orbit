@@ -101,6 +101,8 @@ function run() {
   delete env.STUB_BUILD_NEEDED;
   delete env.ORBIT_TEST_COVERAGE;
   delete env.ORBIT_TEST_PHASE;
+  // #1933: a CI `fast` shard sets it for its own run; the script under test must not inherit it.
+  delete env.ORBIT_TEST_SHARD;
   const r = spawnSync("bash", [join(repo, "scripts", "test-backend.sh")], {
     cwd: repo,
     encoding: "utf8",

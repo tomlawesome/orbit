@@ -58,7 +58,20 @@ fi
 # guard.
 #
 # It and the node --test guards after it run in the `tests` phase (#1831).
-if [[ "$run_tests" == true ]]; then
+#
+# ORBIT_TEST_SHARD (#1933 103a): CI's `fast` runs the Vitest suite as two
+# shards, "1/2" and "2/2". The guards are not split, so they run in shard 1
+# only (or unsharded), and every check still runs in exactly one job (#1831).
+shard="${ORBIT_TEST_SHARD:-}"
+run_guards=false
+if [[ -z "$shard" || "$shard" == 1/* ]]; then
+  run_guards=true
+fi
+shard_args=()
+if [[ -n "$shard" ]]; then
+  shard_args=("--shard=$shard")
+fi
+if [[ "$run_tests" == true && "$run_guards" == true ]]; then
   committed_lockfile="$(mktemp)"
   trap 'rm -f "$committed_lockfile"' EXIT
   if git show HEAD:pnpm-lock.yaml > "$committed_lockfile" 2>/dev/null; then
@@ -200,14 +213,24 @@ if [[ "$use_pnpm" == true ]]; then
     node scripts/check-v19-types.mjs
   fi
   if [[ "$run_tests" == true ]]; then
-    if [[ -n "$changed_base" ]]; then
+    if [[ -n "$changed_base" && -n "$shard" ]]; then
+      # A narrowed shard may be handed no files at all (#1933).
+      pnpm exec vitest run --changed "$changed_base" "${shard_args[@]}" --passWithNoTests
+    elif [[ -n "$changed_base" ]]; then
       # A merge request (#1414): only the tests that import a changed file, and
       # never coverage -- a partial run cannot measure the floors, so neither the
       # coverage run nor the floor check happens, whatever ORBIT_TEST_COVERAGE says.
       pnpm exec vitest run --changed "$changed_base"
+    elif [[ "${ORBIT_TEST_COVERAGE:-false}" == "true" && -n "$shard" ]]; then
+      # A shard measures half the suite (#1933): it writes its coverage into
+      # its Vitest blob, and `fast_coverage` merges the blobs and runs the
+      # floor check on the whole.
+      pnpm exec vitest run --coverage "${shard_args[@]}"
     elif [[ "${ORBIT_TEST_COVERAGE:-false}" == "true" ]]; then
       pnpm test:coverage
       node scripts/ci/coverage-floor-check.mjs
+    elif [[ -n "$shard" ]]; then
+      pnpm exec vitest run "${shard_args[@]}"
     else
       pnpm test
     fi
@@ -236,14 +259,18 @@ elif command -v node >/dev/null 2>&1 && [[ -d node_modules ]]; then
     node scripts/check-v19-types.mjs
   fi
   if [[ "$run_tests" == true ]]; then
-    if [[ -n "$changed_base" ]]; then
-      # See the pnpm branch above (#1414).
+    # See the pnpm branch above (#1414, #1933).
+    if [[ -n "$changed_base" && -n "$shard" ]]; then
+      node node_modules/vitest/vitest.mjs run --changed "$changed_base" "${shard_args[@]}" --passWithNoTests
+    elif [[ -n "$changed_base" ]]; then
       node node_modules/vitest/vitest.mjs run --changed "$changed_base"
+    elif [[ "${ORBIT_TEST_COVERAGE:-false}" == "true" && -n "$shard" ]]; then
+      node node_modules/vitest/vitest.mjs run --coverage "${shard_args[@]}"
     elif [[ "${ORBIT_TEST_COVERAGE:-false}" == "true" ]]; then
       node node_modules/vitest/vitest.mjs run --coverage
       node scripts/ci/coverage-floor-check.mjs
     else
-      node node_modules/vitest/vitest.mjs run
+      node node_modules/vitest/vitest.mjs run "${shard_args[@]}"
     fi
   fi
 else

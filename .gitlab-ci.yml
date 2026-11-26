@@ -603,8 +603,8 @@ variables:
   #                     supply_chain_source
   #   ci             .gitlab-ci.yml, scripts/ci/, the classifier and the two
   #                  tests that read this file
-  #                  -> fast, fast_checks, fast_docker, gitleaks, private-details,
-  #                     supply_chain_source
+  #                  -> fast, fast_checks, fast_docker, fast_coverage, gitleaks,
+  #                     private-details, supply_chain_source
   #   no_change      a proven comparison that found no changed path, such
   #                  as a back-merge (#1597)
   #                  -> gitleaks, licence_policy, private-details,
@@ -615,14 +615,14 @@ variables:
   # unconditional -- a member runs whether or not its own axis would also have
   # asked for it, which is the point of a lane naming the job. `fast_docker` joined the `ci` lane's membership when
   # #950 split it out of `fast`, and `fast_checks` when #1831 did: both are the pipeline-definition change's own
-  # coverage, same as before the split.
+  # coverage, same as before the split. `fast_coverage` (#1933) holds `fast`'s floor check, so it joins with it.
   orbit_lane_admits() {
     case "${ORBIT_LANE:-full}:$1" in
       nightly_idle:*) echo "skipped: dev has not moved since the last nightly browser run (#1412)"; return 1 ;;
       nightly_yield:*) echo "skipped: a pipeline on preview or main is running; the nightly yields to it (#1546)"; return 1 ;;
       full:*) return 0 ;;
       ignore_policy:gitleaks | ignore_policy:licence_policy | ignore_policy:private-details | ignore_policy:supply_chain_source) return 0 ;;
-      ci:fast | ci:fast_checks | ci:fast_docker | ci:gitleaks | ci:private-details | ci:supply_chain_source) return 0 ;;
+      ci:fast | ci:fast_checks | ci:fast_docker | ci:fast_coverage | ci:gitleaks | ci:private-details | ci:supply_chain_source) return 0 ;;
       no_change:gitleaks | no_change:licence_policy | no_change:private-details | no_change:supply_chain_source) return 0 ;;
     esac
     echo "skipped: the ${ORBIT_LANE:-full} lane does not run ${1} (#889)"
@@ -702,12 +702,18 @@ variables:
 # keep the full wait, unchanged by #945.
 #
 # `fast_checks` (#1831) is in every wait `fast` is in, and the rig jobs take
-# web/build from it; `fast` no longer publishes one, only coverage/.
+# web/build from it; `fast` no longer publishes one, only its shard blobs
+# (#1933; `fast_coverage` publishes coverage/).
 #
 # `fast_docker` (#950) joins every wait `fast` is in: it is the other half of
 # what `fast` used to be, on the coverage and correctness side, so a job that
 # had to wait for `fast` to pass must wait for both halves now, or a red
 # `fast_docker` would stop blocking anything.
+#
+# `fast_coverage` (#1933) joins every wait `fast` is in for the same reason:
+# the coverage floors moved there from `fast`, so a job that had to wait for
+# `fast` to pass must wait for the floors too, or a red floor would stop
+# blocking anything.
 #
 # `optional: true`, because a pipeline that does not create one of these jobs
 # -- a lane, a future rule -- must skip the wait rather than fail to build.
@@ -725,6 +731,9 @@ variables:
   - job: fast_docker
     artifacts: false
     optional: true
+  - job: fast_coverage
+    artifacts: false
+    optional: true
 
 # The same wait, for the two jobs that already took `fast`'s artefacts, and
 # that still wait on the policy jobs (#945 did not touch this anchor).
@@ -733,14 +742,19 @@ variables:
 # `fast_checks` publishes the built web application here, and the rig serves it
 # rather than building its own. A `needs:` that stopped delivering artefacts
 # would not fail — the gate would quietly rebuild — so the delivery says so.
+# `fast` itself is a waiting order only since #1933: its artefacts are now
+# the shards' Vitest blobs (about 20 MB each), which only `fast_coverage` reads.
 .needs_gated_with_fast_artifacts: &needs_gated_with_fast_artifacts
   - job: classify
     artifacts: true
   - job: fast
-    artifacts: true
+    artifacts: false
   - job: fast_checks
     artifacts: true
   - job: fast_docker
+    artifacts: false
+    optional: true
+  - job: fast_coverage
     artifacts: false
     optional: true
   - job: gitleaks
@@ -762,10 +776,13 @@ variables:
   - job: classify
     artifacts: true
   - job: fast
-    artifacts: true
+    artifacts: false
   - job: fast_checks
     artifacts: true
   - job: fast_docker
+    artifacts: false
+    optional: true
+  - job: fast_coverage
     artifacts: false
     optional: true
   - job: gitleaks
@@ -796,6 +813,9 @@ variables:
   - job: fast_docker
     artifacts: false
     optional: true
+  - job: fast_coverage
+    artifacts: false
+    optional: true
 
 # The same, for the jobs that stand a stack up (the browser suites,
 # `acceptance`, `repair_journeys`): they also wait for the quick, failure-prone
@@ -821,6 +841,9 @@ variables:
     artifacts: false
     optional: true
   - job: fast_docker
+    artifacts: false
+    optional: true
+  - job: fast_coverage
     artifacts: false
     optional: true
   - job: sidecar_images
@@ -1499,6 +1522,38 @@ classify:
 
 # --- fast --------------------------------------------------------------------
 
+# What `fast` runs (#1414), decided once for `fast` and `fast_coverage` (#1933)
+# from the same inputs: ORBIT_TEST_CHANGED_BASE set means the narrowed run,
+# empty the whole suite with the coverage ratchet.
+#
+# A merge request runs only the tests that import a changed file, with no
+# coverage (#1414, ADR-0039 section 6), except one from exactly batch-a or
+# batch-b into exactly dev, which runs the whole suite with the coverage
+# ratchet as the preview push does (owner 6a, #1812). Every other pipeline,
+# the push that lands on dev included, runs the whole suite with the ratchet.
+# A base the clone does not hold falls back to the whole suite, the fail-safe
+# direction. A changed file that is not JavaScript, TypeScript or Svelte (the
+# CI YAML, a Dockerfile) also runs the whole suite, because --changed cannot
+# see who reads it (Markdown keeps the narrow run, answer 34b); test-backend.sh
+# decides that, without coverage, as before, so `fast_coverage` stops on it
+# like any narrowed run.
+#
+# A list, not a scalar, so a job's `script:` takes it as one more item
+# (GitLab flattens nested script lists).
+.fast_run_mode: &fast_run_mode
+  - |
+    if [ "$CI_PIPELINE_SOURCE" = "merge_request_event" ] && [ -n "${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}" ] \
+      && ! { [ "${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-}" = "dev" ] \
+        && { [ "${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME:-}" = "batch-a" ] || [ "${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME:-}" = "batch-b" ]; }; } \
+      && git cat-file -e "${CI_MERGE_REQUEST_DIFF_BASE_SHA}^{commit}" 2> /dev/null; then
+      export ORBIT_TEST_CHANGED_BASE="$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+    else
+      if [ "$CI_PIPELINE_SOURCE" = "merge_request_event" ]; then
+        echo "the merge base is not in the clone: the whole suite runs"
+      fi
+      export ORBIT_TEST_CHANGED_BASE=""
+    fi
+
 # Split from one Docker-requiring job into two (#950, owner ruling on #923
 # rec 15a, 2026-09-09). It used to occupy the privileged `orbit-build` slot
 # for 219-312 s a pipeline, but per #923 finding 10 almost none of that work
@@ -1528,6 +1583,13 @@ classify:
 # *service* (rather than an in-job daemon) is enough for `fast_docker`: nothing
 # reachable from either of its two files bind-mounts a checkout or tmpdir path
 # into a container, only passes a build context over the API.
+#
+# Two `parallel:` shards since #1933 (103a): the whole suite had grown to
+# 1290-1440 s of a 30m limit on the runs note 70578 measured, so each shard
+# runs half the Vitest files and `fast_coverage` merges their coverage. A
+# shard cannot be faster than its slowest file (carry-previous-release's
+# tests, 689-822 s, #1861), so this buys headroom under the same limit, not a
+# smaller one. The `node --test` guards run in shard 1 only.
 fast:
   stage: fast
   extends: .node
@@ -1537,6 +1599,8 @@ fast:
   # 20m; 30m is about 1.5x that. Speeding up the slow repair and install tests
   # is #1861. This job runs test-backend.sh's `tests` phase.
   timeout: 30m
+  # Two shards (#1933 103a): `fast 1/2` and `fast 2/2`. See the note above.
+  parallel: 2
   rules:
     - !reference [.dev-landing, job_rule]
     - !reference [.backmerge-skip, job_rule]
@@ -1574,31 +1638,18 @@ fast:
     # a permission refusal that root does not receive. See .drop_to_node.
     - *drop_to_node
     # ORBIT_TEST_SKIP_DOCKER excludes the suites fast_docker owns, below.
-    #
-    # A merge request runs only the tests that import a changed file, with no
-    # coverage (#1414, ADR-0039 section 6), except one from exactly batch-a or
-    # batch-b into exactly dev, which runs the whole suite with the coverage
-    # ratchet as the preview push does (owner 6a, #1812). Every other pipeline,
-    # the push that lands on dev included, runs the whole suite with the ratchet. The
-    # base is also passed on the command line because `su` is not relied on to
-    # carry the exported variable across. A base the clone does not hold
-    # falls back to the whole suite, the fail-safe direction.
-    # A changed file that is not JavaScript, TypeScript or Svelte (the CI YAML,
-    # a Dockerfile) also runs the whole suite, because --changed cannot see who reads it.
-    # Markdown is the exception: it keeps the narrow run (answer 34b).
+    # The run mode (narrowed or whole suite) is `.fast_run_mode`'s, shared with
+    # `fast_coverage` so both jobs decide alike. The base is also passed on the
+    # command line because `su` is not relied on to carry the exported
+    # variable across. Each shard runs half the Vitest files (#1933 103a);
+    # on the whole-suite branch it writes its coverage into its Vitest blob
+    # and `fast_coverage` merges the two and runs the floor check.
+    - *fast_run_mode
     - |
-      if [ "$CI_PIPELINE_SOURCE" = "merge_request_event" ] && [ -n "${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}" ] \
-        && ! { [ "${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-}" = "dev" ] \
-          && { [ "${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME:-}" = "batch-a" ] || [ "${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME:-}" = "batch-b" ]; }; } \
-        && git cat-file -e "${CI_MERGE_REQUEST_DIFF_BASE_SHA}^{commit}" 2> /dev/null; then
-        export ORBIT_TEST_CHANGED_BASE="$CI_MERGE_REQUEST_DIFF_BASE_SHA"
-        orbit_as_node "ORBIT_TEST_CHANGED_BASE='$ORBIT_TEST_CHANGED_BASE' ORBIT_TEST_PHASE=tests ORBIT_TEST_SKIP_DOCKER=true bash scripts/test-backend.sh"
+      if [ -n "${ORBIT_TEST_CHANGED_BASE:-}" ]; then
+        orbit_as_node "ORBIT_TEST_CHANGED_BASE='$ORBIT_TEST_CHANGED_BASE' ORBIT_TEST_SHARD=$CI_NODE_INDEX/$CI_NODE_TOTAL ORBIT_TEST_PHASE=tests ORBIT_TEST_SKIP_DOCKER=true bash scripts/test-backend.sh"
       else
-        if [ "$CI_PIPELINE_SOURCE" = "merge_request_event" ]; then
-          echo "the merge base is not in the clone: the whole suite runs"
-        fi
-        unset ORBIT_TEST_CHANGED_BASE
-        orbit_as_node 'ORBIT_TEST_COVERAGE=true ORBIT_TEST_PHASE=tests ORBIT_TEST_SKIP_DOCKER=true bash scripts/test-backend.sh'
+        orbit_as_node "ORBIT_TEST_COVERAGE=true ORBIT_TEST_SHARD=$CI_NODE_INDEX/$CI_NODE_TOTAL ORBIT_TEST_PHASE=tests ORBIT_TEST_SKIP_DOCKER=true bash scripts/test-backend.sh"
       fi
     # A narrowed run is never reuse evidence (#1414): the key does not carry
     # the run mode, so the dev push with the same tree would stand on it and
@@ -1609,6 +1660,73 @@ fast:
       else
         bash scripts/ci/reuse-evidence.sh "$CI_JOB_NAME"
       fi
+  # The shard's Vitest blob (blob-<index>-<count>.json, with its coverage map
+  # on the whole-suite branch) for `fast_coverage`, and the evidence. No
+  # coverage/: a shard's own report is half the suite and would mislead.
+  # Eight days, one past the seven-day reuse window, so a shard that a later
+  # pipeline stands on still has a blob to fetch (fast-coverage-blobs.sh).
+  artifacts:
+    name: orbit-fast-shard
+    paths:
+      - .vitest/blob/
+      - ci-evidence/
+    expire_in: 8 days
+    when: on_success
+
+# The coverage ratchet for the sharded `fast` (#1933 103a): Vitest's
+# documented shape for `--shard` with coverage, and the one `browser_report`
+# uses for Playwright. Each shard leaves a blob with its coverage map; this
+# merges them (istanbul's map merge), writes coverage/ as an unsharded run
+# does, and enforces the floors twice as before: vitest.config.ts's thresholds
+# on the merged map (the merge run sets no ORBIT_TEST_SHARD), then
+# coverage-floor-check.mjs. A floor breach fails this job, not a shard, so it
+# is in every wait `fast` is in. A narrowed run measures no floors (#1414) and
+# stops here, with no evidence, as `fast` does. A shard that stood on an
+# earlier run left no blob; fast-coverage-blobs.sh fetches it from that run or
+# fails. Its own reuse key keeps supply-chain/coverage-floors.mjs, which
+# `@source_only` denies: this job reads the floors.
+fast_coverage:
+  stage: fast
+  tags: [light]
+  extends: .node
+  # A hang detector: install about 2m, the merge and HTML report about 1-2m.
+  timeout: 10m
+  rules:
+    - !reference [.dev-landing, job_rule]
+    - !reference [.backmerge-skip, job_rule]
+    - *not_on_main_push
+    - *nightly_browsers
+    - *not_scheduled
+    - when: on_success
+  needs:
+    - job: classify
+      artifacts: true
+    - job: fast
+      artifacts: true
+  variables:
+    COREPACK_HOME: $CI_BUILDS_DIR/.corepack
+    # The same clone depth as `fast`, or *fast_run_mode could decide differently.
+    GIT_DEPTH: 0
+  script:
+    - *reach_helpers
+    - orbit_lane_admits fast_coverage || exit 0
+    - *reuse_gate
+    - *fast_run_mode
+    - |
+      if [ -n "${ORBIT_TEST_CHANGED_BASE:-}" ]; then
+        echo "no floors on a narrowed run (#1414): nothing to merge"
+        exit 0
+      fi
+    # Vitest and the v8 coverage provider only; see browser_report.
+    - pnpm install --frozen-lockfile --ignore-scripts
+    - *drop_to_node
+    - bash scripts/ci/fast-coverage-blobs.sh 2
+    # --reporter=dot replaces the test reporters for this run only: progress
+    # lines for ~930 files that run nowhere would mean nothing. The coverage
+    # reporters are the config's and write coverage/ as before.
+    - orbit_as_node 'pnpm exec vitest run --merge-reports .vitest/blob --coverage.enabled=true --reporter=dot'
+    - orbit_as_node 'node scripts/ci/coverage-floor-check.mjs'
+    - *reuse_evidence
   artifacts:
     name: orbit-coverage
     paths:
@@ -1692,9 +1810,9 @@ fast_checks:
 # container, so the dind *service* (`.dind_service`) is enough, and is what
 # `fast` used to carry for both.
 #
-# No `--coverage`: the coverage-bearing run is `fast`'s, and stays whole so
-# the ratchet floors in vitest.config.ts measure one consistent run rather
-# than two partial ones with no merge step. Neither src/lib file's own coverage
+# No `--coverage`: the ratchet floors in vitest.config.ts are measured once,
+# in `fast_coverage`, on the merged coverage of `fast`'s two shards (#1933),
+# and nothing here feeds that merge. Neither src/lib file's own coverage
 # contribution is currently double-counted or dropped in a way verified
 # against a live pipeline -- watch the first real run after this split for a
 # `src/lib/**` floor regression before assuming it is clear (recovery-bundle.ts's
@@ -2843,18 +2961,18 @@ backup_drill:
 # pinned digest and the suite is driven directly with the environment
 # scripts/test-integration.mjs builds.
 #
-# Four shards (#1806): `vitest --shard` splits the files across four parallel
+# Five shards (#1806): `vitest --shard` splits the files across five parallel
 # jobs. Each job has its own postgres service, so its own database, migrated
 # by that job; no shard can collide with another. `needs: integration` waits
-# for all four, and each shard has its own reuse key (job-inputs.json
-# `shards`).
+# for all five, and each shard has its own reuse key (job-inputs.json
+# `shards`). At four, a shard ran 760-905 s against the 15m limit (#1971).
 integration:
   stage: acceptance
   tags: [light]
   extends: .node
-  parallel: 4
+  parallel: 5
   # One shard's budget, not a hang guard: each test fails on its own 15 s
-  # limit (vitest.config.ts). The single job reached 873 s (#1805); a quarter
+  # limit (vitest.config.ts). The single job reached 873 s (#1805); a fifth
   # of that plus install and migration leaves room to grow (#1806).
   timeout: 15m
   rules:
@@ -4443,6 +4561,9 @@ launcher_install_compat:
     - job: fast_docker
       artifacts: false
       optional: true
+    - job: fast_coverage
+      artifacts: false
+      optional: true
     # Exactly one of the two runs on any ref this job runs on (#1608). Ordering
     # only: their archive is not downloaded by `needs:`, because GitLab fails a
     # job whose needed artifacts have expired before its script runs, and
@@ -4825,6 +4946,7 @@ record_image:
       optional: true
     - job: supply_chain_source
     - job: fast
+    - job: fast_coverage
     - job: fast_checks
     - job: fast_docker
     - job: base_image
