@@ -22,7 +22,6 @@ import { guardedRoute } from "./workspace-writes.js";
 const HARLOW = "hh-harlow-1";
 const SEASIDE = "hh-seaside-4551";
 const PASSPHRASE = "correct-horse-battery-staple";
-const SETTLE = 20_000;
 
 test.describe("the desk card", () => {
   test.beforeEach(({}, testInfo) => {
@@ -35,7 +34,7 @@ test.describe("the desk card", () => {
        armed, so how long the browser takes between steps cannot move the hold. */
     await page.clock.install();
     await signedIn(`/household/${HARLOW}`, "any-dialect")(page);
-    await expect(page.locator(".c-archive")).toBeVisible({ timeout: SETTLE });
+    await expect(page.locator(".c-archive")).toBeVisible();
     await page.getByRole("button", { name: "write an archive →" }).click();
     await page.getByLabel("a passphrase for the file").fill(PASSPHRASE);
     await page.getByLabel("the passphrase again").fill(PASSPHRASE);
@@ -43,14 +42,14 @@ test.describe("the desk card", () => {
     const armed = page.getByRole("button", { name: "tap again to write the archive" });
     await page.clock.pauseAt(new Date(Date.now() + 2_000));
     await page.getByRole("button", { name: "write the archive" }).click(); // arm
-    await expect(armed).toBeVisible({ timeout: SETTLE });
+    await expect(armed).toBeVisible();
     // Still armed 3.9 s into the hold ...
     await page.clock.runFor(3_900);
     await expect(armed).toBeVisible();
     // ... and relaxed once 4 s have passed, 5 s being the old hold on this screen.
     await page.clock.runFor(200);
-    await expect(armed).toHaveCount(0, { timeout: SETTLE });
-    await expect(page.getByRole("button", { name: "write the archive" })).toBeVisible({ timeout: SETTLE });
+    await expect(armed).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "write the archive" })).toBeVisible();
   });
 
   test("a wrong passphrase is refused in the server's words, and nothing is shown of the file", async ({ page }) => {
@@ -64,7 +63,7 @@ test.describe("the desk card", () => {
         json: { error: { code: "archive_passphrase_invalid", message: "The passphrase or archive is invalid" } },
       });
     }));
-    await expect(page.locator(".c-archive")).toBeVisible({ timeout: SETTLE });
+    await expect(page.locator(".c-archive")).toBeVisible();
 
     await page.getByRole("tab", { name: "bring one in" }).click();
     await page.getByRole("button", { name: "bring in an archive →" }).click();
@@ -76,7 +75,7 @@ test.describe("the desk card", () => {
     await page.getByLabel("the file's passphrase").fill("not-the-right-phrase-at-all");
     await page.getByRole("button", { name: "look inside" }).click();
 
-    await expect(page.locator(".c-archive .refuse")).toBeVisible({ timeout: SETTLE });
+    await expect(page.locator(".c-archive .refuse")).toBeVisible();
     await expect(page.locator(".c-archive .refuse")).toContainText("The passphrase or archive is invalid");
     expect(previews).toEqual(["POST"]);
     // Refused, not merely unread: the preview never appears.
@@ -88,6 +87,6 @@ test("a member who is not an owner sees no archive card", async ({ page }) => {
   await signedIn(`/household/${SEASIDE}`, "any-dialect")(page);
   /* The household page has loaded (its title is showing on whichever layout
      this is) before the absence below is believed. */
-  await expect(page.getByRole("heading", { level: 1, name: "Seaside Cottage" })).toBeVisible({ timeout: SETTLE });
+  await expect(page.getByRole("heading", { level: 1, name: "Seaside Cottage" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "The archive" })).toHaveCount(0);
 });

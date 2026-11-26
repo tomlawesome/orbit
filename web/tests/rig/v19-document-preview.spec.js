@@ -1,6 +1,5 @@
 import { expect, test } from "@playwright/test";
 
-import { SETTLE } from "../../../tests/e2e/support/settle";
 import { APP, onPhone } from "./a11y-support.js";
 
 /** @typedef {import("@playwright/test").Locator} Locator */
@@ -44,7 +43,7 @@ import { APP, onPhone } from "./a11y-support.js";
  * Reduced motion, as the original: the preview's 900 ms focus beat is then
  * instant and nothing the preview draws changes.
  */
-test.use({ baseURL: APP, reducedMotion: "reduce" });
+test.use({ baseURL: APP });
 
 const ONE_PAGE_PAPER = { item: "i-mot", itemTitle: "Car MOT — Volvo V60", file: "MOT certificate 2025" };
 const THREE_PAGE_PAPER = { item: "i-svc", itemTitle: "Car full service", file: "three-page-proving.pdf" };
@@ -66,7 +65,7 @@ async function shownText(locator) {
 /** The picture is drawn: complete and with a width.
  * @param {Locator} picture */
 const drawn = (picture) =>
-  expect.poll(() => picture.evaluate((/** @type {HTMLImageElement} */ img) => (img.complete ? img.naturalWidth : 0)), { timeout: SETTLE })
+  expect.poll(() => picture.evaluate((/** @type {HTMLImageElement} */ img) => (img.complete ? img.naturalWidth : 0)))
     .toBeGreaterThan(0);
 
 /** The picture is drawn, and it is the page asked for. A picture of the wrong
@@ -121,11 +120,11 @@ async function openDrawer(page, itemId, info) {
   await page.goto(`/home?item=${itemId}`);
   if (onPhone(info)) {
     const row = page.locator(`.pocket .pk-below [data-row-key="${itemId}"]`);
-    await expect(row).toHaveAttribute("data-open", "", { timeout: SETTLE });
+    await expect(row).toHaveAttribute("data-open", "");
     return row;
   }
   const drawer = page.locator(`[id="${itemId}-view"]`);
-  await expect(drawer).toBeVisible({ timeout: SETTLE });
+  await expect(drawer).toBeVisible();
   return drawer;
 }
 
@@ -145,7 +144,7 @@ const readerOf = (page, paper) => page.getByRole("dialog", { name: `${paper.file
 async function openPaper(page, paper, info) {
   const drawer = await openDrawer(page, paper.item, info);
   const pressed = drawer.getByRole("button", { name: `Open ${paper.file}` });
-  await expect(pressed).toBeVisible({ timeout: SETTLE });
+  await expect(pressed).toBeVisible();
   await pressed.click();
   const card = previewOf(page, paper.file);
   await expect(card).toBeVisible();
@@ -156,7 +155,7 @@ async function openPaper(page, paper, info) {
  * @param {Page} page @param {Paper} paper */
 async function openReader(page, paper) {
   const pageButton = page.getByRole("button", { name: `Read ${paper.file}` });
-  await expect(pageButton).toBeEnabled({ timeout: SETTLE });
+  await expect(pageButton).toBeEnabled();
   await pageButton.click();
   const reader = readerOf(page, paper);
   await expect(reader).toBeVisible();
@@ -170,7 +169,7 @@ test("pressing the page opens the reader over home, and Esc closes it", async ({
   const { reader } = await openReader(page, ONE_PAGE_PAPER);
   await expect(page).toHaveURL(new RegExp(`/home\\?item=${ONE_PAGE_PAPER.item}`));
   await page.keyboard.press("Escape");
-  await expect(reader).toBeHidden({ timeout: SETTLE });
+  await expect(reader).toBeHidden();
 });
 
 /* #1301: a click off the page closes the reader and the preview card together,
@@ -196,13 +195,13 @@ test("on the desk, a click off the reader returns to the drawer, the reader's ow
   const stage = await reader.locator(".rd-stage").boundingBox();
   if (!stage) throw new Error("the reader's stage has no box");
   await page.mouse.click(stage.x + 4, stage.y + stage.height / 2);
-  await expect(reader).toBeHidden({ timeout: SETTLE });
-  await expect(pageButton).toBeHidden({ timeout: SETTLE });
+  await expect(reader).toBeHidden();
+  await expect(pageButton).toBeHidden();
   await expect(drawer).toBeVisible();
 
   /* The same paper again: the preview card first, not the reader. */
   await paper.click();
-  await expect(pageButton).toBeEnabled({ timeout: SETTLE });
+  await expect(pageButton).toBeEnabled();
   await expect(reader).toBeHidden();
 });
 
@@ -236,7 +235,7 @@ test("a one-page document's reader says \"one page\" and has no arrows", async (
 
 test("a one-page document's preview pager says \"one page\" and has no arrows", async ({ page }, testInfo) => {
   await openPaper(page, ONE_PAGE_PAPER, testInfo);
-  await expect(page.getByRole("button", { name: `Read ${ONE_PAGE_PAPER.file}` })).toBeEnabled({ timeout: SETTLE });
+  await expect(page.getByRole("button", { name: `Read ${ONE_PAGE_PAPER.file}` })).toBeEnabled();
 
   const card = previewOf(page, ONE_PAGE_PAPER.file);
   await expect(card.locator(".pager .pgn")).toHaveText("one page");
@@ -282,8 +281,8 @@ test("each page turn in the reader asks the server for that page's picture once"
   const picture = reader.getByRole("img", { name: new RegExp(THREE_PAGE_PAPER.file.replace(/[.]/g, "\\.")) });
   /** @param {number} n */
   const shown = async (n) => {
-    await expect(reader.locator(".rd-name .rd-of")).toHaveText(`· page ${n} of 3`, { timeout: SETTLE });
-    await expect(picture).toHaveAccessibleName(`Page ${n} of ${THREE_PAGE_PAPER.file}`, { timeout: SETTLE });
+    await expect(reader.locator(".rd-name .rd-of")).toHaveText(`· page ${n} of 3`);
+    await expect(picture).toHaveAccessibleName(`Page ${n} of ${THREE_PAGE_PAPER.file}`);
     await drawnAsPage(picture, n);
   };
   await shown(1);
@@ -309,7 +308,7 @@ test("opening the reader on the page the card shows asks for no page again, and 
   const asked = watchPreviewRequests(page);
   await openPaper(page, THREE_PAGE_PAPER, testInfo);
   const pageButton = page.getByRole("button", { name: `Read ${THREE_PAGE_PAPER.file}` });
-  await expect(pageButton).toBeEnabled({ timeout: SETTLE });
+  await expect(pageButton).toBeEnabled();
 
   /* The card on page 1, drawn: opening the reader here must not ask again. */
   const cardPicture = pageButton.locator("img");
@@ -321,15 +320,15 @@ test("opening the reader on the page the card shows asks for no page again, and 
   const readerPicture = reader.getByRole("img", { name: new RegExp(THREE_PAGE_PAPER.file.replace(/[.]/g, "\\.")) });
   /** @param {number} n */
   const readerShows = async (n) => {
-    await expect(reader.locator(".rd-name .rd-of")).toHaveText(`· page ${n} of 3`, { timeout: SETTLE });
-    await expect(readerPicture).toHaveAccessibleName(`Page ${n} of ${THREE_PAGE_PAPER.file}`, { timeout: SETTLE });
+    await expect(reader.locator(".rd-name .rd-of")).toHaveText(`· page ${n} of 3`);
+    await expect(readerPicture).toHaveAccessibleName(`Page ${n} of ${THREE_PAGE_PAPER.file}`);
     await drawnAsPage(readerPicture, n);
   };
 
   for (const n of [1, 2]) {
     if (n === 2) {
       await previewOf(page, THREE_PAGE_PAPER.file).getByRole("button", { name: "Next page" }).click();
-      await expect(cardPicture).toHaveAttribute("alt", `Page 2 of ${THREE_PAGE_PAPER.file}`, { timeout: SETTLE });
+      await expect(cardPicture).toHaveAttribute("alt", `Page 2 of ${THREE_PAGE_PAPER.file}`);
       await drawnAsPage(cardPicture, 2);
     }
     const before = asked.total();
@@ -338,7 +337,7 @@ test("opening the reader on the page the card shows asks for no page again, and 
     await readerShows(n);
     expect(asked.total() - before, `requests on opening the reader at page ${n}: ${asked.all().slice(before)}`).toBe(0);
     await page.keyboard.press("Escape");
-    await expect(reader).toBeHidden({ timeout: SETTLE });
+    await expect(reader).toBeHidden();
   }
 });
 
@@ -369,14 +368,14 @@ test.describe("a failed page turn", () => {
     await openPaper(page, THREE_PAGE_PAPER, testInfo);
     const { reader } = await openReader(page, THREE_PAGE_PAPER);
     const picture = reader.getByRole("img", { name: new RegExp(THREE_PAGE_PAPER.file.replace(/[.]/g, "\\.")) });
-    await expect(picture).toHaveAccessibleName(`Page 1 of ${THREE_PAGE_PAPER.file}`, { timeout: SETTLE });
+    await expect(picture).toHaveAccessibleName(`Page 1 of ${THREE_PAGE_PAPER.file}`);
     await drawnAsPage(picture, 1);
 
     await failPageTwo(page);
     await reader.getByRole("button", { name: "Next page" }).click();
 
     /* A failure reads as one, inside the reader... */
-    await expect(reader.getByText(LOAD_FAILURE)).toBeVisible({ timeout: SETTLE });
+    await expect(reader.getByText(LOAD_FAILURE)).toBeVisible();
     /* ...and the old page's picture is gone: no "Page 1" image left under a
        head or foot that says page 2. */
     await expect(reader.getByRole("img", { name: new RegExp(`^Page 1 of ${THREE_PAGE_PAPER.file.replace(/[.]/g, "\\.")}$`) })).toHaveCount(0);
@@ -392,14 +391,14 @@ test.describe("a failed page turn", () => {
      shows the new page's number ("2 of 3") over the old page's picture. */
   test("on the preview card shows a load failure in place of the picture, never the new page number over the old picture", async ({ page }, testInfo) => {
     await openPaper(page, THREE_PAGE_PAPER, testInfo);
-    await expect(page.getByRole("button", { name: `Read ${THREE_PAGE_PAPER.file}` })).toBeEnabled({ timeout: SETTLE });
+    await expect(page.getByRole("button", { name: `Read ${THREE_PAGE_PAPER.file}` })).toBeEnabled();
 
     const card = previewOf(page, THREE_PAGE_PAPER.file);
     const number = card.locator(".pager .pgn");
     const escaped = THREE_PAGE_PAPER.file.replace(/[.]/g, "\\.");
     /* The card's first page names its picture "Page one"; later ones "Page 2". */
     const firstPicture = card.getByRole("img", { name: new RegExp(`^Page (1|one) of ${escaped}$`) });
-    await expect(firstPicture).toBeVisible({ timeout: SETTLE });
+    await expect(firstPicture).toBeVisible();
     await drawnAsPage(firstPicture, 1);
     await expect.poll(() => shownText(number)).toBe("1 of 3");
 
@@ -407,7 +406,7 @@ test.describe("a failed page turn", () => {
     await card.getByRole("button", { name: "Next page" }).click();
 
     /* A failure reads as one, inside the card... */
-    await expect(card.getByText(LOAD_FAILURE)).toBeVisible({ timeout: SETTLE });
+    await expect(card.getByText(LOAD_FAILURE)).toBeVisible();
     /* ...and the old page's picture is gone: no "Page 1" image left under a
        pager that says page 2. */
     await expect(card.getByRole("img", { name: new RegExp(`^Page (1|one) of ${escaped}$`) })).toHaveCount(0);

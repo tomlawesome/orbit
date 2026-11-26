@@ -2,7 +2,6 @@ import { expect, test } from "@playwright/test";
 
 import { renderedFrames } from "../../../tests/e2e/support/frames";
 import { settled } from "../../../tests/e2e/support/keyboard";
-import { SETTLE } from "../../../tests/e2e/support/settle";
 import { APP, onPhone, signedIn } from "./a11y-support.js";
 
 /** @typedef {import("@playwright/test").Page} Page */
@@ -280,7 +279,7 @@ test("scrolled to the manifest with a row expanded, one press on the north star 
   const row = page.locator(`a.item[id="${ITEM_ID}"]`);
   await expect(row).toBeVisible();
   await row.click();
-  await expect(page.locator(`[id="${ITEM_ID}-view"]`)).toBeVisible({ timeout: SETTLE });
+  await expect(page.locator(`[id="${ITEM_ID}-view"]`)).toBeVisible();
   await expect(page).toHaveURL(new RegExp(`/home\\?item=${ITEM_ID}$`));
   /* the page is still down at the manifest, not back at the top */
   const restedAt = await restingScrollY(page);
@@ -311,7 +310,7 @@ async function homeWithRowOpenedThenScrolledOn(page) {
      difference: the page got shorter, and no product can keep that. */
   const closedFoot = await page.evaluate(() => document.documentElement.scrollHeight - window.innerHeight);
   await row.click();
-  await expect(page.locator(`[id="${ITEM_ID}-view"]`)).toBeVisible({ timeout: SETTLE });
+  await expect(page.locator(`[id="${ITEM_ID}-view"]`)).toBeVisible();
   await expect(page).toHaveURL(new RegExp(`/home\\?item=${ITEM_ID}$`));
   const openedAt = await restingScrollY(page);
 
@@ -457,7 +456,7 @@ test("a wheel before the quick-add drawer opened does not close it on a later sc
   });
   await scrollFromScript(page);
   await expect.poll(() => page.evaluate(() => window.scrollY), { message: "the script's scroll did not move the page" }).toBeGreaterThan(before);
-  await page.waitForFunction(() => /** @type {any} */ (window).__scrollHandled, undefined, { timeout: SETTLE });
+  await page.waitForFunction(() => /** @type {any} */ (window).__scrollHandled, undefined);
   await renderedFrames(page);
 
   await expect(page.locator("#createdrawer"), "a scroll the reader did not make closed the drawer, on the strength of a wheel from before it opened").toHaveClass(/\bopen\b/);

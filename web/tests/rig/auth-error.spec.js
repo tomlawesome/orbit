@@ -21,12 +21,12 @@ import { APP } from "./a11y-support.js";
  * stack suite's "an unrecognised or missing code fails open to the recoverable
  * face" went there (see the commit for the lines).
  *
- * `reducedMotion: "reduce"` file-wide, as the stack version had it: the "Try
+ * `reducedMotion: "reduce"` file-wide (the rig's default, #1964), as the stack version had it: the "Try
  * again" pill's navigation is instant by design under it (`rm ? 200 : 900` in
  * +page.svelte), so these tests do not wait out the ratified 900ms beat for
  * something the beat itself does not assert.
  */
-test.use({ baseURL: APP, reducedMotion: "reduce" });
+test.use({ baseURL: APP });
 
 /**
  * The WCAG sweep every held-dawn face has to pass.

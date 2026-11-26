@@ -5,10 +5,9 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect as baseExpect, test } from "@playwright/test";
 
 import { entrancesSettled } from "../../../tests/e2e/support/motion";
-import { onPhone, RIG_EXPECT_MS, RIG_TEST_MS, signedIn, withDecorationHidden, withoutKnownFaults } from "./a11y-support.js";
+import { onPhone, RIG_EXPECT_MS, signedIn, withDecorationHidden, withoutKnownFaults } from "./a11y-support.js";
 
 const expect = baseExpect.configure({ timeout: RIG_EXPECT_MS });
-test.describe.configure({ timeout: RIG_TEST_MS });
 
 /** @typedef {import("@playwright/test").Page} Page */
 
