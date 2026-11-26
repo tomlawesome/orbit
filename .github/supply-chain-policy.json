@@ -788,69 +788,69 @@
     },
     {
       "kind": "stale-package",
-      "image": "apache/tika:4.2.0-full",
+      "image": "apache/tika:4.2.0-2-full",
       "package": "libgssapi-krb5-2",
       "installedVersion": "1.22.1-2ubuntu4.1",
       "availableVersion": "1.22.1-2ubuntu4.3",
       "owner": "Orbit maintainers",
       "expiresOn": "2026-12-03",
       "trackingIssue": 1950,
-      "rationale": "Upstream has not yet rebuilt apache/tika:4.2.0-full with libgssapi-krb5-2 1.22.1-2ubuntu4.3; the pin is the newest build of the tag (checked 2026-11-26). Owner decisions 89a and 114a: named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+      "rationale": "Upstream has not yet rebuilt apache/tika:4.2.0-2-full with libgssapi-krb5-2 1.22.1-2ubuntu4.3; the pin is the newest build of the tag (checked 2026-11-26). Owner decisions 89a and 114a: named, 7-day exception; remove once upstream rebuilds and the pin is synced."
     },
     {
       "kind": "stale-package",
-      "image": "apache/tika:4.2.0-full",
+      "image": "apache/tika:4.2.0-2-full",
       "package": "libkrb5-3",
       "installedVersion": "1.22.1-2ubuntu4.1",
       "availableVersion": "1.22.1-2ubuntu4.3",
       "owner": "Orbit maintainers",
       "expiresOn": "2026-12-03",
       "trackingIssue": 1950,
-      "rationale": "Upstream has not yet rebuilt apache/tika:4.2.0-full with libkrb5-3 1.22.1-2ubuntu4.3; the pin is the newest build of the tag (checked 2026-11-26). Owner decisions 89a and 114a: named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+      "rationale": "Upstream has not yet rebuilt apache/tika:4.2.0-2-full with libkrb5-3 1.22.1-2ubuntu4.3; the pin is the newest build of the tag (checked 2026-11-26). Owner decisions 89a and 114a: named, 7-day exception; remove once upstream rebuilds and the pin is synced."
     },
     {
       "kind": "stale-package",
-      "image": "apache/tika:4.2.0-full",
+      "image": "apache/tika:4.2.0-2-full",
       "package": "libkrb5support0",
       "installedVersion": "1.22.1-2ubuntu4.1",
       "availableVersion": "1.22.1-2ubuntu4.3",
       "owner": "Orbit maintainers",
       "expiresOn": "2026-12-03",
       "trackingIssue": 1950,
-      "rationale": "Upstream has not yet rebuilt apache/tika:4.2.0-full with libkrb5support0 1.22.1-2ubuntu4.3; the pin is the newest build of the tag (checked 2026-11-26). Owner decisions 89a and 114a: named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+      "rationale": "Upstream has not yet rebuilt apache/tika:4.2.0-2-full with libkrb5support0 1.22.1-2ubuntu4.3; the pin is the newest build of the tag (checked 2026-11-26). Owner decisions 89a and 114a: named, 7-day exception; remove once upstream rebuilds and the pin is synced."
     },
     {
       "kind": "stale-package",
-      "image": "apache/tika:4.2.0-full",
+      "image": "apache/tika:4.2.0-2-full",
       "package": "libk5crypto3",
       "installedVersion": "1.22.1-2ubuntu4.1",
       "availableVersion": "1.22.1-2ubuntu4.3",
       "owner": "Orbit maintainers",
       "expiresOn": "2026-12-03",
       "trackingIssue": 1950,
-      "rationale": "Upstream has not yet rebuilt apache/tika:4.2.0-full with libk5crypto3 1.22.1-2ubuntu4.3; the pin is the newest build of the tag (checked 2026-11-26). Owner decisions 89a and 114a: named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+      "rationale": "Upstream has not yet rebuilt apache/tika:4.2.0-2-full with libk5crypto3 1.22.1-2ubuntu4.3; the pin is the newest build of the tag (checked 2026-11-26). Owner decisions 89a and 114a: named, 7-day exception; remove once upstream rebuilds and the pin is synced."
     },
     {
       "kind": "stale-package",
-      "image": "apache/tika:4.2.0-full",
+      "image": "apache/tika:4.2.0-2-full",
       "package": "libsqlite3-0",
       "installedVersion": "3.46.1-9ubuntu0.3",
       "availableVersion": "3.46.1-9ubuntu0.4",
       "owner": "Orbit maintainers",
       "expiresOn": "2026-12-03",
       "trackingIssue": 1950,
-      "rationale": "Upstream has not yet rebuilt apache/tika:4.2.0-full with libsqlite3-0 3.46.1-9ubuntu0.4; the pin is the newest build of the tag (checked 2026-11-26). Owner decisions 89a and 114a: named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+      "rationale": "Upstream has not yet rebuilt apache/tika:4.2.0-2-full with libsqlite3-0 3.46.1-9ubuntu0.4; the pin is the newest build of the tag (checked 2026-11-26). Owner decisions 89a and 114a: named, 7-day exception; remove once upstream rebuilds and the pin is synced."
     },
     {
       "kind": "stale-package",
-      "image": "apache/tika:4.2.0-full",
+      "image": "apache/tika:4.2.0-2-full",
       "package": "libtiff6",
       "installedVersion": "4.7.0-3ubuntu5",
       "availableVersion": "4.7.0-3ubuntu5.1",
       "owner": "Orbit maintainers",
       "expiresOn": "2026-12-03",
       "trackingIssue": 1950,
-      "rationale": "Upstream has not yet rebuilt apache/tika:4.2.0-full with libtiff6 4.7.0-3ubuntu5.1; the pin is the newest build of the tag (checked 2026-11-26). Owner decisions 89a and 114a: named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+      "rationale": "Upstream has not yet rebuilt apache/tika:4.2.0-2-full with libtiff6 4.7.0-3ubuntu5.1; the pin is the newest build of the tag (checked 2026-11-26). Owner decisions 89a and 114a: named, 7-day exception; remove once upstream rebuilds and the pin is synced."
     },
     {
       "kind": "stale-package",
