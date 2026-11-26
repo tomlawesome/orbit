@@ -711,3 +711,11 @@ timeout on this one case rather than a global raise.
 ## scripts/install.readiness.test.mjs "install.sh: a service still running at the deadline is left in place (#1456 decision) > the database running with its probe still failing: no rollback, `repair`, left running, and an Update is accepted"
 
 - 2026-11-23 · !1333 bf57751bf · pipeline 5229 / fast (job 62669) · `expected 1 to be +0` at line 247 (the Update's exit status) on a loaded host; the change is a @sveltejs/kit bump only. First sighting.
+
+## scripts/repair-lock-rw-1890.test.mjs "#1890 L3: nothing is written to the lock > start-services: after the probe, the acquire and the release the lock's bytes, size, mode, mtime and owner are unchanged"
+
+- 2026-11-26 · !1504 e4d396ae · pipeline 5563 / fast 1/2 (job 67212) · took the docker-unavailable manual-step path at 9.3 s under host load of about 10, in a 1047 s run; the change is policy and docs only. Passed on retry (job 67273). First sighting.
+
+## scripts/ci/carry-previous-release.test.mjs "sign_evidence still running: a bounded wait on an in-flight dependency (#1607 note 48548, item 3) > a sign_evidence that stays running past the poll cap fails, saying it is still running and to run this job again" and "... > a sign_evidence that stays scheduled past the poll cap fails, saying it is still running and to run this job again"
+
+- 2026-11-26 · !1504 e4d396ae · pipeline 5563 / fast 2/2 (job 67213) · both: the child was killed at its 30000 ms deadline (31.9 s, 30.1 s) in a 1210 s run on a slow runner; the change is policy and docs only. Passed on retry (job 67274). First sighting.
