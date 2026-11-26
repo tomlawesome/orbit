@@ -1800,7 +1800,7 @@ describe("merge requests run changed-reachable tests, the dev push runs everythi
           POSTGRES_DB: "orbit_integration",
           CI_JOB_ID: "1",
           CI_NODE_INDEX: "2",
-          CI_NODE_TOTAL: "4",
+          CI_NODE_TOTAL: "5",
           ...environment,
         }), directory);
         const calls = existsSync(log) ? readFileSync(log, "utf8").split("\n").filter(Boolean) : [];
@@ -1816,12 +1816,12 @@ describe("merge requests run changed-reachable tests, the dev push runs everythi
     const STUB_LOGGER = (name) => `#!/bin/sh\nprintf '${name}\\t%s\\n' "$*" >> "$STUB_LOG"\nexit 0\n`;
 
     it("on a merge request runs only the changed-reachable integration tests", () => {
-      expect(integrationVitestCalls(mergeRequestEnv)).toEqual([`exec vitest run --project integration --changed ${MERGE_BASE} --shard=2/4 --passWithNoTests`]);
+      expect(integrationVitestCalls(mergeRequestEnv)).toEqual([`exec vitest run --project integration --changed ${MERGE_BASE} --shard=2/5 --passWithNoTests`]);
     });
 
     for (const [event, environment] of Object.entries(fullRunEvents)) {
       it(`on ${event} runs the whole integration project`, () => {
-        expect(integrationVitestCalls(environment)).toEqual(["exec vitest run --project integration --shard=2/4 --passWithNoTests"]);
+        expect(integrationVitestCalls(environment)).toEqual(["exec vitest run --project integration --shard=2/5 --passWithNoTests"]);
       });
     }
 
@@ -1837,7 +1837,7 @@ describe("merge requests run changed-reachable tests, the dev push runs everythi
 
     it("on a merge request whose base is in the clone writes no reuse evidence", () => {
       const run = integrationRun(mergeRequestEnv);
-      expect(run.vitest).toEqual([`exec vitest run --project integration --changed ${MERGE_BASE} --shard=2/4 --passWithNoTests`]);
+      expect(run.vitest).toEqual([`exec vitest run --project integration --changed ${MERGE_BASE} --shard=2/5 --passWithNoTests`]);
       expect(run.evidence).toEqual([]);
       expect(run.output).not.toMatch(BASE_MISSING_LINE);
     });
@@ -1849,7 +1849,7 @@ describe("merge requests run changed-reachable tests, the dev push runs everythi
       it(`on a merge request whose base ${absence} says so and runs the whole integration project`, () => {
         const run = integrationRun({ ...mergeRequestEnv, CI_MERGE_REQUEST_DIFF_BASE_SHA: base, GIT_STUB_PRESENT: present });
         expect(run.output).toMatch(BASE_MISSING_LINE);
-        expect(run.vitest).toEqual(["exec vitest run --project integration --shard=2/4 --passWithNoTests"]);
+        expect(run.vitest).toEqual(["exec vitest run --project integration --shard=2/5 --passWithNoTests"]);
       });
 
       it(`on a merge request whose base ${absence} still writes reuse evidence, as the full run it is`, () => {
@@ -2290,9 +2290,9 @@ exit 0
     }
   });
 
-  it("splits integration into four `parallel:` jobs, equal to its `shards` in job-inputs.json (#1806)", () => {
-    expect(inputsJson().jobs.integration?.shards, "integration: shards in job-inputs.json").toBe(4);
-    expect(parallelOf("integration"), "integration: parallel:").toBe("4");
+  it("splits integration into five `parallel:` jobs, equal to its `shards` in job-inputs.json (#1806)", () => {
+    expect(inputsJson().jobs.integration?.shards, "integration: shards in job-inputs.json").toBe(5);
+    expect(parallelOf("integration"), "integration: parallel:").toBe("5");
   });
 
   it("shards no other job by `shards`, and gives screens_chromium no `parallel:` (one worker cannot shard, #1148)", () => {
