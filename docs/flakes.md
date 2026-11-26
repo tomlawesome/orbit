@@ -492,7 +492,15 @@ timeout on this one case rather than a global raise.
 
 ## src/server/documents/validation.test.ts "structural document classification > answers an image's page count as 1 (#1436 D8)" (:80)
 
-- 2026-11-26 · !1487 fix/1933-fast-shards 1415c6f7 (CI shard layout, integration shards and a base-image re-pin; nowhere near the image sandbox) · pipeline 5531 / fast 1/2 (job 66646) · received `{ reason: "structure_check_unavailable" }` instead of `supported_structure` with `pageCount: 1`, in a 774 s shard on a loaded runner: the child decode did not answer in time, the same symptom as the image-sandbox entry above. Retried as job 66729. First sighting.
+- 2026-11-26 · !1487 fix/1933-fast-shards 1415c6f7 (CI shard layout, integration shards and a base-image re-pin; nowhere near the image sandbox) · pipeline 5531 / fast 1/2 (job 66646) · received `{ reason: "structure_check_unavailable" }` instead of `supported_structure` with `pageCount: 1`, in a 774 s shard on a loaded runner: the child decode did not answer in time, the same symptom as the image-sandbox entry above. Retried as job 66729, which failed on a different test (below). First sighting.
+
+## scripts/web-deploy.test.mjs "scripts/web-deploy.sh serializes concurrent runs (#1151 D1-S3) > never lets a second run start its own deploy before the first one's cleanup finishes" (:199)
+
+- 2026-11-26 · !1487 fix/1933-fast-shards 1415c6f7 (CI shard layout; web-deploy.sh unchanged) · pipeline 5531 / fast 1/2 retry (job 66729) · "expected '' to contain 'another web-deploy is already running…'": both runs exited 0, but the second never reported waiting, so it started after the first had finished; an 865 s shard on a loaded runner. Retried as job 66782. First sighting.
+
+## scripts/install.readiness.test.mjs "install.sh: a service that is not running at the deadline rolls a fresh install back (#1456 decision) > when the application container is missing: rolls back ..." (:201)
+
+- 2026-11-26 · !1487 fix/1933-fast-shards 1415c6f7 (CI shard layout; install.sh unchanged) · pipeline 5531 / fast 2/2 (job 66647) · "expected [ 'orbit_orbit-db-data' ] to deeply equal []": a volume was still listed after the rollback; a 900 s shard on a loaded runner. Retried as job 66783. First sighting.
 
 ## tour-pocket-webkit.spec.js:685 "the pocket film in WebKit (#1174) › plays end to end at 430x932 under normal motion" — pocket-webkit
 
