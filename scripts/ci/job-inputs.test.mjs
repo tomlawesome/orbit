@@ -556,17 +556,18 @@ describe("the retired private-names job is named nowhere it would mislead (D-F10
 describe("sharded candidates (#1546)", () => {
   const raw = JSON.parse(readFileSync(new URL("./job-inputs.json", import.meta.url), "utf8"));
 
-  it("declares the shard counts of the design: rig_chromium 3, rig_firefox 2, rig_webkit 4, film_webkit 2, integration 4", () => {
+  it("declares the shard counts of the design: rig_chromium 3, rig_firefox 2, rig_webkit 4, film_webkit 2, integration 5", () => {
     expect(raw.jobs.rig_chromium.shards).toBe(3);
     expect(raw.jobs.rig_firefox.shards).toBe(2);
     expect(raw.jobs.rig_webkit.shards).toBe(4);
     expect(raw.jobs.film_webkit.shards).toBe(2);
-    expect(raw.jobs.integration.shards).toBe(4);
+    expect(raw.jobs.integration.shards).toBe(5);
   });
 
   it("shards nothing else, and screens_chromium runs alone", () => {
     const sharded = Object.entries(raw.jobs).filter(([, job]) => job.shards !== undefined).map(([name]) => name).sort();
-    expect(sharded).toEqual(["film_webkit", "integration", "rig_chromium", "rig_firefox", "rig_webkit"]);
+    // #1933 (103a): `fast` is two Vitest shards.
+    expect(sharded).toEqual(["fast", "film_webkit", "integration", "rig_chromium", "rig_firefox", "rig_webkit"]);
     expect(raw.jobs.screens_chromium.shards).toBeUndefined();
   });
 
@@ -582,11 +583,11 @@ describe("sharded candidates (#1546)", () => {
     expect(shardNames(config, "rig_webkit")).toEqual(["rig_webkit 1/4", "rig_webkit 2/4", "rig_webkit 3/4", "rig_webkit 4/4"]);
     expect(shardNames(config, "rig_chromium")).toEqual(["rig_chromium 1/3", "rig_chromium 2/3", "rig_chromium 3/3"]);
     expect(shardNames(config, "film_webkit")).toEqual(["film_webkit 1/2", "film_webkit 2/2"]);
-    expect(shardNames(config, "integration")).toEqual(["integration 1/4", "integration 2/4", "integration 3/4", "integration 4/4"]);
+    expect(shardNames(config, "integration")).toEqual(["integration 1/5", "integration 2/5", "integration 3/5", "integration 4/5", "integration 5/5"]);
   });
 
   it("names an unsharded job as itself", () => {
-    expect(shardNames(config, "fast")).toEqual(["fast"]);
+    expect(shardNames(config, "fast_checks")).toEqual(["fast_checks"]);
     expect(shardNames(config, "screens_chromium")).toEqual(["screens_chromium"]);
     expect(shardNames(config, "smoke")).toEqual(["smoke"]);
   });

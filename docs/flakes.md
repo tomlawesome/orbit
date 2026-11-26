@@ -636,3 +636,7 @@ timeout on this one case rather than a global raise.
 ## scripts/install.update-retire-smtp.test.mjs "removes an inline SMTP_PASSWORD line too, and the password is then in no file of the folder or the installer's state"
 
 - 2026-11-24 · dev 1d397e4a · pipeline 5313 (nightly browsers, started early) / fast (job 63916) · failed after 12 s on a loaded runner, the only failure of 16,661; the change touches none of it. First sighting.
+
+## scripts/install.readiness.test.mjs "install.sh: a service still running at the deadline is left in place (#1456 decision) > the database running with its probe still failing: no rollback, `repair`, left running, and an Update is accepted"
+
+- 2026-11-23 · !1333 bf57751bf · pipeline 5229 / fast (job 62669) · `expected 1 to be +0` at line 247 (the Update's exit status) on a loaded host; the change is a @sveltejs/kit bump only. First sighting.

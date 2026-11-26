@@ -33,7 +33,9 @@ Three runners, and a check lives in the cheapest one that proves it
 - `pnpm test:e2e` runs browser tests against an application that is already
   running.
 - `pnpm test:coverage` produces V8 coverage for the fast suite, for
-  information only.
+  information only. CI measures the coverage floors in `fast_coverage`, from
+  the merged coverage of `fast`'s two shards (#1933); a local run is unsharded
+  and unchanged.
 
 The integration command needs Docker to be running. It never touches the
 developer's own Orbit database, containers or volumes. Every run makes up a
