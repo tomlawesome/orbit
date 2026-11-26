@@ -604,7 +604,7 @@ variables:
   #   ci             .gitlab-ci.yml, scripts/ci/, the classifier and the two
   #                  tests that read this file
   #                  -> fast, fast_checks, fast_docker, gitleaks, private-details,
-  #                     supply_chain_source, code_scanners
+  #                     supply_chain_source, code_scanners, knip_scan
   #   no_change      a proven comparison that found no changed path, such
   #                  as a back-merge (#1597)
   #                  -> gitleaks, licence_policy, private-details,
@@ -622,7 +622,7 @@ variables:
       nightly_yield:*) echo "skipped: a pipeline on preview or main is running; the nightly yields to it (#1546)"; return 1 ;;
       full:*) return 0 ;;
       ignore_policy:gitleaks | ignore_policy:licence_policy | ignore_policy:private-details | ignore_policy:supply_chain_source) return 0 ;;
-      ci:fast | ci:fast_checks | ci:fast_docker | ci:gitleaks | ci:private-details | ci:supply_chain_source | ci:code_scanners) return 0 ;;
+      ci:fast | ci:fast_checks | ci:fast_docker | ci:gitleaks | ci:private-details | ci:supply_chain_source | ci:code_scanners | ci:knip_scan) return 0 ;;
       no_change:gitleaks | no_change:licence_policy | no_change:private-details | no_change:supply_chain_source) return 0 ;;
     esac
     echo "skipped: the ${ORBIT_LANE:-full} lane does not run ${1} (#889)"
@@ -1830,13 +1830,15 @@ signing_image_age:
 # Code scanners, report-only (#1592; owner decision 96, 2026-11-24): shellcheck
 # on the shell scripts, zizmor on the GitHub workflows, ruff's S rules on the
 # Python, opengrep with the repository's own rules (.opengrep/rules) on the
-# TypeScript, JavaScript and Svelte. Each tool is a release binary pinned by
-# version and checksum (opengrep also by its Cosign signature) in
+# TypeScript, JavaScript and Svelte, and jscpd for duplicated TypeScript,
+# JavaScript and Svelte (#1596; owner decision 104a, 2026-11-25). Each tool is
+# a release binary pinned by version and checksum (opengrep also by its Cosign
+# signature) in
 # scripts/ci/ensure-<tool>.sh, which refuses anything else. Findings never
 # fail this job; a tool that cannot be fetched, verified or run does, and
 # allow_failure keeps that from blocking a merge while the reports are read.
 # Blocking comes later, at a stated threshold, with an ignore file holding a
-# reason and an expiry for each false alarm. One job for all four, so one
+# reason and an expiry for each false alarm. One job for all five, so one
 # light-lane slot (#1933). Reports: .orbit-code-scan/<tool>.json.
 # No `*system_lane_gate`, unlike `supply_chain_source`: what these tools read
 # is code and scripts, so an ordinary change to src/ or a script is exactly
@@ -1864,7 +1866,7 @@ code_scanners:
   # The downloads, kept between pipelines. Every run re-checks each cached
   # binary against its pinned hash, so a cache entry is never trusted as is.
   # Saved whatever the job's result, so one failing tool does not make the
-  # other three download again on every run.
+  # others download again on every run.
   cache:
     key: code-scanners-tools
     paths:
@@ -1875,13 +1877,73 @@ code_scanners:
     - orbit_lane_admits code_scanners || exit 0
     - |
       status=0
-      for tool in shellcheck zizmor ruff opengrep; do
+      for tool in shellcheck zizmor ruff opengrep jscpd; do
         echo "--- $tool"
         bash "scripts/ci/scan-$tool.sh" || { echo "code_scanners: $tool did not complete"; status=1; }
       done
       exit "$status"
   artifacts:
     name: orbit-code-scan
+    paths:
+      - .orbit-code-scan/
+    expire_in: 7 days
+    when: always
+
+# knip, report-only (#1596; owner decision 106a, 2026-11-25): unused files,
+# exports and dependencies, read with knip.json at the repository root. The
+# same rules as `code_scanners` above, and the same report-only terms:
+# findings never fail it, a tool that cannot be installed, verified or run
+# does, and allow_failure keeps that from blocking a merge.
+#
+# Its own job because knip, unlike the other scanners, runs package code: it
+# loads the app's config files. So:
+#   - knip comes from tools/knip, its own package.json and lockfile outside
+#     Orbit's manifest and pnpm workspace, ignored by Renovate (upgrades by
+#     hand), an exact version checked against each package's integrity hash;
+#   - every install uses --ignore-scripts, the app's own dependencies
+#     included, so nothing from a package runs in this privileged job;
+#   - knip itself runs only in a nested container with no network, a
+#     read-only root, no capabilities, a non-root user and an environment of
+#     PATH, HOME and NODE_OPTIONS -- scripts/ci/scan-knip.sh has the details.
+# Why `.dind`: an ordinary job cannot cut its own network (`unshare -rn` is
+# refused in the node image and iptables needs NET_ADMIN), so the job takes
+# the dind daemon on the privileged runner the acceptance jobs already use.
+# The bare job token only: no `environment:`, and no protected or masked
+# variable in its rules or variables.
+#
+# The job image is $NODE_IMAGE, not .dind's docker CLI image: the installs
+# need Node and pnpm, and knip's container is the same $NODE_IMAGE, so the
+# native packages the installs pick (glibc, x86_64) are the ones that load
+# inside it. The docker client comes from *docker_cli.
+# Report: .orbit-code-scan/knip.json.
+knip_scan:
+  stage: policy
+  extends: .dind
+  image:
+    name: $NODE_IMAGE
+    pull_policy: if-not-present
+  timeout: 20m
+  allow_failure: true
+  rules:
+    - !reference [.dev-landing, job_rule]
+    - !reference [.backmerge-skip, job_rule]
+    - *batch_intake_skip
+    - *not_on_main_push
+    - *not_scheduled
+    - when: on_success
+  needs:
+    - job: classify
+      artifacts: true
+  variables:
+    COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+  script:
+    - *reach_helpers
+    - orbit_lane_admits knip_scan || exit 0
+    - *docker_cli
+    - *pnpm_setup
+    - bash scripts/ci/scan-knip.sh
+  artifacts:
+    name: orbit-knip-scan
     paths:
       - .orbit-code-scan/
     expire_in: 7 days

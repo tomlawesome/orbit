@@ -1,0 +1,21 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "workspaces": {
+    ".": {
+      "entry": [
+        "src/cli/orbit.ts",
+        "src/db/migrate.ts",
+        "src/db/rewrap-kek.ts",
+        "src/server/**/*-cli.ts",
+        "scripts/**/*.{js,mjs,cjs,ts}",
+        "drizzle.config.ts"
+      ],
+      "project": ["src/**/*.ts", "scripts/**/*.{js,mjs,cjs,ts}", "*.{js,mjs,ts}"],
+      "ignore": ["tmp/**", "drizzle/**", "tools/**"]
+    },
+    "web": {
+      "entry": ["src/hooks.server.js", "src/service-worker.js", "scripts/**/*.{js,mjs}"],
+      "project": ["src/**/*.{js,ts,svelte}", "scripts/**/*.{js,mjs}", "*.{js,mjs,ts}"]
+    }
+  }
+}

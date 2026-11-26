@@ -472,7 +472,7 @@ for each.
 | --- | --- | --- |
 | documentation (`risk=fast`) | prose, issue templates, policy files and unit-only tests | `classify`, `fast`, `base_image`, `gitleaks`, `licence_policy` where the file is one it reads; a change to `supply-chain/licence-policy.yml` also runs the image build (`build_image`) and the system jobs, because the Dockerfile fails the build on an apk licence that file does not allow (#1823) |
 | ignore/policy (#889) | `.gitleaksignore` | `classify`, `gitleaks`, `licence_policy`, `supply_chain_source` |
-| CI definition (#889) | `.gitlab-ci.yml`, `scripts/ci/`, the classifier and the tests that read the pipeline file | `classify`, `fast`, `fast_checks`, `fast_docker`, `gitleaks`, `supply_chain_source`, `code_scanners` |
+| CI definition (#889) | `.gitlab-ci.yml`, `scripts/ci/`, the classifier and the tests that read the pipeline file | `classify`, `fast`, `fast_checks`, `fast_docker`, `gitleaks`, `supply_chain_source`, `code_scanners`, `knip_scan` |
 
 The documentation lane is the risk classifier's `fast` result and predates the
 other two: it shortens the pipeline by axis, so a job still runs when its own
@@ -503,7 +503,7 @@ for the same thing.
 `scripts/ci/` sits in the CI lane by the owner's decision on #889. Several of
 those scripts are the acceptance stage's own checks, so a change confined to
 the CI-definition lane's own merge request does not exercise them: that lane
-runs `fast`, `fast_checks`, `fast_docker`, `gitleaks`, `supply_chain_source` and `code_scanners` only, and
+runs `fast`, `fast_checks`, `fast_docker`, `gitleaks`, `supply_chain_source`, `code_scanners` and `knip_scan` only, and
 skips the acceptance stage entirely. `scripts/ci/` matches no path in
 `classifyCiRisk`'s `fastPatterns`, `systemPatterns` or `integrationPatterns`,
 so it falls through to the function's catch-all default, `CI_RISK.SYSTEM`
@@ -701,6 +701,15 @@ into the main build: a combined build-and-export fails the whole build when
 the push fails, where an export-only invocation cannot touch the image
 already built. A registry outage or a login failure degrades to an uncached
 build, never a red pipeline.
+
+Dead code and duplication are reported, not yet blocking (#1596). jscpd
+(duplicated TypeScript, JavaScript and Svelte) runs in `code_scanners` beside
+#1592's scanners, a release binary pinned by checksum in
+`scripts/ci/ensure-jscpd.sh`. knip (unused files, exports and dependencies,
+read with `knip.json`) runs in its own `knip_scan` job, from the separate,
+Renovate-ignored `tools/knip` manifest with `--ignore-scripts` installs, inside
+a nested container with no network and a read-only root. Reports:
+`.orbit-code-scan/jscpd.json` and `knip.json`.
 
 The three Trivy scanner jobs (`supply_chain_source`, `sidecar_images`,
 `supply_chain_image`) each downloaded the ~111 MB vulnerability database

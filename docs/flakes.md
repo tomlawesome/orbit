@@ -686,3 +686,7 @@ timeout on this one case rather than a global raise.
 
 - 2026-11-25 · #1633 branch 4e1164f1a · local full gate (not CI) · the first test timed out at 5 s on a loaded host (load average about 22); the next test then saw the engine mock already called once, by the timed-out test. The change touches nothing this route uses. The file passed on its own on the same commit. First sighting.
 
+
+## tests/unit/v19-mail-sender-rows-1650.test.mjs (beforeAll: compiles the desk's Svelte files)
+
+- 2026-11-26 · !1500 7c2c7f43 · pipeline 5515 / fast (job 66449) · `Hook timed out in 10000ms` at line 117 in a 1608 s run on a loaded runner; the change (#1774) touches no mail-sender code. Two retries then hit the 30-minute job limit with the host load at 15 to 19 (#1933); the third (job 66741) passed. First sighting of the hook; the file's own test timed out on 2026-11-20 (above).

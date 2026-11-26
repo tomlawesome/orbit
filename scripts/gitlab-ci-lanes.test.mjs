@@ -56,7 +56,8 @@ const jobs = [...allBlocks].filter(([name]) => !name.startsWith("."));
 // `private-details` (#1562).
 const laneMembers = {
   [CI_LANE.IGNORE_POLICY]: ["gitleaks", "licence_policy", "private-details", "supply_chain_source"],
-  [CI_LANE.CI]: ["code_scanners", "fast", "fast_checks", "fast_docker", "gitleaks", "private-details", "supply_chain_source"],
+  // #1596: knip_scan beside code_scanners; most of what it reads is scripts.
+  [CI_LANE.CI]: ["code_scanners", "fast", "fast_checks", "fast_docker", "gitleaks", "knip_scan", "private-details", "supply_chain_source"],
   // #1597: a proven empty diff runs the same four as the ignore/policy lane.
   // Spelled as a literal, not CI_LANE.NO_CHANGE, so the key means what it says
   // whether or not the classifier exports the constant yet.
@@ -211,6 +212,8 @@ describe("pipeline lanes", () => {
       // #1692: the phone film, split out of rig_webkit.
       "film_webkit",
       "integration",
+      // #1596: report-only knip, guarded like code_scanners.
+      "knip_scan",
       // #1076: it consumes build_image's artifact, so it has to stop on a
       // lane that skipped the build rather than load the placeholder.
       "launcher_install_compat",
