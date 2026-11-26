@@ -640,3 +640,49 @@ timeout on this one case rather than a global raise.
 ## scripts/install.interrupts-journal.test.mjs "B26: the rollback never reads, runs, moves or deletes anything in an earlier run's folder; its own folder is a sibling"
 
 - 2026-11-26 · !1499 a294def9 · pipeline 5504 / fast (job 66354) · failed after 8.5 s on a loaded runner (no stamp/moved/docker-compose.yml, line 606), the only failure of 16,674; the change touches none of it. Passed 3 of 3 locally on the same commit. First sighting.
+
+## scripts/install.rollback.test.mjs "install.sh: an interrupt rolls a fresh install back (#1456) > on SIGHUP: exits non-zero, restores the folder, removes the attempt's volumes by exact name, and a retry installs"
+
+- 2026-11-26 · !1487 039cb685 · pipeline 5489 / fast 1/2 (job 66191) · `expected 1 to be +0` after 39 s on a loaded runner, one of four load failures in the job; the change touches none of it. Passed on retry (job 66217). First sighting.
+
+## scripts/repair-retire-privdrop-1848.test.mjs "#1848 FIX-S1 addendum 4: the owner's identity, quiet successes, and clean error text > a child that succeeds but writes to stderr: the run still succeeds and the text is not printed"
+
+- 2026-11-26 · !1487 039cb685 · pipeline 5489 / fast 1/2 (job 66191) · `runRepair: child killed after its 30000ms deadline` on a loaded runner; the change touches none of it. Passed on retry (job 66217). First sighting.
+
+## src/cli/orbit.configure.test.ts "orbit configure --set-deployment-profile > standard clears the profile fields" and "... > wrong argument count exits 2 with a usage message"
+
+- 2026-11-26 · !1487 039cb685 · pipeline 5489 / fast 1/2 (job 66191) · both `Hook timed out in 10000ms` (11.5 s, 11.4 s) on a loaded runner; the change touches none of it. Passed on retry (job 66217). First sighting.
+
+## tests/integration/mail-relay-sender-addresses-1650.test.ts "removal: DELETE /api/settings/mail-relay/senders/:id > answers 404 sender_address_unknown for an unknown id and for another member's row, and removes nothing" (integration)
+
+- 2026-11-26 · !1487 039cb685 · pipeline 5489 / integration 1/4 (job 66203) · `Hook timed out in 15000ms` (22 s) on a loaded runner, the only failure of 651; the change touches none of it. First sighting.
+
+## tests/integration/maintenance.test.ts "window lifecycle, versioned mutations and audit (#522, #585)": two lifecycle tests time out, then "rejects a stale or replayed version ..." fails as a knock-on (integration)
+
+- 2026-11-26 · !1487 039cb685 · pipeline 5489 / integration 3/4 (job 66205) · "schedules, opens, updates and resolves a window ..." and "schedules a window, opens it on the tick ..." `Test timed out in 15000ms` (15.9 s, 16.8 s) on a loaded runner; "rejects a stale or replayed version with no state change and no audit row" then threw `Maintenance state changed since it was read`, the timed-out tests' window left behind. The change touches none of it. First sighting.
+
+## tests/integration/document-lifecycle.test.ts "authenticated encrypted document lifecycle > uploads, downloads, soft-deletes, restores, and irreversibly purges ciphertext" and "... > still lists a deleted document as pending deletion, so Restore stays reachable (G-B4-2, #1671)" (integration)
+
+- 2026-11-26 · !1487 039cb685 · pipeline 5489 / integration 4/4 (job 66206) · both `Test timed out in 15000ms` on a loaded runner; the change touches none of it. First sighting.
+
+## Integration shard hits the 15-minute job limit on a loaded runner, no test failing (#1971)
+
+- 2026-11-26 · !1487 039cb685 · pipeline 5489 / integration 1/4 (job 66289) · `job_execution_timeout` at 908 s, no summary: 661 of 663 started tests done, last running document-staged-limit-system-staging-1605.test.ts; no test failed. First sighting.
+- 2026-11-26 · !1487 039cb685 · pipeline 5489 / integration 4/4 (job 66291) · `job_execution_timeout` at 904 s: all 564 tests passed and the summary printed, then the job was killed 26 s later. Second sighting.
+- 2026-11-26 · !1487 039cb685 · pipeline 5489 / integration 1/4 (job 66389) · `job_execution_timeout` at 905 s, no summary: 583 of 585 started tests done, last running update-preflight.test.ts; no test failed. Third sighting: #1971.
+
+## scripts/install-retire-lock-1855.test.mjs "install.sh --plain --update: the SMTP retirement takes the backup/restore lock (#1855) > flock exiting 1 with an error on stderr is untestable, not held: the could-not-be-tested line names the lock file and flock's words"
+
+- 2026-11-26 · !1497 a0971112 · pipeline 5496 / fast (job 66225) · `expected 1 to be +0` after 9.3 s in a 1656 s run on a loaded runner, one of four load failures in the job; the change (a base image re-pin) touches none of it. First sighting.
+
+## scripts/repair-owner-producer-1935.test.mjs "#1935: the owner step's limit excludes root's producer > a checkpoint encryption slower than the owner limit (2 s) but within its own does not fail the checkpoint; the rename goes through setpriv" and "... > control: the same run with no encryption delay rotates as before"
+
+- 2026-11-26 · !1497 a0971112 · pipeline 5496 / fast (job 66225) · both failed after about 15-17 s on a loaded runner: the checkpoint reported as failed, and the control's result empty; the change (a base image re-pin) touches none of it. First sighting.
+
+## tests/unit/document-preview-page-route.test.mjs "preview routes: ?page=N and X-Orbit-Page-Count (#1300) > draws page one when no page is asked for, and carries the page count"
+
+- 2026-11-26 · !1497 a0971112 · pipeline 5496 / fast (job 66225) · `Test timed out in 15000ms` (16.9 s) on a loaded runner; the change (a base image re-pin) touches none of it. First sighting.
+
+## Fast job hits the 30-minute job limit on a loaded runner, no test failing (host)
+
+- 2026-11-26 · !1497 a0971112 · pipeline 5497 / fast (job 66247) · `job_execution_timeout` at 1807 s, no summary: 17,231 of 17,235 started tests done, none failed. Passed on retry (job 66391, 1333 s). First sighting.
