@@ -636,3 +636,7 @@ timeout on this one case rather than a global raise.
 ## scripts/install.update-retire-smtp.test.mjs "removes an inline SMTP_PASSWORD line too, and the password is then in no file of the folder or the installer's state"
 
 - 2026-11-24 · dev 1d397e4a · pipeline 5313 (nightly browsers, started early) / fast (job 63916) · failed after 12 s on a loaded runner, the only failure of 16,661; the change touches none of it. First sighting.
+
+## scripts/install.interrupts-journal.test.mjs "B26: the rollback never reads, runs, moves or deletes anything in an earlier run's folder; its own folder is a sibling"
+
+- 2026-11-26 · !1499 a294def9 · pipeline 5504 / fast (job 66354) · failed after 8.5 s on a loaded runner (no stamp/moved/docker-compose.yml, line 606), the only failure of 16,674; the change touches none of it. Passed 3 of 3 locally on the same commit. First sighting.
