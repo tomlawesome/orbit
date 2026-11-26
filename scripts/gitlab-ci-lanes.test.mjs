@@ -56,7 +56,7 @@ const jobs = [...allBlocks].filter(([name]) => !name.startsWith("."));
 // `private-details` (#1562).
 const laneMembers = {
   [CI_LANE.IGNORE_POLICY]: ["gitleaks", "licence_policy", "private-details", "supply_chain_source"],
-  [CI_LANE.CI]: ["fast", "fast_checks", "fast_docker", "gitleaks", "private-details", "supply_chain_source"],
+  [CI_LANE.CI]: ["fast", "fast_checks", "fast_coverage", "fast_docker", "gitleaks", "private-details", "supply_chain_source"],
   // #1597: a proven empty diff runs the same four as the ignore/policy lane.
   // Spelled as a literal, not CI_LANE.NO_CHANGE, so the key means what it says
   // whether or not the classifier exports the constant yet.
@@ -206,6 +206,8 @@ describe("pipeline lanes", () => {
       "build_launcher_branch",
       "fast",
       "fast_checks",
+      // #1933: merges fast's shard blobs and runs the floor check.
+      "fast_coverage",
       "fast_docker",
       // #1692: the phone film, split out of rig_webkit.
       "film_webkit",
@@ -296,7 +298,7 @@ describe("pipeline lanes", () => {
     const everyJob = new Set(["classify", "flake_check", ...jobs.map(([name]) => name), ...laneMembers.no_change]);
     const admitted = [...everyJob].filter((job) => verdict("no_change", job).admitted).sort();
     expect(admitted).toEqual(["gitleaks", "licence_policy", "private-details", "supply_chain_source"]);
-    for (const job of ["fast", "fast_checks", "fast_docker", "build_image", "integration", "smoke", "acceptance"]) {
+    for (const job of ["fast", "fast_checks", "fast_coverage", "fast_docker", "build_image", "integration", "smoke", "acceptance"]) {
       const { admitted: ran, stdout } = verdict("no_change", job);
       expect(ran, job).toBe(false);
       expect(stdout.trim(), job).toBe(`skipped: the no_change lane does not run ${job} (#889)`);
@@ -778,7 +780,9 @@ const NIGHTLY_ONLY_JOBS = ["rig_chromium", "rig_firefox", "rig_webkit", "film_we
 const PROMOTION_BROWSER_JOBS = BROWSER_JOBS.filter((name) => !NIGHTLY_ONLY_JOBS.includes(name));
 // What the nightly needs besides the browsers: the build and the image.
 // fast_checks since #1831: it publishes the web/build the rig jobs serve.
-const NIGHTLY_SUPPORT_JOBS = ["classify", "fast", "fast_checks", "build_image"];
+// fast_coverage since #1933: the nightly is the dev proof release_readiness
+// reads, and the floors are measured there now.
+const NIGHTLY_SUPPORT_JOBS = ["classify", "fast", "fast_checks", "fast_coverage", "build_image"];
 
 // The `rules:` list of a block as [{ if, when }], with `- *alias` entries
 // replaced by the hidden key's own rule (or, when the hidden key is itself a
@@ -1316,18 +1320,25 @@ function scriptItems(name) {
   const block = allBlocks.get(name);
   const start = block.search(/^ {2}script:\s*$/mu);
   expect(start, `${name} has no script:`).toBeGreaterThan(-1);
-  const lines = block.slice(start).split("\n").slice(1);
+  return scriptItemsOf(block.slice(start).split("\n").slice(1), 4);
+}
+
+// The `- ` items of a YAML list whose dashes sit at `indent` columns, each
+// as its text (a `|` block's lines without the marker), up to the next key
+// (a line with text at `indent - 2`).
+function scriptItemsOf(lines, indent) {
+  const pad = " ".repeat(indent);
   const items = [];
   let current = null;
   for (const line of lines) {
-    if (/^ {2}\S/u.test(line)) break;
-    if (/^ {4}- /u.test(line)) {
-      current = [line.slice(6)];
+    if (line.startsWith(" ".repeat(indent - 2)) && /\S/u.test(line[indent - 2] ?? "")) break;
+    if (line.startsWith(`${pad}- `)) {
+      current = [line.slice(indent + 2)];
       items.push(current);
-    } else if (/^ {4}#/u.test(line) || line.trim() === "") {
+    } else if (line.startsWith(`${pad}#`) || line.trim() === "") {
       current = null;
     } else if (current) {
-      current.push(line.slice(6));
+      current.push(line.slice(indent + 2));
     }
   }
   return items.map((item) => (item[0] === "|" ? item.slice(1) : item).join("\n"));
@@ -1374,8 +1385,12 @@ function expandAlias(item) {
   const alias = item.trim().match(/^\*([A-Za-z_][A-Za-z0-9_]*)$/u);
   if (!alias) return item;
   const definition = gitlabCi.match(new RegExp(`^\\.[\\w-]+: &${alias[1]} (.+)$`, "mu"));
-  expect(definition, `no anchor &${alias[1]}`).not.toBeNull();
-  return definition[1];
+  if (definition) return definition[1];
+  // A list anchor (#1933 `.fast_run_mode`): its items, joined, as GitLab
+  // flattens a nested script list into the job's.
+  const list = gitlabCi.match(new RegExp(`^(\\.[\\w-]+): &${alias[1]}$`, "mu"));
+  expect(list, `no anchor &${alias[1]}`).not.toBeNull();
+  return scriptItemsOf(allBlocks.get(list[1]).split("\n").slice(1), 2).join("\n");
 }
 
 function stubBin(directory, extra = {}) {
@@ -1560,6 +1575,72 @@ describe("merge requests run changed-reachable tests, the dev push runs everythi
     }
   });
 
+  // `fast_coverage` (#1933): the same `.fast_run_mode` decides whether there are
+  // floors to measure. A narrowed run stops before the merge and records no
+  // evidence; a whole-suite run merges with coverage, runs the floor check and
+  // records evidence.
+  describe("fast_coverage", () => {
+    function coverageDecision(environment) {
+      const directory = realpathSync(mkdtempSync(join(tmpdir(), "orbit-fast-coverage-decision-")));
+      try {
+        mkdirSync(join(directory, "scripts"));
+        stubBin(directory);
+        const items = scriptItems("fast_coverage").map(expandAlias);
+        expect(items.some((item) => /cat-file/u.test(item)), "the run-mode anchor is in fast_coverage").toBe(true);
+        const relevant = items.filter((item) =>
+          /ORBIT_TEST_CHANGED_BASE|--merge-reports|coverage-floor-check|reuse-evidence|cat-file|CI_MERGE_REQUEST/u.test(item),
+        );
+        const prelude = 'orbit_as_node() { printf "node: %s\\n" "$1"; }';
+        const result = runItems([prelude, ...relevant], jobEnvironment(directory, environment), directory);
+        expect(result.status, result.stderr).toBe(0);
+        return {
+          merged: /^node: .*--merge-reports \.vitest\/blob --coverage\.enabled=true/mu.test(result.stdout),
+          floors: /^node: node scripts\/ci\/coverage-floor-check\.mjs$/mu.test(result.stdout),
+          ...observed(directory, result),
+        };
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    }
+
+    it("on a narrowed merge request stops before the merge and writes no evidence", () => {
+      const seen = coverageDecision(mergeRequestEnv);
+      expect(seen.merged).toBe(false);
+      expect(seen.floors).toBe(false);
+      expect(seen.evidence).toEqual([]);
+      expect(seen.output).toMatch(/no floors on a narrowed run/u);
+    });
+
+    for (const [event, environment] of Object.entries(fullRunEvents)) {
+      it(`on ${event} merges with coverage, checks the floors and writes evidence`, () => {
+        const seen = coverageDecision(environment);
+        expect(seen.merged).toBe(true);
+        expect(seen.floors).toBe(true);
+        expect(seen.evidence).toEqual(["job"]);
+      });
+    }
+
+    for (const batch of ["batch-a", "batch-b"]) {
+      it(`on a ${batch} -> dev merge request merges and checks the floors (#1812)`, () => {
+        const seen = coverageDecision({ ...mergeRequestEnv, CI_MERGE_REQUEST_SOURCE_BRANCH_NAME: batch, CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "dev" });
+        expect(seen.merged).toBe(true);
+        expect(seen.floors).toBe(true);
+      });
+    }
+
+    it("on a merge request whose base is not in the clone merges, as fast runs the whole suite", () => {
+      const seen = coverageDecision({ ...mergeRequestEnv, GIT_STUB_PRESENT: "ffffffffffffffffffffffffffffffffffffffff" });
+      expect(seen.output).toMatch(BASE_MISSING_LINE);
+      expect(seen.merged).toBe(true);
+      expect(seen.evidence).toEqual(["job"]);
+    });
+
+    it("takes the run mode from the same anchor as fast", () => {
+      expect(scriptItems("fast")).toContain("*fast_run_mode");
+      expect(scriptItems("fast_coverage")).toContain("*fast_run_mode");
+    });
+  });
+
   // scripts/test-backend.sh: the checks run every time; only the Vitest step narrows.
   // Each test runs the script as a child with a 60 s deadline, so the test's
   // own limit sits above it: Vitest's 5 s default killed passing runs on a
@@ -1606,7 +1687,7 @@ describe("merge requests run changed-reachable tests, the dev push runs everythi
           chmodSync(join(stubs, name), 0o755);
         }
         const env = { ...process.env, PATH: `${stubs}:/usr/bin:/bin`, STUB_LOG: log, ...(base ? { ORBIT_TEST_CHANGED_BASE: base } : {}), ...environment };
-        for (const key of ["CI", "ORBIT_TEST_COVERAGE", "ORBIT_TEST_CHANGED_BASE", "ORBIT_TEST_PHASE"]) if (!(key in environment) && !(key === "ORBIT_TEST_CHANGED_BASE" && base)) delete env[key];
+        for (const key of ["CI", "ORBIT_TEST_COVERAGE", "ORBIT_TEST_CHANGED_BASE", "ORBIT_TEST_PHASE", "ORBIT_TEST_SHARD"]) if (!(key in environment) && !(key === "ORBIT_TEST_CHANGED_BASE" && base)) delete env[key];
         const result = spawnSync("bash", [join(repo, "scripts", "test-backend.sh")], {
           cwd: repo,
           encoding: "utf8",
@@ -1719,7 +1800,7 @@ describe("merge requests run changed-reachable tests, the dev push runs everythi
           POSTGRES_DB: "orbit_integration",
           CI_JOB_ID: "1",
           CI_NODE_INDEX: "2",
-          CI_NODE_TOTAL: "4",
+          CI_NODE_TOTAL: "5",
           ...environment,
         }), directory);
         const calls = existsSync(log) ? readFileSync(log, "utf8").split("\n").filter(Boolean) : [];
@@ -1735,12 +1816,12 @@ describe("merge requests run changed-reachable tests, the dev push runs everythi
     const STUB_LOGGER = (name) => `#!/bin/sh\nprintf '${name}\\t%s\\n' "$*" >> "$STUB_LOG"\nexit 0\n`;
 
     it("on a merge request runs only the changed-reachable integration tests", () => {
-      expect(integrationVitestCalls(mergeRequestEnv)).toEqual([`exec vitest run --project integration --changed ${MERGE_BASE} --shard=2/4 --passWithNoTests`]);
+      expect(integrationVitestCalls(mergeRequestEnv)).toEqual([`exec vitest run --project integration --changed ${MERGE_BASE} --shard=2/5 --passWithNoTests`]);
     });
 
     for (const [event, environment] of Object.entries(fullRunEvents)) {
       it(`on ${event} runs the whole integration project`, () => {
-        expect(integrationVitestCalls(environment)).toEqual(["exec vitest run --project integration --shard=2/4 --passWithNoTests"]);
+        expect(integrationVitestCalls(environment)).toEqual(["exec vitest run --project integration --shard=2/5 --passWithNoTests"]);
       });
     }
 
@@ -1756,7 +1837,7 @@ describe("merge requests run changed-reachable tests, the dev push runs everythi
 
     it("on a merge request whose base is in the clone writes no reuse evidence", () => {
       const run = integrationRun(mergeRequestEnv);
-      expect(run.vitest).toEqual([`exec vitest run --project integration --changed ${MERGE_BASE} --shard=2/4 --passWithNoTests`]);
+      expect(run.vitest).toEqual([`exec vitest run --project integration --changed ${MERGE_BASE} --shard=2/5 --passWithNoTests`]);
       expect(run.evidence).toEqual([]);
       expect(run.output).not.toMatch(BASE_MISSING_LINE);
     });
@@ -1768,7 +1849,7 @@ describe("merge requests run changed-reachable tests, the dev push runs everythi
       it(`on a merge request whose base ${absence} says so and runs the whole integration project`, () => {
         const run = integrationRun({ ...mergeRequestEnv, CI_MERGE_REQUEST_DIFF_BASE_SHA: base, GIT_STUB_PRESENT: present });
         expect(run.output).toMatch(BASE_MISSING_LINE);
-        expect(run.vitest).toEqual(["exec vitest run --project integration --shard=2/4 --passWithNoTests"]);
+        expect(run.vitest).toEqual(["exec vitest run --project integration --shard=2/5 --passWithNoTests"]);
       });
 
       it(`on a merge request whose base ${absence} still writes reuse evidence, as the full run it is`, () => {
@@ -1813,6 +1894,10 @@ describe("job timeouts (#1620)", () => {
 
   it("gives fast_checks a 10m timeout (#1831)", () => {
     expect(timeoutOf("fast_checks")).toBe("10m");
+  });
+
+  it("gives fast_coverage a 10m timeout (#1933)", () => {
+    expect(timeoutOf("fast_coverage")).toBe("10m");
   });
 
   it("keeps fast_docker at 15m", () => {
@@ -2192,7 +2277,9 @@ exit 0
    * machinery expands to `name 1/N` ... `name N/N`, so the two must agree or
    * evidence would name jobs the pipeline never runs.
    */
-  const SHARDED = { rig_chromium: 2, rig_firefox: 2, rig_webkit: 4, film_webkit: 2 };
+  const BROWSER_SHARDED = { rig_chromium: 2, rig_firefox: 2, rig_webkit: 4, film_webkit: 2 };
+  // #1933 (103a): `fast` is Vitest shards; its blobs go to fast_coverage, not browser_report.
+  const SHARDED = { ...BROWSER_SHARDED, fast: 2 };
   const inputsJson = () => JSON.parse(readFileSync(new URL("./ci/job-inputs.json", import.meta.url), "utf8"));
   const parallelOf = (name) => allBlocks.get(name).match(/^ {2}parallel: (\S+)\s*(?:#.*)?$/mu)?.[1];
 
@@ -2203,9 +2290,9 @@ exit 0
     }
   });
 
-  it("splits integration into four `parallel:` jobs, equal to its `shards` in job-inputs.json (#1806)", () => {
-    expect(inputsJson().jobs.integration?.shards, "integration: shards in job-inputs.json").toBe(4);
-    expect(parallelOf("integration"), "integration: parallel:").toBe("4");
+  it("splits integration into five `parallel:` jobs, equal to its `shards` in job-inputs.json (#1806)", () => {
+    expect(inputsJson().jobs.integration?.shards, "integration: shards in job-inputs.json").toBe(5);
+    expect(parallelOf("integration"), "integration: parallel:").toBe("5");
   });
 
   it("shards no other job by `shards`, and gives screens_chromium no `parallel:` (one worker cannot shard, #1148)", () => {
@@ -2246,7 +2333,7 @@ exit 0
   });
 
   it("adds the blob reporter's directory, web/blob-report/, to every shard's and screens_chromium's artifacts (#1546)", () => {
-    for (const name of [...Object.keys(SHARDED), "screens_chromium"]) {
+    for (const name of [...Object.keys(BROWSER_SHARDED), "screens_chromium"]) {
       const block = allBlocks.get(name);
       const paths = block.match(/\n {2}artifacts:\n(?:(?: {4,}[^\n]*)?\n)*/u)?.[0] ?? "";
       expect(paths, `${name}: artifacts`).toMatch(/^ {6}- web\/blob-report\/$/mu);
@@ -2257,7 +2344,7 @@ exit 0
   });
 
   describe("browser_report (#1546)", () => {
-    const REPORTED = [...Object.keys(SHARDED), "screens_chromium"];
+    const REPORTED = [...Object.keys(BROWSER_SHARDED), "screens_chromium"];
 
     it("is an acceptance-stage light job with a 5m limit that is no reuse candidate", () => {
       const block = allBlocks.get("browser_report");
@@ -3291,19 +3378,24 @@ describe("the fast job is split by phase (#1831)", () => {
     expect(code("fast_checks")).toMatch(/^ {2}timeout: 10m\s*$/mu);
   });
 
+  // #1933: fast_coverage's own needs name `fast` for its blobs; it merges
+  // coverage and reads nothing of fast_checks', so it is the one exception.
+  const isFastCoverage = (list) => list.map((need) => need.job).join(",") === "classify,fast";
+
   it("names fast_checks in every needs list that names fast", () => {
-    const withFast = needLists().filter((list) => list.some((need) => need.job === "fast"));
+    const withFast = needLists().filter((list) => list.some((need) => need.job === "fast") && !isFastCoverage(list));
     expect(withFast.length, "lists naming fast").toBeGreaterThan(0);
     for (const list of withFast) {
       expect(list.map((need) => need.job), JSON.stringify(list)).toContain("fast_checks");
     }
   });
 
-  it("makes every job that takes fast's artifacts take fast_checks' as well", () => {
-    const takers = needLists().filter((list) => list.some((need) => need.job === "fast" && need.artifacts === true));
-    expect(takers.length, "lists taking fast's artifacts").toBeGreaterThan(0);
+  it("makes every job that takes fast_checks' artifacts take them, and fast only as a wait (#1831, #1933)", () => {
+    const takers = needLists().filter((list) => list.some((need) => need.job === "fast_checks" && need.artifacts === true));
+    expect(takers.length, "lists taking fast_checks' artifacts").toBeGreaterThan(0);
     for (const list of takers) {
-      expect(list.find((need) => need.job === "fast_checks"), JSON.stringify(list)).toMatchObject({ artifacts: true });
+      // #1933: fast's artefacts are the shard blobs, which only fast_coverage reads.
+      expect(list.find((need) => need.job === "fast"), JSON.stringify(list)).toMatchObject({ artifacts: false });
     }
   });
 
@@ -3312,8 +3404,11 @@ describe("the fast job is split by phase (#1831)", () => {
     expect(artifactPaths("fast")).not.toContain("web/build/");
   });
 
-  it("still publishes coverage/ from fast", () => {
-    expect(artifactPaths("fast")).toContain("coverage/");
+  // #1933: the shards publish blobs; fast_coverage merges them into coverage/.
+  it("publishes coverage/ from fast_coverage, and the shard blobs from fast", () => {
+    expect(artifactPaths("fast_coverage")).toContain("coverage/");
+    expect(artifactPaths("fast")).toContain(".vitest/blob/");
+    expect(artifactPaths("fast")).not.toContain("coverage/");
   });
 
   it("calls test-backend.sh with ORBIT_TEST_PHASE=checks in fast_checks and tests in fast", () => {

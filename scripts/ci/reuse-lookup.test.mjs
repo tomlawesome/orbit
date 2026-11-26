@@ -95,7 +95,7 @@ beforeEach(() => {
   envFile = join(directory, "reuse.env");
   outFile = join(directory, "image.env");
   writeFileSync(envFile, [
-    `ORBIT_INPUTS_FAST=${KEY}`,
+    `ORBIT_INPUTS_FAST_DOCKER=${KEY}`,
     `ORBIT_INPUTS_FAST_CHECKS=${KEY}`,
     `ORBIT_INPUTS_RIG_CHROMIUM=${KEY}`,
     // #1546: the shard is the unit of evidence, so the gate of `rig_chromium 1/2`
@@ -136,15 +136,15 @@ const lines = () => logged.join("\n");
 describe("the source-keyed lookup", () => {
   it("stands on the newest successful run whose evidence names the same key", async () => {
     await start({
-      pipelines: [{ id: 299, jobs: [passed(9001, "fast")] }],
-      evidence: { 9001: { fast: { job: "fast", inputs: KEY, pipeline: 299, job_id: 9001, stands_on: null } } },
+      pipelines: [{ id: 299, jobs: [passed(9001, "fast_docker")] }],
+      evidence: { 9001: { "fast-docker": { job: "fast_docker", inputs: KEY, pipeline: 299, job_id: 9001, stands_on: null } } },
     });
 
     await run({ env: environment(), envFile, now: NOW, log });
 
-    expect(emitted()).toContain("ORBIT_REUSE_FAST=9001");
-    expect(emitted()).toContain("ORBIT_REUSE_FAST_PIPELINE=299");
-    expect(lines()).toContain("fast: stands on job 9001 from pipeline 299");
+    expect(emitted()).toContain("ORBIT_REUSE_FAST_DOCKER=9001");
+    expect(emitted()).toContain("ORBIT_REUSE_FAST_DOCKER_PIPELINE=299");
+    expect(lines()).toContain("fast_docker: stands on job 9001 from pipeline 299");
   });
 
   it("treats fast_checks as source-keyed and stands on its own earlier run (#1831)", async () => {
@@ -161,8 +161,8 @@ describe("the source-keyed lookup", () => {
 
   it("sends the token as a header and never in the URL", async () => {
     await start({
-      pipelines: [{ id: 299, jobs: [passed(9001, "fast")] }],
-      evidence: { 9001: { fast: { inputs: KEY, pipeline: 299, job_id: 9001 } } },
+      pipelines: [{ id: 299, jobs: [passed(9001, "fast_docker")] }],
+      evidence: { 9001: { "fast-docker": { inputs: KEY, pipeline: 299, job_id: 9001 } } },
     });
 
     await run({ env: environment(), envFile, now: NOW, log });
@@ -173,36 +173,36 @@ describe("the source-keyed lookup", () => {
 
   it("does not reuse a run whose key has since changed", async () => {
     await start({
-      pipelines: [{ id: 299, jobs: [passed(9001, "fast")] }],
-      evidence: { 9001: { fast: { inputs: OTHER_KEY, pipeline: 299, job_id: 9001 } } },
+      pipelines: [{ id: 299, jobs: [passed(9001, "fast_docker")] }],
+      evidence: { 9001: { "fast-docker": { inputs: OTHER_KEY, pipeline: 299, job_id: 9001 } } },
     });
 
     await run({ env: environment(), envFile, now: NOW, log });
 
-    expect(emitted()).not.toContain("ORBIT_REUSE_FAST");
+    expect(emitted()).not.toContain("ORBIT_REUSE_FAST_DOCKER");
     expect(lines()).toContain("ran on a different key");
   });
 
   it("does not reuse a job that did not succeed", async () => {
     await start({
-      pipelines: [{ id: 299, jobs: [{ id: 9001, name: "fast", status: "failed", finished_at: RECENT }] }],
-      evidence: { 9001: { fast: { inputs: KEY, pipeline: 299, job_id: 9001 } } },
+      pipelines: [{ id: 299, jobs: [{ id: 9001, name: "fast_docker", status: "failed", finished_at: RECENT }] }],
+      evidence: { 9001: { "fast-docker": { inputs: KEY, pipeline: 299, job_id: 9001 } } },
     });
 
     await run({ env: environment(), envFile, now: NOW, log });
 
-    expect(emitted()).not.toContain("ORBIT_REUSE_FAST");
-    expect(lines()).toContain("fast: runs");
+    expect(emitted()).not.toContain("ORBIT_REUSE_FAST_DOCKER");
+    expect(lines()).toContain("fast_docker: runs");
   });
 
   // A job that gated itself out is green and has no evidence. Green is not the
   // same as "did the work", and this is the only thing that tells them apart.
   it("does not reuse a green job that left no evidence", async () => {
-    await start({ pipelines: [{ id: 299, jobs: [passed(9001, "fast")] }] });
+    await start({ pipelines: [{ id: 299, jobs: [passed(9001, "fast_docker")] }] });
 
     await run({ env: environment(), envFile, now: NOW, log });
 
-    expect(emitted()).not.toContain("ORBIT_REUSE_FAST");
+    expect(emitted()).not.toContain("ORBIT_REUSE_FAST_DOCKER");
   });
 
   it("follows a reused run back to the job that really did the work", async () => {
@@ -231,25 +231,25 @@ describe("the source-keyed lookup", () => {
     await start({
       pipelines: [
         { id: 299, jobs: [passed(9100, "rig_chromium")] },
-        { id: 250, jobs: [passed(8000, "fast")] },
+        { id: 250, jobs: [passed(8000, "fast_docker")] },
       ],
-      evidence: { 8000: { fast: { inputs: KEY, pipeline: 250, job_id: 8000 } } },
+      evidence: { 8000: { "fast-docker": { inputs: KEY, pipeline: 250, job_id: 8000 } } },
     });
 
     await run({ env: environment(), envFile, now: NOW, log });
 
-    expect(emitted()).toContain("ORBIT_REUSE_FAST=8000");
+    expect(emitted()).toContain("ORBIT_REUSE_FAST_DOCKER=8000");
   });
 
   it("never looks at the pipeline it is running in", async () => {
     await start({
-      pipelines: [{ id: 300, jobs: [passed(9001, "fast")] }],
-      evidence: { 9001: { fast: { inputs: KEY, pipeline: 300, job_id: 9001 } } },
+      pipelines: [{ id: 300, jobs: [passed(9001, "fast_docker")] }],
+      evidence: { 9001: { "fast-docker": { inputs: KEY, pipeline: 300, job_id: 9001 } } },
     });
 
     await run({ env: environment(), envFile, now: NOW, log });
 
-    expect(emitted()).not.toContain("ORBIT_REUSE_FAST");
+    expect(emitted()).not.toContain("ORBIT_REUSE_FAST_DOCKER");
     expect(lines()).toContain("no earlier pipeline");
   });
 
@@ -269,30 +269,30 @@ describe("the walk goes project-wide", () => {
   // against the same content is evidence for a merge request that never ran it.
   it("asks for the project's own pipelines, not this merge request's", async () => {
     await start({
-      pipelines: [{ id: 299, ref: "dev", jobs: [passed(9001, "fast")] }],
-      evidence: { 9001: { fast: { inputs: KEY, pipeline: 299, job_id: 9001 } } },
+      pipelines: [{ id: 299, ref: "dev", jobs: [passed(9001, "fast_docker")] }],
+      evidence: { 9001: { "fast-docker": { inputs: KEY, pipeline: 299, job_id: 9001 } } },
     });
 
     await run({ env: environment(), envFile, now: NOW, log });
 
     expect(seen.paths[0]).toBe(`/api/v4/projects/49/pipelines?per_page=${MAX_PIPELINES}&order_by=id&sort=desc`);
     expect(seen.paths.join("\n")).not.toContain("merge_requests");
-    expect(emitted()).toContain("ORBIT_REUSE_FAST=9001");
+    expect(emitted()).toContain("ORBIT_REUSE_FAST_DOCKER=9001");
   });
 
   it("looks no further back than twenty pipelines", async () => {
     const pipelines = Array.from({ length: MAX_PIPELINES + 6 }, (unused, index) => ({
       id: 400 - index,
-      jobs: index === MAX_PIPELINES + 5 ? [passed(9001, "fast")] : [],
+      jobs: index === MAX_PIPELINES + 5 ? [passed(9001, "fast_docker")] : [],
     }));
     await start({
       pipelines,
-      evidence: { 9001: { fast: { inputs: KEY, pipeline: 374, job_id: 9001 } } },
+      evidence: { 9001: { "fast-docker": { inputs: KEY, pipeline: 374, job_id: 9001 } } },
     });
 
     await run({ env: environment(), envFile, now: NOW, log });
 
-    expect(emitted()).not.toContain("ORBIT_REUSE_FAST");
+    expect(emitted()).not.toContain("ORBIT_REUSE_FAST_DOCKER");
     expect(seen.paths.filter((path) => path.includes("/jobs?")).length).toBe(MAX_PIPELINES);
   });
 });
@@ -300,13 +300,13 @@ describe("the walk goes project-wide", () => {
 describe("the seven-day limit", () => {
   it("does not reuse a pass older than seven days", async () => {
     await start({
-      pipelines: [{ id: 299, jobs: [passed(9001, "fast", STALE)] }],
-      evidence: { 9001: { fast: { inputs: KEY, pipeline: 299, job_id: 9001 } } },
+      pipelines: [{ id: 299, jobs: [passed(9001, "fast_docker", STALE)] }],
+      evidence: { 9001: { "fast-docker": { inputs: KEY, pipeline: 299, job_id: 9001 } } },
     });
 
     await run({ env: environment(), envFile, now: NOW, log });
 
-    expect(emitted()).not.toContain("ORBIT_REUSE_FAST");
+    expect(emitted()).not.toContain("ORBIT_REUSE_FAST_DOCKER");
     expect(lines()).toContain("finished too long ago");
     // And never even reads the evidence, so a stale artefact costs no request.
     expect(seen.paths.join("\n")).not.toContain("ci-evidence");
@@ -319,31 +319,31 @@ describe("the seven-day limit", () => {
   it("does not reuse a chain of reuses standing on a pass older than seven days", async () => {
     await start({
       pipelines: [
-        { id: 299, jobs: [passed(9001, "fast", RECENT)] },
-        { id: 100, jobs: [passed(7000, "fast", STALE)] },
+        { id: 299, jobs: [passed(9001, "fast_docker", RECENT)] },
+        { id: 100, jobs: [passed(7000, "fast_docker", STALE)] },
       ],
       evidence: {
         9001: {
-          fast: { inputs: KEY, pipeline: 299, job_id: 9001, stands_on: 7000, stands_on_pipeline: 100 },
+          "fast-docker": { inputs: KEY, pipeline: 299, job_id: 9001, stands_on: 7000, stands_on_pipeline: 100 },
         },
       },
     });
 
     await run({ env: environment(), envFile, now: NOW, log });
 
-    expect(emitted()).not.toContain("ORBIT_REUSE_FAST");
+    expect(emitted()).not.toContain("ORBIT_REUSE_FAST_DOCKER");
     expect(lines()).toContain("the one that really ran, finished too long ago");
   });
 
   it("does not reuse a pass whose finish time the API did not report", async () => {
     await start({
-      pipelines: [{ id: 299, jobs: [{ id: 9001, name: "fast", status: "success" }] }],
-      evidence: { 9001: { fast: { inputs: KEY, pipeline: 299, job_id: 9001 } } },
+      pipelines: [{ id: 299, jobs: [{ id: 9001, name: "fast_docker", status: "success" }] }],
+      evidence: { 9001: { "fast-docker": { inputs: KEY, pipeline: 299, job_id: 9001 } } },
     });
 
     await run({ env: environment(), envFile, now: NOW, log });
 
-    expect(emitted()).not.toContain("ORBIT_REUSE_FAST");
+    expect(emitted()).not.toContain("ORBIT_REUSE_FAST_DOCKER");
     expect(lines()).toContain("no finish time");
   });
 });
@@ -351,8 +351,8 @@ describe("the seven-day limit", () => {
 describe("the escape hatches", () => {
   async function withOnePass() {
     await start({
-      pipelines: [{ id: 299, jobs: [passed(9001, "fast")] }],
-      evidence: { 9001: { fast: { inputs: KEY, pipeline: 299, job_id: 9001 } } },
+      pipelines: [{ id: 299, jobs: [passed(9001, "fast_docker")] }],
+      evidence: { 9001: { "fast-docker": { inputs: KEY, pipeline: 299, job_id: 9001 } } },
     });
   }
 
@@ -362,7 +362,7 @@ describe("the escape hatches", () => {
     await run({ env: environment({ CI_MERGE_REQUEST_LABELS: "type: chore,ci: rerun" }), envFile, now: NOW, log });
 
     expect(seen.paths).toEqual([]);
-    expect(emitted()).not.toContain("ORBIT_REUSE_FAST");
+    expect(emitted()).not.toContain("ORBIT_REUSE_FAST_DOCKER");
     expect(lines()).toContain("ci: rerun");
   });
 
@@ -371,7 +371,7 @@ describe("the escape hatches", () => {
 
     await run({ env: environment({ CI_MERGE_REQUEST_LABELS: "ci: acceptance" }), envFile, now: NOW, log });
 
-    expect(emitted()).toContain("ORBIT_REUSE_FAST=9001");
+    expect(emitted()).toContain("ORBIT_REUSE_FAST_DOCKER=9001");
   });
 
   it("asks nothing when ORBIT_REUSE is off", async () => {
@@ -494,7 +494,7 @@ describe("the image jobs' keys", () => {
   });
 
   it("leaves a job out when classify published no source key for it", async () => {
-    writeFileSync(envFile, `ORBIT_INPUTS_FAST=${KEY}\n`);
+    writeFileSync(envFile, `ORBIT_INPUTS_FAST_DOCKER=${KEY}\n`);
     await start({ pipelines: [] });
 
     await run({ env: environmentWithImage(), envFile, artefact: "image", outFile, now: NOW, log });
@@ -518,16 +518,16 @@ describe("a job that failed with an allowed exit code (D-F17)", () => {
 
   it("is reused when status is failed and allow_failure is true, highest id winning", async () => {
     await start({
-      pipelines: [{ id: 299, jobs: [allowedFailure(9001, "fast"), allowedFailure(9002, "fast")] }],
+      pipelines: [{ id: 299, jobs: [allowedFailure(9001, "fast_docker"), allowedFailure(9002, "fast_docker")] }],
       evidence: {
-        9001: { fast: { job: "fast", inputs: KEY, pipeline: 299, job_id: 9001, stands_on: null } },
-        9002: { fast: { job: "fast", inputs: KEY, pipeline: 299, job_id: 9002, stands_on: null } },
+        9001: { "fast-docker": { job: "fast_docker", inputs: KEY, pipeline: 299, job_id: 9001, stands_on: null } },
+        9002: { "fast-docker": { job: "fast_docker", inputs: KEY, pipeline: 299, job_id: 9002, stands_on: null } },
       },
     });
 
     await run({ env: environment(), envFile, now: NOW, log });
 
-    expect(emitted()).toContain("ORBIT_REUSE_FAST=9002");
+    expect(emitted()).toContain("ORBIT_REUSE_FAST_DOCKER=9002");
   });
 
   it("is not reused when status is failed and allow_failure is false", async () => {
@@ -535,15 +535,15 @@ describe("a job that failed with an allowed exit code (D-F17)", () => {
       pipelines: [
         {
           id: 299,
-          jobs: [{ id: 9001, name: "fast", status: "failed", allow_failure: false, finished_at: RECENT }],
+          jobs: [{ id: 9001, name: "fast_docker", status: "failed", allow_failure: false, finished_at: RECENT }],
         },
       ],
-      evidence: { 9001: { fast: { job: "fast", inputs: KEY, pipeline: 299, job_id: 9001, stands_on: null } } },
+      evidence: { 9001: { "fast-docker": { job: "fast_docker", inputs: KEY, pipeline: 299, job_id: 9001, stands_on: null } } },
     });
 
     await run({ env: environment(), envFile, now: NOW, log });
 
-    expect(emitted()).not.toContain("ORBIT_REUSE_FAST");
+    expect(emitted()).not.toContain("ORBIT_REUSE_FAST_DOCKER");
   });
 });
 
