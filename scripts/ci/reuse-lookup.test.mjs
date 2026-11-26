@@ -98,11 +98,12 @@ beforeEach(() => {
     `ORBIT_INPUTS_FAST=${KEY}`,
     `ORBIT_INPUTS_FAST_CHECKS=${KEY}`,
     `ORBIT_INPUTS_RIG_CHROMIUM=${KEY}`,
-    // #1546: the shard is the unit of evidence, so the gate of `rig_chromium 1/2`
+    // #1546: the shard is the unit of evidence, so the gate of `rig_chromium 1/3`
     // reads the variables of its own full name (one definition hash serves all
     // shards, so every shard of a job carries the same key).
-    `ORBIT_INPUTS_RIG_CHROMIUM_1_2=${KEY}`,
-    `ORBIT_INPUTS_RIG_CHROMIUM_2_2=${KEY}`,
+    `ORBIT_INPUTS_RIG_CHROMIUM_1_3=${KEY}`,
+    `ORBIT_INPUTS_RIG_CHROMIUM_2_3=${KEY}`,
+    `ORBIT_INPUTS_RIG_CHROMIUM_3_3=${KEY}`,
     `ORBIT_INPUTS_RIG_WEBKIT=${KEY}`,
     `ORBIT_INPUTS_RIG_WEBKIT_1_4=${KEY}`,
     `ORBIT_INPUTS_RIG_WEBKIT_2_4=${KEY}`,
@@ -208,14 +209,14 @@ describe("the source-keyed lookup", () => {
   it("follows a reused run back to the job that really did the work", async () => {
     await start({
       pipelines: [
-        { id: 299, jobs: [passed(9100, "rig_chromium 1/2")] },
-        { id: 250, jobs: [passed(8000, "rig_chromium 1/2")] },
+        { id: 299, jobs: [passed(9100, "rig_chromium 1/3")] },
+        { id: 250, jobs: [passed(8000, "rig_chromium 1/3")] },
       ],
       evidence: {
         9100: {
           // #1546: rig_chromium is sharded, so the job and its evidence file
           // carry the shard's name (the file its slug).
-          "rig-chromium-1-2": { inputs: KEY, pipeline: 299, job_id: 9100, stands_on: 8000, stands_on_pipeline: 250 },
+          "rig-chromium-1-3": { inputs: KEY, pipeline: 299, job_id: 9100, stands_on: 8000, stands_on_pipeline: 250 },
         },
       },
     });
@@ -223,8 +224,8 @@ describe("the source-keyed lookup", () => {
     await run({ env: environment(), envFile, now: NOW, log });
 
     // 8000, not 9100: 9100 stood on it, and 8000 is the run that did the work.
-    expect(emitted()).toContain("ORBIT_REUSE_RIG_CHROMIUM_1_2=8000");
-    expect(emitted()).toContain("ORBIT_REUSE_RIG_CHROMIUM_1_2_PIPELINE=250");
+    expect(emitted()).toContain("ORBIT_REUSE_RIG_CHROMIUM_1_3=8000");
+    expect(emitted()).toContain("ORBIT_REUSE_RIG_CHROMIUM_1_3_PIPELINE=250");
   });
 
   it("keeps looking through older pipelines for a job the newest one did not run", async () => {

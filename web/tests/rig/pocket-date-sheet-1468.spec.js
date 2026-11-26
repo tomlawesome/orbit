@@ -16,7 +16,6 @@ import { APP } from "../fidelity/pocket-states.js";
  * computed values, measured on the rig at 1600x1000.
  */
 
-test.use({ reducedMotion: "reduce" });
 test.beforeEach(async ({ page }) => {
   test.skip(!test.info().project.name.includes("phone"), "the phone's bottom sheet; the desk calendar is the reference");
   /* #1968: the sheet opens on today's month, so the days still to come, and

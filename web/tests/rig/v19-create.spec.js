@@ -34,10 +34,9 @@ import { pickKeyDate, pickPocketDate } from "./chooser-support.js";
  * tests/unit/v19-create-partial-landing-words.test.mjs, on both forms.
  */
 
-/* Reduced motion: nothing breathes under Playwright's actionability wait. The
+/* Reduced motion (the rig's default, #1964): nothing breathes under Playwright's actionability wait. The
    assertions hold in either mode. */
 test.use({
-  reducedMotion: "reduce",
   /* #1196, #1235: the tests that hold, abort or refuse a request do it with
      `page.route`, which on WebKit a request from a page Orbit's service worker
      controls skips. Nothing here is about the worker, so on WebKit it is kept out. */
@@ -46,7 +45,6 @@ test.use({
   },
 });
 
-const SETTLE = 20_000;
 const DOCUMENT = "chromium-synthetic.pdf";
 /* The fixture app never reads the file; a stub that is a PDF in name and magic is enough. */
 const DOCUMENT_BYTES = Buffer.concat([Buffer.from("%PDF-1.4\n"), Buffer.alloc(2048, 32), Buffer.from("%%EOF\n")]);
@@ -60,7 +58,7 @@ const pdf = (/** @type {string} */ name = DOCUMENT) => ({ name, mimeType: "appli
 async function gotoCreate(page) {
   await page.goto(`${APP}/create`, { waitUntil: "load" });
   /* waits for the mount that attaches the listeners, not just for `load` (#856) */
-  await page.locator("#card[data-ready]").waitFor({ state: "attached", timeout: SETTLE });
+  await page.locator("#card[data-ready]").waitFor({ state: "attached" });
 }
 
 /** Two painted frames and no finite animation: the page has finished handling what it was just given. @param {import("@playwright/test").Page} page */
@@ -245,7 +243,7 @@ test("add to orbit closes the form and lands on the saved item", async ({ page }
   const name = "Home insurance proving";
   /* A dated save lands on its row in the schedule; the undated one is proven by the next test (#1281). */
   await (onPhone() ? savePocketEntryWithDocument : saveDeskEntryWithDocument)(page, name, KEY_DATE);
-  await expect(page).toHaveURL(/\/home\?item=[0-9a-f-]{36}$/, { timeout: SETTLE });
+  await expect(page).toHaveURL(/\/home\?item=[0-9a-f-]{36}$/);
   const itemId = new URL(page.url()).searchParams.get("item");
 
   expect(saves.stages.map((one) => one.name)).toEqual([DOCUMENT]);
@@ -255,13 +253,13 @@ test("add to orbit closes the form and lands on the saved item", async ({ page }
   if (onPhone()) {
     await expect(page.getByRole("form", { name: "New entry" })).toHaveCount(0);
     const opened = page.locator(`.pocket .pk-below [data-row-key="${itemId}"]`);
-    await expect(opened).toHaveAttribute("data-open", "", { timeout: SETTLE });
+    await expect(opened).toHaveAttribute("data-open", "");
     await expect(opened).toContainText(name);
     await expect(opened).toContainText("T−20d");
   } else {
     await expect(page.locator("#save-note")).toHaveCount(0);
     await expect(page.locator(".item", { hasText: name })).toBeVisible();
-    await expect(page.locator(`[id="${itemId}-view"]`)).toBeVisible({ timeout: SETTLE });
+    await expect(page.locator(`[id="${itemId}-view"]`)).toBeVisible();
     await expect(page.locator(".item", { hasText: name })).toContainText("T−20d");
   }
 });
@@ -278,7 +276,7 @@ test("add to orbit lands an undated item on its row under the no-date rule", asy
   const saves = await savesAnswered(page);
   const name = "Washing machine warranty proving";
   await saveDeskEntryWithDocument(page, name);
-  await expect(page).toHaveURL(/\/home\?item=[0-9a-f-]{36}$/, { timeout: SETTLE });
+  await expect(page).toHaveURL(/\/home\?item=[0-9a-f-]{36}$/);
   const itemId = /** @type {string} */ (new URL(page.url()).searchParams.get("item"));
   expect(saves.upserts().map((one) => one.item.id)).toEqual([itemId]);
 
@@ -337,13 +335,13 @@ test.describe("on the desk", () => {
       const field = page.locator("#field-provider");
 
       await picker.setInputFiles(pdf("invoice-a.pdf"));
-      await expect(provider).toHaveValue("Aviva", { timeout: SETTLE });
+      await expect(provider).toHaveValue("Aviva");
       await expect(field).toHaveClass(/\bsugg\b/);
 
       await picker.setInputFiles(pdf("invoice-b.pdf"));
       await expect(page.locator("#rc-file")).toContainText("invoice-b.pdf");
       // The second read settles on its own before anything is asserted of it.
-      await expect(page.locator("#readcard")).not.toHaveAttribute("data-reading", "true", { timeout: SETTLE });
+      await expect(page.locator("#readcard")).not.toHaveAttribute("data-reading", "true");
       await expect(provider).toHaveValue(expected);
       await expect(provider).not.toHaveValue("Aviva");
       if (second) await expect(field).toHaveClass(/\bsugg\b/);
@@ -402,7 +400,7 @@ test.describe("on the desk", () => {
     let release = () => {};
     const clicked = new Promise((resolve) => {
       release = () => resolve(undefined);
-      setTimeout(resolve, SETTLE);
+      setTimeout(resolve, 20_000);
     });
     const read = "**/api/workspace";
     await page.route(read, async (route) => {
@@ -416,7 +414,7 @@ test.describe("on the desk", () => {
       await expect(page.locator("body[data-home-ready]")).toHaveCount(0);
       await page.locator("#nstar").click();
       release();
-      await expect(page.locator("#createdrawer")).toHaveClass(/\bopen\b/, { timeout: SETTLE });
+      await expect(page.locator("#createdrawer")).toHaveClass(/\bopen\b/);
       await expect(page.locator("#nstar")).toHaveAttribute("aria-expanded", "true");
     } finally {
       release();
@@ -516,10 +514,10 @@ test.describe("on the desk", () => {
   test("the desk's lane says 'refused' beside the size and offers 'remove it' once the server refuses the file", async ({ page }) => {
     const saves = await savesAnswered(page, { stageAnswer: REFUSED });
     await saveDeskEntryWithDocument(page, "Refused row words proving");
-    await expect.poll(() => saves.stages.length, { timeout: SETTLE }).toBe(1);
+    await expect.poll(() => saves.stages.length).toBe(1);
 
     const lane = page.locator("#readcard");
-    await expect(lane.getByRole("button", { name: "remove it" })).toBeVisible({ timeout: SETTLE });
+    await expect(lane.getByRole("button", { name: "remove it" })).toBeVisible();
     await expect(lane).toContainText(DOCUMENT);
     await expect(lane).toContainText(SIZE_THEN_REFUSED);
     await expect(lane.getByRole("button", { name: "not this one" })).toHaveCount(0);
@@ -531,7 +529,7 @@ test.describe("on the desk", () => {
     const add = page.locator(".btn-primary");
     const note = page.locator("#save-note");
     await saveDeskEntryWithDocument(page, "Remove it then save proving");
-    await expect.poll(() => saves.stages.length, { timeout: SETTLE }).toBe(1);
+    await expect.poll(() => saves.stages.length).toBe(1);
 
     // The refusal is reported loudly and Add is held.
     await expect(note).toBeVisible();
@@ -540,17 +538,17 @@ test.describe("on the desk", () => {
     await pressHeldAdd(page, add, saves);
 
     const removeIt = page.locator("#readcard").getByRole("button", { name: "remove it" });
-    await expect(removeIt).toBeVisible({ timeout: SETTLE });
+    await expect(removeIt).toBeVisible();
     await removeIt.click();
 
     // What the note reported is gone with the file.
     await expect(note).not.toContainText(REASON);
     await expect(note).toBeHidden();
     await expect(page.locator("body")).not.toContainText(REASON);
-    await expect(add).not.toHaveAttribute("aria-disabled", "true", { timeout: SETTLE });
+    await expect(add).not.toHaveAttribute("aria-disabled", "true");
 
     await add.click();
-    await expect(page).toHaveURL(/\/home\?item=[0-9a-f-]{36}$/, { timeout: SETTLE });
+    await expect(page).toHaveURL(/\/home\?item=[0-9a-f-]{36}$/);
     expect(saves.stages).toHaveLength(1);
     expect(saves.upserts()).toHaveLength(1);
     expect(saves.upserts()[0].documentIds ?? []).toEqual([]);
@@ -559,9 +557,9 @@ test.describe("on the desk", () => {
   test("dropping a new file after a refusal relabels the button 'not this one' and hides 'refused'", async ({ page }) => {
     const saves = await savesAnswered(page, { stageAnswer: REFUSED });
     await saveDeskEntryWithDocument(page, "Replace after refusal proving");
-    await expect.poll(() => saves.stages.length, { timeout: SETTLE }).toBe(1);
+    await expect.poll(() => saves.stages.length).toBe(1);
     const lane = page.locator("#readcard");
-    await expect(lane.getByRole("button", { name: "remove it" })).toBeVisible({ timeout: SETTLE });
+    await expect(lane.getByRole("button", { name: "remove it" })).toBeVisible();
     await expect(lane).toContainText(SIZE_THEN_REFUSED);
 
     const files = await dragged(page, "replacement-after-refusal.pdf");
@@ -570,7 +568,7 @@ test.describe("on the desk", () => {
     await zone.locator(".dz-main [data-when=rest]").dispatchEvent("drop", { dataTransfer: files });
 
     await expect(lane).toContainText("replacement-after-refusal.pdf");
-    await expect(lane.getByRole("button", { name: "not this one" })).toBeVisible({ timeout: SETTLE });
+    await expect(lane.getByRole("button", { name: "not this one" })).toBeVisible();
     await expect(lane.getByRole("button", { name: "remove it" })).toHaveCount(0);
     await expect(lane).not.toContainText(/refused/i);
   });
@@ -647,7 +645,7 @@ test.describe("on the desk", () => {
         await page.locator(".btn-primary").click();
 
         // The item write is held: the form is mid-save.
-        await expect.poll(() => itemWriteSeen, { timeout: SETTLE }).toBe(true);
+        await expect.poll(() => itemWriteSeen).toBe(true);
         await expect(page.locator(".btn-primary")).toContainText("Adding…");
         // The file was staged before the item was sent: one POST, for the first file.
         expect(documentPosts).toHaveLength(1);
@@ -667,7 +665,7 @@ test.describe("on the desk", () => {
         await handled(page);
 
         releaseItemWrite();
-        await expect(page).toHaveURL(/\/home\?item=[0-9a-f-]{36}$/, { timeout: SETTLE });
+        await expect(page).toHaveURL(/\/home\?item=[0-9a-f-]{36}$/);
         const itemId = /** @type {string} */ (new URL(page.url()).searchParams.get("item"));
         expect(writes.sent("item.upsert").map((one) => one.item.id)).toEqual([itemId]);
 
@@ -767,7 +765,7 @@ test.describe("the phone's create form reads a picked document", () => {
 
     // Page one lands, a picture drawn from the file, and the head says so.
     const sheet = card.getByRole("img", { name: `Page one of ${DOCUMENT}` });
-    await expect(sheet).toBeVisible({ timeout: SETTLE });
+    await expect(sheet).toBeVisible();
     await expect.poll(() => sheet.evaluate((img) => /** @type {HTMLImageElement} */ (img).naturalWidth)).toBeGreaterThan(0);
     await expect(card.getByRole("heading")).toHaveText(/page one/i);
     await expect(card).toContainText("Page one of the file you added");
@@ -809,7 +807,7 @@ test.describe("the phone's create form reads a picked document", () => {
     const form = page.getByRole("form", { name: "New entry" });
     await form.locator('input[type="file"]').setInputFiles(pdf());
     const card = form.locator(".pc-reading");
-    await expect(card.getByRole("img", { name: `Page one of ${DOCUMENT}` })).toBeVisible({ timeout: SETTLE });
+    await expect(card.getByRole("img", { name: `Page one of ${DOCUMENT}` })).toBeVisible();
     await expect(card).toContainText("scanned clean");
   });
 
@@ -826,7 +824,7 @@ test.describe("the phone's create form reads a picked document", () => {
     await form.locator('input[type="file"]').setInputFiles(pdf());
 
     const card = form.locator(".pc-reading");
-    await expect(card).toContainText("Orbit refused this file.", { timeout: SETTLE });
+    await expect(card).toContainText("Orbit refused this file.");
     await expect(card).toContainText(REASON);
     await expect(card).toContainText(DOCUMENT);
     await expect(card).toContainText(/KB · refused/);
@@ -843,10 +841,10 @@ test.describe("the phone's create form reads a picked document", () => {
     const saves = await savesAnswered(page, { stageAnswer: REFUSED });
     await answerInspection(page, ATTACHABLE);
     await savePocketEntryWithDocument(page, "Phone remove clears note proving");
-    await expect.poll(() => saves.stages.length, { timeout: SETTLE }).toBe(1);
+    await expect.poll(() => saves.stages.length).toBe(1);
     const note = page.locator(".pk-problem");
     const add = page.getByRole("button", { name: "Add to orbit" });
-    await expect(note).toContainText(REASON, { timeout: SETTLE });
+    await expect(note).toContainText(REASON);
     await expect(add).toHaveAttribute("aria-disabled", "true");
     await pressHeldAdd(page, add, saves);
 
@@ -854,7 +852,7 @@ test.describe("the phone's create form reads a picked document", () => {
 
     await expect(note.filter({ hasText: REASON })).toHaveCount(0);
     await expect(page.locator("body")).not.toContainText(REASON);
-    await expect(add).not.toHaveAttribute("aria-disabled", "true", { timeout: SETTLE });
+    await expect(add).not.toHaveAttribute("aria-disabled", "true");
     expect(saves.stages).toHaveLength(1);
   });
 });
@@ -957,7 +955,6 @@ async function pageHandled(page, route) {
   await page.waitForFunction(
     (key) => (/** @type {any} */ (window).__answered?.[key] ?? 0) >= 1,
     route,
-    { timeout: SETTLE },
   );
   await handled(page);
 }
@@ -995,7 +992,7 @@ const NO_PAGE_AFTER_REFUSAL = [
       await fillEntry(page, "Late page proving");
       await pickerOf(page).setInputFiles(pdf());
       const lane = laneOf(page);
-      await expect(lane).toContainText("Orbit refused this file.", { timeout: SETTLE });
+      await expect(lane).toContainText("Orbit refused this file.");
       await expect(lane).toContainText(REASON);
       // The held preview is released with a page that can be drawn.
       release();
@@ -1045,7 +1042,7 @@ const NO_PAGE_AFTER_REFUSAL = [
     },
     after: async (/** @type {import("@playwright/test").Page} */ page) => {
       const lane = laneOf(page);
-      await expect(lane).toContainText("Orbit refused this file.", { timeout: SETTLE });
+      await expect(lane).toContainText("Orbit refused this file.");
       // The page has taken the refusal in (and drawn the frames its handling needs) before it is judged.
       await pageHandled(page, "item-document-inspection");
       await expect(lane).toContainText("Orbit refused this file.");
@@ -1075,7 +1072,7 @@ const NO_PAGE_AFTER_REFUSAL = [
       await gotoCreate(page);
       await fillEntry(page, "Refused then undrawable proving");
       await pickerOf(page).setInputFiles(pdf());
-      await expect(laneOf(page)).toContainText("Orbit refused this file.", { timeout: SETTLE });
+      await expect(laneOf(page)).toContainText("Orbit refused this file.");
       release();
       await previewAnswered;
       return () => release();
@@ -1132,7 +1129,7 @@ for (const layout of /** @type {const} */ (["desk", "phone"])) {
     try {
       if (layout === "desk") await saveDeskEntryWithDocument(page, "Late page after save proving");
       else await savePocketEntryWithDocument(page, "Late page after save proving");
-      await expect.poll(() => saves.stages.length, { timeout: SETTLE }).toBe(1);
+      await expect.poll(() => saves.stages.length).toBe(1);
       const lane = laneOf(page);
       await expect(lane).toContainText(/refused/);
       release();
@@ -1163,8 +1160,8 @@ for (const layout of /** @type {const} */ (["desk", "phone"])) {
     const add = addOf(page);
     if (layout === "desk") await saveDeskEntryWithDocument(page, "Replace clears note proving");
     else await savePocketEntryWithDocument(page, "Replace clears note proving");
-    await expect.poll(() => saves.stages.length, { timeout: SETTLE }).toBe(1);
-    await expect(note).toContainText(REASON, { timeout: SETTLE });
+    await expect.poll(() => saves.stages.length).toBe(1);
+    await expect(note).toContainText(REASON);
     await expect(add).toHaveAttribute("aria-disabled", "true");
 
     await pickerOf(page).setInputFiles(pdf("replacement-after-refusal.pdf"));
@@ -1173,9 +1170,9 @@ for (const layout of /** @type {const} */ (["desk", "phone"])) {
     // The loud note goes with the file it was about, and Add is released.
     await expect(note.filter({ hasText: REASON })).toHaveCount(0);
     await expect(page.locator("body")).not.toContainText(REASON);
-    await expect(add).not.toHaveAttribute("aria-disabled", "true", { timeout: SETTLE });
+    await expect(add).not.toHaveAttribute("aria-disabled", "true");
     // #1437: a picked file is staged at the pick, to learn whether it is already held, so the replacement is staged once too.
-    await expect.poll(() => saves.stages.map((stage) => stage.name), { timeout: SETTLE }).toEqual([DOCUMENT, "replacement-after-refusal.pdf"]);
+    await expect.poll(() => saves.stages.map((stage) => stage.name)).toEqual([DOCUMENT, "replacement-after-refusal.pdf"]);
   });
 }
 
@@ -1197,11 +1194,11 @@ for (const layout of /** @type {const} */ (["desk", "phone"])) {
     else await savePocketEntryWithDocument(page, "Scanner timeout proving");
 
     const lane = laneOf(page);
-    await expect(lane).toContainText("The scanner didn’t answer in time.", { timeout: SETTLE });
+    await expect(lane).toContainText("The scanner didn’t answer in time.");
     await expect(lane).toContainText("it is still attached when you add this entry");
     await expect(lane).toContainText("orbit checks it again then");
     await expect(lane).not.toContainText(/notified|been told/iu);
     await expect(lane).not.toContainText("<br>");
-    await expect.poll(() => saves.stages.map((stage) => stage.name), { timeout: SETTLE }).toEqual([DOCUMENT]);
+    await expect.poll(() => saves.stages.map((stage) => stage.name)).toEqual([DOCUMENT]);
   });
 }

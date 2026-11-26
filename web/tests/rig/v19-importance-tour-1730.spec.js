@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { APP, RIG_EXPECT_MS, RIG_TEST_MS, signedIn } from "./a11y-support.js";
+import { APP, RIG_EXPECT_MS, signedIn } from "./a11y-support.js";
 import { useFixtureScenes } from "../fidelity/pocket-states.js";
 
 /*
@@ -9,19 +9,19 @@ import { useFixtureScenes } from "../fidelity/pocket-states.js";
  * tour the same fixture (Harlow Home, one unset item) still shows it. End
  * states only. Runs under both rig projects.
  */
-test.use({ baseURL: APP, reducedMotion: "reduce" });
-test.describe.configure({ timeout: RIG_TEST_MS });
+test.use({ baseURL: APP });
 
-const SETTLE = 30_000;
+/* The tour's transport after a cold home load, as v19-tour-inert gives it; it moves to the fake clock in #1964 step 3. */
+const TOUR_WAIT_MS = 30_000;
 
 /** @param {import("@playwright/test").Page} page */
 const pill = (page) => page.getByRole("status").filter({ hasText: /no importance yet/ });
 
 test("no importance pill while the tour runs", async ({ page }) => {
   await signedIn("/home", "film-rest")(page);
-  await expect(page.locator("#orbit-tour-transport")).toBeVisible({ timeout: SETTLE });
+  await expect(page.locator("#orbit-tour-transport")).toBeVisible({ timeout: TOUR_WAIT_MS });
   await expect(page.locator("#orbit-tour-veil")).toBeAttached({ timeout: RIG_EXPECT_MS });
-  await page.locator("body[data-home-ready]").waitFor({ state: "attached", timeout: SETTLE });
+  await page.locator("body[data-home-ready]").waitFor({ state: "attached" });
   await expect(pill(page), "#1730: the importance pill is drawn over the tour").toHaveCount(0, { timeout: RIG_EXPECT_MS });
   await expect(page.getByRole("button", { name: "set them now" })).toHaveCount(0);
 });
@@ -29,7 +29,7 @@ test("no importance pill while the tour runs", async ({ page }) => {
 test("the importance pill is still shown outside the tour, same fixture", async ({ page }) => {
   await useFixtureScenes(page, "keep-saves");
   await page.goto(`${APP}/home`);
-  await page.locator("body[data-home-ready]").waitFor({ state: "attached", timeout: SETTLE });
+  await page.locator("body[data-home-ready]").waitFor({ state: "attached" });
   await expect(page.locator("#orbit-tour-transport")).toHaveCount(0);
   await expect(pill(page)).toBeVisible({ timeout: RIG_EXPECT_MS });
   await expect(pill(page)).toHaveText(/^\s*1 item has no importance yet/);

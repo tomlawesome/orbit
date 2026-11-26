@@ -313,7 +313,6 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
    * once it has, the session read that follows: signed out, as it would be.
    */
   test("sign-out screen", async ({ page }, testInfo) => {
-    await page.emulateMedia({ reducedMotion: "reduce" });
     let revoked = 0;
     await page.route("**/api/auth/logout", (route) => {
       revoked += 1;
@@ -335,7 +334,6 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
     }
     /* the descent plays before /logout (the stack suite allowed 30 s; the recorded flake was this wait,
        #1637). The test's own limit sits above the wait so a hang fails here, on the wait. */
-    test.setTimeout(60_000);
     await expect(page).toHaveURL(/\/logout$/, { timeout: 30_000 });
     await expect(page.getByRole("link", { name: "Sign back in" })).toBeVisible({ timeout: RIG_EXPECT_MS });
     expect(revoked, "the sign-out control sent the logout request, once").toBe(1);

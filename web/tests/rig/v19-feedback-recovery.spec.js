@@ -2,7 +2,6 @@ import { expect, test } from "@playwright/test";
 
 import { gotoCreate, tabTo } from "../../../tests/e2e/support/keyboard";
 import { focusHeld, liveRegionFor } from "../../../tests/e2e/support/signed-in";
-import { SETTLE } from "../../../tests/e2e/support/settle";
 import { APP, onPhone } from "./a11y-support.js";
 import { guardedRoute } from "./workspace-writes.js";
 import { INTERNAL_ERROR, SUGGESTION, rememberMailDecisions } from "./mail-support.js";
@@ -96,7 +95,7 @@ const createOffline = {
     const name = "Offline proving";
     await gotoCreate(page);
     const nameField = page.getByRole("textbox", { name: "name", exact: true }).filter({ visible: true });
-    await expect(nameField).toBeVisible({ timeout: SETTLE });
+    await expect(nameField).toBeVisible();
     await nameField.fill(name);
     /* Every entry needs a type (#1316 A4-F3, item_kind_missing); a document is
        the type that asks for no date, as v19-create.spec.ts's undated save. */
@@ -112,22 +111,22 @@ const createOffline = {
        that answer, nothing is sent and no failure ever shows. */
     const save = isPocket() ? ".pk-save" : "#card .btn-primary";
     await expect(page.locator(save).filter({ visible: true }), "create: Add is live once the engine has answered")
-      .not.toHaveAttribute("aria-disabled", "true", { timeout: SETTLE });
+      .not.toHaveAttribute("aria-disabled", "true");
     await page.route("**/api/workspace/commands", failCommands);
     await tabTo(page, { selector: save }, { screen: "create" });
     await page.keyboard.press("Enter");
 
     return async () => {
       /* Nothing typed was lost, and the page has not moved. */
-      await expect(nameField).toHaveValue(name, { timeout: SETTLE });
-      await expect(page).toHaveURL(/\/create$/, { timeout: SETTLE });
+      await expect(nameField).toHaveValue(name);
+      await expect(page).toHaveURL(/\/create$/);
       await page.unroute("**/api/workspace/commands", failCommands);
       await reach(page, save, "create, retry");
       await page.keyboard.press("Enter");
       /* Saved: both close onto the main screen at the saved item's own address
          (#1246; the pocket since #1319, when the belt it used to approach
          retired). */
-      await expect(page).toHaveURL(/\/home\?item=[0-9a-f-]{36}$/, { timeout: SETTLE });
+      await expect(page).toHaveURL(/\/home\?item=[0-9a-f-]{36}$/);
     };
   },
   /* No focus defect to expect here any more (#1327): the save button is held
@@ -174,27 +173,27 @@ const drawerApproval = {
       /* The phone opens the suggestion's row by keyboard. */
       await page.goto("/home");
       const face = `.pocket .pk-signals [data-row-key="${mail.receiptId}"] [data-row-face]`;
-      await expect(page.locator(face)).toBeVisible({ timeout: SETTLE });
+      await expect(page.locator(face)).toBeVisible();
       await tabTo(page, { selector: face }, { screen: "home, signals" });
       await page.keyboard.press("Enter");
     } else {
       await page.goto(`/home?item=${mail.receiptId}`);
     }
-    await expect(page.locator(act)).toBeEnabled({ timeout: SETTLE });
+    await expect(page.locator(act)).toBeEnabled();
     await tabTo(page, { selector: act }, { screen: "home, suggestion drawer" });
     await press();
-    await expect.poll(mail.approvals, { timeout: SETTLE }).toBe(1);
+    await expect.poll(mail.approvals).toBe(1);
     return async () => {
       /* The failure stays where it is said: the phone's row stays open, its
          words and its decisions with it. */
       if (isPocket()) {
-        await expect(page.locator(`.pocket .pk-signals [data-row-key="${mail.receiptId}"]`)).toHaveAttribute("data-open", "", { timeout: SETTLE });
+        await expect(page.locator(`.pocket .pk-signals [data-row-key="${mail.receiptId}"]`)).toHaveAttribute("data-open", "");
       }
       await reach(page, act, "home drawer, retry");
       await press();
-      await expect.poll(mail.approvals, { timeout: SETTLE }).toBe(2);
+      await expect.poll(mail.approvals).toBe(2);
       /* Approved: the suggestion leaves home, its decisions with it. */
-      await expect(page.locator(act)).toHaveCount(0, { timeout: SETTLE });
+      await expect(page.locator(act)).toHaveCount(0);
     };
   },
 };
@@ -208,19 +207,19 @@ const inboxApproval = {
     await page.goto("/inbox");
     /* Both dialects ask twice: Enter arms, Enter fires. */
     const act = isPocket() ? `button[aria-label="Add ${mail.title} to your orbit"]` : ".actions button.yes";
-    await expect(page.locator(act).first()).toBeVisible({ timeout: SETTLE });
+    await expect(page.locator(act).first()).toBeVisible();
     await tabTo(page, { selector: act }, { screen: "inbox" });
     await page.keyboard.press("Enter");
     await page.keyboard.press("Enter");
-    await expect.poll(mail.approvals, { timeout: SETTLE }).toBe(1);
+    await expect.poll(mail.approvals).toBe(1);
     return async () => {
       await reach(page, act, "inbox, retry");
       await page.keyboard.press("Enter");
       await page.keyboard.press("Enter");
-      await expect.poll(mail.approvals, { timeout: SETTLE }).toBe(2);
+      await expect.poll(mail.approvals).toBe(2);
       /* Approved: the suggestion's card leaves the inbox. (Not its title text:
          the pocket's wake still carries it, "added to your orbit".) */
-      await expect(page.locator(act)).toHaveCount(0, { timeout: SETTLE });
+      await expect(page.locator(act)).toHaveCount(0);
     };
   },
 };
@@ -242,7 +241,7 @@ const householdDeletion = {
         ? route.fulfill({ status: 500, json: { error: { code: "lifecycle_unavailable", message: "Orbit could not schedule the deletion just now" } } })
         : route.continue();
     await page.goto(`/household/${HOUSEHOLD.id}`);
-    await expect(page.getByRole("heading", { name: HOUSEHOLD.name })).toBeVisible({ timeout: SETTLE });
+    await expect(page.getByRole("heading", { name: HOUSEHOLD.name })).toBeVisible();
     await page.route(lifecycle, failDeletion);
 
     /* Opening the confirmation moves focus into it: on the desk onto the name
@@ -278,7 +277,7 @@ const householdDeletion = {
       await page.route(lifecycle, (route) =>
         route.fulfill({ json: { deleteAfter: new Date(Date.now() + 30 * 86_400_000).toISOString() } }));
       await fire("household, ask again");
-      await expect(shownText(page, /requested · .*gone for good in 30 days/)).toBeVisible({ timeout: SETTLE });
+      await expect(shownText(page, /requested · .*gone for good in 30 days/)).toBeVisible();
     };
   },
 };
@@ -308,13 +307,12 @@ const JOURNEYS = [createOffline, drawerApproval, inboxApproval, householdDeletio
 
 for (const journey of JOURNEYS) {
   test(`${journey.name} is announced, and the act can be repeated by keyboard`, async ({ page }) => {
-    test.setTimeout(60_000);
     const retry = await journey.fire(page);
     /* End states, as the focus check below (#1313, #1447): the failure is
        waited for, and so is the live region that carries it. */
-    await expect(shownText(page, journey.words), `${journey.name}: the failure is shown`).toBeVisible({ timeout: SETTLE });
+    await expect(shownText(page, journey.words), `${journey.name}: the failure is shown`).toBeVisible();
     await expect
-      .poll(() => announcedAs(page, journey.words), { message: `${journey.name}: the failure is announced (focus on it, or in a live region)`, timeout: SETTLE })
+      .poll(() => announcedAs(page, journey.words), { message: `${journey.name}: the failure is announced (focus on it, or in a live region)` })
       .not.toMatch(/^(none|absent)$/);
     await retry();
   });
@@ -324,13 +322,13 @@ for (const journey of JOURNEYS) {
        WebKit (#1705), so the poll and the test get room for several reads */
     test.setTimeout(120_000);
     await journey.fire(page);
-    await expect(shownText(page, journey.words), `${journey.name}: the failure is shown`).toBeVisible({ timeout: SETTLE });
+    await expect(shownText(page, journey.words), `${journey.name}: the failure is shown`).toBeVisible();
     /* The end state, not a single read the instant the failure shows: focus may
        take a moment to settle, and what matters is where it STAYS -- so it has
        to hold one element for a run of painted frames, and a focus that only
        passed through an element on its way to the page (T-Q2) is not that. */
     await expect
-      .poll(() => focusHeld(page), { message: `${journey.name}: focus is held on an element, not dropped to the page`, timeout: 3 * SETTLE })
+      .poll(() => focusHeld(page), { message: `${journey.name}: focus is held on an element, not dropped to the page`, timeout: 60_000 })
       .not.toMatch(/^(body|moving)$/);
   });
 }
@@ -388,26 +386,25 @@ test.describe("a decision in flight ignores every press (#1182)", () => {
     const count = await buttons.count();
     expect(count, `${message}: there are buttons to check`).toBeGreaterThan(0);
     for (let i = 0; i < count; i += 1) {
-      await expect(buttons.nth(i), `${message} (#${i})`).toHaveAttribute("aria-disabled", "true", { timeout: SETTLE });
+      await expect(buttons.nth(i), `${message} (#${i})`).toHaveAttribute("aria-disabled", "true");
     }
   }
 
   test("desk /inbox: a press, an Enter, or another receipt's buttons send nothing while an approval is out", async ({ page }) => {
     test.skip(isPocket(), "the desk's inbox");
-    test.setTimeout(60_000);
     const { sent, release } = await holdApproval(page);
     try {
       await page.goto("/inbox");
       const yes = page.locator(".receipt .actions button.yes");
       const dismiss = page.locator(".receipt .actions button:not(.yes)");
       const remove = page.locator(".failed button");
-      await expect(yes).toBeVisible({ timeout: SETTLE });
+      await expect(yes).toBeVisible();
       await expect(remove, "the failed message that can be removed is the other receipt").toHaveCount(1);
       /* Enter arms, Enter fires: one approval is out. */
       await yes.focus();
       await page.keyboard.press("Enter");
       await page.keyboard.press("Enter");
-      await expect.poll(() => sent.length, { timeout: SETTLE }).toBe(1);
+      await expect.poll(() => sent.length).toBe(1);
       await allHeld(page.locator(".receipt .actions button, .failed button"), "inbox: every receipt's decision buttons are held while one is out");
 
       /* again, by click (twice, as a two-tap act asks) and by Enter */
@@ -429,13 +426,12 @@ test.describe("a decision in flight ignores every press (#1182)", () => {
       release();
     }
     /* the one approval lands once it is let go */
-    await expect(page.locator(".receipt .actions button.yes")).toHaveCount(0, { timeout: SETTLE });
+    await expect(page.locator(".receipt .actions button.yes")).toHaveCount(0);
     expect(sent).toEqual(["approve"]);
   });
 
   test("home drawer: approve, dismiss and review & amend do nothing while an approval is out", async ({ page }) => {
     test.skip(isPocket(), "the desk's drawer");
-    test.setTimeout(60_000);
     const { sent, rereads, release } = await holdApproval(page);
     try {
       await page.goto(`/home?item=${SUGGESTION.id}`);
@@ -443,11 +439,11 @@ test.describe("a decision in flight ignores every press (#1182)", () => {
       const yes = view.locator(".actions button.yes");
       const dismiss = view.locator(".actions button:not(.yes)");
       const amend = view.locator(".ivamend");
-      await expect(yes).toBeEnabled({ timeout: SETTLE });
+      await expect(yes).toBeEnabled();
       await yes.focus();
       await page.keyboard.press("Enter");
       await page.keyboard.press("Enter");
-      await expect.poll(() => sent.length, { timeout: SETTLE }).toBe(1);
+      await expect.poll(() => sent.length).toBe(1);
       await allHeld(view.locator(".actions button, .ivamend"), "drawer: approve, dismiss and review & amend are held");
 
       await press(yes);
@@ -467,7 +463,7 @@ test.describe("a decision in flight ignores every press (#1182)", () => {
     } finally {
       release();
     }
-    await expect(page.locator(`[id="${SUGGESTION.id}-view"] .actions button.yes`)).toHaveCount(0, { timeout: SETTLE });
+    await expect(page.locator(`[id="${SUGGESTION.id}-view"] .actions button.yes`)).toHaveCount(0);
     expect(sent).toEqual(["approve"]);
     await page.waitForTimeout(NOTHING_FOLLOWS);
     expect(rereads, "the approval that landed was followed by one re-read of the inbox").toHaveLength(1);
@@ -475,22 +471,21 @@ test.describe("a decision in flight ignores every press (#1182)", () => {
 
   test("phone /inbox: the review card's buttons and review & amend do nothing while an approval is out", async ({ page }) => {
     test.skip(!isPocket(), "the phone's review card");
-    test.setTimeout(60_000);
     const { sent, release } = await holdApproval(page);
     try {
       await page.goto("/inbox");
       const card = page.locator(".pki-card").filter({ visible: true }).first();
       const yes = card.locator(".rv-yes");
       const amend = card.locator(".rv-amend");
-      await expect(yes).toBeVisible({ timeout: SETTLE });
+      await expect(yes).toBeVisible();
       /* the pill arms on the first tap, fires on the second */
       await press(yes);
       await press(yes);
-      await expect.poll(() => sent.length, { timeout: SETTLE }).toBe(1);
+      await expect.poll(() => sent.length).toBe(1);
       /* while it is out the pills are held (disabled) and review & amend is aria-disabled */
       await expect(card.locator(".rv-acts button")).toHaveCount(2);
       for (const pill of await card.locator(".rv-acts button").all()) await expect(pill).toBeDisabled();
-      await expect(amend).toHaveAttribute("aria-disabled", "true", { timeout: SETTLE });
+      await expect(amend).toHaveAttribute("aria-disabled", "true");
 
       for (const pill of await card.locator(".rv-acts button").all()) {
         await press(pill);
@@ -505,7 +500,7 @@ test.describe("a decision in flight ignores every press (#1182)", () => {
     } finally {
       release();
     }
-    await expect(page.locator(".pki-card .rv-yes")).toHaveCount(0, { timeout: SETTLE });
+    await expect(page.locator(".pki-card .rv-yes")).toHaveCount(0);
     expect(sent).toEqual(["approve"]);
   });
 });
@@ -521,10 +516,9 @@ test.describe("focusHeld waits for a painted frame (#1705)", () => {
    *  requestAnimationFrame callback delivered 3 s late.
    * @param {Page} page */
   async function focusedWithLateFrames(page) {
-    test.setTimeout(60_000);
     await gotoCreate(page);
     const nameField = page.getByRole("textbox", { name: "name", exact: true }).filter({ visible: true });
-    await expect(nameField).toBeVisible({ timeout: SETTLE });
+    await expect(nameField).toBeVisible();
     await nameField.focus();
     await expect(nameField).toBeFocused();
     await page.evaluate(() => {
