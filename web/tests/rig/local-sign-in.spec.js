@@ -8,6 +8,13 @@ import { APP, door } from "./a11y-support.js";
 /** @typedef {import("@playwright/test").Page} Page */
 /** @typedef {import("@playwright/test").Locator} Locator */
 
+/* #1962 (owner 109a): on WebKit the flight holds for up to 8 s while the 3-D
+   world builds (journey.js WORLD_WAIT) before `showwarp`, and a busy runner
+   paints slowly, so the poll for it gets longer there than SETTLE. The hold
+   is unchanged; only the bound on the wait grows. */
+/** @param {string} browserName */
+const warpWait = (browserName) => (browserName === "webkit" ? 45_000 : SETTLE);
+
 /*
  * NO SIGN-IN CARD OVER ANY ARRIVAL STAGE (#1271), moved to the rig
  * (ADR-0039, #1610) from tests/e2e/local-sign-in.spec.ts.
@@ -78,7 +85,7 @@ async function expectClickReaches(page, control, where) {
   }), { message: `${where}: a click at the control's centre`, timeout: 10_000 }).toBe("the control");
 }
 
-test("no sign-in card sits over the climb, or the drawer it lands on", async ({ page }) => {
+test("no sign-in card sits over the climb, or the drawer it lands on", async ({ page, browserName }) => {
   test.setTimeout(120_000);
   await watchCardLayer(page);
   await witnessBodyClasses(page);
@@ -96,7 +103,7 @@ test("no sign-in card sits over the climb, or the drawer it lands on", async ({ 
   await page.locator("#idbtn").click();
 
   await expect(page).toHaveURL(/\/\?arrival=newcomer/, { timeout: 30_000 });
-  await expect.poll(() => bodyClassSeen(page, "showwarp"), { timeout: SETTLE }).toBe(true);
+  await expect.poll(() => bodyClassSeen(page, "showwarp"), { timeout: warpWait(browserName) }).toBe(true);
   await expect(page.locator(".nf")).toBeAttached();
   /* mid-climb */
   await expectNoCardLayer(page, "the climb");
@@ -110,6 +117,7 @@ test("no sign-in card sits over the climb, or the drawer it lands on", async ({ 
 });
 
 test("no sign-in card sits over the arrival with no climb owed", async ({ page }) => {
+  test.setTimeout(120_000); // as its siblings: the arrival runs past 30 s on a busy WebKit runner (#1962)
   await watchCardLayer(page);
   await door("login", "local-card")(page);
   await page.goto("/?arrival=newcomer&drawer=1");
@@ -148,7 +156,7 @@ test("no sign-in card sits over the chooser and the count", async ({ page }) => 
   await expectClickReaches(page, page.locator(".nf .belong #hhname"), "the drawer's name field");
 });
 
-test("no sign-in card sits over an invited reader's landing", async ({ page }) => {
+test("no sign-in card sits over an invited reader's landing", async ({ page, browserName }) => {
   test.setTimeout(120_000);
   await watchCardLayer(page);
   await witnessBodyClasses(page);
@@ -166,7 +174,7 @@ test("no sign-in card sits over an invited reader's landing", async ({ page }) =
          is judged before it.
      The arrival it reaches is `/`, landed on and left running (the climb). */
   await door("arrival", "invited-landing-local-only")(page);
-  await expect.poll(() => bodyClassSeen(page, "showwarp"), { timeout: SETTLE }).toBe(true);
+  await expect.poll(() => bodyClassSeen(page, "showwarp"), { timeout: warpWait(browserName) }).toBe(true);
   await expect(page.locator(".nf")).toBeAttached();
   await expectNoCardLayer(page, "the invited climb");
 });
