@@ -45,7 +45,12 @@ beforeAll(async () => {
   const path = outDir;
   writeFileSync(path, `${code}\n//# sourceMappingURL=data:application/json;base64,${Buffer.from(JSON.stringify(map)).toString("base64")}\n`);
   /** @type {any} */ (globalThis).__archiveMounts = mounts.fns;
-  ({ createArchiveController } = await import(/* @vite-ignore */ path));
+  /* The copy exists only while it loads: other tests walk web/src and must not meet it. */
+  try {
+    ({ createArchiveController } = await import(/* @vite-ignore */ path));
+  } finally {
+    rmSync(path, { force: true });
+  }
 });
 afterAll(() => { if (outDir) rmSync(outDir, { force: true }); });
 
