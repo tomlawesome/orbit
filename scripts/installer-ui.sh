@@ -3,6 +3,9 @@
 # Shared semantic renderer for the installer command centre. Callers pass only
 # fixed vocabulary values; invalid values are rendered as "unknown" rather
 # than copied into operator-visible output.
+#
+# Needs bash 4.1+: {fd}<> redirections, local -A, fractional read -t and
+# read -N all arrive by 4.1.
 
 installer_ui_mode="plain"
 installer_ui_started_at=0
@@ -168,6 +171,36 @@ installer_ui_emit() {
   fi
 }
 
+# Reads one byte from fd $1 with timeout $2 into the caller-named variable $3.
+# Every timed read in this file goes through here (#1967): when read -t's timer
+# fires just as a byte lands, bash returns a status above 128 *and* keeps the
+# byte in the variable (the manual: "read saves any partial input"). Treating
+# every such status as "nothing arrived" dropped that key, which in the prune
+# prompt could turn " yes" or "yeas" into the exact "yes". So the variable is
+# checked before the status is trusted. -N 1 takes the byte whatever it is, so
+# Enter arrives as $'\n' or $'\r', not as an empty string.
+# Returns:
+#   0     a byte (status 0, or above 128 with the variable set). The value can
+#         be empty only on a bash that hands back a NUL byte (5.2 skips NULs
+#         inside read); callers treat an empty byte as no key at all.
+#   >128  a tick: the timer (or a trapped signal) fired with nothing read. The
+#         read's own status is passed through, normally 142.
+#   other EOF or a read error, status passed through.
+# Writes with printf -v, not command substitution; see installer_ui_read_key.
+installer_ui_read_byte() {
+  local __installer_ui_fd="$1" __installer_ui_timeout="$2" __installer_ui_outvar="$3"
+  local __installer_ui_byte="" __installer_ui_status=0
+  IFS= read -r -s -N 1 -t "$__installer_ui_timeout" -u "$__installer_ui_fd" __installer_ui_byte ||
+    __installer_ui_status=$?
+  if ((__installer_ui_status == 0)) ||
+    { ((__installer_ui_status > 128)) && [[ -n "$__installer_ui_byte" ]]; }; then
+    printf -v "$__installer_ui_outvar" '%s' "$__installer_ui_byte"
+    return 0
+  fi
+  printf -v "$__installer_ui_outvar" '%s' ''
+  return "$__installer_ui_status"
+}
+
 # Writes the decoded key name into the caller-named variable $2 rather than
 # printing it for command substitution. A command substitution would fork a
 # subshell per keystroke; a signal delivered to the calling process while that
@@ -177,7 +210,7 @@ installer_ui_emit() {
 installer_ui_read_key() {
   local terminal_fd="$1" outvar="$2" raw_key next read_status=0
 
-  IFS= read -r -s -n 1 -t 0.2 -u "$terminal_fd" raw_key || read_status=$?
+  installer_ui_read_byte "$terminal_fd" 0.2 raw_key || read_status=$?
   if [[ "$read_status" != 0 ]]; then
     if ((read_status > 128)); then
       printf -v "$outvar" '%s' 'timeout'
@@ -185,10 +218,13 @@ installer_ui_read_key() {
     fi
     return "$read_status"
   fi
-  if [[ -z "$raw_key" ]]; then
-    printf -v "$outvar" '%s' 'enter'
-    return 0
-  fi
+  # -N 1 delivers Enter as LF or CR (#1967); an empty byte is a NUL from a
+  # bash that passes NULs through, and must not become a key that edits or
+  # submits an answer.
+  case "$raw_key" in
+    $'\n'|$'\r') printf -v "$outvar" '%s' 'enter'; return 0 ;;
+    '') printf -v "$outvar" '%s' 'ignore'; return 0 ;;
+  esac
   if [[ "$raw_key" != $'\033' ]]; then
     case "$raw_key" in
       $'\004') return 1 ;;
@@ -199,7 +235,7 @@ installer_ui_read_key() {
     return 0
   fi
 
-  if ! IFS= read -r -s -n 1 -t 0.08 -u "$terminal_fd" next; then
+  if ! installer_ui_read_byte "$terminal_fd" 0.08 next; then
     printf -v "$outvar" '%s' 'escape'
     return 0
   fi
@@ -209,14 +245,14 @@ installer_ui_read_key() {
     # value as ordinary text.
     local osc_byte="" osc_index
     for ((osc_index = 0; osc_index < 256; osc_index++)); do
-      if ! IFS= read -r -s -n 1 -t 0.08 -u "$terminal_fd" osc_byte; then
+      if ! installer_ui_read_byte "$terminal_fd" 0.08 osc_byte; then
         printf -v "$outvar" '%s' 'ignore'
         return 0
       fi
       case "$osc_byte" in
         $'\a') printf -v "$outvar" '%s' 'ignore'; return 0 ;;
         $'\033')
-          if IFS= read -r -s -n 1 -t 0.08 -u "$terminal_fd" osc_byte &&
+          if installer_ui_read_byte "$terminal_fd" 0.08 osc_byte &&
             [[ "$osc_byte" == "\\" ]]; then
             printf -v "$outvar" '%s' 'ignore'
           else
@@ -237,7 +273,7 @@ installer_ui_read_key() {
     # from monopolising an input widget indefinitely.
     local prefix="$next" sequence="" final="" sequence_byte="" sequence_index
     for ((sequence_index = 0; sequence_index < 32; sequence_index++)); do
-      if ! IFS= read -r -s -n 1 -t 0.08 -u "$terminal_fd" sequence_byte; then
+      if ! installer_ui_read_byte "$terminal_fd" 0.08 sequence_byte; then
         printf -v "$outvar" '%s' 'ignore'
         return 0
       fi
@@ -297,7 +333,7 @@ installer_ui_read_paste() {
   local terminal_fd="$1" maximum="$2" outvar="$3" byte payload="" marker=$'\033[201~' read_status=0 idle_timeouts=0
   while true; do
     read_status=0
-    IFS= read -r -s -n 1 -t 0.2 -u "$terminal_fd" byte || read_status=$?
+    installer_ui_read_byte "$terminal_fd" 0.2 byte || read_status=$?
     if [[ "$read_status" != 0 ]]; then
       if ((read_status > 128)); then
         [[ "${interrupted:-0}" == 0 ]] || return 130
@@ -309,7 +345,13 @@ installer_ui_read_paste() {
     fi
     idle_timeouts=0
     [[ "$byte" != $'\004' ]] || return 1
-    [[ -n "$byte" ]] || byte=$'\n'
+    # With -N 1 a line break arrives as LF or CR, never empty (#1967); both
+    # become LF, which the control-character check below rejects. An empty
+    # byte (a passed-through NUL) adds nothing.
+    case "$byte" in
+      $'\n'|$'\r') byte=$'\n' ;;
+      '') continue ;;
+    esac
     payload+="$byte"
     if [[ "$payload" == *"$marker" ]]; then
       payload="${payload%"$marker"}"

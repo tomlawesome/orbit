@@ -640,7 +640,7 @@ describe("'about' and installer-ui.sh citations in the guarantee catalogue (#188
     { guarantee: "installer-ui.sh #3", index: 0, contains: ["installer_ui_emit() {", "$# -eq 5 || $# -eq 6"] },
     { guarantee: "installer-ui.sh #4", index: 0, contains: ["[SIMULATION] "] },
     { guarantee: "installer-ui.sh #4", index: 1, contains: ["simulation=true"] },
-    { guarantee: "installer-ui.sh #5", index: 0, contains: ["installer_ui_read_key() {", '-u "$terminal_fd" raw_key'] },
+    { guarantee: "installer-ui.sh #5", index: 0, contains: ["installer_ui_read_byte() {", '-u "$__installer_ui_fd" __installer_ui_byte', "installer_ui_read_key() {", 'installer_ui_read_byte "$terminal_fd" 0.2 raw_key'] },
     { guarantee: "installer-ui.sh #6", index: 0, contains: ["osc_index < 256", "sequence_index < 32"] },
     { guarantee: "installer-ui.sh #7", index: 0, contains: ["installer_ui_read_paste() {", "[[:cntrl:]]", "return 2"] },
     { guarantee: "installer-ui.sh #8", index: 0, contains: ["installer_ui_read_value() {"] },
