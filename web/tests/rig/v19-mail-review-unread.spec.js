@@ -1,6 +1,5 @@
 import { expect, test } from "@playwright/test";
 
-import { SETTLE } from "../../../tests/e2e/support/settle";
 import { APP, onPhone } from "./a11y-support.js";
 import { FAILED_MESSAGE, INTERNAL_ERROR, SUGGESTION, rememberMailDecisions } from "./mail-support.js";
 
@@ -76,11 +75,11 @@ async function approveFromHome(page, pocket) {
   if (pocket) {
     await page.goto("/home");
     const row = page.locator(`.pocket .pk-signals [data-row-key="${SUGGESTION.id}"]`);
-    await expect(row.locator("[data-row-face]")).toBeVisible({ timeout: SETTLE });
+    await expect(row.locator("[data-row-face]")).toBeVisible();
     await row.locator("[data-row-face]").click();
     /* The pill's name is "Add <title> to your orbit", then "tap again to add ..." once armed. */
     const pill = row.getByRole("button", { name: new RegExp(`add ${SUGGESTION.title} to your orbit$`, "i") }).filter({ visible: true });
-    await expect(pill).toBeEnabled({ timeout: SETTLE });
+    await expect(pill).toBeEnabled();
     await pill.click();
     await pill.click();
     return row;
@@ -88,7 +87,7 @@ async function approveFromHome(page, pocket) {
   await page.goto(`/home?item=${SUGGESTION.id}`);
   const drawer = page.locator(`[id="${SUGGESTION.id}-view"]`);
   const add = drawer.getByRole("button", { name: "Add to orbit" });
-  await expect(add).toBeEnabled({ timeout: SETTLE });
+  await expect(add).toBeEnabled();
   await add.click();
   await drawer.getByRole("button", { name: "tap again to approve" }).click();
   return drawer;
@@ -102,10 +101,10 @@ test("home desk: a landed approve whose re-read fails shows the done line on the
   test.skip(onPhone(testInfo), "the desk drawer; the phone's row is the next test");
   const mail = await interceptMail(page, { failReadAfterLanding: true });
   const drawer = await approveFromHome(page, false);
-  await expect.poll(mail.approvals, { timeout: SETTLE }).toBe(1);
-  await expect.poll(mail.workspaceFailures, { timeout: SETTLE }).toBe(1);
+  await expect.poll(mail.approvals).toBe(1);
+  await expect.poll(mail.workspaceFailures).toBe(1);
 
-  await expect(drawer.locator("[role=alert]")).toHaveText(DONE, { timeout: SETTLE });
+  await expect(drawer.locator("[role=alert]")).toHaveText(DONE);
   /* The row stood, at rest: the buttons read as before and work. */
   const add = drawer.getByRole("button", { name: "Add to orbit" });
   await expect(add).toBeVisible();
@@ -115,7 +114,7 @@ test("home desk: a landed approve whose re-read fails shows the done line on the
 
   /* The remedy the line names: after a reload the suggestion is gone. */
   await page.reload();
-  await expect(page.locator(".item.suggest", { hasText: SUGGESTION.title })).toHaveCount(0, { timeout: SETTLE });
+  await expect(page.locator(".item.suggest", { hasText: SUGGESTION.title })).toHaveCount(0);
   await expect(page.locator(`[id="${SUGGESTION.id}-view"]`)).toHaveCount(0);
 });
 
@@ -123,11 +122,11 @@ test("home phone: a landed approve whose re-read fails is woken as done and the 
   test.skip(!onPhone(testInfo), "the phone's row; the desk's drawer is the previous test");
   const mail = await interceptMail(page, { failReadAfterLanding: true });
   const row = await approveFromHome(page, true);
-  await expect.poll(mail.approvals, { timeout: SETTLE }).toBe(1);
-  await expect.poll(mail.workspaceFailures, { timeout: SETTLE }).toBe(1);
+  await expect.poll(mail.approvals).toBe(1);
+  await expect.poll(mail.workspaceFailures).toBe(1);
 
   /* The decision landed, so it is woken as done... */
-  await expect(woken(page, `${SUGGESTION.title} added to your orbit`)).toHaveCount(1, { timeout: SETTLE });
+  await expect(woken(page, `${SUGGESTION.title} added to your orbit`)).toHaveCount(1);
   /* ...and the row, which stays, carries the line under it. */
   await expect(row).toHaveAttribute("data-open", "");
   await expect(row.locator("[role=alert]")).toHaveText(DONE);
@@ -139,40 +138,40 @@ test("inbox: a landed remove of a failed message whose re-read fails is done, no
   await page.goto("/inbox");
   if (onPhone(testInfo)) {
     const row = page.locator(`.pk-inbox [data-row-key="${FAILED_MESSAGE.id}"]`);
-    await expect(row.locator("[data-row-face]")).toBeVisible({ timeout: SETTLE });
+    await expect(row.locator("[data-row-face]")).toBeVisible();
     await row.locator("[data-row-face]").click();
     const pill = row.getByRole("button", { name: /remove the message from/i }).filter({ visible: true });
-    await expect(pill).toBeEnabled({ timeout: SETTLE });
+    await expect(pill).toBeEnabled();
     await pill.click();
     await pill.click();
-    await expect.poll(mail.removals, { timeout: SETTLE }).toBe(1);
-    await expect.poll(mail.workspaceFailures, { timeout: SETTLE }).toBe(1);
+    await expect.poll(mail.removals).toBe(1);
+    await expect.poll(mail.workspaceFailures).toBe(1);
     /* The row has no line of its own, so the phone wakes it. */
-    await expect(woken(page, DONE)).toHaveCount(1, { timeout: SETTLE });
+    await expect(woken(page, DONE)).toHaveCount(1);
   } else {
     /* The fixture inbox holds two failed messages: this is the one that carried no document. */
     const entry = page.locator(".inbox-page .failed").filter({ hasText: FAILED_MESSAGE.words }).filter({ visible: true });
-    await expect(entry).toBeVisible({ timeout: SETTLE });
+    await expect(entry).toBeVisible();
     await entry.getByRole("button", { name: "remove" }).click();
     await entry.getByRole("button", { name: "tap again to remove" }).click();
-    await expect.poll(mail.removals, { timeout: SETTLE }).toBe(1);
-    await expect.poll(mail.workspaceFailures, { timeout: SETTLE }).toBe(1);
-    await expect(entry.locator(".mail-problem")).toHaveText(DONE, { timeout: SETTLE });
+    await expect.poll(mail.removals).toBe(1);
+    await expect.poll(mail.workspaceFailures).toBe(1);
+    await expect(entry.locator(".mail-problem")).toHaveText(DONE);
   }
   /* Removed is removed: nobody is told it was not. */
   await expect(page.getByText(/not removed/)).toHaveCount(0);
 
   await page.reload();
-  await expect(page.getByText(FAILED_MESSAGE.words)).toHaveCount(0, { timeout: SETTLE });
-  await expect(page.locator(`[data-row-key="${FAILED_MESSAGE.id}"]`)).toHaveCount(0, { timeout: SETTLE });
+  await expect(page.getByText(FAILED_MESSAGE.words)).toHaveCount(0);
+  await expect(page.locator(`[data-row-key="${FAILED_MESSAGE.id}"]`)).toHaveCount(0);
 });
 
 test("guard: a refused approve still shows the refusal, with no done line and no wake (passes today)", async ({ page }, testInfo) => {
   const mail = await interceptMail(page, { approveRefusedOnce: true });
   const place = await approveFromHome(page, onPhone(testInfo));
-  await expect.poll(mail.approvals, { timeout: SETTLE }).toBe(1);
+  await expect.poll(mail.approvals).toBe(1);
 
-  await expect(place.getByText(APPROVAL_FAILED).first()).toBeVisible({ timeout: SETTLE });
+  await expect(place.getByText(APPROVAL_FAILED).first()).toBeVisible();
   await expect(place.getByText(/done —/)).toHaveCount(0);
   await expect(woken(page, /added to your orbit/)).toHaveCount(0);
   expect(mail.workspaceFailures()).toBe(0);

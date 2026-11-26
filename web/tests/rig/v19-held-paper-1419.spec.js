@@ -1,6 +1,5 @@
 import { expect, test } from "@playwright/test";
 
-import { SETTLE } from "../../../tests/e2e/support/settle";
 import { APP, onPhone } from "./a11y-support.js";
 
 /*
@@ -15,7 +14,9 @@ import { APP, onPhone } from "./a11y-support.js";
  *   HELD_PAPER  a fifth document on item i-svc, "held-proving.pdf",
  *               lifecycle scanning, ready false, scanHeld true.
  */
-test.use({ baseURL: APP });
+/* "No sweep running" is a claim about motion, which the rig's reduced-motion
+   default (#1964) would stop on its own: the motion is on. */
+test.use({ baseURL: APP, reducedMotion: "no-preference" });
 
 const HELD_PAPER = { item: "i-svc", file: "held-proving.pdf" };
 const HELD_LINE = "The scanner couldn't be reached, Admin have been notified";
@@ -25,11 +26,11 @@ test("a held paper's card shows the held plate and the line, and its foot is emp
   const drawer = onPhone(testInfo)
     ? page.locator(`.pocket .pk-below [data-row-key="${HELD_PAPER.item}"]`)
     : page.locator(`[id="${HELD_PAPER.item}-view"]`);
-  await expect(drawer).toBeVisible({ timeout: SETTLE });
+  await expect(drawer).toBeVisible();
 
   /* The row says `waiting`, not `scanning`. */
   const row = drawer.getByRole("button", { name: `Open ${HELD_PAPER.file}` });
-  await expect(row).toBeVisible({ timeout: SETTLE });
+  await expect(row).toBeVisible();
   await expect(row).toContainText("waiting");
   await expect(row).not.toContainText("scanning");
   await row.click();

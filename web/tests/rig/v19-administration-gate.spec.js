@@ -14,8 +14,6 @@ import { signedIn } from "./a11y-support.js";
  * and tests/integration/authorization-matrix.test.ts:474,496,498.
  */
 
-const SETTLE = 20_000;
-
 /** The account menu this width draws: the desk's card, or the pocket's hatch. @param {import("@playwright/test").Page} page */
 async function openMenu(page) {
   if (!test.info().project.name.includes("phone")) {
@@ -33,7 +31,7 @@ for (const route of ["/settings", "/home"]) {
     await signedIn(route, route === "/home" ? "rest" : "any-dialect")(page);
     const menu = await openMenu(page);
     /* The menu is open and drawn (About is every member's), then the absence means something. */
-    await expect(menu.getByRole("link", { name: "About" })).toBeVisible({ timeout: SETTLE });
+    await expect(menu.getByRole("link", { name: "About" })).toBeVisible();
     await expect(menu.getByRole("link", { name: "Administration" })).toHaveCount(0);
   });
 }
@@ -41,19 +39,19 @@ for (const route of ["/settings", "/home"]) {
 test("home offers the instance administrator Administration in the account menu", async ({ page }) => {
   await signedIn("/home", "administrator")(page);
   const menu = await openMenu(page);
-  await expect(menu.getByRole("link", { name: "Administration" })).toBeVisible({ timeout: SETTLE });
+  await expect(menu.getByRole("link", { name: "Administration" })).toBeVisible();
 });
 
 test("the instance administrator is offered Administration and the page renders", async ({ page }) => {
   await signedIn("/settings", "administrator")(page);
   const menu = await openMenu(page);
   const link = menu.getByRole("link", { name: "Administration" });
-  await expect(link).toBeVisible({ timeout: SETTLE });
+  await expect(link).toBeVisible();
   /* The link itself is followed, as the reader does: the administrator's session
      stays the one the state gave this page. */
   await link.click();
 
   await expect(page).toHaveURL(/\/administration$/);
   await expect(page).toHaveTitle("Orbit — administration");
-  await expect(page.getByRole("heading", { level: 1, name: "Administration" })).toBeVisible({ timeout: SETTLE });
+  await expect(page.getByRole("heading", { level: 1, name: "Administration" })).toBeVisible();
 });

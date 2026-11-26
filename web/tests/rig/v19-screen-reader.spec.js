@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { expect, test } from "@playwright/test";
 
 import { gotoCreate } from "../../../tests/e2e/support/keyboard";
-import { APP, door, onPhone, settle, signedIn } from "./a11y-support.js";
+import { APP, door, onPhone, RIG_EXPECT_MS, settle, signedIn } from "./a11y-support.js";
 
 /** @typedef {import("@playwright/test").Locator} Locator */
 /** @typedef {import("@playwright/test").Page} Page */
@@ -153,7 +153,7 @@ const ITEM_TITLE = "Car MOT — Volvo V60";
 test.describe("#496 screen-reader walkthrough of the core journeys", () => {
   test("arrive/sign-in: the front door, signed out", async ({ page }, testInfo) => {
     await door("door", "rest")(page);
-    await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible({ timeout: RIG_EXPECT_MS });
     await walkScreen(page, testInfo, "arrive-sign-in");
     // Decorative: the dawn's own starfield and world layers.
     await expect(page.locator(".signin-stage")).toHaveAttribute("aria-hidden", "true");
@@ -161,13 +161,13 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
 
   test("/home", async ({ page }, testInfo) => {
     await signedIn("/home", "rest")(page);
-    await expect(page.locator(".dialwrap, .mdial").filter({ visible: true })).toHaveCount(1);
+    await expect(page.locator(".dialwrap, .mdial").filter({ visible: true })).toHaveCount(1, { timeout: RIG_EXPECT_MS });
     await walkScreen(page, testInfo, "home");
 
     // Criterion 3: the dial itself is v19-chart-accessibility.spec.ts's job;
     // this only checks the status drawer is present to check as a live region.
     const drawer = page.locator("#statusdrawer");
-    await expect(drawer).toBeAttached();
+    await expect(drawer).toBeAttached({ timeout: RIG_EXPECT_MS });
     await assertLiveRegionIsSafe(drawer, "home", "#statusdrawer (system status)");
   });
 
@@ -185,28 +185,28 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
       : page.getByRole("region", { name: `${ITEM_TITLE} — full detail` });
     if (phone) await expect(drawer).toHaveAttribute("data-open", "");
     const acts = drawer.getByRole("group", { name: `Actions for ${ITEM_TITLE}` });
-    await expect(acts).toBeVisible();
+    await expect(acts).toBeVisible({ timeout: RIG_EXPECT_MS });
     await walkScreen(page, testInfo, "home-item-drawer");
     await expect(acts.getByRole("button")).toHaveText(["snooze", "complete", "attach a document", "retire"]);
-    await expect(drawer.getByRole("button", { name: "Edit this item" })).toBeVisible();
-    await expect(drawer.getByRole("button", { name: "Copy link" })).toBeVisible();
+    await expect(drawer.getByRole("button", { name: "Edit this item" })).toBeVisible({ timeout: RIG_EXPECT_MS });
+    await expect(drawer.getByRole("button", { name: "Copy link" })).toBeVisible({ timeout: RIG_EXPECT_MS });
 
     await drawer.getByRole("button", { name: "Edit this item" }).click();
-    await expect(drawer.getByRole("group", { name: `Editing ${ITEM_TITLE}` })).toBeVisible();
+    await expect(drawer.getByRole("group", { name: `Editing ${ITEM_TITLE}` })).toBeVisible({ timeout: RIG_EXPECT_MS });
     await drawer.getByRole("button", { name: /^due: / }).click();
     const chooser = page.getByRole("dialog", { name: /due date/i });
-    await expect(chooser).toBeVisible();
+    await expect(chooser).toBeVisible({ timeout: RIG_EXPECT_MS });
     await walkScreen(page, testInfo, "home-item-drawer-editing");
     await expect(chooser.getByRole("grid")).toHaveAccessibleName(/\S/);
     /* Put back as found: the chooser, then the unchanged edit. */
     await page.keyboard.press("Escape");
     await page.keyboard.press("Escape");
-    await expect(acts).toBeVisible();
+    await expect(acts).toBeVisible({ timeout: RIG_EXPECT_MS });
   });
 
   test("/household/[id]", async ({ page }, testInfo) => {
     await signedIn("/household/hh-harlow-1", "any-dialect")(page);
-    await expect(page.getByRole("heading", { name: "Harlow Home" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Harlow Home" })).toBeVisible({ timeout: RIG_EXPECT_MS });
     await walkScreen(page, testInfo, "household-id");
   });
 
@@ -239,7 +239,7 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
 
   test("/administration", async ({ page }, testInfo) => {
     await signedIn("/administration", "any-dialect")(page);
-    await expect(page.getByRole("heading", { name: "Administration" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Administration" })).toBeVisible({ timeout: RIG_EXPECT_MS });
     await walkScreen(page, testInfo, "administration");
     await expect(page.locator(".station-backdrop")).toHaveAttribute("aria-hidden", "true");
   });
@@ -263,7 +263,7 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
     // the pill is a `role="group"` landmark a reader tabs to like any other
     // toolbar, not something that grabs focus on arrival.
     const transport = page.locator("#orbit-tour-transport");
-    await expect(transport).toBeVisible();
+    await expect(transport).toBeVisible({ timeout: RIG_EXPECT_MS });
 
     await expect(transport).toHaveAttribute("role", "group");
     await expect(transport).toHaveAccessibleName(/\S/);
@@ -285,7 +285,7 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
       // Pocket content is pinned at twelve headings and this exact wording
       // once the pocket script's shape is confirmed; until then this only
       // proves the script and announcement exist and are not empty.
-      await expect(script.locator("h3").first()).toBeAttached();
+      await expect(script.locator("h3").first()).toBeAttached({ timeout: RIG_EXPECT_MS });
       await expect(status).not.toHaveText("");
     } else {
       await expect(script.locator("h3")).toHaveCount(12);
@@ -313,7 +313,6 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
    * once it has, the session read that follows: signed out, as it would be.
    */
   test("sign-out screen", async ({ page }, testInfo) => {
-    await page.emulateMedia({ reducedMotion: "reduce" });
     let revoked = 0;
     await page.route("**/api/auth/logout", (route) => {
       revoked += 1;
@@ -335,9 +334,8 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
     }
     /* the descent plays before /logout (the stack suite allowed 30 s; the recorded flake was this wait,
        #1637). The test's own limit sits above the wait so a hang fails here, on the wait. */
-    test.setTimeout(60_000);
     await expect(page).toHaveURL(/\/logout$/, { timeout: 30_000 });
-    await expect(page.getByRole("link", { name: "Sign back in" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Sign back in" })).toBeVisible({ timeout: RIG_EXPECT_MS });
     expect(revoked, "the sign-out control sent the logout request, once").toBe(1);
 
     /* #1673, #1701: the address must STAY /logout once the goodbye has settled (a refresh or Back must

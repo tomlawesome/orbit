@@ -288,7 +288,7 @@ describe("the pipeline and the declarations agree", () => {
     expect(denyGlobs(config, "film_webkit")).toEqual([]);
     const raw = JSON.parse(readFileSync(new URL("./job-inputs.json", import.meta.url), "utf8"));
     // #1546 changed this: the two jobs no longer declare the same thing, because
-    // each has its own shard count (rig_webkit 3, film_webkit 2). Everything but
+    // each has its own shard count (rig_webkit 4, film_webkit 2). Everything but
     // `shards` is still the same.
     const { shards: _film, ...film } = raw.jobs.film_webkit;
     const { shards: _rig, ...rig } = raw.jobs.rig_webkit;
@@ -556,17 +556,18 @@ describe("the retired private-names job is named nowhere it would mislead (D-F10
 describe("sharded candidates (#1546)", () => {
   const raw = JSON.parse(readFileSync(new URL("./job-inputs.json", import.meta.url), "utf8"));
 
-  it("declares the shard counts of the design: rig_chromium 2, rig_firefox 2, rig_webkit 3, film_webkit 2, integration 4", () => {
-    expect(raw.jobs.rig_chromium.shards).toBe(2);
+  it("declares the shard counts of the design: rig_chromium 3, rig_firefox 2, rig_webkit 4, film_webkit 2, integration 5", () => {
+    expect(raw.jobs.rig_chromium.shards).toBe(3);
     expect(raw.jobs.rig_firefox.shards).toBe(2);
-    expect(raw.jobs.rig_webkit.shards).toBe(3);
+    expect(raw.jobs.rig_webkit.shards).toBe(4);
     expect(raw.jobs.film_webkit.shards).toBe(2);
-    expect(raw.jobs.integration.shards).toBe(4);
+    expect(raw.jobs.integration.shards).toBe(5);
   });
 
   it("shards nothing else, and screens_chromium runs alone", () => {
     const sharded = Object.entries(raw.jobs).filter(([, job]) => job.shards !== undefined).map(([name]) => name).sort();
-    expect(sharded).toEqual(["film_webkit", "integration", "rig_chromium", "rig_firefox", "rig_webkit"]);
+    // #1933 (103a): `fast` is two Vitest shards.
+    expect(sharded).toEqual(["fast", "film_webkit", "integration", "rig_chromium", "rig_firefox", "rig_webkit"]);
     expect(raw.jobs.screens_chromium.shards).toBeUndefined();
   });
 
@@ -579,14 +580,14 @@ describe("sharded candidates (#1546)", () => {
   });
 
   it("names the shards of a sharded job, in order", () => {
-    expect(shardNames(config, "rig_webkit")).toEqual(["rig_webkit 1/3", "rig_webkit 2/3", "rig_webkit 3/3"]);
-    expect(shardNames(config, "rig_chromium")).toEqual(["rig_chromium 1/2", "rig_chromium 2/2"]);
+    expect(shardNames(config, "rig_webkit")).toEqual(["rig_webkit 1/4", "rig_webkit 2/4", "rig_webkit 3/4", "rig_webkit 4/4"]);
+    expect(shardNames(config, "rig_chromium")).toEqual(["rig_chromium 1/3", "rig_chromium 2/3", "rig_chromium 3/3"]);
     expect(shardNames(config, "film_webkit")).toEqual(["film_webkit 1/2", "film_webkit 2/2"]);
-    expect(shardNames(config, "integration")).toEqual(["integration 1/4", "integration 2/4", "integration 3/4", "integration 4/4"]);
+    expect(shardNames(config, "integration")).toEqual(["integration 1/5", "integration 2/5", "integration 3/5", "integration 4/5", "integration 5/5"]);
   });
 
   it("names an unsharded job as itself", () => {
-    expect(shardNames(config, "fast")).toEqual(["fast"]);
+    expect(shardNames(config, "fast_checks")).toEqual(["fast_checks"]);
     expect(shardNames(config, "screens_chromium")).toEqual(["screens_chromium"]);
     expect(shardNames(config, "smoke")).toEqual(["smoke"]);
   });
@@ -604,11 +605,11 @@ describe("sharded candidates (#1546)", () => {
     const key = keys.get("rig_webkit").key;
     expect(key, "rig_webkit has a final key").toBeTruthy();
     const lines = formatVariables(keys, (job) => shardNames(config, job)).split("\n");
-    for (const n of [1, 2, 3]) expect(lines, `shard ${n}/3`).toContain(`ORBIT_INPUTS_RIG_WEBKIT_${n}_3=${key}`);
+    for (const n of [1, 2, 3, 4]) expect(lines, `shard ${n}/4`).toContain(`ORBIT_INPUTS_RIG_WEBKIT_${n}_4=${key}`);
   });
 
   it("turns a shard name into the variable suffix the gate uses", () => {
-    expect(inputsVariable("rig_webkit 2/3")).toBe("ORBIT_INPUTS_RIG_WEBKIT_2_3");
+    expect(inputsVariable("rig_webkit 2/4")).toBe("ORBIT_INPUTS_RIG_WEBKIT_2_4");
   });
 
   // A whole number of at least two: one shard is not a shard (GitLab sets

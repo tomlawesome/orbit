@@ -26,9 +26,8 @@ import { APP } from "../fidelity/pocket-states.js";
  * the stage itself, as v19-create.spec.js does.
  */
 
-test.use({ reducedMotion: "reduce", serviceWorkers: "block" });
+test.use({ serviceWorkers: "block" });
 
-const SETTLE = 20_000;
 const DOCUMENT = "MOT certificate 2026.pdf";
 const DOCUMENT_BYTES = Buffer.concat([Buffer.from("%PDF-1.4\n"), Buffer.alloc(2048, 32), Buffer.from("%%EOF\n")]);
 const pdf = () => ({ name: DOCUMENT, mimeType: "application/pdf", buffer: DOCUMENT_BYTES });
@@ -88,7 +87,7 @@ async function pickFile(page) {
     await form.locator('input[type="file"]').setInputFiles(pdf());
     return page.locator("main");
   }
-  await page.locator("#card[data-ready]").waitFor({ state: "attached", timeout: SETTLE });
+  await page.locator("#card[data-ready]").waitFor({ state: "attached" });
   await page.locator('#card input[type="file"]').setInputFiles(pdf());
   return page.locator("#readcard");
 }
@@ -101,7 +100,7 @@ test.describe("the card says the file is already held", () => {
   test("names the existing entry, in the mock-up's words", async ({ page }) => {
     await stageAnswered(page, HELD_SERVICE);
     const card = await pickFile(page);
-    await expect(card.getByRole("heading", { name: ALERT_HEAD })).toBeVisible({ timeout: SETTLE });
+    await expect(card.getByRole("heading", { name: ALERT_HEAD })).toBeVisible();
     await expect(card).toContainText("You already hold this document.");
     await expect(card).toContainText(sentence(HELD_SERVICE, "3 Mar 2026"));
     await expect(card).toContainText("nothing has been read from it yet");
@@ -112,7 +111,7 @@ test.describe("the card says the file is already held", () => {
   test("the open link leads to the entry that holds the file", async ({ page }) => {
     await stageAnswered(page, HELD_SERVICE);
     const card = await pickFile(page);
-    await expect(card.getByRole("heading", { name: ALERT_HEAD })).toBeVisible({ timeout: SETTLE });
+    await expect(card.getByRole("heading", { name: ALERT_HEAD })).toBeVisible();
     if (onPhone()) {
       const row = card.getByRole("button", { name: "open Service history.pdf on Car full service" });
       await expect(row).toBeVisible();
@@ -123,25 +122,25 @@ test.describe("the card says the file is already held", () => {
       await expect(link).toHaveAttribute("href", /item=i-svc/);
       await link.click();
     }
-    await expect(page).toHaveURL(/item=i-svc/, { timeout: SETTLE });
+    await expect(page).toHaveURL(/item=i-svc/);
   });
 
   test("the read waits for the answer: nothing is read until the person keeps the file", async ({ page }) => {
     const reads = await stageAnswered(page, HELD_SERVICE);
     const card = await pickFile(page);
-    await expect(card.getByRole("heading", { name: ALERT_HEAD })).toBeVisible({ timeout: SETTLE });
+    await expect(card.getByRole("heading", { name: ALERT_HEAD })).toBeVisible();
     await page.waitForTimeout(500);
     expect(reads.count, "no read while the alert is up").toBe(0);
     await card.getByRole("button", { name: "keep it anyway" }).click();
-    await expect.poll(() => reads.count, { timeout: SETTLE }).toBeGreaterThan(0);
+    await expect.poll(() => reads.count).toBeGreaterThan(0);
   });
 
   test("keep it anyway returns the card to page one with a quiet kept line", async ({ page }) => {
     await stageAnswered(page, HELD_MOT);
     const card = await pickFile(page);
-    await expect(card.getByRole("heading", { name: ALERT_HEAD })).toBeVisible({ timeout: SETTLE });
+    await expect(card.getByRole("heading", { name: ALERT_HEAD })).toBeVisible();
     await card.getByRole("button", { name: "keep it anyway" }).click();
-    await expect(card.getByRole("heading", { name: "Page one" })).toBeVisible({ timeout: SETTLE });
+    await expect(card.getByRole("heading", { name: "Page one" })).toBeVisible();
     await expect(card).toContainText("kept as a second copy · the first is on Car MOT — Volvo V60");
     await expect(card.getByRole("heading", { name: ALERT_HEAD })).toHaveCount(0);
     await expect(card.getByRole("button", { name: "keep it anyway" })).toHaveCount(0);
@@ -151,7 +150,7 @@ test.describe("the card says the file is already held", () => {
   test("not this one drops the file and the alert with it", async ({ page }) => {
     await stageAnswered(page, HELD_SERVICE);
     const card = await pickFile(page);
-    await expect(card.getByRole("heading", { name: ALERT_HEAD })).toBeVisible({ timeout: SETTLE });
+    await expect(card.getByRole("heading", { name: ALERT_HEAD })).toBeVisible();
     await card.getByRole("button", { name: "not this one" }).click();
     await expect(page.getByText("You already hold this document.")).toHaveCount(0);
     await expect(page.getByRole("heading", { name: ALERT_HEAD })).toHaveCount(0);
@@ -166,7 +165,7 @@ test.describe("the renewal line (owner 4a: due within 30 days, or overdue)", () 
   test("shows when the holding entry is due inside the 30-day window", async ({ page }) => {
     await stageAnswered(page, HELD_MOT);
     const card = await pickFile(page);
-    await expect(card.getByRole("heading", { name: ALERT_HEAD })).toBeVisible({ timeout: SETTLE });
+    await expect(card.getByRole("heading", { name: ALERT_HEAD })).toBeVisible();
     await expect(card).toContainText("Car MOT — Volvo V60 is due in 16 days.");
     await expect(card).toContainText(RENEWAL);
   });
@@ -174,7 +173,7 @@ test.describe("the renewal line (owner 4a: due within 30 days, or overdue)", () 
   test("is not shown when the holding entry is due later than that", async ({ page }) => {
     await stageAnswered(page, HELD_SERVICE);
     const card = await pickFile(page);
-    await expect(card.getByRole("heading", { name: ALERT_HEAD })).toBeVisible({ timeout: SETTLE });
+    await expect(card.getByRole("heading", { name: ALERT_HEAD })).toBeVisible();
     await expect(card).not.toContainText(RENEWAL);
     await expect(card).not.toContainText("is due in 161 days");
     await expect(card).not.toContainText("last year");
@@ -183,7 +182,7 @@ test.describe("the renewal line (owner 4a: due within 30 days, or overdue)", () 
   test("shows when the holding entry is overdue", async ({ page }) => {
     await stageAnswered(page, HELD_OVERDUE);
     const card = await pickFile(page);
-    await expect(card.getByRole("heading", { name: ALERT_HEAD })).toBeVisible({ timeout: SETTLE });
+    await expect(card.getByRole("heading", { name: ALERT_HEAD })).toBeVisible();
     await expect(card).toContainText(/Gutter clearing is /);
     await expect(card).toContainText(RENEWAL);
   });
@@ -192,7 +191,7 @@ test.describe("the renewal line (owner 4a: due within 30 days, or overdue)", () 
 test("a file the household does not hold shows no alert at all", async ({ page }) => {
   const reads = await stageAnswered(page, null);
   const card = await pickFile(page);
-  await expect.poll(() => reads.count, { timeout: SETTLE }).toBeGreaterThan(0);
+  await expect.poll(() => reads.count).toBeGreaterThan(0);
   await expect(page.getByRole("heading", { name: ALERT_HEAD })).toHaveCount(0);
   await expect(page.getByText("You already hold this document.")).toHaveCount(0);
   await expect(page.getByText(/kept as a second copy/)).toHaveCount(0);

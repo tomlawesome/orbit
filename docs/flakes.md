@@ -505,6 +505,7 @@ timeout on this one case rather than a global raise.
 ## tour-pocket-webkit.spec.js:685 "the pocket film in WebKit (#1174) › plays end to end at 430x932 under normal motion" — pocket-webkit
 
 - 2026-11-19 · bed6d036 (batch-b) · local run in the Playwright image, no pipeline · `locator.tap` on `#pocket-entry .pc-chip[data-imp="low"]` (line 818) retried "element was detached from the DOM" until the 600 s test timeout. 27 others passed. Rerun of the same case on unchanged code: passed (3.4m). First sighting.
+- 2026-11-25 · dev cd403cae · nightly 5441 / `film_webkit` 1/2 (job 65559) · pocket-webkit 430x932, failed at :854 with faults `{"pill faint (dim top) · /home · ch7": 1}`; no trace kept and the key holds no figures. #1960 (pill faint, diagnostics): diagnostics added; no fix yet. First sighting of this symptom.
 
 ## upgrade_cell: [latest-3, all-keys] "Could not download the release manifest for channel v0.3.7" (image-registry)
 
@@ -684,3 +685,7 @@ timeout on this one case rather than a global raise.
 ## scripts/repair-root-left-1897.test.mjs "repair blocked opening the FIFO" (line 247)
 
 - 2026-11-25 · 6bb43c996 (feat/1387-start-maintenance; repair.sh only gained one path in an array) · pipeline 5449 / fast 65681 · `result.hung` was true; the file passed 17/17 three times locally on the same commit and once on batch-a
+
+## scripts/install.readiness.test.mjs "install.sh: a service still running at the deadline is left in place (#1456 decision) > the database running with its probe still failing: no rollback, `repair`, left running, and an Update is accepted"
+
+- 2026-11-23 · !1333 bf57751bf · pipeline 5229 / fast (job 62669) · `expected 1 to be +0` at line 247 (the Update's exit status) on a loaded host; the change is a @sveltejs/kit bump only. First sighting.

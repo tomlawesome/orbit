@@ -113,11 +113,9 @@ async function drawerMotion(page, phone) {
   return problems;
 }
 
+/* Reduced motion is the rig's default (playwright.config.js, #1964), so the
+   reader of this describe has asked for it from the first paint. */
 test.describe("reduced motion", () => {
-  test.beforeEach(async ({ page }) => {
-    await page.emulateMedia({ reducedMotion: "reduce" });
-  });
-
   test("signed-in screens hold still (desktop dial)", async ({ page }, testInfo) => {
     test.skip(onPhone(testInfo), "the desk dial only; the pocket dialect has its own test below");
     /* Six real navigations, each waiting for its finite motion to end, then
