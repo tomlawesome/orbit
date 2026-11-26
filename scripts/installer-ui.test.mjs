@@ -3,6 +3,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -876,4 +877,113 @@ describe("installer text prompts with double-width characters (#1885)", () => {
       });
     }
   }
+});
+
+/*
+ * A byte taken at a timeout (#1967).
+ *
+ * bash's `read -t` can store a byte in the variable and still return a status
+ * above 128 when its timer fires as the byte lands. The readers treated every
+ * such status as "nothing arrived" and threw the byte away; in the prune
+ * prompt a dropped key can turn "yeas" or " yes" into the exact "yes".
+ *
+ * Deterministic, no timing: SHIM defines a `read` function that shadows the
+ * builtin. Only the keystroke reads count (those with both -s and -t). On
+ * call number SHIM_CALL it behaves like a read that lost the race:
+ *  - SHIM_BYTE set: stores SHIM_BYTE (possibly empty) in the variable named
+ *    by the last argument, consumes nothing, and returns 142;
+ *  - SHIM_BYTE unset: performs the real read, then returns 142 even though it
+ *    stored the byte.
+ * Every other call is the builtin.
+ */
+const SHIM = `
+__shim_calls=0
+read() {
+  local __shim_arg __shim_s=0 __shim_t=0 __shim_var="\${!#}" __shim_status=0
+  for __shim_arg in "$@"; do
+    [[ "$__shim_arg" == -t ]] && __shim_t=1
+    [[ "$__shim_arg" == -*s* ]] && __shim_s=1
+  done
+  if ((__shim_s == 0 || __shim_t == 0)); then builtin read "$@"; return; fi
+  __shim_calls=$((__shim_calls + 1))
+  if ((__shim_calls != SHIM_CALL)); then builtin read "$@"; return; fi
+  if [[ -n "\${SHIM_BYTE+x}" ]]; then
+    printf -v "$__shim_var" '%s' "$SHIM_BYTE"
+    return 142
+  fi
+  builtin read "$@" || __shim_status=$?
+  ((__shim_status == 0)) || return "$__shim_status"
+  return 142
+}
+`;
+const shimFile = join(mkdtempSync(join(tmpdir(), "orbit-read-shim-")), "shim.bash");
+writeFileSync(shimFile, SHIM);
+
+/** Runs `body` with the shim loaded and fd 3 carrying `input` (printf %b escapes). */
+function runShimmed(body, { input = "", call, byte }) {
+  const env = { ...process.env, TERM: "xterm", SHIM_CALL: String(call) };
+  delete env.SHIM_BYTE;
+  if (byte !== undefined) env.SHIM_BYTE = byte;
+  const result = failOnProcessDeadline(spawnSync(
+    "bash",
+    ["-c", `source "$1"; source "$2"; exec 3< <(printf '%b' "$3"); ${body}`, "shimmed", helper, shimFile, input],
+    { encoding: "utf8", env, ...processGuard() },
+  ), { label: "runShimmed" });
+  return result;
+}
+
+describe("installer_ui_read_key and installer_ui_read_paste keep a byte taken at a timeout (#1967)", () => {
+  const readKey = 'installer_ui_read_key 3 key; printf "KEY=%s\\n" "$key"';
+
+  for (const [label, byte, expected] of [
+    ["a printable key", "y", "char:y"],
+    ["a newline", "\n", "enter"],
+    ["a carriage return", "\r", "enter"],
+  ]) {
+    it(`${label} stored by a read that returned 142 is that key, not a timeout`, () => {
+      const result = runShimmed(readKey, { call: 1, byte });
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe(`KEY=${expected}\n`);
+    });
+  }
+
+  it("a 142 with an empty variable is still a timeout", () => {
+    const result = runShimmed(readKey, { call: 1, byte: "" });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe("KEY=timeout\n");
+  });
+
+  it("ESC then a '[' that comes back with status 142, then A, is still up", () => {
+    const result = runShimmed(readKey, { input: "\\033A", call: 2, byte: "[" });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe("KEY=up\n");
+  });
+
+  it("ESC [ then an 'A' that comes back with status 142 is still up", () => {
+    const result = runShimmed(readKey, { input: "\\033[", call: 3, byte: "A" });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe("KEY=up\n");
+  });
+
+  it("a pasted payload keeps a byte that came back with status 142", () => {
+    const result = runShimmed(
+      'installer_ui_read_paste 3 64 out; status=$?; printf "STATUS=%s OUT=%s\\n" "$status" "$out"',
+      { input: "a" + "c\\033[201~", call: 2, byte: "b" },
+    );
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe("STATUS=0 OUT=abc\n");
+  });
+});
+
+describe("installer_ui_read_text keeps a whole answer when one byte comes back with status 142 (#1967)", () => {
+  it('returns exactly " yes" for " yes" and Enter', async () => {
+    const result = await runPtyOpenStdin(
+      'source "$1"; source "$SHIM_FILE"; exec 3<>/dev/tty; value="$(installer_ui_read_text 3 "Answer: " 64)"; printf "\\nVALUE=[%s]\\n" "$value"',
+      " yes\r",
+      { SHIM_FILE: shimFile, SHIM_CALL: "2" },
+      "Answer: ",
+    );
+    expect(result.status).toBe(0);
+    expect(result.stdout).toMatch(/VALUE=\[ yes\]\r?\n/u);
+  });
 });
