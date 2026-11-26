@@ -37,12 +37,13 @@
  * it. The rich weight's two passes (the clouds' field, the cities' glow: voyage.js, cloudField, cityGlow) are drawn
  * by the rich program itself, so they are made once it is there, before its first measure.
  */
-import { chore, fetchOnce, note, quiet, linked, counted, compilesAside, compiledWithin } from "./chores.js";
+import { chore, fetchOnce, fetchBitmap, note, quiet, linked, counted, compilesAside, compiledWithin } from "./chores.js";
 import { flag } from "./settings.js";
-import { sceneHead, PASS_SWITCH, pictures, EURO, NEAR, BOXED, doorCamera, followDoor, sunTexture, theStrip, sharpStrip, cloudField, cityGlow, wantRich, compileRich } from "./voyage.js";
+import { sceneHead, PASS_SWITCH, pictures, sizesFor, firstURL, EURO, NEAR, BOXED, doorCamera, followDoor, sunTexture, theStrip, sharpStrip, cloudField, cityGlow, wantRich, compileRich } from "./voyage.js";
 import { probe, theDoorWeight, lateDoor, BUDGET, liveDoor as doorIsLiveHere } from "./capability.js";
 import { gpu } from "./fitness.js";
-import { uploadBanded } from "./upload.js";
+import { uploadBanded, uploadSized, easeLevels } from "./upload.js";
+import { watch } from "./busy.js";
 
 /**
  * @typedef {{ p: WebGLProgram, u: Record<string, WebGLUniformLocation | null> }} Prog a linked program and its uniforms
@@ -97,12 +98,14 @@ const AIR = 1.4;
 let ctx = null;
 /** @returns {DoorContext} */
 function context() {
+  /* (a context lost is never handed out again: the next live door makes its own, on a canvas of its own) */
+  if (ctx?.gl?.isContextLost()) ctx = null;
   if (ctx) return ctx;
   const canvas = document.createElement("canvas");
   canvas.className = "wl live";
   canvas.setAttribute("aria-hidden", "true");
   /* (a context of its own, with alpha, but only where the page may use the GPU at all: fitness.js) */
-  const gl = gpu() ? canvas.getContext("webgl2", { alpha: true, premultipliedAlpha: true, antialias: false, depth: false, stencil: false, powerPreference: "low-power" }) : null;
+  const gl = gpu() ? watch(canvas.getContext("webgl2", { alpha: true, premultipliedAlpha: true, antialias: false, depth: false, stencil: false, powerPreference: "low-power" })) : null;
   return (ctx = { canvas, gl, par: gl?.getExtension("KHR_parallel_shader_compile") || null, weights: {}, richFlight: null });
 }
 /** @param {WebGL2RenderingContext} gl @param {number} type @param {string} src */
@@ -182,6 +185,8 @@ export function compileDoor() {
 export function liveDoor(world) {
   const { canvas, gl } = /** @type {DoorContext & { gl: WebGL2RenderingContext }} */ (context());  /* (non-null after the next line: the inner functions are hoisted, so the narrowing would not reach them) */
   if (!gl) { measuredNow(); return null; }
+  /* (unseen until shown, also on a canvas a door destroyed before it gave back: destroy, below) */
+  canvas.className = "wl live";
   const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
   const since = performance.now();
   /* the pictures down the wire at once; only putting them on the GPU waits its turn. The sharpest lights at the
@@ -189,7 +194,7 @@ export function liveDoor(world) {
      own faded in over it after everything else, here and in the flight alike (sharpStrip) */
   const strip = theStrip(), stripS = sharpStrip();
   const keys = ["lights", "euro", "clouds", "day", "lightsN", "cloudsN", "dayN", "lightsS"];
-  for (const k of keys) fetchOnce(pictures()[k]).catch(() => {});
+  for (const k of keys) fetchOnce(firstURL(k)).catch(() => {});
 
   /* prog: the weight drawn ({ p, u }: the lean one, or the rich one once it is kept); mode: the weights chosen (the
      probe's: capability.js); rich: the rich program, once there is one (its passes draw the fields and the glow) */
@@ -217,12 +222,15 @@ export function liveDoor(world) {
   /** @param {string} key @param {ImageBitmap} bm */
   const upload = (key, bm) => {
     const t = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, t);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, bm);
-    gl.generateMipmap(gl.TEXTURE_2D);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
-    sharper(gl);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    wrapOf(key)(gl);
+    /* (one whose upload fails is let go before the failure goes on: the strip stays small, nothing left alive) */
+    try {
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, bm);
+      gl.generateMipmap(gl.TEXTURE_2D);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+      sharper(gl);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      wrapOf(key)(gl);
+    } catch (e) { try { gl.deleteTexture(t); } catch { /* a lost context */ } throw e; }
     return t;
   };
   /* the rich weight's fields, one a clouds map (voyage.js: cloudField), drawn by the rich program: made as soon as the
@@ -236,15 +244,33 @@ export function liveDoor(world) {
     fieldOf("clouds"); fieldOf("cloudsN");
     if (rich && !glowT && maps.lights) glowT = cityGlow(gl, rich, maps.lights, ...dims.lights, maps.lightsN, blank);
   };
-  /* each map put on the GPU a band at a time (upload.js: soft chores), its mipmaps after; drawable from its last band
-     (its first level alone, LINEAR: the canvas is not on the page until every map is in, mipmaps and all) */
+  /* a map with ready-made sizes (#148): smallest first, drawable then, and the larger ones after
+     it, the door's own copy of each (the same files as the flight's: voyage.js, sizesFor); done once its last is in */
   /** @param {string} key */
-  const load = (key) => fetchOnce(pictures()[key])
-    .then((b) => createImageBitmap(b, { colorSpaceConversion: "none", premultiplyAlpha: "none" }))
+  const load = (key) => {
+    const sizes = sizesFor(key);
+    if (!sizes) return loadWhole(key);
+    const up = uploadSized(gl, sizes, { decode: (url) => fetchBitmap(url, { colorSpaceConversion: "none", premultiplyAlpha: "none" }), tag: "door", name: `door ${key}`, setup: wrapOf(key), after: sharper, gone: () => dead });
+    return up.first.then((t) => {
+      if (dead || !t) { if (t) gl.deleteTexture(t); return; }
+      maps[key] = t; dims[key] = [sizes[0].w, sizes[0].h];
+      return up.more().then(() => {
+        if (dead) return;
+        mipped.add(key);
+        if (key === "clouds" || key === "cloudsN") fieldOf(key);
+      });
+    }).catch(() => { delete maps[key]; delete dims[key]; failed.add(key); });
+  };
+  /* a map with no sizes (or a host without them) put on the GPU a band at a time (upload.js: soft chores), its
+     mipmaps after; drawable from its last band (its first level alone, LINEAR: the canvas is not on the page until
+     every map is in, mipmaps and all) */
+  /** @param {string} key */
+  const loadWhole = (key) => fetchBitmap(pictures()[key], { colorSpaceConversion: "none", premultiplyAlpha: "none" })
     .then((bm) => {
       if (dead) { bm.close?.(); return; }
       const wh = /** @type {[number, number]} */ ([bm.width, bm.height]);
-      return uploadBanded(gl, bm, { tag: "door", name: `door ${key}`, setup: wrapOf(key), after: sharper, drawable: (t) => { maps[key] = t; dims[key] = wh; } });
+      /* (one that lands after the door is taken down is given back at once, and never kept) */
+      return uploadBanded(gl, bm, { tag: "door", name: `door ${key}`, setup: wrapOf(key), after: sharper, drawable: (t) => { if (dead) { gl.deleteTexture(t); return; } maps[key] = t; dims[key] = wh; } });
     })
     .then(() => {
       if (dead) return;
@@ -297,6 +323,8 @@ export function liveDoor(world) {
   /** @param {WebGLFramebuffer | null} [into] */
   function draw(into = null) {
     if (!prog || dead) return;
+    /* a map's larger size easing in (#148: upload.js) */
+    easeLevels(gl);
     /* the sun table, put on the GPU with the first frame (not with the compile, which may come before the reveal) */
     if (!sunTex) sunTex = sunTexture(gl);
     const u = prog.u;
@@ -416,7 +444,7 @@ export function liveDoor(world) {
   function show() {
     if (dead) return;
     if (dirty) draw();
-    requestAnimationFrame(() => { if (!dead) world.classList.add("live"); });
+    requestAnimationFrame(() => { if (!dead && !gl.isContextLost()) world.classList.add("live"); });
     if (mode === "rich") { state.rich = !fell; wantRich(); }
     followDoor(state);
     seen = true;
@@ -468,7 +496,8 @@ export function liveDoor(world) {
     .then((p) => { prog = p; if (mode === "rich") rich = p; })
     .then(() => Promise.all(keys.map(load)))
     /* a map that failed (a dropped download; fetchOnce forgets a failed fetch) asked for once more, once the first
-       round is in, as the flight does (voyage.js: warm), so the door and the flight draw the same Earth */
+       round is in, before the reveal; the flight has its own retry (voyage.js: warm), which runs beside this one, so
+       the door and the flight draw the same Earth */
     .then(() => Promise.all(keys.filter((k) => failed.has(k) && !dead).map(load)))
     /* the sharper strip, once the small one is in (sharpStrip): put on the GPU beside it, and drawn from then on */
     .then(() => { if (maps.lightsS) stripS.ready((bm) => { if (dead) return; maps.lightsS2 = upload("lightsS", bm); dirty = true; wake(); }); else stripS.fail(); })
@@ -487,7 +516,9 @@ export function liveDoor(world) {
   const onResize = () => { if (prog && !dead) { resize(); wake(); } };
   /* a lost context: no call on it, the loop stopped, and the door down until a remount; the world no longer live, so
      its canvas goes and the page shows its pictures again (door.css: .world.live) */
-  const onLost = () => { dead = true; if (raf) cancelAnimationFrame(raf); raf = 0; world.classList.remove("live"); measuredNow(); };
+  /* (the context itself is let go, so a remount is handed a fresh one: context, above; preventDefault says the page
+     takes the loss in hand rather than leaving the canvas for good) */
+  const onLost = (/** @type {Event} */ e) => { e.preventDefault?.(); dead = true; if (raf) cancelAnimationFrame(raf); raf = 0; world.classList.remove("live"); if (ctx?.canvas === canvas) ctx = null; measuredNow(); };
   addEventListener("resize", onResize);
   document.addEventListener("visibilitychange", wake);
   canvas.addEventListener("webglcontextlost", onLost);
@@ -500,8 +531,9 @@ export function liveDoor(world) {
   watchers[watchers.length - 1].observe(document.body, { attributes: true, attributeFilter: ["class"] });
   /* taken down (dawn.destroy): the loop stopped, its listeners and observers removed, nothing it was waiting for acts
      (a door destroyed before it was shown never becomes the world's door: followDoor), and it leaves the sharp strip's
-     queue so it holds no other context back. Its textures stay on the context until the page goes (as a flight world's do
-     not): a remount makes its own */
+     queue so it holds no other context back. What it put on the page's one context (its maps, the blank, the sun table,
+     the clouds' fields, the glow, the unseen target, its vertex array) is given back, as a flight world's is, since a
+     remount makes its own; the compiled programs stay, kept for the next door (ctx.weights). Its canvas is no longer live */
   const destroy = () => {
     dead = true;
     if (raf) cancelAnimationFrame(raf);
@@ -511,7 +543,19 @@ export function liveDoor(world) {
     canvas.removeEventListener("webglcontextlost", onLost);
     for (const w of watchers) w.disconnect();
     stripS.leave();
+    release();
+    canvas.className = "wl";
     measuredNow();
+  };
+  /* (on a lost context there is nothing to give back: every call is a no-op) */
+  const release = () => {
+    const ts = new Set([...Object.values(maps), ...Object.values(fields), blank, sunTex, glowT, off?.t]);
+    for (const t of ts) if (t) gl.deleteTexture(t);
+    for (const k of Object.keys(maps)) delete maps[k];
+    for (const k of Object.keys(fields)) delete fields[k];
+    if (off?.f) gl.deleteFramebuffer(off.f);
+    off = null; sunTex = null; glowT = null;
+    gl.deleteVertexArray(vao);
   };
   return { ready, state, wake, destroy };
 }

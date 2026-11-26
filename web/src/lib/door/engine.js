@@ -23,9 +23,11 @@
  */
 import { createVoyage, fetchVoyage, doorIsLive, DOOR3D } from "./voyage.js";
 import { probe } from "./capability.js";
-import { chore, note, noteChores, compilesAside } from "./chores.js";
+import { chore, note, noteChores, compilesAside, moving, PICTURE_WAIT } from "./chores.js";
 import { seededRng } from "./stars.js";
 import { image } from "./settings.js";
+import { page } from "./page.js";
+import { gpu, rememberedFit, sayVerdict } from "./fitness.js";
 
 /**
  * @typedef {object} Atmosphere
@@ -256,7 +258,7 @@ export const mirror = (t) => UPDUR * (1 - Math.min(1, Math.max(0, t / DOWNDUR)))
    faster, to the start of the way in (engine: milkyWay). Shared with the journey (journey.js), so the mark's ring
    grows with the galaxy, exactly, as it becomes its rim. */
 export const MARK_RING = 166.4 * 72 / 200, FAR_T0 = 1080, FAR_T1 = 1750;
-/* the way in: from out beyond the disc, down into it, to rest among the stars of an arm (voyage.js: REST) */
+/* the way in: from out beyond the disc, down into it, to rest among the stars of an arm: the last point, which createVoyage is given as `restFor` */
 export const PATH = [[0.7, 2.35, 1.85], [0.95, 0.95, 1.35], [0.82, 0.1, 0.42], [0.56, 0.006, 0]];
 /* on a portrait screen (taller than wide: width / height <= 10/11, the door's own threshold) the way in stops short of
    the disc: above it, 1.1 from the core and looking down at it from 55 degrees off its axis, where the whole spiral
@@ -335,6 +337,39 @@ export const DOWN = {
   duskMix(t) { return Math.max(0, Math.min(1, (t / DOWNDUR - 0.64) / 0.36)); },
 };
 
+/* ── A PROFILE SENT TO A WORKER (ADR-0004 6a.3) ─────────────────────────────
+   A message cannot carry a function, so a profile's curves go by name: every flight is the climb's or the descent's,
+   whatever else it changes, so `base` says which, and the rest is data, sent as it is. A curve the base has and the
+   profile does not (DOWN_DAWN's duskMix) goes as undefined, so it is still missing at the other end; the chart's parts,
+   getters on the site, are read now. A curve of the profile's own cannot be sent: it throws, rather than the worker
+   drawing something else. */
+/** @typedef {"speed" | "atm" | "duskMix"} Curve */
+/** @type {Curve[]} */
+const CURVES = ["speed", "atm", "duskMix"];
+/** @typedef {Omit<Profile, Curve> & { base: "UP" | "DOWN", duskMix?: undefined }} WireProfile */
+/** @param {Profile} P @returns {WireProfile} */
+export function wireProfile(P) {
+  const base = P.speed === DOWN.speed ? "DOWN" : "UP", B = base === "DOWN" ? DOWN : UP;
+  /** @type {Record<string, unknown>} */
+  const w = { base };
+  for (const [k, v] of Object.entries(P)) if (!(/** @type {string[]} */ (CURVES)).includes(k)) w[k] = v;
+  for (const k of CURVES) {
+    if (typeof P[k] === "function" && P[k] !== B[k]) {
+      const e = new Error(`a flight's ${k} must be UP's or DOWN's own: a curve of its own cannot be drawn in a worker`);
+      e.name = "ProfileCurveError";
+      throw e;
+    }
+    if (typeof P[k] !== "function" && B[k]) w[k] = undefined;
+  }
+  if (P.chart) w.chart = { rect: P.chart.rect, geometry: P.chart.geometry };
+  return /** @type {WireProfile} */ (w);
+}
+/** the profile again, from its wire form: the base's very curves, and the data as sent @param {WireProfile} w @returns {Profile} */
+export function unwireProfile(w) {
+  const { base, ...data } = w, B = base === "DOWN" ? DOWN : UP;
+  return /** @type {Profile} */ ({ ...Object.fromEntries(CURVES.filter((k) => B[k]).map((k) => [k, B[k]])), ...data });
+}
+
 /* ── THE REVEAL (§15 second pass, ruling 2) ───────────────────────────────
    The first pass ran 2760→3360 and read as a flash; this runs 3200→4500 (and
    then holds, so the handoff happens in full light) and is built to be slow on
@@ -360,6 +395,8 @@ const SHUTTER = 0.042;
    by the fixtures is the same beat every time on every machine */
 const PINNED_STEP = 1000 / 60;
 
+/* the Earth the flight starts on, by the path the host's image() is asked for (remote-flight.js resolves it too) */
+export const EARTH_PICTURE = "dawn/dawn.webp";
 /**
  * One flight, bound to one canvas. Everything the mockup held at module scope
  * lives in this closure instead, so two of these can never tread on each
@@ -380,27 +417,44 @@ export function createFlight(canvas, options = {}) {
      DOM type is for an already-spent contextType mismatch, which cannot
      happen here. */
   const ctx = /** @type {CanvasRenderingContext2D} */ (canvas.getContext("2d"));
-  const raf = options.requestFrame ?? ((fn) => requestAnimationFrame(fn));
-  const cancel = options.cancelFrame ?? ((id) => cancelAnimationFrame(id));
+  const raf = options.requestFrame ?? ((fn) => page.frame(fn));
+  const cancel = options.cancelFrame ?? ((id) => page.cancelFrame(id));
   const clock = options.now ?? (() => performance.now());
   /* the Earth the door shows under its dawn (tools/dawn.py): the flight starts on that very picture and
      lets it go into its own plainer world as the climb gets under way. The door has already asked for it. */
-  const earth = typeof Image === "undefined" ? null : new Image();
-  /* asked for by warm(), below, with the rest of what the flight draws */
-  const earthReady = earth ? new Promise((r) => { earth.addEventListener("load", r, { once: true }); earth.addEventListener("error", r, { once: true }); }) : Promise.resolve();
+  /* (asked for by warm(), below, with the rest of what the flight draws; asked again, as a new request, by a later
+     warm if it did not come in time: a stalled request is not restarted by setting the same address again) */
+  /** @type {import("./page.js").Picture | null} */
+  let earth = null;
+  /** @type {Promise<unknown>} */
+  let earthReady = Promise.resolve();
   /* … and a copy of it whose left and right edges fade, so that as the world shrinks the picture's sides never show */
   /** @type {HTMLCanvasElement | null} */
   let earthF = null;
-  if (earth) earth.addEventListener("load", () => {
-    try {
-      const c = document.createElement("canvas"); c.width = earth.naturalWidth; c.height = earth.naturalHeight;
-      const x = /** @type {CanvasRenderingContext2D} */ (c.getContext("2d"));
-      x.drawImage(earth, 0, 0); x.globalCompositeOperation = "destination-in";
-      const g = x.createLinearGradient(0, 0, c.width, 0);
-      g.addColorStop(0, "rgba(0,0,0,0)"); g.addColorStop(0.025, "#000"); g.addColorStop(0.975, "#000"); g.addColorStop(1, "rgba(0,0,0,0)");
-      x.fillStyle = g; x.fillRect(0, 0, c.width, c.height); earthF = c;
-    } catch { /* the plain picture, then */ }
-  }, { once: true });
+  const askEarth = () => {
+    const pic = page.picture(image(EARTH_PICTURE), (img, w, h) => {
+      if (pic !== earth) return;
+      try {
+        const c = page.canvas(w, h);
+        const x = /** @type {CanvasRenderingContext2D} */ (c.getContext("2d"));
+        x.drawImage(img, 0, 0); x.globalCompositeOperation = "destination-in";
+        const g = x.createLinearGradient(0, 0, c.width, 0);
+        g.addColorStop(0, "rgba(0,0,0,0)"); g.addColorStop(0.025, "#000"); g.addColorStop(0.975, "#000"); g.addColorStop(1, "rgba(0,0,0,0)");
+        x.fillStyle = g; x.fillRect(0, 0, c.width, c.height); earthF = c;
+      } catch { /* the plain picture, then */ }
+    });
+    if (!pic) return;
+    earth = pic;
+    earthReady = pic.settled;
+  };
+  /* … waited for no longer than any picture (PICTURE_WAIT, chores.js): true once it has come (or failed), false if the
+     wait ran out, so a stalled request never holds the flight flat */
+  const earthWait = () => {
+    /** @type {ReturnType<typeof setTimeout> | undefined} */
+    let timer;
+    const late = new Promise((r) => { timer = setTimeout(() => r(false), PICTURE_WAIT); });
+    return Promise.race([earthReady.then(() => true), late]).finally(() => clearTimeout(timer));
+  };
   /* the flight's world in WebGL beneath this canvas where it can be had (voyage.js): the Earth as a globe, the
      Milky Way, the streaks as light. Without it, this canvas draws all of it, as it always has. */
   /* made when the flight is first readied (warm), not when the page starts: the door's first light is never kept
@@ -415,6 +469,52 @@ export function createFlight(canvas, options = {}) {
   /* a world that can no longer be drawn (its shaders would not link, its context lost or let go) is stopped as it is
      dropped, so what it made is given back (voyage.js: stop) and nothing more of it is put on the context */
   const letGo = () => { /** @type {World} */ (world3d).stop(); world3d = null; };
+  /*
+   * THE VERDICT ON THE WORLD (ADR-0002 6.3, #116): what a way in waits for besides the flight's load, so none opens on a
+   * cheaper version for want of readiness. A promise of { fit, ms, how }, settled once a round by the first of: a pass
+   * remembered on this device (fitness.js: rememberedFit, read at the first warm, on the page only), "remembered"; this
+   * visit's test (the world's `judged`), "tested" or "skipped"; the GPU refused or save-data (6.9), "refused", at once;
+   * the world not made, lost or given up before any judgement, "failed". Never on a remembered unfit. A new promise with
+   * each new round (a world made anew). Every verdict but a remembered one is told to the page (page.judged: kept there
+   * for the next visit when it measured; from a worker, posted to the page)
+   */
+  /** @typedef {{ fit: boolean, ms: number, how: "remembered" | "tested" | "skipped" | "refused" | "failed" }} Verdict */
+  /** @type {(v: Verdict) => void} */
+  let verdictIs = () => {};
+  /** @type {Promise<Verdict>} */
+  let verdictNow = Promise.resolve(/** @type {Verdict} */ ({ fit: false, ms: Infinity, how: "failed" }));
+  let decided = false;
+  const renewVerdict = () => { decided = false; verdictNow = new Promise((r) => { verdictIs = r; }); };
+  renewVerdict();
+  /** @param {Verdict} v */
+  const decide = (v) => { if (!decided) { decided = true; verdictIs(v); } };
+  /** @param {Verdict} v */
+  const tell = (v) => { try { page.judged({ fit: v.fit, ms: v.ms, skipped: v.how === "skipped", how: v.how }); } catch { /* the verdict stands */ } };
+  /* a refusal or a failure: the verdict, if none is in yet (a world proved or remembered stands) */
+  /** @param {"refused" | "failed"} how */
+  const fail = (how) => { if (decided) return; const v = /** @type {Verdict} */ ({ fit: false, ms: Infinity, how }); tell(v); decide(v); };
+  /* unfit: this visit's test refused the machine (5a), so the flight is painted for the visit and no world is made again;
+     again: the world failed (lost, or given up at the hold's backstop: abandon), so the next warm makes it anew (6.7);
+     madeOk: this round's world was made (one whose shaders would not link is not tried again) */
+  let unfit = false, again = false, madeOk = false;
+  /* a world found dead, let go: made anew at the next warm unless it was judged too slow or never made, and failed if
+     no verdict was in */
+  const drop = () => { if (!world3d?.dead) return; letGo(); if (!unfit && madeOk) again = true; fail("failed"); };
+  /* the world's own judgement, heard for its round */
+  /** @param {{ made?: Promise<boolean>, judged?: Promise<{ fit: boolean, ms: number, skipped?: boolean }> }} w */
+  const hear = (w) => {
+    const mine = round;
+    w.made?.then?.((ok) => { if (mine === round) madeOk = !!ok; }, () => {});
+    w.judged?.then((j) => {
+      if (mine !== round || destroyed) return;
+      if (!j.fit) unfit = true;
+      const v = /** @type {Verdict} */ ({ fit: j.fit, ms: j.ms, how: j.skipped ? "skipped" : "tested" });
+      tell(v); decide(v);
+    }, () => {});
+  };
+  /* save-data (ADR-0002 6.9, owner 1a): the visitor's own ask for less, so no world at all: the GPU not asked, nothing of
+     it fetched, the flight painted */
+  const saving = () => !!(/** @type {Navigator & { connection?: { saveData?: boolean } }} */ (globalThis.navigator ?? {})).connection?.saveData;
   /* destroyed (journey.js: destroy): no world is made after it, and the one made is stopped */
   let destroyed = false;
   /** @type {{ cx: number, cy: number, R: number, alpha: number, c: number } | null} */
@@ -506,10 +606,11 @@ export function createFlight(canvas, options = {}) {
   let flightRaf = 0;
 
   function sizeCanvas() {
-    const dpr = Math.min(2, options.devicePixelRatio ?? window.devicePixelRatio ?? 1);
-    W = window.innerWidth; H = window.innerHeight; DIAG = Math.hypot(W, H);
+    const screen = page.size();
+    const dpr = Math.min(2, options.devicePixelRatio ?? screen.dpr ?? 1);
+    W = screen.W; H = screen.H; DIAG = Math.hypot(W, H);
     canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
-    canvas.style.width = W + "px"; canvas.style.height = H + "px";
+    page.css(canvas, W, H);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     voyage?.resize(W, H);
     return dpr;
@@ -794,16 +895,17 @@ export function createFlight(canvas, options = {}) {
     /* how much of the door's own Earth is still in the picture: all of it at the start, gone before the world has
        shrunk enough to show the picture's edges */
     /* (none when the door's Earth is live, door3d.js: the voyage's is then that very Earth, turned as the door left it) */
-    const ea = pal.hasSun && earth && earth.complete && earth.naturalWidth && !(voyage && doorIsLive()) ? Math.max(0, Math.min(1, (R / R0 - 0.93) / 0.07)) : 0;
+    const pic = earth?.drawable() ?? null;
+    const ea = pal.hasSun && pic && !(voyage && doorIsLive()) ? Math.max(0, Math.min(1, (R / R0 - 0.93) / 0.07)) : 0;
 
     /* with the voyage, the Earth, its air and its limb are drawn there, on this same circle; only the door's
        picture is laid over it here, while it lasts */
     if (voyage && pal.hasSun) {
       worldGL = { cx, cy, R, alpha, c };
-      if (ea > 0.002 && earth) {
+      if (ea > 0.002 && pic) {
         const u = s * (R / R0);
         ctx.save(); ctx.globalAlpha = alpha * ea;
-        ctx.drawImage(earthF || earth, cx - 800 * u, cy + (640 - 3920) * u, 1600 * u, 360 * u);
+        ctx.drawImage(earthF || pic, cx - 800 * u, cy + (640 - 3920) * u, 1600 * u, 360 * u);
         ctx.restore();
       }
       return;
@@ -835,10 +937,10 @@ export function createFlight(canvas, options = {}) {
     ctx.beginPath(); ctx.arc(cx, cy, R, 0, 6.284); ctx.stroke();
     ctx.restore();
     /* the picture: the frame's rows 640..1000, scaled about the world's centre as the world falls away */
-    if (ea > 0.002 && earth) {
+    if (ea > 0.002 && pic) {
       const u = s * (R / R0);
       ctx.save(); ctx.globalAlpha = alpha * ea;
-      ctx.drawImage(earthF || earth, cx - 800 * u, cy + (640 - 3920) * u, 1600 * u, 360 * u);
+      ctx.drawImage(earthF || pic, cx - 800 * u, cy + (640 - 3920) * u, 1600 * u, 360 * u);
       ctx.restore();
     }
   }
@@ -1189,8 +1291,23 @@ export function createFlight(canvas, options = {}) {
     else if (active.n && !active.noted) { active.noted = true; note(`flight: first second ${active.n} frames, worst ${Math.round(/** @type {number} */ (active.worst))} ms`); }
     active.last = now;
     step(t, dt);
+    markDrawn();
     if (t < active.P.dur + 400) flightRaf = raf(frame);
-    else { flightRaf = 0; flight = null; }
+    else { flightRaf = 0; flight = null; still(); }
+  }
+  /* the flight's own loop draws on the page's thread: while it runs the chore queue's share is the smaller one (chores.js:
+     moving), taken where the loop starts and given back where it ends or is cancelled, once per loop (ADR-0004 6d.2) */
+  /** @type {(() => void) | null} */
+  let unmove = null;
+  const still = () => { if (unmove) { unmove(); unmove = null; } };
+
+  /* `data-drawn` on the canvas: the number of the start whose first frame is on it (the worker path's mark, remote-flight.js).
+     Cleared as a start begins; an OffscreenCanvas (the worker's) has no dataset, and the page is told by message there */
+  let starts = 0, marked = 0;
+  function markDrawn() {
+    if (marked === starts) return;
+    marked = starts;
+    if (canvas.dataset) canvas.dataset.drawn = String(starts);
   }
 
   /** @param {Profile} P */
@@ -1220,53 +1337,107 @@ export function createFlight(canvas, options = {}) {
   }
 
   let /** @type {Promise<void> | null} */ warmed = null, /** @type {Promise<void> | null} */ proved = null, /** @type {Promise<unknown> | null} */ warmedDocs = null, /** @type {Promise<unknown> | null} */ provedDocs = null, /** @type {Promise<unknown> | null} */ compiled = null;
+  /* the Earth's picture did not come within its wait (earthWait): the next warm waits for it again, and proves then */
+  let earthLate = false;
+  /** the flight readied once its world is made: the Earth's picture waited for, the world's pictures put on the GPU
+      @param {Promise<void>} made */
+  const settle = (made) => {
+    const earthIn = earthWait(), mine = round;
+    return Promise.all([earthIn, made.then(() => (world3d ? world3d.warm({ prove: false }) : null))]).catch(() => {})
+      .then(() => earthIn).then((ok) => { if (mine !== round) return; earthLate = !ok; if (world3d?.dead) drop(); else if (!world3d) fail("failed"); if (!options.plain) { note(ok ? "flight: ready" : "flight: ready, without the Earth's picture"); noteChores("flight ready"); } });
+  };
+  /** @type {Promise<void>} */
+  let made = Promise.resolve();
+  /* the warm-up's round: a new one each time the flight is readied again (a lost world replaced, a late Earth asked
+     again), so what an older round finishes later changes nothing of the newer one's (a stale-callback guard) */
+  let round = 0;
   return {
     /* when the flight's shaders are compiled (after warm has made its world); where compiles freeze the page, the docs'
        galaxy's too (voyage.js: a "compile" chore of its own, which main.js holds the door for with the rest) */
     compiled() { return compiled || Promise.resolve(); },
+    /** the verdict on the world, for the ways in (above: decide) @returns {Promise<Verdict>} */
+    verdict() { return verdictNow; },
+    /* the journey's hold let go at its backstop (journey.js: WORLD_FAILED, ADR-0002 6.7): a world still not ready by then
+       has hung somewhere, so it is given up as failed, said once, and made anew at the next warm; a world already ready
+       stands */
+    abandon() {
+      if (destroyed) return;
+      if (world3d?.dead) drop();
+      else if (world3d && !world3d.ready) { sayVerdict("off: not ready in 30 s"); letGo(); again = true; }
+      fail("failed");
+    },
     /** whether a flight is under way with the WebGL world drawing it (journey.js: the clock's stall cap) */
     get drawingWorld() { return !!flight && !!voyage; },
+    /** whether the flight last started is drawn with the WebGL world (the worker's `frame` says so: draw-worker.js) */
+    get withWorld() { return !!voyage; },
     /* everything the flight draws, fetched and made ready before it is wanted; resolves when it is. Where the page may
        not use the GPU (fitness.js: gpu()) there is no world, none of its pictures is fetched, and this is the Earth's
        picture alone. `prove: false` (the door's, speculative): the world made and its pictures on the GPU, and no
        frame drawn; the default proves the world (its test frames and the fitness test: voyage.js), which the host
        asks at leisure once the door is lit, or a flight up asks if it is first; the world is drawn only once proved. */
     warm({ prove = true } = {}) {
+      /* a world that died after it was made (its context lost: a backgrounded phone tab, a GPU reset) is let go, and
+         the flight readied from the start with a new one, so a later journey is not drawn flat until a reload */
+      /* (one judged too slow is retired for the visit, never made again) */
+      if (world3d?.dead && unfit) drop();
+      if ((world3d?.dead || again) && !destroyed) { fail("failed"); round++; if (world3d) letGo(); again = false; madeOk = false; warmed = proved = warmedDocs = provedDocs = compiled = null; earthLate = false; renewVerdict(); }
+      /* the Earth's picture late last time: waited for again (the world as it was), and the flight proved after it */
+      else if (earthLate && warmed) { round++; earthLate = false; proved = warmedDocs = provedDocs = null; if (!earth?.done()) askEarth(); warmed = settle(made); }
       if (!warmed) {
-        if (earth && !earth.src) earth.src = image("dawn/dawn.webp");
+        if (!earth) askEarth();
+        /* the verdict, where it is known before any proof: no world here, or a pass remembered (a remembered unfit opens
+           nothing: the test is taken again, ADR-0002 6.4) */
+        const bare = !!options.plain || saving();
+        if (!options.plain) {
+          if (saving()) { if (round === 0) sayVerdict("off: save-data"); fail("refused"); }
+          else if (!gpu()) fail("refused");
+          else {
+            const kept = page.shared() ? rememberedFit() : null;
+            if (kept?.fit) decide({ fit: true, ms: kept.ms, how: "remembered" });
+          }
+        }
         /* its pictures asked for (only if the GPU gate lets the page have a world: voyage.js), and its world made (its
            shaders set compiling in the background), at once; what it then puts on the GPU waits its turn as chores
            (voyage.js). Where the browser compiles on the page's own thread (compilesAside false), the world is made as
            a chore ("compile", queued at once and run under the first light's ring, before the door is lit; hurried
            with the flight's own), its shaders looked at in the same chore (voyage.js: made) */
-        if (!options.plain) fetchVoyage();
+        if (!bare) fetchVoyage();
         const make = () => {
           if (destroyed) return undefined;
-          try { world3d = createVoyage(canvas); world3d?.resize(W || innerWidth, H || innerHeight); } catch (e) { world3d = null; }
+          try { world3d = createVoyage(canvas, { restFor: (w, h) => (tallScreen(w, h) ? PATH_TALL : PATH)[3] }); const screen = page.size(); world3d?.resize(W || screen.W, H || screen.H); } catch (e) { world3d = null; }
+          if (world3d) hear(world3d);
           return world3d?.made;
         };
         /* (where the door is live, its weight is chosen first, by the probe: the flight's Earth is compiled to match,
            voyage.js) */
-        const first = DOOR3D() && !options.plain ? probe().catch(() => null) : Promise.resolve();
-        const made = options.plain ? Promise.resolve() : compilesAside() ? first.then(() => { make(); })
+        const first = DOOR3D() && !bare ? probe().catch(() => null) : Promise.resolve();
+        made = bare ? Promise.resolve() : compilesAside() ? first.then(() => { make(); })
           : first.then(() => chore(make, 20, ["compile", "flight"])).then(() => {}, () => {});
-        compiled = made.then(() => world3d?.made).then((ok) => (compilesAside() ? ok : Promise.resolve(world3d?.galaxy).then(() => ok)));
+        /* (under save-data nothing compiles, and the GPU is not asked whether it would compile aside) */
+        compiled = saving() ? made : made.then(() => world3d?.made).then((ok) => (compilesAside() ? ok : Promise.resolve(world3d?.galaxy).then(() => ok)));
         /* if its shaders could not be made after all, the flight draws without it, as it always could */
-        warmed = Promise.all([earthReady, made.then(() => (world3d ? world3d.warm({ prove: false }) : null))]).catch(() => {}).then(() => { if (world3d?.dead) letGo(); if (!options.plain) { note("flight: ready"); noteChores("flight ready"); } });
+        warmed = settle(made);
       }
       /* (a later ask lets the world try once more for a map that failed: voyage.js warm; it settles by itself) */
       else if (world3d && !world3d.dead) world3d.warm({ prove: false }).catch(() => {});
       if (!prove) return warmed;
       if (!proved) {
-        proved = warmed.then(() => (world3d ? world3d.warm() : null)).catch(() => {}).then(() => { if (world3d?.dead) letGo(); });
+        /* (not while the Earth's picture is late: proved by the warm that has it) */
+        const mine = round;
+        proved = warmed.then(() => (world3d && !earthLate && mine === round ? world3d.warm() : null)).catch(() => {}).then(() => { if (mine !== round) return; if (world3d?.dead) drop(); if (earthLate) proved = null; });
       }
       return proved;
     },
-    /* the docs' flight needs its galaxy too, readied after the flight itself (`prove` as warm's) */
+    /* the docs' flight needs its galaxy, readied on its own: the world made, the galaxy compiled and its stars on the GPU,
+       before the flight's maps are in (ADR-0004 6d.1). `prove: false`: that, and nothing more. The default proves the world
+       on that alone (voyage.js: its test frame of the galaxy and the fitness test, which it shares with the flight's proof), the
+       Earth's picture waited for as the flight's is, so a trip to the docs may begin while the maps are still landing,
+       drawn with those that have. A host that wants the maps too waits on warm() as well. */
     warmDocs({ prove = true } = {}) {
-      this.warm({ prove });
-      if (!prove) return (warmedDocs ??= /** @type {Promise<void>} */ (warmed).then(() => (world3d ? world3d.warmDocs({ prove: false }) : null)).catch(() => {}));
-      return (provedDocs ??= /** @type {Promise<void>} */ (proved).then(() => (world3d ? world3d.warmDocs() : null)).catch(() => {}));
+      this.warm({ prove: false });
+      const mine = round;
+      if (!prove) return (warmedDocs ??= made.then(() => (world3d && mine === round ? world3d.warmDocs({ prove: false }) : null)).catch(() => {}));
+      return (provedDocs ??= Promise.all([earthWait(), made]).then(() => (world3d && mine === round ? world3d.warmDocs() : null)).catch(() => {}).then(() => { if (mine === round && world3d?.dead) drop(); }));
     },
     /**
      * Fly. `at` pins the flight to one beat instead of running it: the
@@ -1278,19 +1449,23 @@ export function createFlight(canvas, options = {}) {
      */
     start(P, { at } = {}) {
       this.stop();
+      starts++;
+      if (canvas.dataset) delete canvas.dataset.drawn;
       prime(P);
       if (typeof at === "number") {
         if (flight) flight.pinned = true;
         /* from where the live flight starts (P.skip, its own time: the stretch it skips is never integrated) */
         for (let t = Math.min(P.skip || 0, at); t <= at; t += PINNED_STEP) step(t, PINNED_STEP / 1000, t + PINNED_STEP > at);
         flight = null;
+        markDrawn();
         return;
       }
+      still(); unmove = moving();
       flightRaf = raf(frame);
     },
     stop() {
       if (flightRaf) cancel(flightRaf);
-      flightRaf = 0; flight = null;
+      flightRaf = 0; flight = null; still();
     },
     clear() {
       this.stop();

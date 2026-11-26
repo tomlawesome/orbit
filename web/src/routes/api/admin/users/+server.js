@@ -9,7 +9,12 @@ import { requireRecentAuthentication } from "orbit/lib/auth/recent-auth";
 import { ADMIN_USERS_FIXTURE } from "$lib/data/fixtures/admin.js";
 import { read, write } from "$lib/server/api.js";
 
-const administratorUpdateSchema = z.object({ userId: z.uuid(), administrator: z.boolean() });
+/**
+ * Giving or removing administrator access (#1633). `currentPassword` is the
+ * acting administrator's own (ADR-0023 §5, intent `administrator_set`);
+ * absent for an OIDC-only administrator, who brings a step-up proof cookie.
+ */
+const administratorUpdateSchema = z.object({ userId: z.uuid(), administrator: z.boolean(), currentPassword: z.string().optional() });
 const disabledUpdateSchema = z.object({ userId: z.uuid(), disabled: z.boolean() });
 const createLocalUserSchema = z.object({
   email: z.string(),
@@ -40,7 +45,11 @@ export const GET = read(
 );
 
 export const PUT = write(async (event, session) => {
+  await requireInstanceAdministrator(session.user.id);
   const update = administratorUpdateSchema.parse(await event.request.json());
+  /* Re-challenged every time (ADR-0023 §5, #1633): an elevation is at least
+     as sensitive as a setup link, so a stolen session cannot walk it. */
+  await requireRecentAuthentication(event, session, update, "administrator_set");
   const result = await setInstanceAdministrator(session.user.id, update.userId, update.administrator);
   return json(
     { users: result.users, totalUsers: result.totalCount, truncated: result.truncated },

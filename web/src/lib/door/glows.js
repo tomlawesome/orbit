@@ -17,8 +17,13 @@
 
 /**
  * @typedef {{ defs: string, body: string }} Group a glow: its filter and gradient definitions, and what is drawn
- * @typedef {{ cx: number, cy: number, r: number, stops: [number, string, number][] }} SunDisc one radial gradient: centre, radius, and [offset, colour, opacity] stops
+ * @typedef {import("./sun.js").SunDisc} SunDisc one radial gradient of the sun
  */
+import { SUN, sunBand, sunDiscs, sunRows } from "./sun.js";
+import { settings, flag } from "./settings.js";
+
+export { SUN };
+
 const F_B6L = '<filter id="b6l" filterUnits="userSpaceOnUse" x="-40" y="-40" width="1680" height="1080"><feGaussianBlur stdDeviation="6"/></filter>';
 const F_B20L = '<filter id="b20l" filterUnits="userSpaceOnUse" x="-100" y="-100" width="1800" height="1200"><feGaussianBlur stdDeviation="20"/></filter>';
 const F_RAYROUGH = '<filter id="rayrough" x="-30%" y="-30%" width="160%" height="160%"><feTurbulence type="fractalNoise" baseFrequency="0.004 0.03" numOctaves="2" seed="9" result="n"/><feDisplacementMap in="SourceGraphic" in2="n" scale="22"/><feGaussianBlur stdDeviation="17"/></filter>';
@@ -51,14 +56,6 @@ const G_DRIM = '<linearGradient id="d-rim" x1="0" y1="0" x2="0" y2="1"><stop off
 const G_DGLOW = '<radialGradient id="d-glow" cx="50%" cy="100%" r="60%"><stop offset="0%" stop-color="#e2772b" stop-opacity=".28"/><stop offset="60%" stop-color="#7a2c18" stop-opacity=".08"/><stop offset="100%" stop-opacity="0"/></radialGradient>';
 const G_DBELT = '<linearGradient id="d-belt" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#5a3a7a" stop-opacity="0"/><stop offset="50%" stop-color="#a24d6a" stop-opacity=".18"/><stop offset="100%" stop-color="#e2772b" stop-opacity="0"/></linearGradient>';
 
-/* the sun's own glows (the door's sunrise point, 800,920): three radial gradients, as the SVG had them, but drawn by
-   hand (paintSun), because a browser draws a gradient this soft in eight bits and each level is a flat ring */
-/** @type {SunDisc[]} */
-export const SUN = [
-  { cx: 800, cy: 922, r: 520, stops: [[0, "#e2772b", 0.3], [0.55, "#c2571f", 0.12], [1, "#000000", 0]] },
-  { cx: 800, cy: 922, r: 240, stops: [[0, "#f8c95e", 0.55], [0.3, "#f4c048", 0.3], [0.6, "#f0b429", 0.1], [0.82, "#f0b429", 0.025], [1, "#f0b429", 0]] },
-  { cx: 800, cy: 920, r: 86, stops: [[0, "#ffffff", 1], [0.15, "#fff6e2", 0.9], [0.3, "#ffedc2", 0.6], [0.45, "#ffe9c4", 0.34], [0.6, "#ffe4b8", 0.16], [0.75, "#ffe0b0", 0.06], [0.9, "#ffe0b0", 0.015], [1, "#ffe0b0", 0]] },
-];
 export const DUSK = {
   glow: { defs: F_DB24 + G_DGLOW, body: '<ellipse cx="800" cy="960" rx="900" ry="380" fill="url(#d-glow)" filter="url(#d-b24)"/>' },
   belt: { defs: F_DB24 + G_DBELT, body: '<rect x="0" y="560" width="1600" height="360" fill="url(#d-belt)" filter="url(#d-b24)"/>' },
@@ -112,62 +109,68 @@ async function rasterise(key, svg, w, h) {
 async function keep(key, canvas) {
   /** @type {Blob | null} */ const blob = await new Promise((r) => { try { canvas.toBlob(r, "image/png"); } catch { r(null); } });
   const url = blob ? URL.createObjectURL(blob) : canvas.toDataURL("image/png");
+  /* (two builds of one size under way at once: the first picture kept, the second let go, so none is left unrevoked) */
+  const had = cache.get(key);
+  if (had) { if (url.startsWith("blob:")) URL.revokeObjectURL(url); return had; }
   cache.set(key, url);
   return url;
 }
-/* A gradient as soft as the sun's spans a few levels over hundreds of pixels, and eight bits draw each level as a
-   flat ring; noise added to rings already drawn leaves each ring where it was. So the sun's gradients are worked
-   out here in floating point, laid over one another as the SVG laid its circles, and brought down to eight bits
-   with triangular noise of a level either way (the sum of two uniforms, less one) on the colour and on the alpha
-   alike: the rings become grain too fine to see, and nothing is added on average. The same in every browser.
-   Seeded by place, so it dithers the same way on every draw. The colour is kept as the canvas keeps it, times its
-   alpha, and written back straight so the browser's own premultiplying lands on the very level chosen. Done in
-   bands with a breath between each, so the page keeps answering. */
-/** @param {number} x @param {number} y @param {number} seed */
-const hash = (x, y, seed) => {
-  let h = Math.imul(x, 0x27d4eb2d) ^ Math.imul(y, 0x165667b1) ^ seed;
-  h = Math.imul(h ^ (h >>> 15), 0x2c1b3c6d);
-  h = Math.imul(h ^ (h >>> 12), 0x297a2d39);
-  return (h ^ (h >>> 15)) >>> 0;
-};
-/** @param {number} r */
-const tpdf = (r) => (r & 0xffff) / 0x10000 + (r >>> 16) / 0x10000 - 1;
-/** @param {string} hex @returns {number[]} */
-const rgb = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
-/** @param {string} key @param {number} w @param {number} h @param {() => boolean} [live] @returns {Promise<string | null>} */
-async function paintSun(key, w, h, live = () => true) {
+/* the sun painted and encoded by the host's worker (settings.sunWorker, running sun-worker.js), off the page's thread.
+   Resolves with the PNG, or null where the page is to paint it: no sunWorker, no Worker or OffscreenCanvas, ?sun=page,
+   the host's worker null or throwing, and every way a worker fails (an error, an unreadable message, a reply with no
+   picture, no reply within the backstop). The worker is ended however it ends, and what it says later is let go. `ends`,
+   if given, is handed a function that ends it at once with null (a stopped or superseded build: mountRasters). */
+const SUN_BACKSTOP_MS = 20000;
+/** @param {number} w @param {number} h @param {Set<() => void>} [ends] @returns {Promise<Blob | null>} */
+function sunInWorker(w, h, ends) {
+  const make = settings.sunWorker;
+  if (!make || flag("sun") === "page" || typeof Worker === "undefined" || typeof OffscreenCanvas === "undefined") return Promise.resolve(null);
+  /** @type {Worker | null} */ let worker = null;
+  try { worker = make(); } catch { /* the page paints it */ }
+  const w1 = worker;
+  if (!w1) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    let over = false;
+    /** @param {Blob | null} blob */
+    const end = (blob) => {
+      if (over) return;
+      over = true;
+      ends?.delete(abort);
+      clearTimeout(timer);
+      try { w1.terminate(); } catch { /* gone already */ }
+      resolve(blob);
+    };
+    const abort = () => end(null);
+    ends?.add(abort);
+    const timer = setTimeout(abort, SUN_BACKSTOP_MS);
+    w1.addEventListener("message", (e) => end(e.data?.blob ?? null));
+    w1.addEventListener("error", (e) => { e.preventDefault?.(); end(null); });
+    w1.addEventListener("messageerror", () => end(null));
+    try { w1.postMessage({ w, h }); } catch { end(null); }
+  });
+}
+/** @param {string} key @param {number} w @param {number} h @param {() => boolean} [live] @param {Set<() => void>} [ends] @returns {Promise<string | null>} */
+async function paintSun(key, w, h, live = () => true, ends) {
   const hit = cache.get(key);
   if (hit) return hit;
+  const blob = await sunInWorker(w, h, ends);
+  if (!blob && !live()) return null;   /* (its worker ended with the build: the page paints nothing for it) */
+  if (blob) {
+    /* a build that a newer size has superseded makes nothing; two builds of one size: the first picture kept, the second let go */
+    if (!live()) return null;
+    const had = cache.get(key);
+    if (had) return had;
+    const url = URL.createObjectURL(blob);
+    cache.set(key, url);
+    return url;
+  }
   const canvas = document.createElement("canvas");
   canvas.width = w; canvas.height = h;
   const ctx = /** @type {CanvasRenderingContext2D} */ (canvas.getContext("2d")), s = w / 1600; // new canvas: never null
-  const discs = SUN.map((d) => ({ ...d, stops: d.stops.map(([t, c, a]) => /** @type {[number, number[], number]} */ ([t, rgb(c), a])) }));
-  const rows = Math.max(1, Math.floor(6e5 / w));
+  const discs = sunDiscs(), rows = sunRows(w);
   for (let y0 = 0; y0 < h; y0 += rows) {
-    const n = Math.min(rows, h - y0), im = ctx.createImageData(w, n), d = im.data;
-    for (let y = 0, i = 0; y < n; y++) for (let x = 0; x < w; x++, i += 4) {
-      const fx = (x + 0.5) / s, fy = (y0 + y + 0.5) / s;
-      let R = 0, G = 0, B = 0, A = 0;
-      for (const disc of discs) {
-        const t = Math.hypot(fx - disc.cx, fy - disc.cy) / disc.r;
-        if (t >= 1) continue;
-        const st = disc.stops; let k = 1; while (k < st.length - 1 && st[k][0] < t) k++;
-        const [t0, c0, a0] = st[k - 1], [t1, c1, a1] = st[k], u = t1 > t0 ? (t - t0) / (t1 - t0) : 0;
-        const a = a0 + (a1 - a0) * u;
-        /* over: the SVG's own compositing of its circles, in floating point */
-        R = (c0[0] + (c1[0] - c0[0]) * u) * a + R * (1 - a); G = (c0[1] + (c1[1] - c0[1]) * u) * a + G * (1 - a);
-        B = (c0[2] + (c1[2] - c0[2]) * u) * a + B * (1 - a); A = a + A * (1 - a);
-      }
-      if (A <= 0) continue;
-      const r1 = hash(x, y0 + y, 0x9e3779b9), r2 = hash(y0 + y, x, 0x7f4a7c15);
-      const a8 = Math.min(255, Math.max(0, Math.round(A * 255 + tpdf(r1))));
-      if (!a8) continue;
-      const ta = tpdf(r2), u = 255 / a8;
-      d[i] = Math.min(a8, Math.max(0, Math.round(R * 255 + ta))) * u;
-      d[i + 1] = Math.min(a8, Math.max(0, Math.round(G * 255 + ta))) * u;
-      d[i + 2] = Math.min(a8, Math.max(0, Math.round(B * 255 + ta))) * u;
-      d[i + 3] = a8;
-    }
+    const n = Math.min(rows, h - y0), im = ctx.createImageData(w, n);
+    sunBand(discs, s, w, y0, n, im.data);
     ctx.putImageData(im, 0, y0);
     if (y0 + rows < h) {
       await new Promise((r) => setTimeout(r, 0));
@@ -196,6 +199,9 @@ const frame = (defs, body, w, h) =>
  */
 export function mountRasters(world, groups, prefix, { until = () => null, drawn = () => {} } = {}) {
   let /** @type {ReturnType<typeof setTimeout> | undefined} */ timer, run = 0, /** @type {Set<string>} */ current = new Set();
+  /* the picture each layer shows now (its cache key), so nothing on screen is let go */
+  /** @type {Map<string, string>} */
+  const shown = new Map();
   /* where the sunrise point (800, 920 in the slice) falls on screen, for the
      layers that turn about it */
   const origin = () => {
@@ -205,6 +211,7 @@ export function mountRasters(world, groups, prefix, { until = () => null, drawn 
   };
   async function build() {
     const id = ++run;
+    endSun();
     origin();
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const base = Math.max(innerWidth / 1600, innerHeight / 1000);
@@ -219,10 +226,12 @@ export function mountRasters(world, groups, prefix, { until = () => null, drawn 
     for (const [name, group] of Object.entries(groups)) {
       const [key, w, h] = sizes[name];
       /* the sun is painted (paintSun); the rest are drawn from their SVG */
-      const url = /** @type {string} */ (await (group === SUN ? paintSun(key, w, h, () => id === run) : rasterise(key, frame(/** @type {Group} */ (group).defs, /** @type {Group} */ (group).body, w, h), w, h)));
-      /* superseded: what it made for a size that is no longer current is let go (the newer build's own sizes are kept) */
-      if (id !== run) { if (url && !current.has(key)) forget(key); return; }
+      const url = /** @type {string} */ (await (group === SUN ? paintSun(key, w, h, () => id === run, sunEnds) : rasterise(key, frame(/** @type {Group} */ (group).defs, /** @type {Group} */ (group).body, w, h), w, h)));
+      /* superseded: what it made for a size that is no longer current is let go (the newer build's own sizes are kept),
+         unless it is a picture still on screen (a cached one it was handed): the newest build lets that go as it ends */
+      if (id !== run) { if (url && !current.has(key) && ![...shown.values()].includes(key)) forget(key); return; }
       world.querySelector(`image[data-raster="${name}"]`)?.setAttribute("href", url);
+      shown.set(name, key);
       drawn(url, name);
       await new Promise((r) => setTimeout(r, 0));
       if (id !== run) return;
@@ -234,10 +243,14 @@ export function mountRasters(world, groups, prefix, { until = () => null, drawn 
     if (id !== run) return;
     world.dataset.rasterised = "ready";
   }
+  /* the sun workers in flight, ended with the build that asked for them (a newer build, or stop) */
+  /** @type {Set<() => void>} */
+  const sunEnds = new Set();
+  const endSun = () => { for (const f of [...sunEnds]) f(); };
   const rebuild = () => { clearTimeout(timer); timer = setTimeout(build, 120); };
   const start = () => { build(); addEventListener("resize", rebuild); };
   origin(); addEventListener("resize", origin);
   /* taken down: a build under way stops at its next step, and nothing listens */
-  const stop = () => { run++; clearTimeout(timer); removeEventListener("resize", rebuild); removeEventListener("resize", origin); };
+  const stop = () => { run++; endSun(); clearTimeout(timer); removeEventListener("resize", rebuild); removeEventListener("resize", origin); };
   return { start, stop };
 }

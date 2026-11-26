@@ -212,6 +212,9 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
         border:1px solid var(--line);border-radius:99px;padding:4px 11px;cursor:pointer}
 .mission-page .placerow button:hover{border-color:var(--accent);color:var(--accent-text)}
 .mission-page .adminproblem{margin-top:10px;font:0.6875rem var(--mono);color:var(--warm-text)}
+/* #1633: a status region that stands in the page before its text arrives
+   takes no room while it is empty. */
+.mission-page .adminproblem:empty{margin-top:0}
 
 /* The Mail card, live (#743, ADR-0017 slice 2). The controls borrow the
    panel's existing furniture — .kv rows, .placerow buttons, .adminproblem —

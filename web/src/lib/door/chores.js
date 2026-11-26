@@ -3,8 +3,9 @@
  *
  * Readying the journeys is heavy for the page: pictures put on the GPU, shaders made, frames drawn to measure the
  * machine. Done all at once it stutters whatever is moving. So each piece is a chore, queued here and done one at
- * a time, a frame apart (no sooner), with a few frames' rest between one and the next, and none at all until
- * the painted part of the door's reveal is done (open). The network is not a chore: pictures are fetched (and decoded) as soon
+ * a time (or, once a frame's share has begun, several back to back while a few ms last), the share begun in an
+ * animation frame's callback, before the paint, or by a 50 ms timer if frames are late or absent (ADR-0004 6d.2), with
+ * a few frames' rest after the heavy ones, and none at all until the painted part of the door's reveal is done (open). The network is not a chore: pictures are fetched (and decoded) as soon
  * as they are asked for, off the page's own thread; only what touches the page or the GPU waits its turn.
  *
  * When a journey is chosen, what that journey still needs is done straight away (hurry), a frame between each piece,
@@ -18,36 +19,67 @@
  * sooner, from the moment the door is lit (openSoft), one a frame, during the reveal; the rest still wait for open.
  */
 /**
- * @typedef {string | string[]} Tag what a chore readies ("flight", "docs", "install", "info", "compile", "galaxy", "door", "measure", "rich"), or a list of them
+ * @typedef {string | string[]} Tag what a chore readies ("flight", "docs", "install", "info", "sharp", "compile", "galaxy", "door", "measure", "rich"), or a list of them
  * @typedef {{ fn: () => unknown, resolve(value: unknown): void, reject(reason: unknown): void, rest: number, tag: Tag, soft: boolean }} Job
  *   (resolve and reject are methods so a promise's own resolver, of any value type, fits the one queue)
  */
 /** @type {Job[]} */
 const queue = [];
-let open = false, soft = false, compiling = false, running = false, /** @type {string[] | null} */ want = null, until = 0, wake = 0, started = 0, openedAt = 0;
+let open = false, soft = false, compiling = false, running = false, resting = false, /** @type {string[] | null} */ want = null, until = 0, wake = 0, started = 0, openedAt = 0;
 /* when someone last typed (watchTyping): an unhurried chore waits while they are, so a texture upload never lands
    between a keystroke and its echo (Orbit's addition; settings.typingWait, 0 to never wait) */
 let lastInput = -Infinity;
-/* where the chores' time goes (noteChores): waiting for an idle moment, running, and the first one's start */
-let waited = 0, ran = 0, firstAt = 0, empty = 0, emptyAt = 0, held = 0, heldAt = 0;
-/* and each chore: its tag, how long it waited to start, how long it ran (ms) */
-/** @type {{ tag: string, w: number, r: number }[]} */
+/* where the chores' time goes (noteChores): waiting for an idle moment, running, and when the first was queued (-1:
+   none yet) */
+let waited = 0, ran = 0, firstAt = -1, empty = 0, emptyAt = 0, held = 0, heldAt = 0;
+/* and the rest of it, each span counted once (#101): held with nothing running (holdAt: held net of the soft chores
+   and their rests), an unhurried chore waiting for a journey's opening or for typing to pause (blockAt, from when,
+   blockOpening, which), the waits for an animation frame between chores (their number, total, longest and how many
+   over 50 ms) and the setTimeout waits (their number, the ms asked for, the ms they took) */
+let heldNet = 0, holdAt = 0, openingMs = 0, typingMs = 0, blockAt = 0, blockOpening = false;
+let framesN = 0, framesMs = 0, framesMax = 0, framesSlow = 0, timersN = 0, timersAsked = 0, timersMs = 0;
+/* and each chore: its tag, how long it waited to start, how long it ran, and the frame wait and the timer wait that
+   followed it (ms) */
+/** @type {{ tag: string, w: number, r: number, f: number, t: number }[]} */
 const record = [];
 /* the soft chores run during the reveal (before open): how many, and how long they ran */
 let softN = 0, softMs = 0;
-/* when the frame's share of chores began (a frame boundary): once the queue is open, or a journey is hurried, soft
-   chores run back to back within this much of a frame (ms) before the next frame is waited for; during the reveal,
-   one a frame and no more */
-let frameAt = 0;
+/* the reveal's share (before open, soft chores only): when it began (frameAt, a frame boundary), and whether a frame
+   has been waited for and no chore has started since (fresh). During the reveal one soft chore runs a frame, a second
+   only if the first fitted in REVEAL_SHARE of the share's start (#101: on a phone the browser paints between the frame
+   callback and the hop, ~8 ms, so a share counted from the callback was spent before the first chore started) */
+let frameAt = 0, fresh = true;
+/* the page's share once the queue is open or a journey is hurried (ADR-0004 6d.2): the window in which chores start,
+   closing at windowEnd (performance.now()); it opens in an animation frame's callback (or the backstop's firing) and
+   lasts the budget (SHARE, or REVEAL_SHARE while something moves on the page's thread: moving()). A chore that starts
+   inside it runs whole; the next starts at once, in the microtask that ends the last, while the window is still open */
+let windowEnd = 0, movers = 0;
+/* and what the share costs, for the line: the hops (page.yield, or the worker's 0 ms timers) and the shares begun by
+   the backstop rather than a frame */
+let yieldsN = 0, yieldsMs = 0, backstopsN = 0;
+/** @type {{ f: number } | null} the last chore's record, which a frame wait after it is counted against */
+let lastRec = null;
 const SHARE = 8, REVEAL_SHARE = 4;
+/* the longest a frame is waited for before the share is begun without one (ms): a page drawing under 20 frames a second
+   paints nothing worth waiting for, and a hidden tab has no frames at all; a healthy page never sees it fire */
+const FRAME_WAIT = 50;
 /* the longest a chore may hold the queue (ms): the longest real one is a texture upload or a compile, seconds on a slow GPU */
 const CAP = 15000;
+/* the queue's pace (pace): "page", every hold and rest here, so whatever moves on the page keeps moving; "none", a
+   queue with no page to keep moving (a worker's, ADR-0004 6a.5): a chore runs the moment the last ends, whether or not
+   the queue is open, a journey's opening is over or someone is typing, and a picture goes on the GPU whole (upload.js).
+   The measures keep their rest: a chore beside one is still not the drawing's time */
+let paced = true;
+/** @param {"page" | "none"} how */
+export function pace(how) { paced = how !== "none"; }
+export const unpaced = () => !paced;
 /* ?holdreveal: nothing during the reveal, as before (openSoft is never called, and upload.js puts each picture on the
    GPU whole): for the owner's A/B */
 export const holdReveal = () => !!flag("holdreveal");
 
 import { settings, flag } from "./settings.js";
 import { gpu } from "./fitness.js";
+import { page, decodeHere } from "./page.js";
 /* whether this browser compiles shaders in the background (KHR_parallel_shader_compile). Where it does not (Firefox),
    every compile freezes the page for as long as it takes (measured: even the compositor's animations stall), so each
    is a chore tagged "compile", all of them done while the first light's ring runs, before the door is lit
@@ -60,6 +92,8 @@ let aside = null;
 export function compilesAside() {
   if (aside !== null) return aside;
   try {
+    /* (no page on this thread, the worker's: nothing a compile can freeze, ADR-0004 6a.5) */
+    if (!page.shared()) return (aside = true);
     if (flag("mainthread")) return (aside = false);
     const g = gpu();
     return (aside = g ? g.parallel : true);
@@ -70,48 +104,108 @@ export function compilesAside() {
    and 1.3 s in Edge before the flight was ready. Now a chore starts a frame after the last, and no sooner) */
 /* the order the rest are done in, when no journey has been chosen: the compiles before anything (only where they
    freeze the page: compilesAside; elsewhere nothing is tagged so; and before open, nothing else), then the journeys
-   (a visitor can do nothing until one is ready), the docs' galaxy where it compiles in the background (voyage.js:
+   (a visitor can do nothing until one is ready; the docs' before the flight's: owner, #101, 13a, so the docs open first on a
+   slow device), the docs' galaxy where it compiles in the background (voyage.js:
    one chore that only starts its compiles, so it costs the door nothing, and the docs' way in opens with the others',
    #49; the docs' journey still hurries it), then the live door (door3d.js: its picture is already on screen), the
-   measures, and last of all the rich clouds, which nothing waits for */
-const ORDER = ["compile", "install", "flight", "docs", "info", "", "galaxy", "door", "measure", "rich"];
+   measures, and last of all the rich clouds, which nothing waits for. The flight's maps' larger sizes ("sharp", #148)
+   come behind every journey's readying and are never hurried: the gate opens on the smallest sizes */
+const ORDER = ["compile", "install", "docs", "flight", "info", "sharp", "", "galaxy", "door", "measure", "rich"];
 /* a chore's tag may be a list: ranked by its first ("compile"), hurried by any (the journey the compile is for) */
 /** @param {Tag} tag @returns {string[]} */
 const tags = (tag) => /** @type {string[]} */ ([]).concat(tag);
 /** @param {Tag} tag */
 const rank = (tag) => { const i = ORDER.indexOf(tags(tag)[0]); return i < 0 ? ORDER.length : i; };
 
+/* the next task, with no clamp, where the queue is paced (the page): its own yield (page.js), or, from a host's page
+   adapter without one, a 0 ms timer. Unpaced (a worker, pace("none")) the hop stays a 0 ms timer: there the host's
+   own messages (a frame, a size) share the task queue with a yield, and a chore hopping ahead of them drew the
+   flight's first frame before its size had come (draw-pixels P1, 2026-10-30); the worker's hops were never the wait.
+   The page's queue hops only in the reveal (the share in a frame's callback needs none, 6d.2); each hop is timed for the line */
+/** @param {() => void} fn */
+const hop = (fn) => {
+  const t = performance.now();
+  const done = () => { yieldsN++; yieldsMs += performance.now() - t; fn(); };
+  if (paced && typeof page.yield === "function") page.yield(done); else setTimeout(done, 0);
+};
+
+/** something moves on the page's thread (a flight's own loop, drawn there): the share is the smaller REVEAL_SHARE
+    until it is released. Counted, so loops may overlap; the release is safe to call twice
+    @returns {() => void} */
+export function moving() {
+  movers++;
+  let held = true;
+  return () => { if (held) { held = false; movers--; } };
+}
+
+/* a frame wait over (by a frame or the backstop): counted against the chore before it */
+/** @param {number} d */
+const framed = (d) => {
+  framesN++; framesMs += d;
+  if (lastRec) lastRec.f += d;
+  if (d > framesMax) framesMax = d;
+  if (d > 50) framesSlow++;
+};
+
+/* the page's share begins in the next animation frame's callback or, if that is FRAME_WAIT late, a timer's: whichever
+   fires first runs it and cancels the other, exactly one share a wait (React's scheduler, 2018:
+   requestAnimationFrameWithTimeout). The window opens at the firing, and `go` runs in it */
+/** `blocked`: the share follows a wait for a journey's opening (true) or for typing to pause (false), and the frame wait
+    that ends it is counted as that wait, so the span from the block to the chore's start is counted once
+    @param {(at: number) => void} go @param {boolean | null} [blocked] */
+function shareFrame(go, blocked = null) {
+  const f0 = performance.now();
+  let live = true, id = 0, timer = /** @type {ReturnType<typeof setTimeout> | undefined} */ (undefined);
+  /** @param {boolean} late */
+  const fire = (late) => {
+    if (!live) return;
+    live = false;
+    if (late) { try { page.cancelFrame(id); } catch { /* a page adapter with no cancel */ } backstopsN++; } else clearTimeout(timer);
+    const at = performance.now();
+    if (blocked === null) framed(at - f0); else if (blocked) openingMs += at - f0; else typingMs += at - f0;
+    windowEnd = at + (movers > 0 ? REVEAL_SHARE : SHARE);
+    go(at);
+  };
+  id = page.frame(() => fire(false));
+  timer = setTimeout(() => fire(true), FRAME_WAIT);
+}
+
 function pump() {
-  if (running || !queue.length) return;
+  if (running || resting || !queue.length) return;
   const now = performance.now();
+  /* (any wait there was is over: it is begun again below if it goes on) */
+  const blocked = blockAt ? blockOpening : null;
+  if (holdAt) { heldNet += now - holdAt; holdAt = 0; }
+  if (blockAt) { if (blockOpening) openingMs += now - blockAt; else typingMs += now - blockAt; blockAt = 0; }
   /* what the chosen journey needs, first */
   let i = want ? queue.findIndex((j) => tags(j.tag).some((t) => /** @type {string[]} */ (want).includes(t))) : -1;
   if (want && i < 0 && now >= until) want = null;
   const hurried = i >= 0;
   if (!hurried) {
-    if (!open && !compiling && !soft) { if (!heldAt) heldAt = now; return; }
+    if (paced && !open && !compiling && !soft) { if (!heldAt) heldAt = now; holdAt = now; return; }
     /* the rest waits until the journey has had its opening */
-    if (now < until) { clearTimeout(wake); wake = setTimeout(pump, until - now + 20); return; }
+    if (paced && now < until) { blockAt = now; blockOpening = true; clearTimeout(wake); wake = setTimeout(pump, until - now + 20); return; }
     /* and while someone is typing, until they pause */
-    const typing = settings.typingWait - (now - lastInput);
-    if (typing > 0) { clearTimeout(wake); wake = setTimeout(pump, typing + 20); return; }
+    const typing = paced ? settings.typingWait - (now - lastInput) : 0;
+    if (typing > 0) { blockAt = now; blockOpening = false; clearTimeout(wake); wake = setTimeout(pump, typing + 20); return; }
     /* before open, only a compile (while they may run) or a soft chore (once the door is lit), or nothing ("compile"
        ranks first, so if there is one, it is this) */
     /** @param {Job} j */
-    const may = (j) => open || (compiling && tags(j.tag)[0] === "compile") || (soft && j.soft);
+    const may = (j) => !paced || open || (compiling && tags(j.tag)[0] === "compile") || (soft && j.soft);
     i = -1;
     for (let k = 0; k < queue.length; k++) if (may(queue[k]) && (i < 0 || rank(queue[k].tag) < rank(queue[i].tag))) i = k;
-    if (i < 0) { if (!heldAt) heldAt = now; return; }
+    if (i < 0) { if (!heldAt) heldAt = now; holdAt = now; return; }
   }
   running = true;
-  const asked = performance.now();
-  const run = () => {
-    const [job] = queue.splice(Math.min(i, queue.length - 1), 1);
+  const job = queue[i];
+  /* a soft chore let through before open: one of the reveal's (untouched by the share: one a frame, a hop after it) */
+  const early = job.soft && !open && !hurried, reveal = paced && early;
+  /** @param {number} asked */
+  const run = (asked) => {
+    queue.splice(Math.max(0, queue.indexOf(job)), 1);
     started++;
-    /* a soft chore let through before open: one of the reveal's */
-    const early = job.soft && !open && !hurried;
-    const t0 = performance.now(); waited += t0 - asked; if (!firstAt) firstAt = t0;
-    const rec = { tag: tags(job.tag).join("+") || "-", w: Math.round(t0 - asked), r: 0 }; record.push(rec);
+    const t0 = performance.now(); waited += t0 - asked; if (fresh) { frameAt = t0; fresh = false; }
+    const rec = { tag: tags(job.tag).join("+") || "-", w: Math.round(t0 - asked), r: 0, f: 0, t: 0 }; record.push(rec); lastRec = rec;
     let out;
     try { out = job.fn(); } catch (e) { out = Promise.reject(e); }
     /* a job that never settles must not hold the queue for ever: after CAP the queue goes on. The chore's own promise
@@ -121,23 +215,51 @@ function pump() {
     const end = () => {
       if (over) return;
       over = true; clearTimeout(cap);
-      running = false; rec.r = Math.round(performance.now() - t0); ran += performance.now() - t0; if (!queue.length) emptyAt = performance.now();
-      if (early) { softN++; softMs += performance.now() - t0; }
-      /* a rest between chores: a frame or so, so whatever is moving keeps moving (the measures keep their longer rest,
-         so nothing heavy sits right beside them); hurried, still a frame; a soft one during the reveal, a frame and no
-         more (it fits in a frame's slack, and the reveal is short) */
-      /* (a soft one after the reveal, or hurried: the next at once while the frame's share lasts) */
+      const t1 = performance.now();
+      running = false; rec.r = Math.round(t1 - t0); ran += t1 - t0;
+      if (early) { softN++; softMs += t1 - t0; }
+      /* (the queue is empty from the end of the chore, or of its rest: the rest is counted as a rest, #101) */
+      const next = () => { resting = false; if (!queue.length) emptyAt = performance.now(); pump(); };
+      /* (the waits are timed, for the line: a timer asked for ms, counted against the chore before it) */
       /** @param {number} ms */
-      const frame = (ms) => requestAnimationFrame(() => { frameAt = performance.now(); setTimeout(pump, ms); });
-      /* (during the reveal a smaller share, 4 ms: a second band in the frame when the first was quick) */
-      if (job.soft && performance.now() - frameAt < (open || hurried ? SHARE : REVEAL_SHARE)) setTimeout(pump, 0);
-      else if (hurried || (job.soft && !open)) frame(0);
-      else frame(job.tag === "measure" ? job.rest : Math.min(job.rest, 20));
+      const timer = (ms) => {
+        const t2 = performance.now(); timersN++; timersAsked += ms;
+        resting = true;
+        setTimeout(() => { const d = performance.now() - t2; timersMs += d; rec.t += d; next(); }, ms);
+      };
+      if (!paced) {
+        /* (unpaced: the next at once, and nothing but a measure rests) */
+        resting = true;
+        if (job.tag === "measure" && job.rest > 0) timer(job.rest); else hop(next);
+      } else if (reveal) {
+        /* (the reveal: a second band in the frame when the first was quick, else the next frame, and a hop after it) */
+        resting = true;
+        if (t1 - frameAt < REVEAL_SHARE) hop(next);
+        else {
+          const f0 = performance.now();
+          page.frame(() => { fresh = true; framed(performance.now() - f0); next(); });
+        }
+      } else if (job.soft) {
+        /* (a soft one: the next at once, in this microtask, while the window lasts; else pump asks a frame) */
+        if (!queue.length) emptyAt = t1;
+        pump();
+      } else {
+        /* (a hard one shuts the window: its rest is a timer, where one is asked, and then a frame, so the next share
+           lands in a callback; a hurried one keeps no rest, as before, and a measure its own) */
+        windowEnd = 0;
+        const ms = job.tag === "measure" ? job.rest : hurried ? 0 : Math.min(job.rest, 20);
+        if (ms > 0) timer(ms); else next();
+      }
     };
     cap = setTimeout(end, CAP);
     Promise.resolve(out).then(job.resolve, job.reject).finally(end);
   };
-  setTimeout(run, 0);
+  const asked = performance.now();
+  if (!paced || reveal) hop(() => run(performance.now()));
+  /* a chore may start while the window is open, in a microtask of its own, never synchronously (a caller of chore() gets
+     its promise first); outside it, in the next frame's callback */
+  else if (asked < windowEnd) Promise.resolve().then(() => run(asked));
+  else shareFrame(run, blocked);
 }
 
 /**
@@ -151,6 +273,7 @@ function pump() {
  * @returns {Promise<T>}
  */
 export function chore(fn, rest = 60, tag = "", { soft: frameSized = false } = {}) {
+  if (firstAt < 0) firstAt = performance.now();
   if (emptyAt) { empty += performance.now() - emptyAt; emptyAt = 0; }
   return new Promise((resolve, reject) => { queue.push({ fn, resolve, reject, rest, tag, soft: frameSized }); pump(); });
 }
@@ -222,13 +345,14 @@ export function quiet() {
       if (running || queue.length) { at = -1; frames = 0; }
       else if (at !== started) { at = started; frames = 0; }
       else if (++frames >= 2) { const was = started; resolve(() => !running && !queue.length && started === was); return; }
-      requestAnimationFrame(look);
+      page.frame(look);
     };
-    requestAnimationFrame(look);
+    page.frame(look);
   });
 }
-/** for the test only (?door3d, index.js: window.__chores): the queue as it is now */
-export const choresNow = () => ({ queued: queue.map((j) => tags(j.tag).join("+")), running, started, open, soft, compiling, openedAt });
+/** for the test only (?door3d, index.js: window.__chores; tools/ci/freeze.mjs): the queue as it is now (queuedSoft:
+    whether each queued one is soft, beside queued; moving: how many loops hold the smaller share, moving()) */
+export const choresNow = () => ({ queued: queue.map((j) => tags(j.tag).join("+")), queuedSoft: queue.map((j) => j.soft), running, started, open, soft, compiling, openedAt, moving: movers });
 
 /* the pictures, fetched once for whatever wants them, and asked for as early as is wanted: the network is never a chore */
 /* (keyed by the address resolved against the page, so a relative and an absolute spelling of one picture share
@@ -236,12 +360,22 @@ export const choresNow = () => ({ queued: queue.map((j) => tags(j.tag).join("+")
 /** @type {Map<string, Promise<Blob>>} */
 const fetched = new Map();
 /** @param {string} url */
-const keyOf = (url) => { try { return new URL(url, document.baseURI).href; } catch { return url; } };
+const keyOf = (url) => { try { return new URL(url, page.baseURI()).href; } catch { return url; } };
+/* the longest a picture is waited for (its answer and its body both): a download that opens and never delivers is
+   given up on and forgotten like a failed one, so the flight is never held flat by it and the next ask tries again.
+   Shorter than the journey's backstop (WORLD_FAILED, 30 s, journey.js), which waits past it, as past COMPILE_WAIT, below */
+export const PICTURE_WAIT = 20000;
 /** @param {string} url @returns {Promise<Blob>} */
 export function fetchOnce(url) {
   const key = keyOf(url);
   if (!fetched.has(key)) {
-    const p = fetch(url).then((r) => { if (!r.ok) throw new Error(`${url}: ${r.status}`); return r.blob(); });
+    const ac = typeof AbortController === "undefined" ? null : new AbortController();
+    /** @type {ReturnType<typeof setTimeout> | undefined} */
+    let timer;
+    /** @type {Promise<never>} */
+    const limit = new Promise((_, no) => { timer = setTimeout(() => { ac?.abort(); no(new Error(`${url}: no answer in ${PICTURE_WAIT} ms`)); }, PICTURE_WAIT); });
+    const got = fetch(url, ac ? { signal: ac.signal } : undefined).then((r) => { if (!r.ok) throw new Error(`${url}: ${r.status}`); return r.blob(); });
+    const p = Promise.race([got, limit]).finally(() => clearTimeout(timer));
     fetched.set(key, p);
     /* a failed fetch is forgotten, so the next ask tries the network again */
     p.catch(() => { if (fetched.get(key) === p) fetched.delete(key); });
@@ -249,22 +383,67 @@ export function fetchOnce(url) {
   return /** @type {Promise<Blob>} */ (fetched.get(key));
 }
 
+/**
+ * A picture fetched once (fetchOnce) and decoded by this thread's route (page.js: decode; ADR-0004 6e): the browser's image
+ * loader where fitness.js says so, createImageBitmap(blob, options) elsewhere, a worker's page asked in a worker. A
+ * decode is never a chore, as a download is not; the caller's chore is what puts the bitmap on the GPU.
+ * @param {string} url @param {ImageBitmapOptions} [options] @returns {Promise<ImageBitmap>}
+ */
+export function fetchBitmap(url, options) { return fetchOnce(url).then((blob) => page.decode(blob, options)); }
+/** a blob this thread has, decoded as fetchBitmap does (a host answering a worker's ask) @param {Blob} blob @param {ImageBitmapOptions} [options] */
+export const decodeBlob = (blob, options) => page.decode(blob, options);
+
+/**
+ * A worker's way to the page's decoder (ADR-0004 6e.2): `decode` for page.decode (setPage) posts the blob up as a `decode`
+ * ask and resolves on the page's `decoded` answer (the bitmap, transferred); `heard` is given each `decoded` message. An
+ * error answer, no answer in PICTURE_WAIT (the bound a download has) or an answer with no bitmap is made good in the
+ * worker, by createImageBitmap(blob, options); an answer for an ask no longer waiting changes nothing.
+ * @param {(message: object) => void} post
+ */
+export function askPage(post) {
+  let ids = 0;
+  /** @type {Map<number, (m: { bitmap?: ImageBitmap }) => void>} */
+  const waiting = new Map();
+  return {
+    /** @param {Blob} blob @param {ImageBitmapOptions} [options] @returns {Promise<ImageBitmap>} */
+    decode: (blob, options) => new Promise((resolve) => {
+      const id = ++ids;
+      /** @type {ReturnType<typeof setTimeout> | undefined} */
+      let timer;
+      const end = () => { waiting.delete(id); clearTimeout(timer); };
+      const here = () => { end(); resolve(decodeHere(blob, options)); };
+      waiting.set(id, (m) => { if (m.bitmap) { end(); resolve(m.bitmap); } else here(); });
+      timer = setTimeout(here, PICTURE_WAIT);
+      post({ type: "decode", id, blob, options });
+    }),
+    /** @param {{ id: number, bitmap?: ImageBitmap }} m */
+    heard(m) { const f = waiting.get(m.id); if (f) f(m); else m.bitmap?.close?.(); },  // a late or second answer: let its bitmap go
+  };
+}
+
 /** where the chores' time has gone so far, in the console: running (a compile's wait in the background counts as
-    running), waiting to start (a frame, or the opening a journey is given), the queue empty (nothing to do: the
-    pictures still coming, or decoding), and the rests between
+    running), waiting to start (the hop before a chore), held for the reveal, the queue empty (nothing to do: the
+    pictures still coming, or decoding; the span still open now included), the waits between chores (for an animation
+    frame; for a timer: asked for, and what it took, the difference being the browser's clamping or throttling), an
+    unhurried chore waiting for a journey's opening, and for typing to pause. `resting` is what none of those explain,
+    and should be near 0 (#101: it was a remainder that read a frame-rate crawl as a pause)
     @param {string} when */
 export function noteChores(when) {
-  const wall = firstAt ? performance.now() - firstAt : 0;
-  /* (the soft chores ran inside the held time: counted once, as running) */
-  note(`chores at ${when}: ${started} done, ran ${Math.round(ran)} ms, waited ${Math.round(waited)} ms to start, held ${Math.round(held)} ms for the reveal, of which ${softN} soft chores (${Math.round(softMs)} ms) during the reveal, empty ${Math.round(empty)} ms, resting ${Math.round(Math.max(0, wall - ran - waited - Math.max(0, held - softMs) - empty))} ms, over ${Math.round(wall)}`);
-  /* each one: tag, waited/ran (?door3d only: a long line) */
-  if (counting()) note(`chores, each (tag waited/ran ms): ${record.map((c) => `${c.tag} ${c.w}/${c.r}`).join(", ")}`);
+  const now = performance.now();
+  const wall = firstAt < 0 ? 0 : now - firstAt;
+  const idle = empty + (emptyAt ? now - emptyAt : 0);
+  /* (the soft chores ran inside the held time, so held is taken net of the time something ran or rested in it: heldNet) */
+  /* (not clamped: below 0 means a span was counted twice, which is as much a finding as a gap above it) */
+  const rest = wall - ran - waited - heldNet - idle - framesMs - yieldsMs - timersMs - openingMs - typingMs;
+  note(`chores at ${when}: ${started} done, ran ${Math.round(ran)} ms, waited ${Math.round(waited)} ms to start, held ${Math.round(held)} ms for the reveal, of which ${softN} soft chores (${Math.round(softMs)} ms) during the reveal, empty ${Math.round(idle)} ms, frames ${framesN}, ${Math.round(framesMs)} ms (longest ${Math.round(framesMax)} ms, ${framesSlow} over 50 ms), yields ${yieldsN}, ${Math.round(yieldsMs)} ms, backstops ${backstopsN}, timers ${timersN}, asked ${Math.round(timersAsked)} ms, took ${Math.round(timersMs)} ms, opening ${Math.round(openingMs)} ms, typing ${Math.round(typingMs)} ms, resting ${Math.round(rest)} ms, over ${Math.round(wall)}`);
+  /* each one: tag, waited/ran, and the frame wait and the timer wait after it (?door3d only: a long line) */
+  if (counting()) note(`chores, each (tag waited/ran/frame/timer): ${record.map((c) => `${c.tag} ${c.w}/${c.r}/${Math.round(c.f)}/${Math.round(c.t)} ms`).join(", ")}`);
 }
 /** how long the readying took, in the console (the first visit's GPU work differs greatly between machines and
    browsers: this says where the time went)
    @param {string} what @param {number} [since] */
 export function note(what, since = 0) {
-  try { console.info(`orbit · ${what}: ${Math.round(performance.now() - since)} ms${since ? "" : " after opening"}`); } catch { /* fine */ }
+  try { page.note(`orbit · ${what}: ${Math.round(performance.now() - since)} ms${since ? "" : " after opening"}`); } catch { /* fine */ }
 }
 /* the longest a compile in the background is waited for (KHR_parallel_shader_compile's COMPLETION_STATUS_KHR, polled):
    past it, as on a lost context, the compile is taken as never coming and its part goes on without it (#49: a status
@@ -282,11 +461,22 @@ export const COMPILE_WAIT = 5000;
     @returns {Promise<boolean>} */
 export const compiledWithin = (gl, par, list, every = 40, stop = () => false) => new Promise((resolve) => {
   if (!par) { resolve(true); return; }
-  const t0 = performance.now();
+  /* (only the time the page is seen counts: a hidden tab's compiles and timers may be held back by the browser, so a
+     phone tab put in the background mid-compile does not lose its world for the visit) */
+  /* (#123: a span between two polls counts only if the page was seen at both and not shown again in between, so the
+     first poll after the tab comes back does not credit the time it was away; page.onVisible, which the draw worker
+     answers too) */
+  let seen = 0, last = performance.now(), was = !page.hidden(), away = false;
+  const unsee = page.onVisible(() => { away = true; });
+  /** @param {boolean} ok */
+  const done = (ok) => { unsee(); resolve(ok); };
   const poll = () => {
-    if (gl.isContextLost() || stop()) resolve(false);
-    else if (list.every((p) => gl.getProgramParameter(p, par.COMPLETION_STATUS_KHR))) resolve(true);
-    else if (performance.now() - t0 > COMPILE_WAIT) resolve(false);
+    const now = performance.now(), shown = !page.hidden();
+    if (shown && was && !away) seen += now - last;
+    was = shown; away = false; last = now;
+    if (gl.isContextLost() || stop()) done(false);
+    else if (list.every((p) => gl.getProgramParameter(p, par.COMPLETION_STATUS_KHR))) done(true);
+    else if (seen > COMPILE_WAIT) done(false);
     else setTimeout(poll, every);
   };
   poll();

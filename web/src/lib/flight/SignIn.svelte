@@ -179,7 +179,9 @@
   /** The hold ran out before a password was saved. */
   let renewLapsed = $state(false);
   /** The password is saved but no session came with it (#1901): the route
-      answered `sign_in_again`, or a retry was refused `password_change_saved`.
+      answered `sign_in_again`. The server no longer answers a retry with
+      `password_change_saved` (#1943 SEC-H3: it answers lapsed); the branch
+      that reads it stays for a page still open across an update.
       The card says so and offers the fresh door, as the lapsed card does. */
   let renewSaved = $state(false);
   /** @type {ReturnType<typeof setTimeout> | undefined} */

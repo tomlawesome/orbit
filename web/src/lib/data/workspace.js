@@ -1922,7 +1922,7 @@ export async function readAdminScreen() {
     }, () => null),
     adminRead("/api/admin/users", tally).then((response) => json(response))
       .then(
-        (/** @type {{ users?: { id: string, displayName: string, email?: string, isInstanceAdmin?: boolean, disabledAt?: ?string, metadataStatus?: { email?: string } }[] }} */ body) =>
+        (/** @type {{ users?: { id: string, displayName: string, email?: string, isInstanceAdmin?: boolean, isPrimaryAdministrator?: boolean, disabledAt?: ?string, metadataStatus?: { email?: string } }[] }} */ body) =>
           body.users ?? [],
       )
       /* null, not []: a failed read is not an instance of nobody (#1442). */
@@ -2171,6 +2171,23 @@ export async function testMail(which) {
  */
 export async function setUserDisabled(userId, disabled) {
   return json(await csrfFetch("/api/admin/users", { method: "PATCH", body: { userId, disabled } }));
+}
+
+/**
+ * Give or remove a person's administrator access (`PUT /api/admin/users`,
+ * #1633). Challenged under ADR-0023 §5, intent `administrator_set`:
+ * `currentPassword` is the acting administrator's own, absent for an
+ * OIDC-only administrator who carries a step-up proof cookie instead.
+ *
+ * @param {string} userId
+ * @param {boolean} administrator
+ * @param {string} [currentPassword]
+ */
+export async function setUserAdministrator(userId, administrator, currentPassword) {
+  return json(await csrfFetch("/api/admin/users", {
+    method: "PUT",
+    body: { userId, administrator, ...(currentPassword === undefined ? {} : { currentPassword }) },
+  }));
 }
 
 /**

@@ -440,7 +440,9 @@ describe("administration mutations (`/api/admin/users`)", () => {
   });
 
   it("names a disabled target rather than refusing the administrator", async () => {
-    const administrator = await seedUser("granting-administrator", { administrator: true });
+    /* A password of their own, so the step-up the PUT asks for (#1633) is
+       answered and the refusal under test is the target's. */
+    const administrator = await seedUser("granting-administrator", { password: PASSWORD, administrator: true });
     const caller = await callerFor(administrator);
     const target = await seedUser("suspended", { disabled: true });
 
@@ -451,7 +453,7 @@ describe("administration mutations (`/api/admin/users`)", () => {
       await call(setAdministrator, "/api/admin/users", {
         method: "PUT",
         headers: caller.headers,
-        body: { userId: target.id, administrator: true },
+        body: { userId: target.id, administrator: true, currentPassword: PASSWORD },
       }),
       409,
       "account_disabled",

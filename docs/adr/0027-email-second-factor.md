@@ -157,6 +157,7 @@ reply, or no connection could be made), when staged is cleared and the send
 time put back. Any other outcome, a timeout or a reset connection above all,
 is treated as maybe delivered and keeps both, since the sender cannot tell a
 lost acknowledgement from a lost message (at-least-once delivery with
-idempotent acceptance). A later resend replaces the staged digest, so at most
+idempotent acceptance). A later resend replaces the staged digest; a resend
+proven not to have left puts the earlier staged digest back (#1943 A-R3), so at most
 two links resolve for one pending sign-in. Expiry and single use are the
 row's: deciding through either link spends both, and the sweep removes both.

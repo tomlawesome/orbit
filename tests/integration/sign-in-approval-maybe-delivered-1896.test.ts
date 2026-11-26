@@ -211,6 +211,43 @@ describe("a refused resend clears its staged link (#1896)", () => {
   }, 60_000);
 });
 
+describe("a refused resend after a maybe-delivered one puts the earlier staged link back (#1943 A-R3)", () => {
+  it("resend 1 times out, resend 2 is refused with a numbered reply: T0 current, T1 staged, the send time resend 1's", async () => {
+    const userId = await account();
+    const approval = await pendingWithLink(userId);
+    const firstAt = new Date(Date.now() - 120_000);
+    let first = "";
+    let second = "";
+
+    const one = await resendSignInApproval(approval.claim, {
+      now: firstAt,
+      mailer: { async sendEmail(notification: SmtpNotification) { first = tokenIn(notification); throw timedOut(); } },
+    });
+    expect(one).toMatchObject({ state: "sent" });
+    expect((await digestsOf(approval.id)).staged_token_hash).toBe(sha(first));
+
+    const two = await resendSignInApproval(approval.claim, {
+      now: new Date(firstAt.getTime() + 61_000),
+      mailer: {
+        async sendEmail(notification: SmtpNotification) {
+          second = tokenIn(notification);
+          throw Object.assign(new Error("relay refused"), { code: "EENVELOPE", responseCode: 550 });
+        },
+      },
+    });
+    expect(two).toMatchObject({ state: "sent" });
+    expect(second).not.toBe("");
+    expect(second).not.toBe(first);
+
+    const after = await digestsOf(approval.id);
+    expect(after.token_hash).toBe(sha(approval.oldToken));
+    expect(after.staged_token_hash).toBe(sha(first));
+    expect(new Date(after.last_sent_at as string).getTime()).toBe(firstAt.getTime());
+    expect(await stateOf(first)).toBe("open");
+    expect(await stateOf(second)).toBeNull();
+  }, 60_000);
+});
+
 describe("concurrent resends still send one mail (#1891, #1896)", () => {
   it("two at once with a timing-out mailer: one mail, one too_soon, exactly one staged digest", async () => {
     const userId = await account();

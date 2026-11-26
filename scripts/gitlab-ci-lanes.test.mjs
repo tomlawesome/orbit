@@ -2195,7 +2195,7 @@ exit 0
    * machinery expands to `name 1/N` ... `name N/N`, so the two must agree or
    * evidence would name jobs the pipeline never runs.
    */
-  const SHARDED = { rig_chromium: 2, rig_firefox: 2, rig_webkit: 3, film_webkit: 2 };
+  const SHARDED = { rig_chromium: 2, rig_firefox: 2, rig_webkit: 4, film_webkit: 2 };
   const inputsJson = () => JSON.parse(readFileSync(new URL("./ci/job-inputs.json", import.meta.url), "utf8"));
   const parallelOf = (name) => allBlocks.get(name).match(/^ {2}parallel: (\S+)\s*(?:#.*)?$/mu)?.[1];
 

@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { digest, download, downloadVerified } from "./build.mjs";
-import { TIKA_VERSION } from "./tika-version.mjs";
+import { TIKA_IMAGE_TAG, TIKA_VERSION } from "./tika-version.mjs";
 
 /*
  * O2-R5 (#1151): a download interrupted partway used to leave a half-written
@@ -193,12 +193,16 @@ describe("Tika version pin", () => {
     return { version: pin[1], digest: pin[2] };
   }
 
-  it("#1489: TIKA_VERSION is the version docker-compose.yml pins for orbit-tika", () => {
-    expect(TIKA_VERSION).toBe(composeTikaPin().version);
+  it("#1489: TIKA_IMAGE_TAG is the image tag docker-compose.yml pins for orbit-tika", () => {
+    expect(TIKA_IMAGE_TAG).toBe(composeTikaPin().version);
+  });
+
+  it("#1489: TIKA_VERSION is the pinned tag without its image rebuild number (the download is per release)", () => {
+    expect(TIKA_VERSION).toBe(composeTikaPin().version.replace(/-\d+$/u, ""));
   });
 
   it("#1489: cli.ts's Tika image carries the digest docker-compose.yml pins", () => {
     const source = readFileSync(new URL("./cli.ts", import.meta.url), "utf8");
-    expect(source).toContain(`apache/tika:\${TIKA_VERSION}-full@sha256:${composeTikaPin().digest}`);
+    expect(source).toContain(`apache/tika:\${TIKA_IMAGE_TAG}-full@sha256:${composeTikaPin().digest}`);
   });
 });
