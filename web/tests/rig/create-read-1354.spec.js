@@ -14,13 +14,11 @@ import { pickImportance } from "./importance-support.js";
  */
 
 test.use({
-  reducedMotion: "reduce",
   serviceWorkers: async ({}, use, testInfo) => {
     await use(testInfo.project.use.browserName === "webkit" ? "block" : "allow");
   },
 });
 
-const SETTLE = 20_000;
 const DOCUMENT = "chromium-synthetic.pdf";
 const DOCUMENT_BYTES = Buffer.concat([Buffer.from("%PDF-1.4\n"), Buffer.alloc(2048, 32), Buffer.from("%%EOF\n")]);
 const REASON = "That file is not a PDF or image we can keep";
@@ -39,7 +37,7 @@ const NOTHING = { extracted: true, suggestions: [], attachmentDisposition: "atta
 /** @param {import("@playwright/test").Page} page */
 async function gotoCreate(page) {
   await page.goto(`${APP}/create`, { waitUntil: "load" });
-  await page.locator("#card[data-ready]").waitFor({ state: "attached", timeout: SETTLE });
+  await page.locator("#card[data-ready]").waitFor({ state: "attached" });
 }
 
 /**
@@ -106,7 +104,7 @@ test("reading words show while both requests are out, then the page and the fiel
   await pick(page);
 
   const card = lane(page);
-  await expect(card).toContainText("Reading your document", { timeout: SETTLE });
+  await expect(card).toContainText("Reading your document");
   await expect(card).toContainText("Checking this file for viruses…");
   await expect(card).toContainText("orbit is reading the pages it was given");
   await expect(card).toContainText("nothing is saved, and nothing is assumed");
@@ -116,7 +114,7 @@ test("reading words show while both requests are out, then the page and the fiel
   await expect.poll(() => [asked.preview, asked.inspect]).toEqual([1, 1]);
 
   release();
-  await expect(pageOne(page)).toBeVisible({ timeout: SETTLE });
+  await expect(pageOne(page)).toBeVisible();
   await expect(card).toContainText(/page one/i);
   await expect(scanSaid(page)).toBeVisible();
   await expect(card).toContainText("the fields marked ◆ from document are what orbit read across into the form");
@@ -130,7 +128,7 @@ test("a read that finds nothing says so and leaves the fields alone", async ({ p
   await gotoCreate(page);
   await field(page, "provider").fill("typed by hand");
   await pick(page);
-  await expect(pageOne(page)).toBeVisible({ timeout: SETTLE });
+  await expect(pageOne(page)).toBeVisible();
   await expect(lane(page)).toContainText("orbit read the pages and found nothing to carry across");
   await expect(field(page, "provider")).toHaveValue("typed by hand");
 });
@@ -148,7 +146,7 @@ test("a suggestion never overwrites what was typed", async ({ page }) => {
   await gotoCreate(page);
   await field(page, "reference").fill("MY-OWN-REF");
   await pick(page);
-  await expect(field(page, "provider")).toHaveValue("British Gas", { timeout: SETTLE });
+  await expect(field(page, "provider")).toHaveValue("British Gas");
   await expect(field(page, "reference")).toHaveValue("MY-OWN-REF");
 });
 
@@ -158,7 +156,7 @@ test("a file the read refuses stays in the entry, marked refused in the server's
   await pick(page);
   await fillEntry(page);
   const card = lane(page);
-  await expect(card).toContainText("Orbit refused this file.", { timeout: SETTLE });
+  await expect(card).toContainText("Orbit refused this file.");
   await expect(card).toContainText(REASON);
   await expect(card).toContainText(DOCUMENT);
   await expect(card).toContainText("refused");
@@ -172,7 +170,7 @@ test("a malware verdict on the preview refuses the file in the lane's words", as
   await gotoCreate(page);
   await pick(page);
   const card = lane(page);
-  await expect(card).toContainText("Orbit refused this file.", { timeout: SETTLE });
+  await expect(card).toContainText("Orbit refused this file.");
   await expect(card).toContainText("it did not pass what orbit checks before keeping a file");
   await expect(card).toContainText("choose another document");
   await expect(pageOne(page)).toHaveCount(onPhone() ? 0 : 1);
@@ -187,7 +185,7 @@ test("scanner unavailable (#1593's 503): no page, the held line, the file still 
   await gotoCreate(page);
   await pick(page);
   const card = lane(page);
-  await expect(card).toContainText("The scanner couldn't be reached, Admin have been notified", { timeout: SETTLE });
+  await expect(card).toContainText("The scanner couldn't be reached, Admin have been notified");
   await expect(card).not.toContainText("Orbit refused this file.");
   await expect(scanSaid(page)).toBeHidden();
   await expect(card).toContainText(DOCUMENT);
@@ -201,7 +199,7 @@ test("a scan that timed out says so, not that admins were told", async ({ page }
   await gotoCreate(page);
   await pick(page);
   const card = lane(page);
-  await expect(card).toContainText("The scanner didn’t answer in time.", { timeout: SETTLE });
+  await expect(card).toContainText("The scanner didn’t answer in time.");
   await expect(card).toContainText("orbit checks it again then");
   await expect(card).not.toContainText("Admin have been notified");
 });
@@ -211,7 +209,7 @@ test("a page that cannot be drawn is said in the lane's words once the read is d
   await gotoCreate(page);
   await pick(page);
   const card = lane(page);
-  await expect(card).toContainText("Orbit could not draw a picture of this document.", { timeout: SETTLE });
+  await expect(card).toContainText("Orbit could not draw a picture of this document.");
   await expect(card).toContainText(/could not turn it into a page/i);
   await expect(card).not.toContainText("Orbit refused this file.");
 });
@@ -220,7 +218,7 @@ test("a read that fails says it could not read, with the server's words, and the
   await answered(page, { inspect: json(500, { error: { code: "inspection_failed", message: "The reader fell over" } }) });
   await gotoCreate(page);
   await pick(page);
-  await expect(pageOne(page)).toBeVisible({ timeout: SETTLE });
+  await expect(pageOne(page)).toBeVisible();
   const card = lane(page);
   await expect(card).toContainText("orbit could not read the pages this time");
   await expect(card).toContainText("The reader fell over");
@@ -231,7 +229,7 @@ test("a file too large to read is said so in the lane", async ({ page }) => {
   await answered(page, { inspect: json(413, { error: { code: "document_too_large", message: "big" } }) });
   await gotoCreate(page);
   await pick(page);
-  await expect(lane(page)).toContainText("this file is too large to send", { timeout: SETTLE });
+  await expect(lane(page)).toContainText("this file is too large to send");
 });
 
 test("not this one: the file and what it suggested leave, and nothing more is asked", async ({ page }) => {
@@ -243,7 +241,7 @@ test("not this one: the file and what it suggested leave, and nothing more is as
   });
   await gotoCreate(page);
   await pick(page);
-  await expect(field(page, "provider")).toHaveValue("British Gas", { timeout: SETTLE });
+  await expect(field(page, "provider")).toHaveValue("British Gas");
   await lane(page).getByRole("button", { name: "not this one" }).click();
   await expect(field(page, "provider")).toHaveValue("");
   if (onPhone()) await expect(lane(page)).toHaveCount(0);
@@ -266,10 +264,10 @@ test("picking again reads the new file and takes the first file's suggestions wi
   });
   await gotoCreate(page);
   await pick(page);
-  await expect(field(page, "provider")).toHaveValue("First Provider", { timeout: SETTLE });
+  await expect(field(page, "provider")).toHaveValue("First Provider");
   await pick(page);
-  await expect(field(page, "provider")).toHaveValue("", { timeout: SETTLE });
-  await expect(lane(page)).toContainText("orbit read the pages and found nothing to carry across", { timeout: SETTLE });
+  await expect(field(page, "provider")).toHaveValue("");
+  await expect(lane(page)).toContainText("orbit read the pages and found nothing to carry across");
   expect(asked.preview).toBe(2);
 });
 
@@ -284,8 +282,8 @@ test("desk: a document dropped on the zone is read like a picked one", async ({ 
   }, { name: DOCUMENT, bytes: DOCUMENT_BYTES.toString("base64") });
   await page.locator("#dropzone").dispatchEvent("dragover", { dataTransfer: files });
   await page.locator("#dropzone").dispatchEvent("drop", { dataTransfer: files });
-  await expect(page.locator("#readcard")).toContainText(DOCUMENT, { timeout: SETTLE });
-  await expect(pageOne(page)).toBeVisible({ timeout: SETTLE });
+  await expect(page.locator("#readcard")).toContainText(DOCUMENT);
+  await expect(pageOne(page)).toBeVisible();
   await expect(page.locator("#readcard")).toContainText("orbit read the pages and found nothing to carry across");
   expect([asked.preview, asked.inspect]).toEqual([1, 1]);
 });
