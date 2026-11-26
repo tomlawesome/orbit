@@ -23,7 +23,7 @@
     canRemove, closeConfirm, loadProviders, openConfirm, providerRows, providerState, removeNow, signedOutToo,
   } from "./providers.js";
   import {
-    card, commandMail, deleteSystemNow, inviteLocalUser, issueSetupLink, makeSystem, placePerson, restoreSystem, setAddress,
+    card, commandMail, deleteSystemNow, inviteLocalUser, issueSetupLink, makeSystem, placePerson, restoreSystem, setAddress, setAdministrator,
     runMailTest, retryJob, saveSending, setArchiveStorage, setContact, setDisabled, setMailLimit, setUploadLimit,
   } from "./acts.svelte.js";
 
@@ -54,12 +54,12 @@
 
   /** @typedef {NonNullable<Awaited<ReturnType<typeof import('$lib/data/workspace.js').readAdminScreen>>>} AdminView */
   /** @typedef {{ email: string, displayName: string, expiresInDays: number }} Draft */
-  /** @typedef {(intent: string, open: () => void, report?: (message: string) => void, about?: { resend?: { personId: string, days: number }, address?: { personId: string, email: string } }) => Promise<void>} Challenge */
+  /** @typedef {(intent: string, open: () => void, report?: (message: string) => void, about?: { resend?: { personId: string, days: number }, address?: { personId: string, email: string }, admin?: { personId: string } }) => Promise<void>} Challenge */
   /** @typedef {NonNullable<AdminView["users"]>[number]} Person */
   /** @typedef {AdminView["households"][number]} System */
 
-  /** @type {{ view: AdminView | null, fixtures: boolean, actorHasPassword: boolean, provenIntent: string, resumedResendPersonId: string | null, resumedAddress?: { personId: string, email: string } | null, draft: Draft, challenge: Challenge, reread: () => Promise<void>, spent: () => void, screenProblem: string | null, screenRefused: boolean, onretry: () => void }} */
-  let { view, fixtures, actorHasPassword, provenIntent, resumedResendPersonId, resumedAddress = null, draft = $bindable(), challenge, reread, spent, screenProblem, screenRefused, onretry } = $props();
+  /** @type {{ view: AdminView | null, fixtures: boolean, actorHasPassword: boolean, provenIntent: string, resumedResendPersonId: string | null, resumedAddress?: { personId: string, email: string } | null, resumedAdminPersonId?: string | null, draft: Draft, challenge: Challenge, reread: () => Promise<void>, spent: () => void, screenProblem: string | null, screenRefused: boolean, onretry: () => void }} */
+  let { view, fixtures, actorHasPassword, provenIntent, resumedResendPersonId, resumedAddress = null, resumedAdminPersonId = null, draft = $bindable(), challenge, reread, spent, screenProblem, screenRefused, onretry } = $props();
 
   /* A panel whose read failed says so with a "try again" (#1442), as
      settings does on the phone (#1195): the whole screen is re-read, and a
@@ -257,6 +257,43 @@
     });
   }
 
+  /* Giving or removing administrator access (#1633): its own sheet, shaped
+     as the setup link's, behind its own intent `administrator_set`. */
+  /** @type {Person | null} */
+  let adminFor = $state(null);
+  let adminOpen = $state(false);
+  let adminPassword = $state("");
+  const adminCard = $state(card());
+
+  /** @param {Person} person */
+  function openAdmin(person) {
+    peopleCard.problem = null;
+    challenge("administrator_set", () => {
+      adminFor = person;
+      adminPassword = "";
+      adminCard.problem = null;
+      adminOpen = true;
+    }, (message) => (peopleCard.problem = message), { admin: { personId: person.id } });
+  }
+
+  async function saveAdmin() {
+    const person = adminFor;
+    if (!person) return;
+    /* Never a PUT with neither a password nor a live proof: once the proof is
+       spent, the press starts a fresh step-up instead. */
+    if (!actorHasPassword && provenIntent !== "administrator_set") {
+      await challenge("administrator_set", () => {}, (message) => wake(message, { failure: true }), { admin: { personId: person.id } });
+      return;
+    }
+    await setAdministrator(person, !person.isInstanceAdmin, adminPassword, {
+      card: adminCard, actorHasPassword, reread, wake,
+      landed: () => { adminOpen = false; adminPassword = ""; spent(); },
+      /* With no password the step-up proof is spent: close, so the next try
+         starts a fresh step-up rather than a PUT that carries nothing. */
+      refused: () => { if (!actorHasPassword) { adminOpen = false; spent(); } },
+    });
+  }
+
   /* Placing a person in a system (§11, #453): the systems are the rows. */
   /** @type {Person | null} */
   let placing = $state(null);
@@ -292,6 +329,13 @@
     { label: "link", name: `Send ${person.displayName} a new setup link`, tone: "accent",
       onact: () => openResend(person) },
     ...(person.metadataStatus?.email === "metadata_integrity_failed" ? [] : addressAct(person)),
+    /* #1633: no `arms`, the sheet is the confirmation; never on the primary's
+       row, nor giving to a disabled account. The act answers `false` so the
+       row stays open under the sheet: folded, the act would be hidden and
+       Escape could not hand focus back to it. */
+    ...(person.isPrimaryAdministrator || (!person.isInstanceAdmin && person.disabledAt) ? [] : [person.isInstanceAdmin
+      ? /** @type {import('$lib/pocket/row.js').RowAct} */ ({ label: "remove admin", name: `Remove ${person.displayName}'s administrator access`, onact: () => { openAdmin(person); return false; } })
+      : /** @type {import('$lib/pocket/row.js').RowAct} */ ({ label: "make admin", name: `Give ${person.displayName} administrator access`, tone: "accent", onact: () => { openAdmin(person); return false; } })]),
     person.disabledAt
       ? { label: "enable", name: `Enable ${person.displayName}`, tone: "ok", onact: () => disable(person, false) }
       /* §2.6: disable arms. The wake still offers undo (§1.13) once it has
@@ -643,6 +687,15 @@
         resendOpen = true;
       }
     }
+    if (provenIntent === "administrator_set" && resumedAdminPersonId) {
+      const person = view.users?.find((one) => one.id === resumedAdminPersonId);
+      if (person) {
+        adminFor = person;
+        adminPassword = "";
+        adminCard.problem = null;
+        adminOpen = true;
+      }
+    }
     if (provenIntent === "email_address_set" && resumedAddress) {
       const person = view.users?.find((one) => one.id === resumedAddress.personId);
       if (person) {
@@ -760,7 +813,7 @@
           {#snippet personDetail()}<div class="p-kv"><span>{standing}</span></div>{/snippet}
           <Row title="{person.displayName}{person.id === meId ? ' · you' : ''}"
                meta={person.email ?? (person.metadataStatus?.email === "metadata_integrity_failed" ? "address can’t be read" : undefined)}
-               trail={person.isInstanceAdmin ? "admin" : "user"}
+               trail={person.isPrimaryAdministrator ? "primary admin" : person.isInstanceAdmin ? "admin" : "user"}
                trailTone={person.isInstanceAdmin ? "var(--accent-text)" : ""} acts={personActs(person)}
                detail={standing ? personDetail : undefined}>
             {#snippet mark()}<span class="p-avatar" class:owner={person.isInstanceAdmin} class:ad-off={person.disabledAt}>{initials(person.displayName)}</span>{/snippet}
@@ -1327,6 +1380,26 @@
       {#if addressFor}
         <button class="p-pill filled" type="submit" form="ad-address-form" disabled={addressCard.busy}>{addressCard.busy ? "setting…" : ownAddress && ownAddressArmed ? `set my address to ${addressArmed}` : "set it"}</button>
         {#if ownAddressArmed}<button class="p-pill" type="button" onclick={() => { addressArmed = ""; addressDraft = ""; }}>cancel</button>{/if}
+      {/if}
+    {/snippet}
+  </Sheet>
+
+  <Sheet bind:open={adminOpen} size="callout" title="Administrator access">
+    {#if adminFor}
+      <form id="ad-admin-form" onsubmit={(event) => { event.preventDefault(); saveAdmin(); }}>
+        <p class="p-prose ad-sheet-say">{adminFor.isInstanceAdmin
+          ? `Removes ${adminFor.displayName}'s administrator access. They keep their account and their households.`
+          : `Gives ${adminFor.displayName} administrator access: they will see every household and every person on this instance, and can change who else is an administrator.`}</p>
+        {#if actorHasPassword}
+          <label class="ad-label" for="ad-admin-current">your current password</label>
+          <input id="ad-admin-current" class="p-input" type="password" autocomplete="current-password" enterkeyhint="send"
+                 bind:value={adminPassword} required>
+        {/if}
+      </form>
+    {/if}
+    {#snippet foot()}
+      {#if adminFor}
+        <button class="p-pill filled" type="submit" form="ad-admin-form" disabled={adminCard.busy}>{adminFor.isInstanceAdmin ? "remove it" : "give it"}</button>
       {/if}
     {/snippet}
   </Sheet>

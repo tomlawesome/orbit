@@ -7,6 +7,8 @@ import {
   setInstanceUserDisabled,
   listInstanceUsers,
 } from "@/server/admin-repository";
+import { sealStepUpProof, stepUpProofCookieName } from "@/lib/auth/recent-auth";
+import { getAuthConfig } from "@/lib/env";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
 import { callRouteForSession, loadRoute } from "./support/request-event";
 
@@ -104,10 +106,14 @@ describe("primary administrator authority (#263)", () => {
     expect(disabledBody.error?.code).toBe("primary_administrator_protected");
     expect(disabledBody.error?.message).toBe(PRIMARY_PROTECTED_MESSAGE);
 
+    /* The PUT is re-challenged (#1633): the OIDC-only actor brings an
+       administrator_set step-up proof, so the refusal is the primary's. */
+    const config = getAuthConfig();
+    const proof = await sealStepUpProof(actor.sessionId, "administrator_set", config);
     const demoted = await callRouteForSession(updateAdministrator, actor, {
       url: "http://127.0.0.1:3000/api/admin/users",
       method: "PUT",
-      headers,
+      headers: { ...headers, cookie: `${actor.headers.cookie}; ${stepUpProofCookieName(config)}=${proof}` },
       body: JSON.stringify({ userId: primary.id, administrator: false }),
     });
     expect(demoted.status).toBe(409);
