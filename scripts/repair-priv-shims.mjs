@@ -143,8 +143,8 @@ function slowSleep() {
 // timeout, telling the setpriv shim (ORBIT_TEST_RAN_FIRST=1) to only stall. The command has therefore landed before
 // the clock starts, whatever the runner's speed: the limit decides only how long the stall lasts, not the outcome.
 // The setpriv call is logged here, before anything else, so a slow start of the setpriv shim cannot lose it.
-// Every other accepted setpriv step has its clock replaced by a 600 s hang guard: its own work is not what is
-// under test, and a loaded runner must not cut it short (a cut-short earlier step also keeps the run from ever
+// Every other accepted setpriv step runs directly, under no clock at all (the real timeout is not run): its own
+// work is not what is under test, and a loaded runner must not cut it short (a cut-short earlier step also keeps the run from ever
 // reaching the stalled one, #1954). Calls that are not setpriv steps pass through unchanged.
 function timeoutShim(variant, dbGid, setprivFail, privLog) {
   return String.raw`args=("$@")
@@ -168,7 +168,7 @@ fi
 if [[ "$relax" == 1 ]]; then
   i=0
   while [[ "\${args[$i]}" == -* ]]; do case "\${args[$i]}" in -k|-s) i=$((i + 2));; *) i=$((i + 1));; esac; done
-  args[$i]=__HANG__
+  exec "\${args[@]:$((i + 1))}"
 fi
 exec '__REAL__' "\${args[@]}"
 `
@@ -178,7 +178,6 @@ exec '__REAL__' "\${args[@]}"
     .replaceAll("__FAIL__", setprivFail ?? "__never__")
     .replaceAll("__MATCH__", variant.match ?? "*")
     .replaceAll("__PRIVLOG__", privLog)
-    .replaceAll("__HANG__", "600")
     .replaceAll("__SLOW__", slowSleep())
     .replaceAll("__REAL__", realTool("timeout"));
 }
