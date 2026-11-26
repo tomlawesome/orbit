@@ -67,6 +67,13 @@ test.describe("the signed-in v19 sweep", () => {
     await signedIn("/home", "rest")(page);
     await page.locator("button.orb").click();
     await expect(page.locator("button.orb")).toHaveAttribute("aria-expanded", "true");
+    /* #1969: the panel fades in (AccountCard.svelte, opacity over 0.25 s, not
+       turned off under reduced motion). Checked mid-fade, its text blends with
+       the page behind and axe reads a contrast that no reader is left with.
+       Wait for the fade itself to end, then look. */
+    const panel = page.locator("#account");
+    await panel.evaluate((el) => Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished)));
+    await expect(panel).toHaveCSS("opacity", "1");
     await axeCheck(page);
   });
 
