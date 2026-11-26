@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { APP, RIG_EXPECT_MS, RIG_TEST_MS, onPhone, signedIn } from "./a11y-support.js";
+import { APP, RIG_EXPECT_MS, onPhone, signedIn } from "./a11y-support.js";
 import { useFixtureScenes } from "../fidelity/pocket-states.js";
 
 /*
@@ -14,7 +14,6 @@ import { useFixtureScenes } from "../fidelity/pocket-states.js";
  * only: what the server holds after a reload, and the order saves were sent in.
  */
 test.use({ baseURL: APP });
-test.describe.configure({ timeout: RIG_TEST_MS });
 
 const HOUSEHOLD = "/household/hh-harlow-1";
 

@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 
-import { APP } from "./a11y-support.js";
+import { APP, RIG_EXPECT_MS } from "./a11y-support.js";
 
 /** @typedef {import("@playwright/test").Page} Page */
 
@@ -21,12 +21,25 @@ import { APP } from "./a11y-support.js";
  * stack suite's "an unrecognised or missing code fails open to the recoverable
  * face" went there (see the commit for the lines).
  *
- * `reducedMotion: "reduce"` file-wide, as the stack version had it: the "Try
+ * `reducedMotion: "reduce"` file-wide (the rig's default, #1964), as the stack version had it: the "Try
  * again" pill's navigation is instant by design under it (`rm ? 200 : 900` in
  * +page.svelte), so these tests do not wait out the ratified 900ms beat for
  * something the beat itself does not assert.
  */
-test.use({ baseURL: APP, reducedMotion: "reduce" });
+test.use({ baseURL: APP });
+
+/**
+ * #1970: the page is prerendered, and its face lands on `body[data-state]`
+ * only when it mounts (+page.svelte, onMount). A busy WebKit host hydrated
+ * after the default 5 s look, so the face read as empty. Wait for the mount,
+ * as the rig's other screens do (gotoCreate's `#card[data-ready]`), then read
+ * the face exactly.
+ * @param {Page} page @param {string} code
+ */
+async function open(page, code) {
+  await page.goto(`/auth/error?code=${code}`);
+  await page.locator("body[data-state]").waitFor({ state: "attached", timeout: RIG_EXPECT_MS });
+}
 
 /**
  * The WCAG sweep every held-dawn face has to pass.
@@ -43,7 +56,7 @@ test("didn't complete: the pill stays, and it is the one that plays the door's o
   /* Every code but one (auth-error-state.js): this is the ordinary case a
      provider refusal, a bad state parameter or an expired token exchange
      all land on. */
-  await page.goto("/auth/error?code=invalid_state");
+  await open(page, "invalid_state");
 
   await expect(page.locator("body")).toHaveAttribute("data-state", "incomplete");
   await expect(page.getByText("Sign-in didn’t complete.")).toBeVisible();
@@ -66,7 +79,7 @@ test("didn't complete: the pill stays, and it is the one that plays the door's o
 });
 
 test("account disabled: refused, no pill, the administrator named plainly", async ({ page }) => {
-  await page.goto("/auth/error?code=account_disabled");
+  await open(page, "account_disabled");
 
   await expect(page.locator("body")).toHaveAttribute("data-state", "refused");
   await expect(page.getByText("Sign-in was refused.")).toBeVisible();
@@ -85,7 +98,7 @@ test("account disabled: refused, no pill, the administrator named plainly", asyn
    asserted here is that the page passes the code through (the ordinary words
    never mention Settings), keeps the way back, and fits the pocket's width. */
 test("link required: says to link from Settings, keeps the way back, fits the width", async ({ page }) => {
-  await page.goto("/auth/error?code=link_required");
+  await open(page, "link_required");
 
   await expect(page.locator("body")).toHaveAttribute("data-state", "incomplete");
   const state = page.locator(".state");

@@ -23,7 +23,6 @@ import { guardedRoute } from "./workspace-writes.js";
 
 test.use({ baseURL: APP, serviceWorkers: "block" });
 
-const SETTLE = 20_000;
 const { id: RECEIPT, attachmentName: PAPER } = SUGGESTION;
 const SECTIONS = [
   { id: "s-home", name: "Home" }, { id: "s-vehicles", name: "Vehicles" },
@@ -70,7 +69,7 @@ async function openInbox(page, names) {
   const mail = await rememberMailDecisions(page);
   await flag(page, names);
   await page.goto("/inbox");
-  await expect(decisions(page, test.info()).add).toBeVisible({ timeout: SETTLE });
+  await expect(decisions(page, test.info()).add).toBeVisible();
   await settle(page);
   return mail;
 }
@@ -118,7 +117,7 @@ test("Add without it asks twice, then adds the mail", async ({ page }, testInfo)
   await add.click();
   expect(mail.approvals.length, "one tap only arms").toBe(0);
   await add.click();
-  await expect.poll(() => mail.approvals.length, { timeout: SETTLE }).toBe(1);
+  await expect.poll(() => mail.approvals.length).toBe(1);
   expect(mail.approvals[0]).toMatchObject({ source: { receiptId: RECEIPT } });
   expect(mail.removals).toEqual([]);
 });
@@ -130,7 +129,7 @@ test("Discard everything asks twice, then discards the mail", async ({ page }, t
   await discard.click();
   expect(mail.removals, "one tap only arms").toEqual([]);
   await discard.click();
-  await expect.poll(() => mail.removals, { timeout: SETTLE }).toEqual([RECEIPT]);
+  await expect.poll(() => mail.removals).toEqual([RECEIPT]);
   expect(mail.approvals).toHaveLength(0);
 });
 
@@ -139,7 +138,7 @@ test("desktop: Add without it and Discard everything each sit on one line, as ta
   await rememberMailDecisions(page);
   await page.goto("/inbox");
   const plain = decisions(page, testInfo);
-  await expect(plain.discard).toBeVisible({ timeout: SETTLE });
+  await expect(plain.discard).toBeVisible();
   await settle(page);
   const dismiss = (await plain.discard.boundingBox())?.height ?? 0;
   expect(dismiss, "the ordinary Dismiss is measured").toBeGreaterThan(0);
@@ -147,7 +146,7 @@ test("desktop: Add without it and Discard everything each sit on one line, as ta
   await flag(page, [PAPER]);
   await page.goto("/inbox");
   const { add, discard } = decisions(page, testInfo);
-  await expect(add).toContainText("Add without it", { timeout: SETTLE });
+  await expect(add).toContainText("Add without it");
   await settle(page);
   for (const button of [add, discard]) {
     const box = await button.boundingBox();

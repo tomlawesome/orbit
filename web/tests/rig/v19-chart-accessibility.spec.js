@@ -16,14 +16,13 @@ import { signedIn } from "./a11y-support.js";
  */
 
 const MOT = { id: "i-mot", title: "Car MOT — Volvo V60" };
-const SETTLE = 20_000;
 
 test("names the household link and every rendered body, and hides the decorative chrome", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name.endsWith("phone"), "the labelled-group dial is the desktop dialect; the pocket dial (.mdial) is out of scope for #495/#660");
 
   await signedIn("/home", "rest")(page);
   const dial = page.locator(".dial");
-  await expect(dial).toBeVisible({ timeout: SETTLE });
+  await expect(dial).toBeVisible();
 
   // Criterion 1: a labelled group, not a subtree-pruning image, keeping its existing label exactly.
   //

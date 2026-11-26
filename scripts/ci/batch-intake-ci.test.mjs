@@ -49,7 +49,9 @@ function closureOf(name, text, seen = new Set()) {
 }
 const FAST_NEEDS = [...closureOf("fast", ci)];
 // #1831: `fast_checks` is the static half of what `fast` was, so it runs here too.
-const BATCH_JOBS = [...STATIC_CHECKS, "fast", "fast_checks", ...FAST_NEEDS].sort();
+// #1933: `fast_coverage` carries `fast`'s rules (it holds its floor check); on a
+// batch merge request it sees a narrowed run and stops at once.
+const BATCH_JOBS = [...STATIC_CHECKS, "fast", "fast_checks", "fast_coverage", ...FAST_NEEDS].sort();
 
 describe("a merge request into a batch branch (#1720)", () => {
   for (const [event, env] of Object.entries(BATCH_EVENTS)) {

@@ -256,7 +256,7 @@ describe("containsTarget", () => {
 });
 
 describe("slowGates (GitLab API stubbed)", () => {
-  const GREEN = ["screens_chromium", "smoke", "fast"].map((job) => ({ name: job, status: "success" }));
+  const GREEN = ["screens_chromium", "smoke", "fast", "fast_coverage"].map((job) => ({ name: job, status: "success" }));
 
   // pipelines: [{ id, sha, ref, sameTree, jobs }]; mergeRequests: { iid: targetBranch }
   function stubGitlab({ pipelines, mrPipelines = [], mergeRequests = {}, status = 200 }) {
@@ -327,11 +327,23 @@ describe("slowGates (GitLab API stubbed)", () => {
     const gates = await lookupsFor(dir).slowGates();
     expect(gates.map((g) => g.job)).toEqual(GREEN.map((j) => j.name));
   });
+  it("looks further back past a same-tree pipeline from before fast_coverage existed (#1933)", async () => {
+    const dir = repoForGates();
+    const older = GREEN.filter((j) => j.name !== "fast_coverage");
+    stubGitlab({
+      pipelines: [
+        { id: 30, sha: "c3", ref: "dev", sameTree: true, jobs: older },
+        { id: 20, sha: "c2", ref: "dev", sameTree: true, jobs: GREEN },
+      ],
+    });
+    const gates = await lookupsFor(dir).slowGates();
+    expect(gates.map((g) => g.job)).toEqual(GREEN.map((j) => j.name));
+  });
   it("reports a failed job as failed", async () => {
     const dir = repoForGates();
     stubGitlab({
       pipelines: [
-        { id: 20, sha: "c2", ref: "dev", sameTree: true, jobs: [{ name: "screens_chromium", status: "failed" }, { name: "smoke", status: "success" }, { name: "fast", status: "success" }] },
+        { id: 20, sha: "c2", ref: "dev", sameTree: true, jobs: [{ name: "screens_chromium", status: "failed" }, { name: "smoke", status: "success" }, { name: "fast", status: "success" }, { name: "fast_coverage", status: "success" }] },
       ],
     });
     const gates = await lookupsFor(dir).slowGates();

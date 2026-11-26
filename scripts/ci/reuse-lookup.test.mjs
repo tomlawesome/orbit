@@ -95,18 +95,20 @@ beforeEach(() => {
   envFile = join(directory, "reuse.env");
   outFile = join(directory, "image.env");
   writeFileSync(envFile, [
-    `ORBIT_INPUTS_FAST=${KEY}`,
+    `ORBIT_INPUTS_FAST_DOCKER=${KEY}`,
     `ORBIT_INPUTS_FAST_CHECKS=${KEY}`,
     `ORBIT_INPUTS_RIG_CHROMIUM=${KEY}`,
-    // #1546: the shard is the unit of evidence, so the gate of `rig_chromium 1/2`
+    // #1546: the shard is the unit of evidence, so the gate of `rig_chromium 1/3`
     // reads the variables of its own full name (one definition hash serves all
     // shards, so every shard of a job carries the same key).
-    `ORBIT_INPUTS_RIG_CHROMIUM_1_2=${KEY}`,
-    `ORBIT_INPUTS_RIG_CHROMIUM_2_2=${KEY}`,
+    `ORBIT_INPUTS_RIG_CHROMIUM_1_3=${KEY}`,
+    `ORBIT_INPUTS_RIG_CHROMIUM_2_3=${KEY}`,
+    `ORBIT_INPUTS_RIG_CHROMIUM_3_3=${KEY}`,
     `ORBIT_INPUTS_RIG_WEBKIT=${KEY}`,
-    `ORBIT_INPUTS_RIG_WEBKIT_1_3=${KEY}`,
-    `ORBIT_INPUTS_RIG_WEBKIT_2_3=${KEY}`,
-    `ORBIT_INPUTS_RIG_WEBKIT_3_3=${KEY}`,
+    `ORBIT_INPUTS_RIG_WEBKIT_1_4=${KEY}`,
+    `ORBIT_INPUTS_RIG_WEBKIT_2_4=${KEY}`,
+    `ORBIT_INPUTS_RIG_WEBKIT_3_4=${KEY}`,
+    `ORBIT_INPUTS_RIG_WEBKIT_4_4=${KEY}`,
     `ORBIT_INPUTS_SCREENS_CHROMIUM=${KEY}`,
     `ORBIT_SOURCE_SMOKE=${SOURCE}`,
     "",
@@ -135,15 +137,15 @@ const lines = () => logged.join("\n");
 describe("the source-keyed lookup", () => {
   it("stands on the newest successful run whose evidence names the same key", async () => {
     await start({
-      pipelines: [{ id: 299, jobs: [passed(9001, "fast")] }],
-      evidence: { 9001: { fast: { job: "fast", inputs: KEY, pipeline: 299, job_id: 9001, stands_on: null } } },
+      pipelines: [{ id: 299, jobs: [passed(9001, "fast_docker")] }],
+      evidence: { 9001: { "fast-docker": { job: "fast_docker", inputs: KEY, pipeline: 299, job_id: 9001, stands_on: null } } },
     });
 
     await run({ env: environment(), envFile, now: NOW, log });
 
-    expect(emitted()).toContain("ORBIT_REUSE_FAST=9001");
-    expect(emitted()).toContain("ORBIT_REUSE_FAST_PIPELINE=299");
-    expect(lines()).toContain("fast: stands on job 9001 from pipeline 299");
+    expect(emitted()).toContain("ORBIT_REUSE_FAST_DOCKER=9001");
+    expect(emitted()).toContain("ORBIT_REUSE_FAST_DOCKER_PIPELINE=299");
+    expect(lines()).toContain("fast_docker: stands on job 9001 from pipeline 299");
   });
 
   it("treats fast_checks as source-keyed and stands on its own earlier run (#1831)", async () => {
@@ -160,8 +162,8 @@ describe("the source-keyed lookup", () => {
 
   it("sends the token as a header and never in the URL", async () => {
     await start({
-      pipelines: [{ id: 299, jobs: [passed(9001, "fast")] }],
-      evidence: { 9001: { fast: { inputs: KEY, pipeline: 299, job_id: 9001 } } },
+      pipelines: [{ id: 299, jobs: [passed(9001, "fast_docker")] }],
+      evidence: { 9001: { "fast-docker": { inputs: KEY, pipeline: 299, job_id: 9001 } } },
     });
 
     await run({ env: environment(), envFile, now: NOW, log });
@@ -172,49 +174,49 @@ describe("the source-keyed lookup", () => {
 
   it("does not reuse a run whose key has since changed", async () => {
     await start({
-      pipelines: [{ id: 299, jobs: [passed(9001, "fast")] }],
-      evidence: { 9001: { fast: { inputs: OTHER_KEY, pipeline: 299, job_id: 9001 } } },
+      pipelines: [{ id: 299, jobs: [passed(9001, "fast_docker")] }],
+      evidence: { 9001: { "fast-docker": { inputs: OTHER_KEY, pipeline: 299, job_id: 9001 } } },
     });
 
     await run({ env: environment(), envFile, now: NOW, log });
 
-    expect(emitted()).not.toContain("ORBIT_REUSE_FAST");
+    expect(emitted()).not.toContain("ORBIT_REUSE_FAST_DOCKER");
     expect(lines()).toContain("ran on a different key");
   });
 
   it("does not reuse a job that did not succeed", async () => {
     await start({
-      pipelines: [{ id: 299, jobs: [{ id: 9001, name: "fast", status: "failed", finished_at: RECENT }] }],
-      evidence: { 9001: { fast: { inputs: KEY, pipeline: 299, job_id: 9001 } } },
+      pipelines: [{ id: 299, jobs: [{ id: 9001, name: "fast_docker", status: "failed", finished_at: RECENT }] }],
+      evidence: { 9001: { "fast-docker": { inputs: KEY, pipeline: 299, job_id: 9001 } } },
     });
 
     await run({ env: environment(), envFile, now: NOW, log });
 
-    expect(emitted()).not.toContain("ORBIT_REUSE_FAST");
-    expect(lines()).toContain("fast: runs");
+    expect(emitted()).not.toContain("ORBIT_REUSE_FAST_DOCKER");
+    expect(lines()).toContain("fast_docker: runs");
   });
 
   // A job that gated itself out is green and has no evidence. Green is not the
   // same as "did the work", and this is the only thing that tells them apart.
   it("does not reuse a green job that left no evidence", async () => {
-    await start({ pipelines: [{ id: 299, jobs: [passed(9001, "fast")] }] });
+    await start({ pipelines: [{ id: 299, jobs: [passed(9001, "fast_docker")] }] });
 
     await run({ env: environment(), envFile, now: NOW, log });
 
-    expect(emitted()).not.toContain("ORBIT_REUSE_FAST");
+    expect(emitted()).not.toContain("ORBIT_REUSE_FAST_DOCKER");
   });
 
   it("follows a reused run back to the job that really did the work", async () => {
     await start({
       pipelines: [
-        { id: 299, jobs: [passed(9100, "rig_chromium 1/2")] },
-        { id: 250, jobs: [passed(8000, "rig_chromium 1/2")] },
+        { id: 299, jobs: [passed(9100, "rig_chromium 1/3")] },
+        { id: 250, jobs: [passed(8000, "rig_chromium 1/3")] },
       ],
       evidence: {
         9100: {
           // #1546: rig_chromium is sharded, so the job and its evidence file
           // carry the shard's name (the file its slug).
-          "rig-chromium-1-2": { inputs: KEY, pipeline: 299, job_id: 9100, stands_on: 8000, stands_on_pipeline: 250 },
+          "rig-chromium-1-3": { inputs: KEY, pipeline: 299, job_id: 9100, stands_on: 8000, stands_on_pipeline: 250 },
         },
       },
     });
@@ -222,33 +224,33 @@ describe("the source-keyed lookup", () => {
     await run({ env: environment(), envFile, now: NOW, log });
 
     // 8000, not 9100: 9100 stood on it, and 8000 is the run that did the work.
-    expect(emitted()).toContain("ORBIT_REUSE_RIG_CHROMIUM_1_2=8000");
-    expect(emitted()).toContain("ORBIT_REUSE_RIG_CHROMIUM_1_2_PIPELINE=250");
+    expect(emitted()).toContain("ORBIT_REUSE_RIG_CHROMIUM_1_3=8000");
+    expect(emitted()).toContain("ORBIT_REUSE_RIG_CHROMIUM_1_3_PIPELINE=250");
   });
 
   it("keeps looking through older pipelines for a job the newest one did not run", async () => {
     await start({
       pipelines: [
         { id: 299, jobs: [passed(9100, "rig_chromium")] },
-        { id: 250, jobs: [passed(8000, "fast")] },
+        { id: 250, jobs: [passed(8000, "fast_docker")] },
       ],
-      evidence: { 8000: { fast: { inputs: KEY, pipeline: 250, job_id: 8000 } } },
+      evidence: { 8000: { "fast-docker": { inputs: KEY, pipeline: 250, job_id: 8000 } } },
     });
 
     await run({ env: environment(), envFile, now: NOW, log });
 
-    expect(emitted()).toContain("ORBIT_REUSE_FAST=8000");
+    expect(emitted()).toContain("ORBIT_REUSE_FAST_DOCKER=8000");
   });
 
   it("never looks at the pipeline it is running in", async () => {
     await start({
-      pipelines: [{ id: 300, jobs: [passed(9001, "fast")] }],
-      evidence: { 9001: { fast: { inputs: KEY, pipeline: 300, job_id: 9001 } } },
+      pipelines: [{ id: 300, jobs: [passed(9001, "fast_docker")] }],
+      evidence: { 9001: { "fast-docker": { inputs: KEY, pipeline: 300, job_id: 9001 } } },
     });
 
     await run({ env: environment(), envFile, now: NOW, log });
 
-    expect(emitted()).not.toContain("ORBIT_REUSE_FAST");
+    expect(emitted()).not.toContain("ORBIT_REUSE_FAST_DOCKER");
     expect(lines()).toContain("no earlier pipeline");
   });
 
@@ -268,30 +270,30 @@ describe("the walk goes project-wide", () => {
   // against the same content is evidence for a merge request that never ran it.
   it("asks for the project's own pipelines, not this merge request's", async () => {
     await start({
-      pipelines: [{ id: 299, ref: "dev", jobs: [passed(9001, "fast")] }],
-      evidence: { 9001: { fast: { inputs: KEY, pipeline: 299, job_id: 9001 } } },
+      pipelines: [{ id: 299, ref: "dev", jobs: [passed(9001, "fast_docker")] }],
+      evidence: { 9001: { "fast-docker": { inputs: KEY, pipeline: 299, job_id: 9001 } } },
     });
 
     await run({ env: environment(), envFile, now: NOW, log });
 
     expect(seen.paths[0]).toBe(`/api/v4/projects/49/pipelines?per_page=${MAX_PIPELINES}&order_by=id&sort=desc`);
     expect(seen.paths.join("\n")).not.toContain("merge_requests");
-    expect(emitted()).toContain("ORBIT_REUSE_FAST=9001");
+    expect(emitted()).toContain("ORBIT_REUSE_FAST_DOCKER=9001");
   });
 
   it("looks no further back than twenty pipelines", async () => {
     const pipelines = Array.from({ length: MAX_PIPELINES + 6 }, (unused, index) => ({
       id: 400 - index,
-      jobs: index === MAX_PIPELINES + 5 ? [passed(9001, "fast")] : [],
+      jobs: index === MAX_PIPELINES + 5 ? [passed(9001, "fast_docker")] : [],
     }));
     await start({
       pipelines,
-      evidence: { 9001: { fast: { inputs: KEY, pipeline: 374, job_id: 9001 } } },
+      evidence: { 9001: { "fast-docker": { inputs: KEY, pipeline: 374, job_id: 9001 } } },
     });
 
     await run({ env: environment(), envFile, now: NOW, log });
 
-    expect(emitted()).not.toContain("ORBIT_REUSE_FAST");
+    expect(emitted()).not.toContain("ORBIT_REUSE_FAST_DOCKER");
     expect(seen.paths.filter((path) => path.includes("/jobs?")).length).toBe(MAX_PIPELINES);
   });
 });
@@ -299,13 +301,13 @@ describe("the walk goes project-wide", () => {
 describe("the seven-day limit", () => {
   it("does not reuse a pass older than seven days", async () => {
     await start({
-      pipelines: [{ id: 299, jobs: [passed(9001, "fast", STALE)] }],
-      evidence: { 9001: { fast: { inputs: KEY, pipeline: 299, job_id: 9001 } } },
+      pipelines: [{ id: 299, jobs: [passed(9001, "fast_docker", STALE)] }],
+      evidence: { 9001: { "fast-docker": { inputs: KEY, pipeline: 299, job_id: 9001 } } },
     });
 
     await run({ env: environment(), envFile, now: NOW, log });
 
-    expect(emitted()).not.toContain("ORBIT_REUSE_FAST");
+    expect(emitted()).not.toContain("ORBIT_REUSE_FAST_DOCKER");
     expect(lines()).toContain("finished too long ago");
     // And never even reads the evidence, so a stale artefact costs no request.
     expect(seen.paths.join("\n")).not.toContain("ci-evidence");
@@ -318,31 +320,31 @@ describe("the seven-day limit", () => {
   it("does not reuse a chain of reuses standing on a pass older than seven days", async () => {
     await start({
       pipelines: [
-        { id: 299, jobs: [passed(9001, "fast", RECENT)] },
-        { id: 100, jobs: [passed(7000, "fast", STALE)] },
+        { id: 299, jobs: [passed(9001, "fast_docker", RECENT)] },
+        { id: 100, jobs: [passed(7000, "fast_docker", STALE)] },
       ],
       evidence: {
         9001: {
-          fast: { inputs: KEY, pipeline: 299, job_id: 9001, stands_on: 7000, stands_on_pipeline: 100 },
+          "fast-docker": { inputs: KEY, pipeline: 299, job_id: 9001, stands_on: 7000, stands_on_pipeline: 100 },
         },
       },
     });
 
     await run({ env: environment(), envFile, now: NOW, log });
 
-    expect(emitted()).not.toContain("ORBIT_REUSE_FAST");
+    expect(emitted()).not.toContain("ORBIT_REUSE_FAST_DOCKER");
     expect(lines()).toContain("the one that really ran, finished too long ago");
   });
 
   it("does not reuse a pass whose finish time the API did not report", async () => {
     await start({
-      pipelines: [{ id: 299, jobs: [{ id: 9001, name: "fast", status: "success" }] }],
-      evidence: { 9001: { fast: { inputs: KEY, pipeline: 299, job_id: 9001 } } },
+      pipelines: [{ id: 299, jobs: [{ id: 9001, name: "fast_docker", status: "success" }] }],
+      evidence: { 9001: { "fast-docker": { inputs: KEY, pipeline: 299, job_id: 9001 } } },
     });
 
     await run({ env: environment(), envFile, now: NOW, log });
 
-    expect(emitted()).not.toContain("ORBIT_REUSE_FAST");
+    expect(emitted()).not.toContain("ORBIT_REUSE_FAST_DOCKER");
     expect(lines()).toContain("no finish time");
   });
 });
@@ -350,8 +352,8 @@ describe("the seven-day limit", () => {
 describe("the escape hatches", () => {
   async function withOnePass() {
     await start({
-      pipelines: [{ id: 299, jobs: [passed(9001, "fast")] }],
-      evidence: { 9001: { fast: { inputs: KEY, pipeline: 299, job_id: 9001 } } },
+      pipelines: [{ id: 299, jobs: [passed(9001, "fast_docker")] }],
+      evidence: { 9001: { "fast-docker": { inputs: KEY, pipeline: 299, job_id: 9001 } } },
     });
   }
 
@@ -361,7 +363,7 @@ describe("the escape hatches", () => {
     await run({ env: environment({ CI_MERGE_REQUEST_LABELS: "type: chore,ci: rerun" }), envFile, now: NOW, log });
 
     expect(seen.paths).toEqual([]);
-    expect(emitted()).not.toContain("ORBIT_REUSE_FAST");
+    expect(emitted()).not.toContain("ORBIT_REUSE_FAST_DOCKER");
     expect(lines()).toContain("ci: rerun");
   });
 
@@ -370,7 +372,7 @@ describe("the escape hatches", () => {
 
     await run({ env: environment({ CI_MERGE_REQUEST_LABELS: "ci: acceptance" }), envFile, now: NOW, log });
 
-    expect(emitted()).toContain("ORBIT_REUSE_FAST=9001");
+    expect(emitted()).toContain("ORBIT_REUSE_FAST_DOCKER=9001");
   });
 
   it("asks nothing when ORBIT_REUSE is off", async () => {
@@ -493,7 +495,7 @@ describe("the image jobs' keys", () => {
   });
 
   it("leaves a job out when classify published no source key for it", async () => {
-    writeFileSync(envFile, `ORBIT_INPUTS_FAST=${KEY}\n`);
+    writeFileSync(envFile, `ORBIT_INPUTS_FAST_DOCKER=${KEY}\n`);
     await start({ pipelines: [] });
 
     await run({ env: environmentWithImage(), envFile, artefact: "image", outFile, now: NOW, log });
@@ -517,16 +519,16 @@ describe("a job that failed with an allowed exit code (D-F17)", () => {
 
   it("is reused when status is failed and allow_failure is true, highest id winning", async () => {
     await start({
-      pipelines: [{ id: 299, jobs: [allowedFailure(9001, "fast"), allowedFailure(9002, "fast")] }],
+      pipelines: [{ id: 299, jobs: [allowedFailure(9001, "fast_docker"), allowedFailure(9002, "fast_docker")] }],
       evidence: {
-        9001: { fast: { job: "fast", inputs: KEY, pipeline: 299, job_id: 9001, stands_on: null } },
-        9002: { fast: { job: "fast", inputs: KEY, pipeline: 299, job_id: 9002, stands_on: null } },
+        9001: { "fast-docker": { job: "fast_docker", inputs: KEY, pipeline: 299, job_id: 9001, stands_on: null } },
+        9002: { "fast-docker": { job: "fast_docker", inputs: KEY, pipeline: 299, job_id: 9002, stands_on: null } },
       },
     });
 
     await run({ env: environment(), envFile, now: NOW, log });
 
-    expect(emitted()).toContain("ORBIT_REUSE_FAST=9002");
+    expect(emitted()).toContain("ORBIT_REUSE_FAST_DOCKER=9002");
   });
 
   it("is not reused when status is failed and allow_failure is false", async () => {
@@ -534,15 +536,15 @@ describe("a job that failed with an allowed exit code (D-F17)", () => {
       pipelines: [
         {
           id: 299,
-          jobs: [{ id: 9001, name: "fast", status: "failed", allow_failure: false, finished_at: RECENT }],
+          jobs: [{ id: 9001, name: "fast_docker", status: "failed", allow_failure: false, finished_at: RECENT }],
         },
       ],
-      evidence: { 9001: { fast: { job: "fast", inputs: KEY, pipeline: 299, job_id: 9001, stands_on: null } } },
+      evidence: { 9001: { "fast-docker": { job: "fast_docker", inputs: KEY, pipeline: 299, job_id: 9001, stands_on: null } } },
     });
 
     await run({ env: environment(), envFile, now: NOW, log });
 
-    expect(emitted()).not.toContain("ORBIT_REUSE_FAST");
+    expect(emitted()).not.toContain("ORBIT_REUSE_FAST_DOCKER");
   });
 });
 
@@ -551,7 +553,7 @@ describe("a job that failed with an allowed exit code (D-F17)", () => {
  * `name 1/N` ... `name N/N`. The lookup decides each shard on its own, by the
  * shard's full name, so shard 1's pass never stands for shard 2, and a change
  * of N orphans the old evidence. The evidence file is named by the job's slug
- * (CI_JOB_NAME_SLUG), because the slash in `rig_webkit 1/3` would make a folder.
+ * (CI_JOB_NAME_SLUG), because the slash in `rig_webkit 1/4` would make a folder.
  */
 describe("sharded candidates (#1546)", () => {
   const shardPass = (id, name) => ({ id, name, status: "success", finished_at: RECENT });
@@ -559,34 +561,36 @@ describe("sharded candidates (#1546)", () => {
 
   it("stands on shard 1's pass for shard 1 only, and runs shard 2", async () => {
     await start({
-      pipelines: [{ id: 299, ref: "dev", jobs: [shardPass(9301, "rig_webkit 1/3")] }],
-      evidence: evidenceFor(9301, "rig-webkit-1-3"),
+      pipelines: [{ id: 299, ref: "dev", jobs: [shardPass(9301, "rig_webkit 1/4")] }],
+      evidence: evidenceFor(9301, "rig-webkit-1-4"),
     });
 
     await run({ env: environment(), envFile, now: NOW, log });
 
-    expect(emitted()).toContain("ORBIT_REUSE_RIG_WEBKIT_1_3=9301");
-    expect(emitted()).toContain("ORBIT_REUSE_RIG_WEBKIT_1_3_PIPELINE=299");
-    expect(emitted()).not.toMatch(/ORBIT_REUSE_RIG_WEBKIT_2_3/u);
-    expect(emitted()).not.toMatch(/ORBIT_REUSE_RIG_WEBKIT_3_3/u);
+    expect(emitted()).toContain("ORBIT_REUSE_RIG_WEBKIT_1_4=9301");
+    expect(emitted()).toContain("ORBIT_REUSE_RIG_WEBKIT_1_4_PIPELINE=299");
+    expect(emitted()).not.toMatch(/ORBIT_REUSE_RIG_WEBKIT_2_4/u);
+    expect(emitted()).not.toMatch(/ORBIT_REUSE_RIG_WEBKIT_3_4/u);
+    expect(emitted()).not.toMatch(/ORBIT_REUSE_RIG_WEBKIT_4_4/u);
     // Nothing is decided for the job as a whole.
     expect(emitted()).not.toMatch(/ORBIT_REUSE_RIG_WEBKIT=/u);
-    expect(lines()).toContain("rig_webkit 1/3: stands on job 9301 from pipeline 299");
-    expect(lines()).toContain("rig_webkit 2/3: runs");
-    expect(lines()).toContain("rig_webkit 3/3: runs");
+    expect(lines()).toContain("rig_webkit 1/4: stands on job 9301 from pipeline 299");
+    expect(lines()).toContain("rig_webkit 2/4: runs");
+    expect(lines()).toContain("rig_webkit 3/4: runs");
+    expect(lines()).toContain("rig_webkit 4/4: runs");
   });
 
   it("reads each shard's evidence by its slug, never by a name with a space or a slash in it", async () => {
     await start({
-      pipelines: [{ id: 299, ref: "dev", jobs: [shardPass(9301, "rig_webkit 1/3")] }],
-      evidence: evidenceFor(9301, "rig-webkit-1-3"),
+      pipelines: [{ id: 299, ref: "dev", jobs: [shardPass(9301, "rig_webkit 1/4")] }],
+      evidence: evidenceFor(9301, "rig-webkit-1-4"),
     });
 
     await run({ env: environment(), envFile, now: NOW, log });
 
     const reads = seen.paths.filter((path) => path.includes("/artifacts/"));
     expect(reads.length, "an evidence file was asked for").toBeGreaterThan(0);
-    expect(reads).toContain("/api/v4/projects/49/jobs/9301/artifacts/ci-evidence/rig-webkit-1-3.json");
+    expect(reads).toContain("/api/v4/projects/49/jobs/9301/artifacts/ci-evidence/rig-webkit-1-4.json");
     for (const path of reads) expect(path, path).not.toMatch(/%2F|%20|\/rig_webkit|1\/3/iu);
   });
 
@@ -594,8 +598,8 @@ describe("sharded candidates (#1546)", () => {
     // Shard 2's job name carrying shard 1's evidence file: the key matches, the
     // slug does not, so there is nothing to read for it.
     await start({
-      pipelines: [{ id: 299, ref: "dev", jobs: [shardPass(9302, "rig_webkit 2/3")] }],
-      evidence: evidenceFor(9302, "rig-webkit-1-3"),
+      pipelines: [{ id: 299, ref: "dev", jobs: [shardPass(9302, "rig_webkit 2/4")] }],
+      evidence: evidenceFor(9302, "rig-webkit-1-4"),
     });
 
     await run({ env: environment(), envFile, now: NOW, log });
@@ -608,17 +612,17 @@ describe("sharded candidates (#1546)", () => {
       pipelines: [{
         id: 299,
         ref: "dev",
-        jobs: [1, 2, 3].map((n) => shardPass(9300 + n, `rig_webkit ${n}/3`)),
+        jobs: [1, 2, 3, 4].map((n) => shardPass(9300 + n, `rig_webkit ${n}/4`)),
       }],
-      evidence: Object.assign({}, ...[1, 2, 3].map((n) => evidenceFor(9300 + n, `rig-webkit-${n}-3`))),
+      evidence: Object.assign({}, ...[1, 2, 3, 4].map((n) => evidenceFor(9300 + n, `rig-webkit-${n}-4`))),
     });
 
     await run({ env: environment(), envFile, now: NOW, log });
 
-    for (const n of [1, 2, 3]) expect(emitted()).toContain(`ORBIT_REUSE_RIG_WEBKIT_${n}_3=${9300 + n}`);
+    for (const n of [1, 2, 3, 4]) expect(emitted()).toContain(`ORBIT_REUSE_RIG_WEBKIT_${n}_4=${9300 + n}`);
   });
 
-  it("ignores an evidence set from a parallel: 2 run once shards is 3", async () => {
+  it("ignores an evidence set from a parallel: 2 run once shards is 4", async () => {
     await start({
       pipelines: [{
         id: 299,
@@ -634,7 +638,7 @@ describe("sharded candidates (#1546)", () => {
     await run({ env: environment(), envFile, now: NOW, log });
 
     expect(emitted()).not.toMatch(/ORBIT_REUSE_RIG_WEBKIT/u);
-    for (const n of [1, 2, 3]) expect(lines()).toContain(`rig_webkit ${n}/3: runs`);
+    for (const n of [1, 2, 3, 4]) expect(lines()).toContain(`rig_webkit ${n}/4: runs`);
   });
 
   it("still looks up an unsharded candidate by its own name", async () => {

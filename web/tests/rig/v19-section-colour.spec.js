@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { APP, RIG_EXPECT_MS, RIG_TEST_MS, onPhone, signedIn } from "./a11y-support.js";
+import { APP, RIG_EXPECT_MS, onPhone, signedIn } from "./a11y-support.js";
 import { useFixtureScenes } from "../fidelity/pocket-states.js";
 
 /*
@@ -35,7 +35,6 @@ import { useFixtureScenes } from "../fidelity/pocket-states.js";
  *  - * a swatch pick saves at once: a `sections.replace` carrying `colour`.
  */
 test.use({ baseURL: APP });
-test.describe.configure({ timeout: RIG_TEST_MS });
 
 const HOUSEHOLD = "/household/hh-harlow-1";
 const COLOURS = ["home", "vehicles", "devices", "services"];
@@ -279,10 +278,12 @@ test("a pick on Home's row survives a reload and recolours the planets, the Add 
     await signedIn(HOUSEHOLD, "saves-kept")(page);
     const home = () => swatchesOf(page, "Home").getByRole("radio", { name: "vehicles", exact: true });
     await expect(home()).toBeVisible({ timeout: RIG_EXPECT_MS });
-    const saved = page.waitForRequest((request) => request.url().endsWith("/api/workspace/commands") && request.method() === "POST"
-      && request.postDataJSON()?.type === "sections.replace" && !request.postDataJSON()?.dryRun);
+    const saved = page.waitForResponse((response) => response.url().endsWith("/api/workspace/commands") && response.request().method() === "POST"
+      && response.request().postDataJSON()?.type === "sections.replace" && !response.request().postDataJSON()?.dryRun);
     await home().click();
-    const sent = (await saved).postDataJSON();
+    const savedResponse = await saved;
+    expect(savedResponse.ok(), "the section colour save is stored before the page reloads").toBe(true);
+    const sent = savedResponse.request().postDataJSON();
     expect(sent.sections.find((/** @type {{ id: string }} */ one) => one.id === "s-home")?.colour).toBe("vehicles");
     await expect(home()).toHaveAttribute("aria-checked", "true");
     await page.reload();
@@ -343,10 +344,12 @@ test("a pick saves only its colour: an unsaved hide stays unsaved (desk and phon
   await expect(showing()).toHaveAttribute(flag, "false");
 
   // a pick on another section
-  const saved = page.waitForRequest((request) => request.url().endsWith("/api/workspace/commands") && request.method() === "POST"
-    && request.postDataJSON()?.type === "sections.replace" && !request.postDataJSON()?.dryRun);
+  const saved = page.waitForResponse((response) => response.url().endsWith("/api/workspace/commands") && response.request().method() === "POST"
+    && response.request().postDataJSON()?.type === "sections.replace" && !response.request().postDataJSON()?.dryRun);
   await swatchesOf(page, "Home").getByRole("radio", { name: "vehicles", exact: true }).click();
-  const sent = (await saved).postDataJSON();
+  const savedResponse = await saved;
+  expect(savedResponse.ok(), "the section colour save is stored before the page reloads").toBe(true);
+  const sent = savedResponse.request().postDataJSON();
   expect(sent.sections.find((/** @type {{ id: string }} */ one) => one.id === "s-home")?.colour).toBe("vehicles");
   // what went out says Devices is still shown
   expect(sent.sections.find((/** @type {{ id: string }} */ one) => one.id === "s-devices")?.visible).toBe(true);
@@ -369,10 +372,12 @@ test("a pick saves only its colour: an unsaved rename and an unsaved removal sta
   await page.getByRole("button", { name: "Remove Dates & renewals" }).click();
   await expect(page.getByRole("button", { name: "Remove Dates & renewals" })).toHaveCount(0);
 
-  const saved = page.waitForRequest((request) => request.url().endsWith("/api/workspace/commands") && request.method() === "POST"
-    && request.postDataJSON()?.type === "sections.replace" && !request.postDataJSON()?.dryRun);
+  const saved = page.waitForResponse((response) => response.url().endsWith("/api/workspace/commands") && response.request().method() === "POST"
+    && response.request().postDataJSON()?.type === "sections.replace" && !response.request().postDataJSON()?.dryRun);
   await swatchesOf(page, "Home").getByRole("radio", { name: "devices", exact: true }).click();
-  const sent = (await saved).postDataJSON();
+  const savedResponse = await saved;
+  expect(savedResponse.ok(), "the section colour save is stored before the page reloads").toBe(true);
+  const sent = savedResponse.request().postDataJSON();
   expect(sent.sections.find((/** @type {{ id: string }} */ one) => one.id === "s-services")?.name).toBe("Services");
   expect(sent.sections.map((/** @type {{ id: string }} */ one) => one.id)).toContain("s-dates");
   expect(sent.moveItemsTo).toBeUndefined();

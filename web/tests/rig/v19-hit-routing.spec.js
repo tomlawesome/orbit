@@ -27,8 +27,6 @@ import { signedIn } from "./a11y-support.js";
  * Everything measured -- layout, CSS, hit-testing, the click -- is the real page.
  */
 
-const SETTLE = 20_000;
-
 /* Twenty overflows the twelve the sky can draw (#670) and leaves undrawn
    households for the last test. */
 const OVERFULL_SKY = Array.from({ length: 20 }, (_, index) => `Hit Routing ${String(index + 1).padStart(2, "0")}`);
@@ -101,7 +99,7 @@ async function packUntilOverlapping(page) {
   for (const viewport of DESK_VIEWPORTS) {
     await page.setViewportSize(viewport);
     await signedIn("/home", "full-sky")(page);
-    await expect(page.locator(".minisys").first()).toBeVisible({ timeout: SETTLE });
+    await expect(page.locator(".minisys").first()).toBeVisible();
     const overlap = await findOverlap(page);
     if (overlap) return { overlap, viewport, drawn: (await drawnNames(page)).length };
     tried.push(`${viewport.width}x${viewport.height} (${(await drawnNames(page)).length} drawn, no covering pair)`);
@@ -152,7 +150,7 @@ test("a click over one household's ring opens that household, not the neighbour 
 
   /* And the click that follows it lands in the same place. */
   await page.mouse.click(overlap.point.x, overlap.point.y);
-  await expect(page.getByRole("heading", { name: `Request to join ${overlap.target} system?` })).toBeVisible({ timeout: SETTLE });
+  await expect(page.getByRole("heading", { name: `Request to join ${overlap.target} system?` })).toBeVisible();
   await expect(page.getByRole("heading", { name: `Request to join ${overlap.neighbour} system?` })).toHaveCount(0);
 });
 
@@ -173,13 +171,13 @@ test("reverting the pointer-events rule gives the click to the neighbour, as #63
   expect(stolen).not.toBe(overlap.target);
 
   await page.mouse.click(overlap.point.x, overlap.point.y);
-  await expect(page.getByRole("heading", { name: `Request to join ${overlap.neighbour} system?` })).toBeVisible({ timeout: SETTLE });
+  await expect(page.getByRole("heading", { name: `Request to join ${overlap.neighbour} system?` })).toBeVisible();
 });
 
 test("a household the packed sky cannot draw is still reachable by name", async ({ page }) => {
   await page.setViewportSize(DESK_VIEWPORTS[0]);
   await signedIn("/home", "overfull-sky")(page);
-  await expect(page.locator(".minisys").first()).toBeVisible({ timeout: SETTLE });
+  await expect(page.locator(".minisys").first()).toBeVisible();
   const drawn = await drawnNames(page);
 
   /* Over capacity the floor pass marks the overflow undrawn rather than
@@ -194,7 +192,7 @@ test("a household the packed sky cannot draw is still reachable by name", async 
      carries a session that skips the newcomer stage (#840). */
   await signedIn("/", "arrival-overfull")(page);
   const belong = page.getByRole("group", { name: "Where do you belong?" });
-  await expect(belong).toBeVisible({ timeout: SETTLE });
+  await expect(belong).toBeVisible();
   for (const name of undrawn) {
     await expect(belong.getByRole("button", { name: `Request to join ${name}` })).toBeVisible();
   }

@@ -97,7 +97,8 @@ control.
 Coverage is collected for diagnostic visibility. The initial baseline does not
 fail on a global percentage.
 
-1. Publish text and machine-readable coverage from the fast test job.
+1. Publish text and machine-readable coverage from `fast_coverage`, which
+   merges the coverage of `fast`'s two shards (#1933).
 2. Use uncovered critical modules and branches to refine risk-ranked issues.
 3. Exclude generated declarations, tests, and intentionally declarative assets;
    do not exclude difficult production code merely to improve a number.
@@ -106,12 +107,18 @@ fail on a global percentage.
    directory drops below its floor, and also when it sits more than 5 points
    above it, so a gain is locked in by raising the floor. Floors only go up and
    are set at the measured value rounded down; a change that needs a lower
-   floor needs more tests. To get numbers that match CI, run what the `fast`
-   job runs on the push to `dev`:
+   floor needs more tests. CI measures the floors once, in `fast_coverage`:
+   `fast` runs as two shards (`ORBIT_TEST_SHARD`, #1933), each writes its
+   coverage into a Vitest blob with the thresholds off (Vitest enforces them
+   per run, and a shard sees half the suite), and `fast_coverage` merges the
+   blobs with `vitest --merge-reports`, which enforces the thresholds on the
+   merged map, then runs the floor check. The merge gives the same totals as
+   one unsharded run. To get numbers that match CI, run the unsharded
+   equivalent locally:
    `ORBIT_TEST_COVERAGE=true ORBIT_TEST_SKIP_DOCKER=true bash scripts/test-backend.sh`
-   with `ORBIT_TEST_CHANGED_BASE` unset, and read
-   `coverage/coverage-summary.json`, or download the `fast` job's `coverage/`
-   artifact. Only `scripts/test-backend.sh` reads `ORBIT_TEST_COVERAGE`; it
+   with `ORBIT_TEST_CHANGED_BASE` and `ORBIT_TEST_SHARD` unset, and read
+   `coverage/coverage-summary.json`, or download the `fast_coverage` job's
+   `coverage/` artifact. Only `scripts/test-backend.sh` reads `ORBIT_TEST_COVERAGE`; it
    narrows to the tests a change touches only when `ORBIT_TEST_CHANGED_BASE`
    is set (CI sets it on merge requests), and then measures no coverage at
    all. A local run with the Docker suites moves the numbers
@@ -414,7 +421,7 @@ this table is what runs.
 
 | Event | Runs |
 | --- | --- |
-| Merge request into `dev` | `vitest run --changed <merge base>` for the default and integration projects, without coverage; lint and type check; `rig_chromium` (journeys, web changes; two shards) once it measures under 10 minutes on three runs (the rule is written and switched off until then) |
+| Merge request into `dev` | `vitest run --changed <merge base>` for the default and integration projects, without coverage; lint and type check; `rig_chromium` (journeys, web changes; three shards) once it measures under 10 minutes on three runs (the rule is written and switched off until then) |
 | Push to `dev` | the full Vitest run with the coverage ratchet; integration in full; the non-browser stack jobs as today |
 | Promotion (push to `preview`) | everything but the nightly browser suite and the tap-floor measurement: the full Vitest run and the Chromium pixel screens (`screens_chromium`, one worker, no shards), then `browser_report`, the stack on Chromium desktop and phone (`smoke`, `smoke_local_only`) plus the WebKit sign-in sliver (`smoke_webkit`, `smoke_webkit_mobile`) |
 | Nightly | the same, plus the full tap-floor measurement (`pocket_measure`), which never fails the pipeline for a miss: a miss ends it as a warning, and `pocket_measure_filing`, which installs nothing and alone holds the filing token, files the screens that missed as one issue labelled `priority: low`; a failure that names no screen fails the filing job and is the night's ordinary failure |
@@ -426,7 +433,7 @@ per-spec isolation is not built.
 Sharded browser jobs (#1546, design note 52876, owner decision 97a). The
 the nightly runs ten rig-lane jobs where there were four (the promotion runs
 only `screens_chromium` of them since #1763):
-`rig_chromium` 2, `rig_firefox` 2, `rig_webkit` 3 and `film_webkit` 2 shards,
+`rig_chromium` 3, `rig_firefox` 2, `rig_webkit` 4 and `film_webkit` 2 shards,
 plus `screens_chromium`. The shard rule: GitLab's `parallel:` gives each job
 `CI_NODE_INDEX` and `CI_NODE_TOTAL`, `web/playwright.config.js` turns them
 into Playwright's own `--shard` when the total is above one, and Playwright
@@ -586,7 +593,7 @@ everything), and, for the six jobs that test the image (`smoke`,
 `fidelity` has no artefact axis — it is keyed on the whole checkout, a
 deliberate simplification rather than hashing the built `web/build` site.
 The shard is the unit (#1546): a sharded job (`shards` in
-`job-inputs.json`) is the GitLab jobs `rig_webkit 1/3` … `rig_webkit 3/3`,
+`job-inputs.json`) is the GitLab jobs `rig_webkit 1/4` … `rig_webkit 4/4`,
 each looked up and recorded under its full name, with one key for all of them.
 One shard's pass never stands for another's, and changing the count orphans
 the old evidence because the names no longer match. The evidence file is named
@@ -634,8 +641,11 @@ part of what used to be one job: type-check, lint, the coverage-bearing
 Vitest run and the web build, on the unprivileged `big` lane. Since #1831
 that is itself split by phase (`ORBIT_TEST_PHASE` in `scripts/test-backend.sh`):
 `fast_checks` runs type-check, lint, the web build and the render proof and
-publishes `web/build/`; `fast` runs the guards and the Vitest run and publishes
-`coverage/`. Every check runs in exactly one of them. `fast_docker`
+publishes `web/build/`; `fast` runs the guards and the Vitest run. Since #1933
+`fast` is two `parallel:` shards (the guards run in shard 1 only), each
+publishing a Vitest blob, and `fast_coverage` merges the blobs, publishes
+`coverage/` and runs the floor check; every wait that names `fast` names it
+too. Every check runs in exactly one of them. `fast_docker`
 is the other half, on the privileged `orbit-build` lane, and runs the
 suites, of everything that mentions Docker, actually confirmed (by running
 the candidate set with `docker` entirely absent from PATH, matching `big`'s

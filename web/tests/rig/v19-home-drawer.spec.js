@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { APP, useFixtureScenes } from "../fidelity/pocket-states.js";
+import { RIG_EXPECT_MS } from "./a11y-support.js";
 import { completeLikeTheEngine, guardedRoute, ownWorkspace, snoozeLikeTheEngine, upsertCheckingTheVersion } from "./workspace-writes.js";
 
 /*
@@ -47,10 +48,9 @@ import { completeLikeTheEngine, guardedRoute, ownWorkspace, snoozeLikeTheEngine,
  *     `archived-proving.pdf`.
  */
 
-/* Reduced motion: the preview's 900ms focus beat is instant, and nothing
+/* Reduced motion (the rig's default, #1964): the preview's 900ms focus beat is instant, and nothing
    breathes under Playwright's actionability wait. The assertions hold in
    either mode. */
-test.use({ reducedMotion: "reduce" });
 
 /* #1196, #1235: the tests that hold, abort or refuse a request do it with
    `page.route`, and on WebKit a request from a page Orbit's service worker
@@ -69,7 +69,6 @@ const BOILER = { id: "i-boiler", title: "Boiler service" };
 const NOTED_ITEM = MOT;
 const ARCHIVED_ITEM = { id: "i-archived", paper: "archived-proving.pdf" };
 const NOTE = "Book the early slot.";
-const SETTLE = 20_000;
 
 const onPhone = () => test.info().project.name.includes("phone");
 
@@ -81,7 +80,7 @@ const rowOf = (/** @type {import("@playwright/test").Page} */ page, /** @type {s
 /** Home at an item's own address, with the screen able to answer (#1064). @param {import("@playwright/test").Page} page @param {string} id */
 async function openAt(page, id) {
   await page.goto(`${APP}/home?item=${id}`, { waitUntil: "load" });
-  await expect(page.locator("body[data-home-ready]")).toBeAttached();
+  await expect(page.locator("body[data-home-ready]")).toBeAttached({ timeout: RIG_EXPECT_MS });
 }
 
 /** The calendar's day 15 of next month, the fixture's today being 2026-08-13: always ahead of it. */
@@ -164,11 +163,11 @@ async function papersAnswered(page, itemId) {
  * @param {import("@playwright/test").Page} page @param {{ id: string, title: string }} item */
 async function editTheTitle(page, item) {
   await page.goto(`${APP}/home`, { waitUntil: "load" });
-  await expect(page.locator("body[data-home-ready]")).toBeAttached();
+  await expect(page.locator("body[data-home-ready]")).toBeAttached({ timeout: RIG_EXPECT_MS });
   await page.locator(`a.item[id="${item.id}"]`).click();
   const drawer = drawerOf(page, item.id);
-  await expect(drawer).toBeVisible({ timeout: SETTLE });
-  await expect(page).toHaveURL(new RegExp(`/home\\?item=${item.id}$`));
+  await expect(drawer).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`/home\\?item=${item.id}$`), { timeout: RIG_EXPECT_MS });
   await drawer.getByRole("button", { name: "Edit this item" }).click();
   const title = page.locator(`[id="${item.id}"]`).getByRole("textbox", { name: "title" });
   await expect(title).toBeFocused();
@@ -181,10 +180,10 @@ async function editTheTitle(page, item) {
 /** The drawer is still open on the edited item, the typed title is still in the rows and the cancel pill has armed as "discard changes?".
  * @param {import("@playwright/test").Page} page @param {{ id: string, title: string }} item @param {import("@playwright/test").Locator} drawer @param {import("@playwright/test").Locator} title */
 async function expectHeldOpen(page, item, drawer, title) {
-  await expect(drawer).toBeVisible();
-  await expect(page).toHaveURL(new RegExp(`/home\\?item=${item.id}$`));
+  await expect(drawer).toBeVisible({ timeout: RIG_EXPECT_MS });
+  await expect(page).toHaveURL(new RegExp(`/home\\?item=${item.id}$`), { timeout: RIG_EXPECT_MS });
   await expect(title).toHaveText(`${item.title} renamed`);
-  await expect(drawer.getByRole("group", { name: /^Editing / }).getByRole("button", { name: "discard changes?" })).toBeVisible();
+  await expect(drawer.getByRole("group", { name: /^Editing / }).getByRole("button", { name: "discard changes?" })).toBeVisible({ timeout: RIG_EXPECT_MS });
 }
 
 /** What the notes box holds before anything is typed onto it, and the text it holds after `typed` is. @param {import("@playwright/test").Locator} notes @param {string} typed */
@@ -207,18 +206,18 @@ test.describe("an item in another of the reader's households", () => {
 
     await openAt(page, OTHER.id);
     if (onPhone()) {
-      await expect(rowOf(page, OTHER.id)).toHaveAttribute("data-open", "", { timeout: SETTLE });
+      await expect(rowOf(page, OTHER.id)).toHaveAttribute("data-open", "");
       await expect(rowOf(page, MOT.id)).toHaveCount(0);
     } else {
       const drawer = drawerOf(page, OTHER.id);
-      await expect(drawer).toBeVisible({ timeout: SETTLE });
+      await expect(drawer).toBeVisible();
       /* the manifest is that household's now: its row, not the first's */
       await expect(page.locator(`a.item[id="${OTHER.id}"]`)).toContainText(OTHER.title);
       await expect(page.locator(`[id="${MOT.id}"]`)).toHaveCount(0);
     }
     /* the page asked for the activation, once, of that household */
     expect(writes.sent("household.activate").map((one) => one.householdId)).toEqual([SEASIDE]);
-    await expect(page).toHaveURL(new RegExp(`/home\\?item=${OTHER.id}$`));
+    await expect(page).toHaveURL(new RegExp(`/home\\?item=${OTHER.id}$`), { timeout: RIG_EXPECT_MS });
   });
 });
 
@@ -234,19 +233,19 @@ test.describe("on the desk", () => {
   test("the dial's documents chip opens the item's drawer at its real documents", async ({ page }) => {
     await page.goto(`${APP}/home`, { waitUntil: "load" });
     const body = page.locator(`.body-link[data-body="${MOT.id}"]`);
-    await expect(body).toHaveAttribute("data-docs", "2", { timeout: SETTLE });
+    await expect(body).toHaveAttribute("data-docs", "2");
     /* The markup is drawn before home's listeners are bound (#1064): a
        synthetic mouseenter sent in that gap is heard by nobody, and there is
        no second one. Wait for the screen to be able to answer. */
-    await expect(page.locator("body[data-home-ready]")).toBeAttached();
+    await expect(page.locator("body[data-home-ready]")).toBeAttached({ timeout: RIG_EXPECT_MS });
     await body.dispatchEvent("mouseenter");
     const chip = page.locator(".callout.show .chip");
     await expect(chip).toHaveText("◆ 2 documents");
     await chip.click();
 
     const drawer = drawerOf(page, MOT.id);
-    await expect(drawer).toBeVisible({ timeout: SETTLE });
-    await expect(page).toHaveURL(new RegExp(`/home\\?item=${MOT.id}$`));
+    await expect(drawer).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`/home\\?item=${MOT.id}$`), { timeout: RIG_EXPECT_MS });
     const paper = drawer.getByRole("button", { name: `Open ${MOT.paper.displayName}` });
     await expect(paper).toBeFocused();
     await expect(drawer.locator("[data-doc-row]")).toHaveCount(2);
@@ -267,7 +266,7 @@ test.describe("on the desk", () => {
 
     await page.goBack();
     await expect(drawer).toHaveCount(0);
-    await expect(page).toHaveURL(/\/home$/);
+    await expect(page).toHaveURL(/\/home$/, { timeout: RIG_EXPECT_MS });
   });
 
   test("picking a search result for another item during an edit keeps the drawer and the typed title; a second pick inside the hold closes it", async ({ page }) => {
@@ -287,7 +286,7 @@ test.describe("on the desk", () => {
 
     const useTheChip = async () => {
       const body = page.locator(`.body-link[data-body="${MOT.id}"]`);
-      await expect(body).toHaveAttribute("data-docs", "2", { timeout: SETTLE });
+      await expect(body).toHaveAttribute("data-docs", "2");
       // The callout is fixed beside the body; a body scrolled off-screen puts it
       // off-screen too. A member scrolls to the dial before pointing at it.
       await body.scrollIntoViewIfNeeded();
@@ -312,12 +311,12 @@ test.describe("on the desk", () => {
     await openAt(page, NOTED_ITEM.id);
     const row = page.locator(`a.item[id="${MOT.id}"]`);
     const drawer = drawerOf(page, MOT.id);
-    await expect(drawer).toBeVisible({ timeout: SETTLE });
+    await expect(drawer).toBeVisible();
     /* the drawer is the item now: no way onward to the belt */
     await expect(drawer.getByRole("link", { name: "manage this item →" })).toHaveCount(0);
     /* notes above documents (owner, 2026-10-08) */
     await expect(drawer.locator("h2")).toHaveText(["notes", "documents"]);
-    await expect(drawer.getByText(NOTE)).toBeVisible();
+    await expect(drawer.getByText(NOTE)).toBeVisible({ timeout: RIG_EXPECT_MS });
 
     /* level the row a little below the page's 84px gutter, so the card's
        top has the row's top to sit level with */
@@ -327,17 +326,17 @@ test.describe("on the desk", () => {
     await paper.click();
 
     const card = page.getByRole("dialog", { name: new RegExp(`^${name}`) });
-    await expect(card).toBeVisible();
+    await expect(card).toBeVisible({ timeout: RIG_EXPECT_MS });
     await expect(paper).toHaveAttribute("aria-current", "true");
     const pageButton = card.getByRole("button", { name: `Read ${name}` });
-    await expect(pageButton).toBeEnabled({ timeout: SETTLE });
-    await expect(card.getByRole("img", { name: `Page one of ${name}` })).toBeVisible();
+    await expect(pageButton).toBeEnabled();
+    await expect(card.getByRole("img", { name: `Page one of ${name}` })).toBeVisible({ timeout: RIG_EXPECT_MS });
 
     /* the page opens the reader over home */
     await pageButton.click();
     const reader = page.getByRole("dialog", { name: `${name}, ${MOT.title}` });
-    await expect(reader).toBeVisible();
-    await expect(page).toHaveURL(new RegExp(`/home\\?item=${MOT.id}`));
+    await expect(reader).toBeVisible({ timeout: RIG_EXPECT_MS });
+    await expect(page).toHaveURL(new RegExp(`/home\\?item=${MOT.id}`), { timeout: RIG_EXPECT_MS });
 
     /* Escape closes the reader onto the page that opened it… */
     await page.keyboard.press("Escape");
@@ -347,14 +346,14 @@ test.describe("on the desk", () => {
     await page.keyboard.press("Escape");
     await expect(card).toHaveCount(0);
     await expect(paper).toBeFocused();
-    await expect(drawer).toBeVisible();
+    await expect(drawer).toBeVisible({ timeout: RIG_EXPECT_MS });
 
     /* a press off the card removes it too, and leaves the drawer open */
     await paper.click();
-    await expect(card).toBeVisible();
+    await expect(card).toBeVisible({ timeout: RIG_EXPECT_MS });
     await page.mouse.click((page.viewportSize()?.width ?? 1280) - 8, (page.viewportSize()?.height ?? 720) - 8);
     await expect(card).toHaveCount(0);
-    await expect(drawer).toBeVisible();
+    await expect(drawer).toBeVisible({ timeout: RIG_EXPECT_MS });
   });
 
   test("snooze and complete act from the drawer's foot row", async ({ page }) => {
@@ -363,16 +362,16 @@ test.describe("on the desk", () => {
     await useFixtureScenes(page, "noted-item");
     await openAt(page, NOTED_ITEM.id);
     const drawer = drawerOf(page, MOT.id);
-    await expect(drawer).toBeVisible({ timeout: SETTLE });
+    await expect(drawer).toBeVisible();
     const acts = drawer.getByRole("group", { name: `Actions for ${MOT.title}` });
     await expect(acts.getByRole("button")).toHaveText(["snooze", "complete", "attach a document", "retire"]);
-    await expect(drawer.getByRole("button", { name: "Edit this item" })).toBeVisible();
-    await expect(drawer.getByRole("button", { name: "Copy link" })).toBeVisible();
+    await expect(drawer.getByRole("button", { name: "Edit this item" })).toBeVisible({ timeout: RIG_EXPECT_MS });
+    await expect(drawer.getByRole("button", { name: "Copy link" })).toBeVisible({ timeout: RIG_EXPECT_MS });
 
     /* snooze opens the calendar beside the drawer; a day picked snoozes */
     await acts.getByRole("button", { name: `Snooze ${MOT.title}` }).click();
     const calendar = page.getByRole("dialog", { name: /snooze until/i });
-    await expect(calendar).toBeVisible();
+    await expect(calendar).toBeVisible({ timeout: RIG_EXPECT_MS });
     await calendar.getByRole("button", { name: "Next month" }).click();
     await calendar.getByRole("button", { name: NEXT_MONTH_15 }).click();
     await expect(calendar).toHaveCount(0);
@@ -388,7 +387,7 @@ test.describe("on the desk", () => {
     await expect(drawer.getByRole("button", { name: /^completed on: / })).toBeFocused();
     await expect(drawer.getByRole("textbox", { name: "notes" })).toHaveText(NOTE);
     await completing.getByRole("button", { name: "record" }).click();
-    await expect(page.getByText(/^Completed · next due/).first()).toBeAttached();
+    await expect(page.getByText(/^Completed · next due/).first()).toBeAttached({ timeout: RIG_EXPECT_MS });
     expect(writes.sent("item.complete").map((one) => one.itemId)).toEqual([MOT.id]);
     expect((await writes.itemOf(MOT.id))?.item.dueDate).not.toBe(dueDate);
   });
@@ -397,7 +396,7 @@ test.describe("on the desk", () => {
     const writes = await ownWorkspace(page, { "item.upsert": upsertCheckingTheVersion });
     await openAt(page, BOILER.id);
     const drawer = drawerOf(page, BOILER.id);
-    await expect(drawer).toBeVisible({ timeout: SETTLE });
+    await expect(drawer).toBeVisible();
     const pencil = drawer.getByRole("button", { name: "Edit this item" });
     await pencil.click();
     await expect(pencil).toHaveAttribute("aria-pressed", "true");
@@ -410,13 +409,13 @@ test.describe("on the desk", () => {
     const due = drawer.getByRole("button", { name: /^due: / });
     await due.click();
     const calendar = page.getByRole("dialog", { name: /due date/i });
-    await expect(calendar).toBeVisible();
+    await expect(calendar).toBeVisible({ timeout: RIG_EXPECT_MS });
     await page.keyboard.press("Escape");
     await expect(calendar).toHaveCount(0);
     await expect(due).toBeFocused();
     /* the second Escape cancels the edit and leaves the drawer open */
     await page.keyboard.press("Escape");
-    await expect(drawer.getByRole("group", { name: `Actions for ${BOILER.title}` })).toBeVisible();
+    await expect(drawer.getByRole("group", { name: `Actions for ${BOILER.title}` })).toBeVisible({ timeout: RIG_EXPECT_MS });
     await expect(pencil).toBeFocused();
 
     /* typed in place, saved through the item (the fixture's Boiler service already has a provider: it is replaced) */
@@ -429,7 +428,7 @@ test.describe("on the desk", () => {
        Escape arms the cancel pill as "discard changes?" and the edit stays */
     const editing = drawer.getByRole("group", { name: `Editing ${BOILER.title}` });
     await page.keyboard.press("Escape");
-    await expect(editing.getByRole("button", { name: "discard changes?" })).toBeVisible();
+    await expect(editing.getByRole("button", { name: "discard changes?" })).toBeVisible({ timeout: RIG_EXPECT_MS });
     await expect(provider).toHaveText("Northgate Services");
     await editing.getByRole("button", { name: "save" }).click();
     await expect(drawer.getByText("Northgate Services")).toBeVisible({ timeout: 10_000 });
@@ -464,7 +463,7 @@ test.describe("on the desk", () => {
     test("Escape twice during a save in flight keeps the rows; a refused save reads under them", async ({ page }) => {
       await openAt(page, BOILER.id);
       const drawer = drawerOf(page, BOILER.id);
-      await expect(drawer).toBeVisible({ timeout: SETTLE });
+      await expect(drawer).toBeVisible();
       const typed = `${BOILER.title}, renamed`;
       await drawer.getByRole("button", { name: "Edit this item" }).click();
       const title = page.locator(`[id="${BOILER.id}"]`).getByRole("textbox", { name: "title" });
@@ -476,27 +475,27 @@ test.describe("on the desk", () => {
       const save = await holdTheSave(page, "item.upsert");
       const editing = drawer.getByRole("group", { name: `Editing ${BOILER.title}` });
       await editing.getByRole("button", { name: "save" }).click();
-      await expect(editing.getByRole("button", { name: "saving…" })).toBeVisible();
+      await expect(editing.getByRole("button", { name: "saving…" })).toBeVisible({ timeout: RIG_EXPECT_MS });
       await expect.poll(save.held).toBe(1);
 
       await escapeTwice(page);
       /* the rows are still open and still hold the typing */
-      await expect(editing).toBeVisible();
-      await expect(title).toBeVisible();
+      await expect(editing).toBeVisible({ timeout: RIG_EXPECT_MS });
+      await expect(title).toBeVisible({ timeout: RIG_EXPECT_MS });
       await expect(title).toHaveText(typed);
       await expect(drawer.getByRole("group", { name: `Actions for ${BOILER.title}` })).toHaveCount(0);
 
       /* the save answers with a refusal: it reads under the rows, which stay */
       save.release();
       await expect(drawer.getByRole("alert")).toContainText(/not saved/, { timeout: 10_000 });
-      await expect(editing).toBeVisible();
+      await expect(editing).toBeVisible({ timeout: RIG_EXPECT_MS });
       await expect(title).toHaveText(typed);
     });
 
     test("Escape twice during a completion being recorded keeps the rows; a refused record reads under them", async ({ page }) => {
       await openAt(page, BOILER.id);
       const drawer = drawerOf(page, BOILER.id);
-      await expect(drawer).toBeVisible({ timeout: SETTLE });
+      await expect(drawer).toBeVisible();
       await drawer.getByRole("group", { name: `Actions for ${BOILER.title}` })
         .getByRole("button", { name: `Complete ${BOILER.title}` }).click();
       const completing = drawer.getByRole("group", { name: `Completing ${BOILER.title}` });
@@ -510,19 +509,19 @@ test.describe("on the desk", () => {
 
       const save = await holdTheSave(page, "item.complete");
       await completing.getByRole("button", { name: "record" }).click();
-      await expect(completing.getByRole("button", { name: "recording…" })).toBeVisible();
+      await expect(completing.getByRole("button", { name: "recording…" })).toBeVisible({ timeout: RIG_EXPECT_MS });
       await expect.poll(save.held).toBe(1);
 
       await escapeTwice(page);
-      await expect(completing).toBeVisible();
-      await expect(notes).toBeVisible();
+      await expect(completing).toBeVisible({ timeout: RIG_EXPECT_MS });
+      await expect(notes).toBeVisible({ timeout: RIG_EXPECT_MS });
       await expect(notes).toHaveText(typed.after);
       await expect(drawer.getByRole("group", { name: `Actions for ${BOILER.title}` })).toHaveCount(0);
 
       save.release();
       await expect(drawer.getByRole("alert")).toBeVisible({ timeout: 10_000 });
       await expect(drawer.getByRole("alert")).not.toHaveText("");
-      await expect(completing).toBeVisible();
+      await expect(completing).toBeVisible({ timeout: RIG_EXPECT_MS });
       await expect(notes).toHaveText(typed.after);
     });
   });
@@ -536,7 +535,7 @@ test.describe("on the phone", () => {
   test("a document in the drawer opens the preview as the bottom sheet", async ({ page }) => {
     await openAt(page, MOT.id);
     const row = rowOf(page, MOT.id);
-    await expect(row).toHaveAttribute("data-open", "", { timeout: SETTLE });
+    await expect(row).toHaveAttribute("data-open", "");
     /* the foot row, as the desk's */
     await expect(row.getByRole("group", { name: `Actions for ${MOT.title}` }).getByRole("button"))
       .toHaveText(["snooze", "complete", "attach a document", "retire"]);
@@ -544,11 +543,11 @@ test.describe("on the phone", () => {
 
     const name = MOT.paper.displayName;
     const paper = row.getByRole("button", { name: `Open ${name}` });
-    await expect(paper).toBeVisible({ timeout: SETTLE });
+    await expect(paper).toBeVisible();
     await paper.tap();
     const sheet = page.getByRole("dialog", { name: new RegExp(`^${name}`) });
-    await expect(sheet).toBeVisible();
-    await expect(sheet.getByRole("button", { name: `Read ${name}` })).toBeEnabled({ timeout: SETTLE });
+    await expect(sheet).toBeVisible({ timeout: RIG_EXPECT_MS });
+    await expect(sheet.getByRole("button", { name: `Read ${name}` })).toBeEnabled();
     /* the bottom sheet: fixed to the foot of the screen */
     const box = await sheet.boundingBox();
     const height = page.viewportSize()?.height ?? 0;
@@ -566,13 +565,13 @@ test.describe("on the phone", () => {
     await expect(row.locator("[data-row-face]")).toBeHidden();
     await row.getByRole("button", { name: /^due: / }).tap();
     const calendar = page.getByRole("dialog", { name: /due date/i });
-    await expect(calendar).toBeVisible();
+    await expect(calendar).toBeVisible({ timeout: RIG_EXPECT_MS });
     const sheetBox = await calendar.boundingBox();
     expect(Math.abs((sheetBox?.y ?? 0) + (sheetBox?.height ?? 0) - height)).toBeLessThan(2);
     await page.keyboard.press("Escape");
     await expect(calendar).toHaveCount(0);
     await page.keyboard.press("Escape");
-    await expect(row.getByRole("group", { name: `Actions for ${MOT.title}` })).toBeVisible();
+    await expect(row.getByRole("group", { name: `Actions for ${MOT.title}` })).toBeVisible({ timeout: RIG_EXPECT_MS });
     await expect(row).toHaveAttribute("data-open", "");
   });
 
@@ -583,9 +582,9 @@ test.describe("on the phone", () => {
     await useFixtureScenes(page, "archived-item");
     await openAt(page, ARCHIVED_ITEM.id);
     const row = rowOf(page, ARCHIVED_ITEM.id);
-    await expect(row).toHaveAttribute("data-open", "", { timeout: SETTLE });
-    await expect(row.getByRole("heading", { name: /^documents$/i })).toBeVisible({ timeout: SETTLE });
-    await expect(row.getByRole("button", { name: `Open ${ARCHIVED_ITEM.paper}` })).toBeVisible();
+    await expect(row).toHaveAttribute("data-open", "");
+    await expect(row.getByRole("heading", { name: /^documents$/i })).toBeVisible();
+    await expect(row.getByRole("button", { name: `Open ${ARCHIVED_ITEM.paper}` })).toBeVisible({ timeout: RIG_EXPECT_MS });
   });
 
   /* #1316 W1-R7: attaching to an item that had no papers left the drawer's
@@ -595,7 +594,7 @@ test.describe("on the phone", () => {
     await papersAnswered(page, BOILER.id);
     await openAt(page, BOILER.id);
     const row = rowOf(page, BOILER.id);
-    await expect(row).toHaveAttribute("data-open", "", { timeout: SETTLE });
+    await expect(row).toHaveAttribute("data-open", "");
     /* the item starts with no papers: nothing to list, no heading */
     await expect(row.getByRole("heading", { name: /^documents$/i })).toHaveCount(0);
     await expect(row.getByRole("button", { name: /^Open .*\.pdf$/ })).toHaveCount(0);
@@ -607,7 +606,7 @@ test.describe("on the phone", () => {
     });
 
     await expect(page.getByRole("status").filter({ hasText: "attached-late.pdf attached" }))
-      .toHaveText("attached-late.pdf attached", { timeout: SETTLE });
+      .toHaveText("attached-late.pdf attached");
     /* the row has stayed open throughout: no close, no reopen */
     await expect(row).toHaveAttribute("data-open", "");
     await expect(row.getByRole("heading", { name: /^documents$/i })).toBeVisible({ timeout: 10_000 });
@@ -622,7 +621,7 @@ test.describe("on the phone", () => {
     test("Escape twice during a save in flight keeps the rows; a refused save reads under them", async ({ page }) => {
       await openAt(page, BOILER.id);
       const row = rowOf(page, BOILER.id);
-      await expect(row).toHaveAttribute("data-open", "", { timeout: SETTLE });
+      await expect(row).toHaveAttribute("data-open", "");
       const typed = `${BOILER.title}, renamed`;
       await row.getByRole("button", { name: "Edit this item" }).tap();
       const title = row.getByRole("textbox", { name: "title" });
@@ -634,24 +633,24 @@ test.describe("on the phone", () => {
       const save = await holdTheSave(page, "item.upsert");
       const editing = row.getByRole("group", { name: `Editing ${BOILER.title}` });
       await editing.getByRole("button", { name: "save" }).tap();
-      await expect(editing.getByRole("button", { name: "saving…" })).toBeVisible();
+      await expect(editing.getByRole("button", { name: "saving…" })).toBeVisible({ timeout: RIG_EXPECT_MS });
       await expect.poll(save.held).toBe(1);
 
       await escapeTwice(page);
-      await expect(editing).toBeVisible();
+      await expect(editing).toBeVisible({ timeout: RIG_EXPECT_MS });
       await expect(title).toHaveText(typed);
       await expect(row).toHaveAttribute("data-open", "");
 
       save.release();
       await expect(row.getByRole("alert")).toContainText(/not saved/, { timeout: 10_000 });
-      await expect(editing).toBeVisible();
+      await expect(editing).toBeVisible({ timeout: RIG_EXPECT_MS });
       await expect(title).toHaveText(typed);
     });
 
     test("Escape twice during a completion being recorded keeps the rows; a refused record reads under them", async ({ page }) => {
       await openAt(page, BOILER.id);
       const row = rowOf(page, BOILER.id);
-      await expect(row).toHaveAttribute("data-open", "", { timeout: SETTLE });
+      await expect(row).toHaveAttribute("data-open", "");
       await row.getByRole("group", { name: `Actions for ${BOILER.title}` })
         .getByRole("button", { name: `Complete ${BOILER.title}` }).tap();
       const completing = row.getByRole("group", { name: `Completing ${BOILER.title}` });
@@ -665,17 +664,17 @@ test.describe("on the phone", () => {
 
       const save = await holdTheSave(page, "item.complete");
       await completing.getByRole("button", { name: "record" }).tap();
-      await expect(completing.getByRole("button", { name: "recording…" })).toBeVisible();
+      await expect(completing.getByRole("button", { name: "recording…" })).toBeVisible({ timeout: RIG_EXPECT_MS });
       await expect.poll(save.held).toBe(1);
 
       await escapeTwice(page);
-      await expect(completing).toBeVisible();
+      await expect(completing).toBeVisible({ timeout: RIG_EXPECT_MS });
       await expect(notes).toHaveText(typed.after);
       await expect(row).toHaveAttribute("data-open", "");
 
       save.release();
       await expect(row.getByRole("alert")).toBeVisible({ timeout: 10_000 });
-      await expect(completing).toBeVisible();
+      await expect(completing).toBeVisible({ timeout: RIG_EXPECT_MS });
       await expect(notes).toHaveText(typed.after);
     });
   });

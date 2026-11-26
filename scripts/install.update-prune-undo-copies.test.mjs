@@ -293,6 +293,7 @@ describe("install.sh --plain --update: old undo copies, on a terminal (#1834 sli
     ['"no"', "no\r"],
     ['" yes"', " yes\r"],
     ['"yes please"', "yes please\r"],
+    ['"yeas"', "yeas\r"],
     ['"yes" followed by 9,997 more characters (a 10,000-character line)', `yes${"x".repeat(9997)}\r`],
   ]) {
     it(`${label} means no: the prompt is shown, nothing is removed, and the update still succeeds`, async () => {
@@ -308,6 +309,61 @@ describe("install.sh --plain --update: old undo copies, on a terminal (#1834 sli
       expect(untouched(targetDir)).toBe(before);
     });
   }
+});
+
+/*
+ * A key the reader loses at a timeout must not change the answer (#1967).
+ * bash's `read -t` can store a byte and still return a status above 128; the
+ * installer's reader threw such a byte away, so " yes" or "yeas" could reach
+ * the prompt as the exact "yes". BASH_ENV loads a `read` function that
+ * shadows the builtin: on keystroke read number SHIM_CALL (those with -s and
+ * -t) it does the real read and then returns 142 although the byte was
+ * stored. No timing is involved.
+ */
+const READ_SHIM = `
+__shim_calls=0
+read() {
+  local __shim_arg __shim_s=0 __shim_t=0 __shim_status=0
+  for __shim_arg in "$@"; do
+    [[ "$__shim_arg" == -t ]] && __shim_t=1
+    [[ "$__shim_arg" == -*s* ]] && __shim_s=1
+  done
+  if ((__shim_s == 0 || __shim_t == 0)); then builtin read "$@"; return; fi
+  __shim_calls=$((__shim_calls + 1))
+  if ((__shim_calls != SHIM_CALL)); then builtin read "$@"; return; fi
+  builtin read "$@" || __shim_status=$?
+  ((__shim_status == 0)) || return "$__shim_status"
+  return 142
+}
+`;
+const readShimFile = join(mkdtempSync(join(tmpdir(), "orbit-read-shim-")), "shim.bash");
+writeFileSync(readShimFile, READ_SHIM);
+
+describe("install.sh --plain --update: the prune answer when the reader gets a byte with status 142 (#1967)", () => {
+  for (const [label, answer, call] of [
+    ['" yes" with the space coming back 142 (a drop would leave "yes")', " yes\r", 1],
+    ['"yeas" with the "a" coming back 142 (a drop would leave "yes")', "yeas\r", 3],
+    ['"yees" with the first "e" coming back 142 (a drop would leave "yes")', "yees\r", 2],
+  ]) {
+    it(`${label}: still means no, nothing is removed`, async () => {
+      const targetDir = withOldCopies(installedFolder());
+      const before = untouched(targetDir);
+      const result = await updateOnTerminal(targetDir, answer, { BASH_ENV: readShimFile, SHIM_CALL: String(call) });
+      expect(result.status).toBe(0);
+      expect(result.promptedInteractions).toBe(1);
+      expect(qualifyingLeft(targetDir)).toEqual(Object.keys(QUALIFYING));
+      for (const name of Object.keys(QUALIFYING)) expect(removedLines(result.stdout.replace(/\r/gu, ""), name)).toEqual([]);
+      expect(untouched(targetDir)).toBe(before);
+    });
+  }
+
+  it('an exact "yes" still removes when its "y" comes back with status 142: the key is kept, not lost', async () => {
+    const targetDir = withOldCopies(installedFolder());
+    const result = await updateOnTerminal(targetDir, "yes\r", { BASH_ENV: readShimFile, SHIM_CALL: "1" });
+    expect(result.status).toBe(0);
+    expect(result.promptedInteractions).toBe(1);
+    expect(qualifyingLeft(targetDir)).toEqual([]);
+  });
 });
 
 describe("install.sh --plain --update: a terminal that does not make the run interactive (#1834 slice 5 review)", () => {

@@ -26,10 +26,7 @@ import { guardedRoute } from "./workspace-writes.js";
 
 const HARLOW = "hh-harlow-1";
 const PASSPHRASE = "correct-horse-battery-staple";
-const SETTLE = 15_000;
 const CHALLENGE_REFUSAL = { error: { code: "recent_authentication_required", message: "Confirm it is you before making this change" } };
-
-test.describe.configure({ timeout: 60_000 });
 
 /**
  * The card and the pieces of it whose place differs by dialect.
@@ -105,7 +102,7 @@ async function archiveRoutes(page, answers = {}) {
 async function openExportForm(page, phone) {
   const { card } = cardOf(page, phone);
   await signedIn(`/household/${HARLOW}`, "any-dialect")(page);
-  await expect(card).toBeVisible({ timeout: SETTLE });
+  await expect(card).toBeVisible();
   /* Idle: the manifest of what the file would hold, and the one way in. */
   await expect(card.getByText("never in the file")).toBeVisible();
   await card.getByRole("button", { name: phone ? "export this system" : "write an archive →" }).click();
@@ -166,7 +163,7 @@ test("writing an archive: tap, tap again, confirm it is you, work in progress, w
   await c.act(/write the archive/).click(); // fire
 
   /* The engine asks for a fresh proof: a Sheet on the pocket, inline on the desk. */
-  await expect(c.challenge).toBeVisible({ timeout: SETTLE });
+  await expect(c.challenge).toBeVisible();
   await expect(c.challenge).toContainText("asks you to sign in again first");
   if (phone) {
     await expect(page.getByRole("dialog")).toHaveCount(1);
@@ -182,12 +179,12 @@ test("writing an archive: tap, tap again, confirm it is you, work in progress, w
   await expect(c.confirm).toBeEnabled();
   await c.confirm.click();
   /* In progress while the engine writes: the button says so and cannot be pressed again. */
-  await expect(c.challenge.getByRole("button", { name: "confirming…" })).toBeDisabled({ timeout: SETTLE });
+  await expect(c.challenge.getByRole("button", { name: "confirming…" })).toBeDisabled();
   expect(seen.writes).toEqual([{ proof: false }, { proof: true }]);
   release();
 
   /* Written: the file's name, when it keeps until, and the way to fetch it; the challenge is gone. */
-  await expect(c.card.getByText(/orbit-export-abc-123\.orbit/)).toBeVisible({ timeout: SETTLE });
+  await expect(c.card.getByText(/orbit-export-abc-123\.orbit/)).toBeVisible();
   await expect(c.card.getByText(/ready until/)).toBeVisible();
   await expect(c.card.getByText(/Orbit keeps your last 2/)).toBeVisible();
   await expect(c.card.getByRole("link", { name: phone ? "download" : "download the file" })).toHaveAttribute("href", /\/api\/portable-archives\/abc-123/);
@@ -205,16 +202,16 @@ test("a wrong password is refused in the card's words, the challenge stays, and 
   const c = await openExportForm(page, phone);
   await typePassphrases(c);
   await armAndFire(c);
-  await expect(c.challenge).toBeVisible({ timeout: SETTLE });
+  await expect(c.challenge).toBeVisible();
   await c.proof.fill("not-my-password");
   await c.confirm.click();
-  await expect(c.challenge).toContainText("that password did not match · try again", { timeout: SETTLE });
+  await expect(c.challenge).toContainText("that password did not match · try again");
   await expect(c.challenge).toBeVisible();
   await expect(c.card.getByText(/orbit-export-/)).toHaveCount(0);
 
   await c.proof.fill("my-account-password");
   await c.confirm.click();
-  await expect(c.card.getByText(/orbit-export-abc-123\.orbit/)).toBeVisible({ timeout: SETTLE });
+  await expect(c.card.getByText(/orbit-export-abc-123\.orbit/)).toBeVisible();
   await expect(c.challenge).toHaveCount(0);
   expect(seen.writes).toEqual([{ proof: false }, { proof: true }, { proof: true }]);
 });
@@ -225,9 +222,9 @@ test("leaving the challenge writes nothing and keeps the passphrases, ready to s
   const c = await openExportForm(page, phone);
   await typePassphrases(c);
   await armAndFire(c);
-  await expect(c.challenge).toBeVisible({ timeout: SETTLE });
+  await expect(c.challenge).toBeVisible();
   await c.cancelChallenge.click();
-  await expect(c.challenge).toHaveCount(0, { timeout: SETTLE });
+  await expect(c.challenge).toHaveCount(0);
   await expect(c.card.getByLabel("a passphrase for the file")).toHaveValue(PASSPHRASE);
   await expect(c.card.getByLabel("the passphrase again")).toHaveValue(PASSPHRASE);
   await expect(c.act(/write the archive/)).toBeEnabled();
@@ -239,7 +236,7 @@ test("leaving the challenge writes nothing and keeps the passphrases, ready to s
   await expect(c.challenge).toHaveCount(0);
   expect(seen.writes).toHaveLength(1);
   await c.act(/write the archive/).click();
-  await expect(c.challenge).toBeVisible({ timeout: SETTLE });
+  await expect(c.challenge).toBeVisible();
   expect(seen.writes).toHaveLength(2);
 });
 
@@ -251,7 +248,7 @@ test("a write the engine refuses says why, in its words, and writes no file", as
   const c = await openExportForm(page, phone);
   await typePassphrases(c);
   await armAndFire(c);
-  await expect(c.card.getByText("The archive could not be written")).toBeVisible({ timeout: SETTLE });
+  await expect(c.card.getByText("The archive could not be written")).toBeVisible();
   await expect(c.card.getByText(/orbit-export-/)).toHaveCount(0);
   expect(seen.writes).toEqual([{ proof: false }]);
   /* Still the form, with what was typed. */
@@ -281,19 +278,19 @@ test("a quick double tap sends one write, and confirming twice answers one", asy
 
   /* Two taps in the same instant: the first arms, the second fires. */
   await c.act(/write the archive/).evaluate((button) => { for (let tap = 0; tap < 2; tap += 1) /** @type {HTMLElement} */ (button).click(); });
-  await expect.poll(() => seen.writes.length, { timeout: SETTLE }).toBe(1);
+  await expect.poll(() => seen.writes.length).toBe(1);
   await page.waitForTimeout(500);
   expect(seen.writes).toEqual([{ proof: false }]);
   releaseFirst();
-  await expect(c.challenge).toBeVisible({ timeout: SETTLE });
+  await expect(c.challenge).toBeVisible();
 
   await c.proof.fill("my-account-password");
   await c.confirm.evaluate((button) => { for (let tap = 0; tap < 2; tap += 1) /** @type {HTMLElement} */ (button).click(); });
-  await expect.poll(() => seen.writes.length, { timeout: SETTLE }).toBe(2);
+  await expect.poll(() => seen.writes.length).toBe(2);
   await page.waitForTimeout(500);
   expect(seen.writes).toEqual([{ proof: false }, { proof: true }]);
   releaseProof();
-  await expect(c.card.getByText(/orbit-export-abc-123\.orbit/)).toBeVisible({ timeout: SETTLE });
+  await expect(c.card.getByText(/orbit-export-abc-123\.orbit/)).toBeVisible();
   expect(seen.writes).toHaveLength(2);
 });
 
@@ -306,14 +303,14 @@ test("an armed button relaxes back after 4 s without a second tap, on the pocket
   const armed = armedMark(c, phone, /^tap again to write the archive/);
   await page.clock.pauseAt(new Date(Date.now() + 2_000));
   await c.act(/write the archive/).click(); // arm
-  await expect(armed).toBeVisible({ timeout: SETTLE });
+  await expect(armed).toBeVisible();
   await page.clock.runFor(3_900);
   await expect(armed).toBeVisible();
   await page.clock.runFor(200);
-  await expect(armed).toHaveCount(0, { timeout: SETTLE });
+  await expect(armed).toHaveCount(0);
   /* Relaxed means a tap now only arms again: nothing is sent. */
   await c.act(/write the archive/).click();
-  await expect(armed).toBeVisible({ timeout: SETTLE });
+  await expect(armed).toBeVisible();
   expect(seen.writes).toEqual([]);
   await expect(c.challenge).toHaveCount(0);
 });
@@ -335,7 +332,7 @@ const archiveFile = (buffer = Buffer.from("{}")) => ({ name: "orbit-archive.json
 async function openBringIn(page, phone) {
   const c = cardOf(page, phone);
   await signedIn(`/household/${HARLOW}`, "any-dialect")(page);
-  await expect(c.card).toBeVisible({ timeout: SETTLE });
+  await expect(c.card).toBeVisible();
   await c.card.getByRole("tab", { name: "bring one in" }).click();
   if (!phone) await c.card.getByRole("button", { name: "bring in an archive →" }).click();
   return c;
@@ -356,7 +353,7 @@ test("bringing one in: choose the file, look inside, see what stays out, tap twi
   await lookInside.click();
 
   /* The preview: what it holds, and the entry already here that stays out. */
-  await expect(c.card.getByText("Source Home")).toBeVisible({ timeout: SETTLE });
+  await expect(c.card.getByText("Source Home")).toBeVisible();
   await expect(c.card.getByText("Boiler service")).toBeVisible();
   await expect(c.card.getByText("already here · stays out")).toBeVisible();
   expect(seen.previews).toEqual(["POST"]);
@@ -368,11 +365,11 @@ test("bringing one in: choose the file, look inside, see what stays out, tap twi
   await expect(armedMark(c, phone, /^tap again to bring in 2 entries/)).toBeVisible();
   expect(seen.imports).toEqual([]);
   await bring.click(); // fire
-  await expect(c.challenge).toBeVisible({ timeout: SETTLE });
+  await expect(c.challenge).toBeVisible();
   await expect(page.getByRole("dialog")).toHaveCount(phone ? 1 : 0);
   await c.proof.fill("my-account-password");
   await c.confirm.click();
-  await expect(c.card.getByText("brought in 2 entries from Source Home")).toBeVisible({ timeout: SETTLE });
+  await expect(c.card.getByText("brought in 2 entries from Source Home")).toBeVisible();
   await expect(c.challenge).toHaveCount(0);
   expect(seen.imports).toEqual([{ proof: false }, { proof: true }]);
 });
@@ -383,7 +380,7 @@ test("bringing one in: a refused file says so and can be swapped; an empty file 
   const c = await openBringIn(page, phone);
   const input = c.card.locator('input[type="file"]');
   await input.setInputFiles(archiveFile(Buffer.alloc(0)));
-  await expect(c.card.getByText("this file is empty")).toBeVisible({ timeout: SETTLE });
+  await expect(c.card.getByText("this file is empty")).toBeVisible();
   await expect(c.card.getByRole("button", { name: "look inside" })).toHaveCount(0);
   expect(seen.previews).toEqual([]);
 
@@ -403,7 +400,7 @@ test("bringing one in: another file takes the person back to choose, and a wrong
   await c.card.locator('input[type="file"]').setInputFiles(archiveFile());
   await c.card.getByLabel("the file's passphrase").fill("not-the-right-phrase-at-all");
   await c.card.getByRole("button", { name: "look inside" }).click();
-  await expect(c.card.getByText("The passphrase or archive is invalid")).toBeVisible({ timeout: SETTLE });
+  await expect(c.card.getByText("The passphrase or archive is invalid")).toBeVisible();
   await expect(c.card.getByText("Source Home")).toHaveCount(0);
   /* Still on the file step, so the person can fix the phrase or swap the file. */
   await expect(c.card.getByLabel("the file's passphrase")).toBeVisible();
@@ -428,18 +425,18 @@ test("bringing one in: a quick double tap sends one request, and confirming twic
   await c.card.getByLabel("the file's passphrase").fill(PASSPHRASE);
   await c.card.getByRole("button", { name: "look inside" }).click();
   const bring = c.card.getByRole("button", { name: /bring in 2 entries|^tap again/ }).first();
-  await expect(bring).toBeVisible({ timeout: SETTLE });
+  await expect(bring).toBeVisible();
   await bring.evaluate((button) => { for (let tap = 0; tap < 2; tap += 1) /** @type {HTMLElement} */ (button).click(); });
-  await expect(c.challenge).toBeVisible({ timeout: SETTLE });
+  await expect(c.challenge).toBeVisible();
   await page.waitForTimeout(500);
   expect(seen.imports).toEqual([{ proof: false }]);
 
   await c.proof.fill("my-account-password");
   await c.confirm.evaluate((button) => { for (let tap = 0; tap < 2; tap += 1) /** @type {HTMLElement} */ (button).click(); });
-  await expect.poll(() => seen.imports.length, { timeout: SETTLE }).toBe(2);
+  await expect.poll(() => seen.imports.length).toBe(2);
   await page.waitForTimeout(500);
   expect(seen.imports).toEqual([{ proof: false }, { proof: true }]);
   release();
-  await expect(c.card.getByText("brought in 2 entries from Source Home")).toBeVisible({ timeout: SETTLE });
+  await expect(c.card.getByText("brought in 2 entries from Source Home")).toBeVisible();
   expect(seen.imports).toHaveLength(2);
 });

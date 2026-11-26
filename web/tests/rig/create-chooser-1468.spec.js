@@ -29,13 +29,11 @@ import { ownWorkspace, upsertLikeTheEngine } from "./workspace-writes.js";
  */
 
 test.use({
-  reducedMotion: "reduce",
   serviceWorkers: async ({}, use, testInfo) => {
     await use(testInfo.project.use.browserName === "webkit" ? "block" : "allow");
   },
 });
 
-const SETTLE = 20_000;
 const DOCUMENT_BYTES = Buffer.concat([Buffer.from("%PDF-1.4\n"), Buffer.alloc(2048, 32), Buffer.from("%%EOF\n")]);
 /* the fixture's today is 2026-08-13 (fixtures/workspace.js) */
 const KEY_DATE = "2026-08-20";
@@ -47,7 +45,7 @@ test.beforeEach(() => {
 /** @param {import("@playwright/test").Page} page */
 async function gotoCreate(page) {
   await page.goto(`${APP}/create`, { waitUntil: "load" });
-  await page.locator("#card[data-ready]").waitFor({ state: "attached", timeout: SETTLE });
+  await page.locator("#card[data-ready]").waitFor({ state: "attached" });
 }
 
 /** The writes of a create answered for this test: the workspace takes the item, the document stage answers 201. @param {import("@playwright/test").Page} page */
@@ -169,7 +167,7 @@ test.describe("desk Add: the chooser card in the lane (#1468, Q)", () => {
     await fillTheRest(page, "Chooser date proving");
     await pickDate(page, KEY_DATE);
     await page.locator(".btn-primary").click();
-    await expect(page).toHaveURL(/\/home\?item=[0-9a-f-]{36}$/, { timeout: SETTLE });
+    await expect(page).toHaveURL(/\/home\?item=[0-9a-f-]{36}$/);
     const sent = saves.upserts();
     expect(sent.map((one) => [one.item.dueDate, one.item.recurrenceMonths, one.item.reminderDays])).toEqual([[KEY_DATE, 12, [14, 3]]]);
   });
@@ -188,7 +186,7 @@ test.describe("desk Add: the chooser card in the lane (#1468, Q)", () => {
     await chips.getByRole("button", { name: "60d" }).click();
     await page.keyboard.press("Escape");
     await page.locator(".btn-primary").click();
-    await expect(page).toHaveURL(/\/home\?item=[0-9a-f-]{36}$/, { timeout: SETTLE });
+    await expect(page).toHaveURL(/\/home\?item=[0-9a-f-]{36}$/);
     const [one] = saves.upserts();
     expect(one.item.dueDate).toBe(KEY_DATE);
     expect(one.item.recurrenceMonths).toBe(6);

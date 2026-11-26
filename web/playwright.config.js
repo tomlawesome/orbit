@@ -23,10 +23,24 @@ if (REUSE && process.env.TEST_WORKER_INDEX === undefined) {
    way the top-level `workers: 4` below caps a run at four, so a larger value
    changes nothing. */
 const RIG_WORKERS = Number(process.env.ORBIT_RIG_WORKERS) || Math.max(2, Math.floor(os.cpus().length / 2));
+/* The rig's hang guard (#1964, owner 110a): an assertion and an action get 15 s and
+   a test 60 s, set once here rather than per spec. A bound that catches a hang, never
+   a measurement: a test that needs more is still waiting out the product's own
+   clock. The same numbers as RIG_EXPECT_MS and RIG_TEST_MS in
+   tests/rig/a11y-support.js, mirrored rather than imported so the config does
+   not load the rig's support modules. */
+const RIG_EXPECT_MS = 15_000;
+const RIG_TEST_MS = 60_000;
 /* Every rig project shares these: its own folder, tests that never touch one
-   another's state, so they run in parallel. */
+   another's state, so they run in parallel; the hang guard; and reduced motion
+   (#1964, owner 111a), so no transition stands between a test and the state it
+   waits for. A spec about motion opts back in with `reducedMotion:
+   "no-preference"`. Each project merges `rig.use` into its own `use`. */
 /* A rig test that fails retries once in CI and, if it then passes, is reported as flaky (#1744, owner decision 124b). */
-const rig = { testDir: "./tests/rig", fullyParallel: true, workers: RIG_WORKERS, retries: process.env.CI ? 1 : 0 };
+const rig = {
+  testDir: "./tests/rig", fullyParallel: true, workers: RIG_WORKERS,
+  timeout: RIG_TEST_MS, retries: process.env.CI ? 1 : 0, expect: { timeout: RIG_EXPECT_MS }, use: { reducedMotion: "reduce", actionTimeout: RIG_EXPECT_MS },
+};
 /* The browser CI jobs shard with Playwright's own --shard, set from the
    variables GitLab's `parallel:` gives each job (#1546). GitLab sets the total
    to 1 for a job without `parallel:`, and a local run has neither, so only a
@@ -136,17 +150,17 @@ export default defineConfig({
        are the devices tests/e2e/playwright.config.ts uses (Pixel 7 and
        iPhone 15), so a rig phone and a stack-suite phone are the same
        phone. The desktops take the 1600x1000 viewport above. */
-    { name: "rig-desktop", ...rig, use: { browserName: "chromium" } },
-    { name: "rig-phone", ...rig, use: { ...devices["Pixel 7"], browserName: "chromium" } },
-    { name: "rig-firefox", ...rig, use: { browserName: "firefox" } },
+    { name: "rig-desktop", ...rig, use: { ...rig.use, browserName: "chromium" } },
+    { name: "rig-phone", ...rig, use: { ...rig.use, ...devices["Pixel 7"], browserName: "chromium" } },
+    { name: "rig-firefox", ...rig, use: { ...rig.use, browserName: "firefox" } },
     /* On WebKit a request from a page Orbit's service worker controls skips
        Playwright's `page.route` (#1196, #1235), and the rig's whole method is
        `page.route`: its writes, its held and refused answers. No rig spec is
        about the worker (the one that is, v19-about-loading, blocks it
        itself), so the WebKit projects keep it out for all of them rather
        than each spec remembering to (#1615, #1611). */
-    { name: "rig-webkit-desktop", ...rig, use: { browserName: "webkit", serviceWorkers: "block" } },
-    { name: "rig-webkit-phone", ...rig, use: { ...devices["iPhone 15"], browserName: "webkit", serviceWorkers: "block" } },
+    { name: "rig-webkit-desktop", ...rig, use: { ...rig.use, browserName: "webkit", serviceWorkers: "block" } },
+    { name: "rig-webkit-phone", ...rig, use: { ...rig.use, ...devices["iPhone 15"], browserName: "webkit", serviceWorkers: "block" } },
   ],
   use: {
     /*

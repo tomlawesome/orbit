@@ -180,3 +180,6 @@ scripts/extract-bundle/out/
 quarantine-list.txt
 /design/v19/mail/round-4/shots/
 /design/v19/mail-setup/round-1/shots/
+
+# Vitest blob reports: a `fast` shard's run, merged by fast_coverage (#1933).
+.vitest/

@@ -95,6 +95,8 @@ function run({ pnpm, buildNeeded, phase, coverage }) {
   delete env.ORBIT_TEST_COVERAGE;
   delete env.ORBIT_TEST_PHASE;
   delete env.ORBIT_TEST_CHANGED_BASE;
+  // #1933: a CI `fast` shard sets it for its own run; the script under test must not inherit it.
+  delete env.ORBIT_TEST_SHARD;
   if (phase) env.ORBIT_TEST_PHASE = phase;
   if (coverage) env.ORBIT_TEST_COVERAGE = "true";
   if (buildNeeded) env.STUB_BUILD_NEEDED = "1";

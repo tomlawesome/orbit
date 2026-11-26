@@ -89,6 +89,7 @@ function goodLookups(overrides = {}) {
       { job: "screens_chromium", status: "success" },
       { job: "smoke", status: "success" },
       { job: "fast", status: "success" },
+      { job: "fast_coverage", status: "success" },
     ],
     releaseRecord: async () => ({ exists: true, signed: true, guideCommit: "abc123", steps: [...GUIDE_STEPS] }),
     guideCommit: async () => "abc123",
@@ -338,6 +339,7 @@ describe("check: slow-gates-green", () => {
         { job: "screens_chromium", status: "failed" },
         { job: "smoke", status: "success" },
         { job: "fast", status: "success" },
+        { job: "fast_coverage", status: "success" },
       ],
     });
   });
@@ -346,6 +348,7 @@ describe("check: slow-gates-green", () => {
       slowGates: async () => [
         { job: "screens_chromium", status: "success" },
         { job: "fast", status: "success" },
+        { job: "fast_coverage", status: "success" },
       ],
     });
   });
@@ -355,6 +358,7 @@ describe("check: slow-gates-green", () => {
         { job: "screens_chromium", status: "success" },
         { job: "smoke", status: "failed" },
         { job: "fast", status: "success" },
+        { job: "fast_coverage", status: "success" },
       ],
     });
     expect(byId(report, "slow-gates-green").message).toContain("smoke");

@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { tabTo } from "../../../tests/e2e/support/keyboard";
-import { APP, onPhone, RIG_EXPECT_MS, RIG_TEST_MS, signedIn } from "./a11y-support.js";
+import { APP, onPhone, RIG_EXPECT_MS, signedIn } from "./a11y-support.js";
 
 /*
  * #1338 (household pick-lists, design call 2026-10-10), moved to the rig
@@ -15,7 +15,6 @@ import { APP, onPhone, RIG_EXPECT_MS, RIG_TEST_MS, signedIn } from "./a11y-suppo
  * saved, so there is no write to answer.
  */
 test.use({ baseURL: APP });
-test.describe.configure({ timeout: RIG_TEST_MS });
 
 test.beforeEach(({ viewport }, testInfo) => {
   test.skip(onPhone(testInfo) || (viewport?.width ?? 0) < 1200, "desk household screen only; a phone draws its own sheet");

@@ -1,7 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { SETTLE } from "../../../tests/e2e/support/settle";
-import { APP, onPhone, settle } from "./a11y-support.js";
+import { APP, onPhone, RIG_EXPECT_MS, settle } from "./a11y-support.js";
 import { FIRST_SECTION_ID, SUGGESTION, rememberMailDecisions } from "./mail-support.js";
 
 /** @typedef {import("@playwright/test").Page} Page */
@@ -57,7 +56,7 @@ function costSent(approval) {
  * @param {Page} page */
 async function openHome(page) {
   await page.goto("/home");
-  await page.locator("body[data-home-ready]").waitFor({ state: "attached" });
+  await page.locator("body[data-home-ready]").waitFor({ state: "attached", timeout: RIG_EXPECT_MS });
   await settle(page);
 }
 
@@ -72,17 +71,17 @@ test("the manifest row approves in two taps, idempotently under partial success"
   });
   await openHome(page);
   const row = page.locator(".item.suggest", { hasText: TITLE });
-  await expect(row.first()).toBeVisible();
+  await expect(row.first()).toBeVisible({ timeout: RIG_EXPECT_MS });
   /* #1145: the two decisions live in the drawer the row opens into, like a
      filed item's detail -- the row at rest carries none. */
   await row.first().click();
   const drawer = page.locator(`[id="${RECEIPT}-view"]`);
-  await expect(drawer).toBeVisible();
+  await expect(drawer).toBeVisible({ timeout: RIG_EXPECT_MS });
   const approve = drawer.getByRole("button", { name: "Add to orbit" });
 
   // One stray click does nothing but arm.
   await approve.click();
-  await expect(drawer.getByRole("button", { name: "tap again to approve" })).toBeVisible();
+  await expect(drawer.getByRole("button", { name: "tap again to approve" })).toBeVisible({ timeout: RIG_EXPECT_MS });
   expect(mail.approvals.length).toBe(0);
 
   // The second tap fires; the first answer is partial, so the drawer says so.
@@ -120,15 +119,15 @@ test("amend then accept from home's drawer", async ({ page }, testInfo) => {
   let drawer;
   if (pocket) {
     drawer = page.locator(`.pocket .pk-signals [data-row-key="${RECEIPT}"]`);
-    await expect(drawer).toBeVisible({ timeout: SETTLE });
+    await expect(drawer).toBeVisible();
     await drawer.locator("[data-row-face]").click();
     await expect(drawer).toHaveAttribute("data-open", "");
   } else {
     const row = page.locator(".item.suggest", { hasText: TITLE }).first();
-    await expect(row).toBeVisible();
+    await expect(row).toBeVisible({ timeout: RIG_EXPECT_MS });
     await row.click();
     drawer = page.locator(`[id="${RECEIPT}-view"]`);
-    await expect(drawer).toBeVisible();
+    await expect(drawer).toBeVisible({ timeout: RIG_EXPECT_MS });
   }
   /* What the relay read, and how sure it was where the receipt says
      (readingsOf, lib/pocket/review.js): the fixture receipt read the provider
@@ -167,7 +166,7 @@ test("amend then accept from home's drawer", async ({ page }, testInfo) => {
   /* Added: the suggestion leaves home, and home stays where it is. (The belt
      used to land on the created item; the drawer stays on home.) */
   await expect(page.locator(pocket ? ".pocket .pk-signals [data-row]" : ".item.suggest", { hasText: TITLE })).toHaveCount(0);
-  await expect(page).toHaveURL(/\/home/);
+  await expect(page).toHaveURL(/\/home/, { timeout: RIG_EXPECT_MS });
 });
 
 /* G-B4-1 (#1671): a reading the relay gave no evidence for draws no sure/unsure mark
@@ -187,15 +186,15 @@ test("a reading with no evidence draws no sure or unsure mark", async ({ page },
   let drawer;
   if (pocket) {
     drawer = page.locator(`.pocket .pk-signals [data-row-key="${RECEIPT}"]`);
-    await expect(drawer).toBeVisible({ timeout: SETTLE });
+    await expect(drawer).toBeVisible();
     await drawer.locator("[data-row-face]").click();
     await expect(drawer).toHaveAttribute("data-open", "");
   } else {
     const row = page.locator(".item.suggest", { hasText: TITLE }).first();
-    await expect(row).toBeVisible();
+    await expect(row).toBeVisible({ timeout: RIG_EXPECT_MS });
     await row.click();
     drawer = page.locator(`[id="${RECEIPT}-view"]`);
-    await expect(drawer).toBeVisible();
+    await expect(drawer).toBeVisible({ timeout: RIG_EXPECT_MS });
   }
   const reading = (/** @type {string} */ label) =>
     drawer.locator(pocket ? ".p-kv" : ".kv", { has: page.locator("span", { hasText: new RegExp(`^${label}$`) }) });
@@ -210,14 +209,14 @@ test("a dismissal takes two taps and mail that failed is visible on the relay", 
   const mail = await rememberMailDecisions(page);
   await openHome(page);
   const row = page.locator(".item.suggest", { hasText: TITLE }).first();
-  await expect(row).toBeVisible();
+  await expect(row).toBeVisible({ timeout: RIG_EXPECT_MS });
   /* #1145: the dismissal lives in the drawer the row opens into, as the approve
      test above; the row at rest carries no buttons. */
   await row.click();
   const drawer = page.locator(`[id="${RECEIPT}-view"]`);
-  await expect(drawer).toBeVisible();
+  await expect(drawer).toBeVisible({ timeout: RIG_EXPECT_MS });
   await drawer.getByRole("button", { name: "Dismiss" }).click();
-  await expect(drawer.getByRole("button", { name: "tap again to dismiss" })).toBeVisible();
+  await expect(drawer.getByRole("button", { name: "tap again to dismiss" })).toBeVisible({ timeout: RIG_EXPECT_MS });
   expect(mail.removals).toEqual([]);
   await drawer.getByRole("button", { name: "tap again to dismiss" }).click();
   await expect.poll(() => mail.removals).toEqual([RECEIPT]);
@@ -239,11 +238,11 @@ test("the desk reads a staged paper's page one, from the suggestion's drawer and
 
   await page.goto(`/home?item=${RECEIPT}`);
   const drawer = page.locator(`[id="${RECEIPT}-view"]`);
-  await expect(drawer).toBeVisible({ timeout: SETTLE });
+  await expect(drawer).toBeVisible();
   await drawer.getByRole("button", { name: `Open ${PAPER}` }).click();
 
   const card = page.getByRole("dialog", { name: PAPER });
-  await expect(card).toHaveClass(/snap/, { timeout: SETTLE });
+  await expect(card).toHaveClass(/snap/);
   await expect(card.getByRole("img")).toHaveAttribute("alt", `Page one of ${PAPER}`);
   await expect(card.locator(".rcfoot .rcnote")).toHaveText("not yet in orbit · attached on acceptance");
   // No download for a staged paper: the foot carries the note, never a link.
@@ -252,9 +251,9 @@ test("the desk reads a staged paper's page one, from the suggestion's drawer and
   // The chip is a second door, into the same drawer (§8, §10).
   await page.goto("/inbox");
   await page.getByRole("link", { name: new RegExp(PAPER.replace(".", "\\.")) }).click();
-  await expect(page).toHaveURL(new RegExp(`/home\\?item=${RECEIPT}$`));
-  await expect(drawer).toBeVisible({ timeout: SETTLE });
-  await expect(drawer.getByRole("button", { name: `Open ${PAPER}` })).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`/home\\?item=${RECEIPT}$`), { timeout: RIG_EXPECT_MS });
+  await expect(drawer).toBeVisible();
+  await expect(drawer.getByRole("button", { name: `Open ${PAPER}` })).toBeVisible({ timeout: RIG_EXPECT_MS });
 });
 
 test("the phone sheet reads a staged paper's page one, and tells a gone mail apart from one it just cannot draw (#1155)", async ({ page }, testInfo) => {
@@ -263,10 +262,10 @@ test("the phone sheet reads a staged paper's page one, and tells a gone mail apa
 
   await page.goto("/inbox");
   const chip = page.getByRole("button", { name: new RegExp(PAPER.replace(".", "\\.")) });
-  await expect(chip).toBeVisible({ timeout: SETTLE });
+  await expect(chip).toBeVisible();
   await chip.click();
   const dialog = page.getByRole("dialog", { name: PAPER });
-  await expect(dialog).toBeVisible();
+  await expect(dialog).toBeVisible({ timeout: RIG_EXPECT_MS });
   await expect(dialog.locator("img")).toHaveAttribute("alt", `Page one of ${PAPER}`);
   await expect(dialog).toContainText("not yet in orbit · attached on acceptance");
   await dialog.getByRole("button", { name: "close" }).click();

@@ -10,9 +10,8 @@ import { signedIn } from "./a11y-support.js";
  * dial it has (640 px wide at 1440 x 900), and the width-based shrinking (#485,
  * min(640px, 100vw - 456px)) still applies: 444 px at 900 x 900.
  *
- * Reduced motion, so the arrival animation does not scale the dial mid-measure.
+ * Reduced motion (the rig's default, #1964), so the arrival animation does not scale the dial mid-measure.
  */
-test.use({ reducedMotion: "reduce" });
 
 const DIAL = ".desk .dialwrap>svg";
 

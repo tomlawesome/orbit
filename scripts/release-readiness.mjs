@@ -60,7 +60,7 @@ export const MAIN_CHECKS = Object.freeze([
 ]);
 
 /** The jobs that must be green on a dev pipeline with the source branch's tree. */
-export const SLOW_GATES = Object.freeze(["screens_chromium", "smoke", "fast"]);
+export const SLOW_GATES = Object.freeze(["screens_chromium", "smoke", "fast", "fast_coverage"]);
 // Time limits (#1860 review): a hung registry, API or script fails its check.
 export const SCRIPT_TIMEOUT_MS = 10 * 60 * 1000;
 export const GIT_TIMEOUT_MS = 2 * 60 * 1000;
@@ -162,7 +162,7 @@ function checkSlowGates(jobs) {
     return {
       ok: false,
       message:
-        "no dev pipeline (nightly or merge request) has the same tree as the source branch, so screens_chromium, smoke and fast are unproven for it: run a pipeline on dev with ORBIT_NIGHTLY_BROWSERS=true (or wait for the nightly) on this exact commit, then re-run this check",
+        "no dev pipeline (nightly or merge request) has the same tree as the source branch, so screens_chromium, smoke, fast and fast_coverage are unproven for it: run a pipeline on dev with ORBIT_NIGHTLY_BROWSERS=true (or wait for the nightly) on this exact commit, then re-run this check",
     };
   }
   // A parallel job is named "name i/n"; every shard counts.
@@ -180,7 +180,7 @@ function checkSlowGates(jobs) {
     if (/^rig_/u.test(base(job.job)) && job.status === "failed") problems.push(`${job.job} failed`);
   }
   return problems.length === 0
-    ? { ok: true, message: "screens_chromium, smoke and fast are green on a dev pipeline with this tree" }
+    ? { ok: true, message: "screens_chromium, smoke, fast and fast_coverage are green on a dev pipeline with this tree" }
     : {
         ok: false,
         message: `the newest dev pipeline with this tree is not green: ${problems.join(", ")}. Fix it on dev and re-run the nightly browser pipeline on the new commit`,

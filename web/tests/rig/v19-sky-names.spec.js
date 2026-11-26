@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { APP, RIG_EXPECT_MS, RIG_TEST_MS, onPhone, signedIn } from "./a11y-support.js";
+import { APP, RIG_EXPECT_MS, onPhone, signedIn } from "./a11y-support.js";
 import { useFixtureScenes } from "../fidelity/pocket-states.js";
 
 /*
@@ -34,7 +34,6 @@ import { useFixtureScenes } from "../fidelity/pocket-states.js";
  *    `keep-saves` scene, and answers the session (and so home) with it.
  */
 test.use({ baseURL: APP });
-test.describe.configure({ timeout: RIG_TEST_MS });
 
 const NEAR = ["i-gutter", "i-mot", "i-boiler"];
 const FAR = ["i-chimney", "i-roof", "i-smoke", "i-svc"];
@@ -177,13 +176,15 @@ test("settings: none shows no names, in the preview and, once saved, on home", a
   await signedIn("/settings", "rest")(page);
   await expect(slider(page)).toBeVisible({ timeout: RIG_EXPECT_MS });
 
-  const saved = page.waitForRequest((request) => request.url().endsWith("/api/preferences") && request.method() === "PUT");
+  const saved = page.waitForResponse((response) => response.url().endsWith("/api/preferences") && response.request().method() === "PUT");
   await slider(page).fill("0");
   await expect(readout(page)).toHaveText("none");
   await expect(slider(page)).toHaveAttribute("aria-valuetext", "none");
   await expect(preview(page)).toHaveAttribute("aria-label", /0 names shown$/);
   await expectNamed(page, []);
-  expect((await saved).postDataJSON().labelDays).toBe(0);
+  const savedResponse = await saved;
+  expect(savedResponse.request().postDataJSON().labelDays).toBe(0);
+  expect(savedResponse.ok(), "the preference save is stored before the page loads again").toBe(true);
 
   await page.goto(`${APP}/home`);
   await expectNamed(page, []);

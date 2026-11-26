@@ -1,6 +1,5 @@
 import { expect, test } from "@playwright/test";
 
-import { SETTLE } from "../../../tests/e2e/support/settle";
 import { APP, onPhone } from "./a11y-support.js";
 
 /** @typedef {import("@playwright/test").Locator} Locator */
@@ -23,7 +22,7 @@ import { APP, onPhone } from "./a11y-support.js";
  * Each turn ends with the label, the picture's name and the drawn picture all
  * showing the new page, within PAGE_TURN_TIMEOUT_MS, a hang guard.
  */
-test.use({ baseURL: APP, reducedMotion: "reduce" });
+test.use({ baseURL: APP });
 
 const THREE_PAGE_PAPER = { item: "i-svc", itemTitle: "Car full service", file: "three-page-proving.pdf" };
 // Only stops a hung page turn; not a performance check (owner, answers 21: "I don't actually think running a timed check in CI at all is a good idea." and "It will still need a timeout, per page."). Copied from LOAD_TIMEOUT_MS in web/src/lib/reading/PreviewCard.svelte (not exported): the app's own page-load failure timeout.
@@ -43,7 +42,7 @@ async function shownText(locator) {
 }
 
 /** The picture is drawn: complete and with a width.
- * @param {Locator} picture @param {number} timeout */
+ * @param {Locator} picture @param {number} [timeout] the config's when left out */
 const drawn = (picture, timeout) =>
   expect.poll(() => picture.evaluate((/** @type {HTMLImageElement} */ img) => (img.complete ? img.naturalWidth : 0)), { timeout })
     .toBeGreaterThan(0);
@@ -54,11 +53,11 @@ async function openDrawer(page, itemId, info) {
   await page.goto(`/home?item=${itemId}`);
   if (onPhone(info)) {
     const row = page.locator(`.pocket .pk-below [data-row-key="${itemId}"]`);
-    await expect(row).toHaveAttribute("data-open", "", { timeout: SETTLE });
+    await expect(row).toHaveAttribute("data-open", "");
     return row;
   }
   const drawer = page.locator(`[id="${itemId}-view"]`);
-  await expect(drawer).toBeVisible({ timeout: SETTLE });
+  await expect(drawer).toBeVisible();
   return drawer;
 }
 
@@ -89,13 +88,13 @@ test("a 3-page document opens with \"1 of 3\" and a Next arrow, no Previous arro
   const held = await holdPreviews(page);
   const drawer = await openDrawer(page, THREE_PAGE_PAPER.item, testInfo);
   const pressed = drawer.getByRole("button", { name: `Open ${THREE_PAGE_PAPER.file}` });
-  await expect(pressed).toBeVisible({ timeout: SETTLE });
+  await expect(pressed).toBeVisible();
   await pressed.click();
 
   const card = previewOf(page);
   await expect(card).toBeVisible();
   /* The picture is still held: the count and the Next arrow come from the summary; page 1 offers no Previous arrow (not in the accessibility tree). */
-  await expect.poll(() => shownText(card.locator(".pager .pgn")), { timeout: SETTLE }).toBe("1 of 3");
+  await expect.poll(() => shownText(card.locator(".pager .pgn"))).toBe("1 of 3");
   await expect(card.getByRole("button", { name: "Previous page" })).toHaveCount(0);
   await expect(card.getByRole("button", { name: "Next page" })).toBeVisible();
   const picture = card.getByRole("img", { name: new RegExp(`^Page (1|one) of ${ESCAPED_FILE}$`) });
@@ -103,30 +102,30 @@ test("a 3-page document opens with \"1 of 3\" and a Next arrow, no Previous arro
   expect(drawnWidth).toBe(0);
 
   held.release();
-  await drawn(picture, SETTLE);
+  await drawn(picture);
   await expect.poll(() => shownText(card.locator(".pager .pgn"))).toBe("1 of 3");
 });
 
 test("each page turn in the reader of a kept 3-page document shows the right page", async ({ page }, testInfo) => {
   const drawer = await openDrawer(page, THREE_PAGE_PAPER.item, testInfo);
   const pressed = drawer.getByRole("button", { name: `Open ${THREE_PAGE_PAPER.file}` });
-  await expect(pressed).toBeVisible({ timeout: SETTLE });
+  await expect(pressed).toBeVisible();
   await pressed.click();
   await expect(previewOf(page)).toBeVisible();
   const pageButton = page.getByRole("button", { name: `Read ${THREE_PAGE_PAPER.file}` });
-  await expect(pageButton).toBeEnabled({ timeout: SETTLE });
+  await expect(pageButton).toBeEnabled();
   await pageButton.click();
   const reader = readerOf(page);
   await expect(reader).toBeVisible();
   const picture = reader.getByRole("img", { name: new RegExp(ESCAPED_FILE) });
 
-  /** @param {number} n @param {number} timeout */
+  /** @param {number} n @param {number} [timeout] the config's when left out */
   const shown = async (n, timeout) => {
     await expect(reader.locator(".rd-name .rd-of")).toHaveText(`· page ${n} of 3`, { timeout });
     await expect(picture).toHaveAccessibleName(`Page ${n} of ${THREE_PAGE_PAPER.file}`, { timeout });
     await drawn(picture, timeout);
   };
-  await shown(1, SETTLE);
+  await shown(1);
 
   /** @param {number} to @param {() => Promise<void>} press */
   const turn = async (to, press) => {
