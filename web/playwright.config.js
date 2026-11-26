@@ -23,8 +23,8 @@ if (REUSE && process.env.TEST_WORKER_INDEX === undefined) {
    way the top-level `workers: 4` below caps a run at four, so a larger value
    changes nothing. */
 const RIG_WORKERS = Number(process.env.ORBIT_RIG_WORKERS) || Math.max(2, Math.floor(os.cpus().length / 2));
-/* The rig's hang guard (#1964, owner 110a): an assertion gets 15 s and a test
-   60 s, set once here rather than per spec. A bound that catches a hang, never
+/* The rig's hang guard (#1964, owner 110a): an assertion and an action get 15 s and
+   a test 60 s, set once here rather than per spec. A bound that catches a hang, never
    a measurement: a test that needs more is still waiting out the product's own
    clock. The same numbers as RIG_EXPECT_MS and RIG_TEST_MS in
    tests/rig/a11y-support.js, mirrored rather than imported so the config does
@@ -38,7 +38,7 @@ const RIG_TEST_MS = 60_000;
    "no-preference"`. Each project merges `rig.use` into its own `use`. */
 const rig = {
   testDir: "./tests/rig", fullyParallel: true, workers: RIG_WORKERS,
-  timeout: RIG_TEST_MS, expect: { timeout: RIG_EXPECT_MS }, use: { reducedMotion: "reduce" },
+  timeout: RIG_TEST_MS, expect: { timeout: RIG_EXPECT_MS }, use: { reducedMotion: "reduce", actionTimeout: RIG_EXPECT_MS },
 };
 /* The browser CI jobs shard with Playwright's own --shard, set from the
    variables GitLab's `parallel:` gives each job (#1546). GitLab sets the total
