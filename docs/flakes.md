@@ -690,3 +690,7 @@ timeout on this one case rather than a global raise.
 ## upgrade_cell: [latest-1, mail] and [latest-1, secrets-file] hit the 8-minute job limit on a loaded runner, no step failing (host)
 
 - 2026-11-26 · !1499 168be281 · pipeline 5547 / upgrade_cell: [latest-1, mail] (job 66903) and [latest-1, secrets-file] (job 66904) · `execution took longer than 8m0s` at 496 s and 483 s, while the pipeline's other 13 cells took 220-464 s; the change is the installer's key reader, and the cells run the installer with --plain, which reads no keys. Both passed on retry (jobs 67084, 67085, 250 s and 234 s). First sighting.
+
+## scripts/install.readiness.test.mjs "install.sh: a service still running at the deadline is left in place (#1456 decision) > the database running with its probe still failing: no rollback, `repair`, left running, and an Update is accepted"
+
+- 2026-11-23 · !1333 bf57751bf · pipeline 5229 / fast (job 62669) · `expected 1 to be +0` at line 247 (the Update's exit status) on a loaded host; the change is a @sveltejs/kit bump only. First sighting.

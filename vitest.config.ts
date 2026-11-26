@@ -44,6 +44,9 @@ const sharedAliases = {
   ),
 };
 
+// A CI `fast` shard (#1933 103a), e.g. "1/2": see reporters and thresholds below.
+const sharded = Boolean(process.env.ORBIT_TEST_SHARD);
+
 // Written as a typed constant rather than inline: `project` below is declared
 // on TestUserConfig, while a config file's `test` field is typed as the
 // narrower InlineConfig, which omits it. Vitest resolves both out of the same
@@ -232,7 +235,11 @@ const test: TestUserConfig = {
   //    where every test finished but the process still won't exit (an
   //    open handle — timer, socket, child process). Vitest recommends it
   //    by name for exactly that symptom.
-  reporters: ["default", "hanging-process", "./scripts/vitest-progress-reporter.mjs"],
+  //
+  // A `fast` shard in CI (#1933 103a: ORBIT_TEST_SHARD set) adds "blob", the
+  // file `fast_coverage` merges with `--merge-reports`. The merge run itself
+  // must not set ORBIT_TEST_SHARD: `--merge-reports` refuses "blob".
+  reporters: ["default", "hanging-process", "./scripts/vitest-progress-reporter.mjs", ...(sharded ? ["blob"] : [])],
   coverage: {
     provider: "v8",
     // web/src (#1066): the app's own JavaScript and TypeScript. Svelte
@@ -249,7 +256,9 @@ const test: TestUserConfig = {
       "web/src/lib/door/**",
       "web/src/**/*.d.ts",
     ],
-    reporter: ["text-summary", "json-summary", "html"],
+    // A shard's own report covers half the suite, so it writes only the
+    // summary line; the merge run writes the three as an unsharded run does.
+    reporter: sharded ? ["text-summary"] : ["text-summary", "json-summary", "html"],
     reportsDirectory: "coverage",
     // Ratchet, not target (#302): floors sit at the measured value rounded
     // down, so CI fails on regression and no percentage is a goal in itself.
@@ -258,9 +267,14 @@ const test: TestUserConfig = {
     // gain has to be locked in by raising the floor. Never lower one to make
     // a change pass. Vitest evaluates glob thresholds independently, so the
     // nested src/server/documents/** beside src/server/** is fine.
-    thresholds: Object.fromEntries(
-      Object.entries(floors).map(([key, metrics]) => [`${key}/**`, { ...metrics }]),
-    ),
+    //
+    // Off in a shard run only (#1933 103a): Vitest enforces thresholds on every
+    // run that writes coverage, and a shard sees about half the suite. The
+    // floors are enforced, unchanged, on the merged map: `fast_coverage`'s
+    // `--merge-reports` run reads this config with no shard set.
+    thresholds: sharded
+      ? undefined
+      : Object.fromEntries(Object.entries(floors).map(([key, metrics]) => [`${key}/**`, { ...metrics }])),
   },
 };
 
