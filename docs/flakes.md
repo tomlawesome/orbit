@@ -301,6 +301,7 @@ timeout on this one case rather than a global raise.
 ## install.backups.test.mjs:358 "a slow but healthy `compose down` (4 s) is not a timeout: the rollback completes, no cause line, all three volumes removed (guards FR2)"
 
 - 2026-10-23 · c1d9a453 (!1088, which changes no installer code) · pipeline 2932 / `fast` job 38895 · the output carried "Docker did not finish within": the fake's 4 s `compose down` overran its 6 s cap. The `fast` job took 584 s, near its limit, so the runner was loaded. Wall-clock-under-load shape (#1447). First sighting.
+- 2026-11-26 · !1498 test/1964-step1-release 6c3c402f (rig config and a dev merge; no installer code) · pipeline 5558 / fast 1/2 (job 67132, 737 s) · the output carried "Docker did not finish within 8 s": the fake's 4 s `compose down` overran the 8 s limit on a busy runner. Retried as job 67159. Second sighting.
 
 ## document-lifecycle.test.ts "recovers an outage-staged upload after the bounded retry delay without re-upload" (integration)
 
