@@ -102,7 +102,11 @@ Worker invariants:
   followed by a lost database update, is explicit to administrators.
 
 One piece of state is deliberately in memory, not in PostgreSQL: the archive
-slot (#1316, `web/src/lib/server/archive-slot.js`). The archive import check or
+slot (#1316). Its core, the holder and the first-come queue, lives in the
+engine (`src/server/archive-slot.ts`, #1774, ADR-0047), so the document worker's
+export job can hold it; `web/src/lib/server/archive-slot.js` keeps the
+request-bound parts (the held-request map, the body watchdog, the upload
+lanes). The archive import check or
 import reads the upload in pieces and never holds it whole (#1566): the memory
 test pins the import check's growth below the archive file's size, and a warmed process's
 import below the archive file's size, since the document path holds one copy of each
@@ -125,9 +129,15 @@ client's link speed. One upload per account may be spooling or processing at
 a time; a second from the same account is answered 429 at once, while
 different accounts spool side by side. A spooled request that finds the slot
 held waits for it, first come first served, for up to 10 minutes
-(`ORBIT_ARCHIVE_SLOT_WAIT_MS`), and is answered 429 if the wait runs out; an
-export, whose body is small, is still answered 429 straight away when the slot
-is held. The slot and the per-account lanes belong to the Node
+(`ORBIT_ARCHIVE_SLOT_WAIT_MS`), and is answered 429 if the wait runs out. An
+export is not written in its request (#1774, ADR-0047): the POST checks access
+and the step-up, derives the file's key, wraps it under the instance key with
+the job's id as associated data, inserts a `portable_archive_exports` row (one
+live per household) and answers 202. The document worker's export loop waits
+for the slot in the same queue, claims the job with a ten-minute lease in
+`document_jobs`' shape, writes the archive with fenced progress writes, and
+nulls the key as the job completes; a failed job keeps it an hour for a retry.
+The card reads the job every 2 seconds while it is live. The slot and the per-account lanes belong to the Node
 process, which is correct for the supported deployment of one app container
 running one process; two app containers, or a clustered process, would each
 get their own slot and between them run that many archives at once. Two
@@ -135,7 +145,8 @@ imports of one household are still refused across processes: phase 0 answers
 409 while another import's start record is open and live (ADR-0045 decision
 5). The route takes the lane and the slot only after its household role check
 (and an import's step-up), so someone who may not export or import that
-household never holds either.
+household never holds either; an export job re-checks the role before it
+writes.
 
 A streamed download hands its 1 MiB pieces to the HTTP response, which drops
 them; V8 frees such pieces at a fixed external-memory trigger (about 33 MiB on

@@ -20,6 +20,7 @@ import { getDb } from "@/db";
 import { items, portableArchives } from "@/db/schema";
 import { sealStepUpProof, stepUpProofCookieName, type StepUpIntent } from "@/lib/auth/recent-auth";
 import { getAuthConfig } from "@/lib/env";
+import { runExportWorkerOnce } from "@/server/document-maintenance/export-jobs";
 import { sealedArchiveFile } from "../support/sealed-archive";
 import { ORIGIN } from "./support/auth";
 import {
@@ -127,7 +128,9 @@ describe("portable archive export: recent authentication (#1132)", () => {
     const before = await archiveCount(fixture.household.id);
 
     const response = await exportAs(owner, fixture, await proofCookie(owner, "archive_export"));
-    expect(response.status).toBe(200);
+    // #1774 (design 2.6): accepted as a job; the worker writes the file.
+    expect(response.status).toBe(202);
+    await runExportWorkerOnce();
     expect(await archiveCount(fixture.household.id)).toBe(before + 1);
   });
 

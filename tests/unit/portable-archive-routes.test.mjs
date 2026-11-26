@@ -25,11 +25,13 @@ const mocks = vi.hoisted(() => ({
   requireSession: vi.fn(),
   requireRecentAuthentication: vi.fn(),
   requirePortableArchiveAccess: vi.fn(),
-  createPortableArchive: vi.fn(),
+  enqueuePortableArchiveExport: vi.fn(),
   importPortableArchive: vi.fn(),
   previewPortableImport: vi.fn(),
 }));
 
+// #1774: the export route only inserts the job and nudges the worker.
+vi.mock("orbit/server/document-maintenance/export-jobs", () => ({ notifyExportWorker: vi.fn() }));
 vi.mock("orbit/server/maintenance", () => ({ assertOutsideMaintenance: mocks.assertOutsideMaintenance }));
 vi.mock("orbit/lib/env", () => ({ getAuthConfig: mocks.getAuthConfig }));
 vi.mock("orbit/lib/auth/session", () => ({
@@ -41,7 +43,8 @@ vi.mock("orbit/lib/auth/recent-auth", () => ({
 }));
 vi.mock("orbit/server/portable-archive-repository", () => ({
   requirePortableArchiveAccess: mocks.requirePortableArchiveAccess,
-  createPortableArchive: mocks.createPortableArchive,
+  enqueuePortableArchiveExport: mocks.enqueuePortableArchiveExport,
+  readPortableArchiveExportState: vi.fn(),
   importPortableArchive: mocks.importPortableArchive,
   previewPortableImport: mocks.previewPortableImport,
   // #1792: the routes take the file in whole before processing it. An in-memory stand-in: this file tests the step-up contract, not the spool.
@@ -123,8 +126,8 @@ describe("portable archive routes: recent authentication (#1132)", () => {
       async (_event, _session, _body, intent) => ({ userId: "owner-1", intent, method: "password" }),
     );
     mocks.requirePortableArchiveAccess.mockReset().mockResolvedValue(undefined);
-    mocks.createPortableArchive.mockReset().mockResolvedValue({
-      id: "archive-1", expiresAt: "2026-09-27T00:00:00.000Z", includesDocuments: false,
+    mocks.enqueuePortableArchiveExport.mockReset().mockResolvedValue({
+      id: "job-1", status: "pending",
     });
     received.preview = null;
     received.import = null;
@@ -142,11 +145,12 @@ describe("portable archive routes: recent authentication (#1132)", () => {
     vi.restoreAllMocks();
   });
 
-  it("challenges an export for the archive_export intent, then writes it", async () => {
+  it("challenges an export for the archive_export intent, then starts the job", async () => {
     const { exportArchive } = await routes();
     const response = await exportArchive(exportRequest({ passphrase: PASSPHRASE, currentPassword: "s3cret" }));
 
-    expect(response.status).toBe(200);
+    // #1774 (design 2.6): accepted as a job, not written inside the request.
+    expect(response.status).toBe(202);
     expect(mocks.requireRecentAuthentication).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ user: expect.objectContaining({ id: "owner-1" }) }),
@@ -154,7 +158,7 @@ describe("portable archive routes: recent authentication (#1132)", () => {
       "archive_export",
     );
     /* The password is the challenge, not part of what the engine is asked to do. */
-    expect(mocks.createPortableArchive).toHaveBeenCalledWith({
+    expect(mocks.enqueuePortableArchiveExport).toHaveBeenCalledWith({
       userId: "owner-1", householdId: HOUSEHOLD, passphrase: PASSPHRASE, includeDocuments: false,
     });
   });
@@ -169,7 +173,7 @@ describe("portable archive routes: recent authentication (#1132)", () => {
 
     expect(response.status).toBe(403);
     expect((await response.json()).error.code).toBe("recent_authentication_required");
-    expect(mocks.createPortableArchive).not.toHaveBeenCalled();
+    expect(mocks.enqueuePortableArchiveExport).not.toHaveBeenCalled();
   });
 
   it("refuses somebody who may not export before challenging them", async () => {
@@ -184,7 +188,7 @@ describe("portable archive routes: recent authentication (#1132)", () => {
     expect((await response.json()).error.code).toBe("owner_required");
     expect(mocks.requirePortableArchiveAccess).toHaveBeenCalledWith("owner-1", HOUSEHOLD, "export");
     expect(mocks.requireRecentAuthentication).not.toHaveBeenCalled();
-    expect(mocks.createPortableArchive).not.toHaveBeenCalled();
+    expect(mocks.enqueuePortableArchiveExport).not.toHaveBeenCalled();
   });
 
   it("challenges an import for the archive_import intent, then brings it in", async () => {

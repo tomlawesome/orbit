@@ -433,8 +433,10 @@ export async function handle({ event, resolve }) {
      database, and no dynamic environment to read. */
   if (building) return resolve(event, event.route.id === "/logout" ? GOODBYE_STAGED : undefined);
 
-  /* ONE ARCHIVE AT A TIME (#1316). The slot itself is claimed by the route,
-     once its household role check has passed (#1390 review, ruling 4), so a
+  /* ONE ARCHIVE AT A TIME (#1316). The slot itself is claimed by the preview
+     or import route, once its household role check has passed (#1390
+     review, ruling 4), and by the document worker's export job, never by the
+     export POST, which only records the job (#1774, ADR-0047); so a
      signed-in person with no right to the household never holds it; a
      preview or import claims it only once its file is spooled to disk
      (#1792), so the watchdog here now bounds the spool phase, not a held

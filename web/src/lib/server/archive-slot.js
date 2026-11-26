@@ -15,9 +15,10 @@
  * first takes its archive file in whole, to a spool file on the document
  * volume (`spoolPortableArchiveUpload`), and only then claims the slot, for
  * the decrypting, checking and restoring: server time, bounded by the file's
- * size, never by the client's link speed. Before, the slot was held while the
- * file arrived, so one signed-in owner sending slowly made every other
- * household's export, preview and import a 429 for as long as they liked.
+ * size, never by the client's link speed. Before #1792 the slot was held
+ * while the file arrived, so one signed-in owner sending slowly made every
+ * other household's archive request a 429 for as long as they liked (the
+ * export too, until #1774 took it off the slot).
  *
  * The lane bounds uploads per account: while an account has a preview or
  * import spooling or processing, its next one is refused at once with the
@@ -29,9 +30,10 @@
  * queues, first come first served, for up to the slot wait (10 minutes,
  * `ORBIT_ARCHIVE_SLOT_WAIT_MS`), and a release hands the slot straight to the
  * request that has waited longest (`awaitArchiveSlot`). A wait that runs out
- * is the 429 and its spool file is removed. The export's body is small JSON,
- * so it still claims the slot directly and is refused at once when it is
- * held (`claimArchiveSlot`): waiting is for bodies already on disk.
+ * is the 429 and its spool file is removed. Since #1774 (ADR-0047) the
+ * export route takes no slot at all: it only records a job, and the document
+ * worker's export job waits for the slot in the engine
+ * (src/server/archive-slot.ts) the way a spooled upload does.
  *
  * The slot is the standard one-slot bulkhead; a request refused with a 429
  * never has its body buffered: it is read and thrown away after the answer,
@@ -66,9 +68,22 @@
  */
 import { env } from "$env/dynamic/private";
 import { AppError } from "orbit/lib/app-error";
+import {
+  ARCHIVE_SLOT_WAIT_MS,
+  archiveSlotHeld as coreSlotHeld,
+  awaitArchiveSlot as coreAwaitSlot,
+  claimArchiveSlot as coreClaimSlot,
+} from "orbit/server/archive-slot";
 import { discardBody } from "./body-limit.js";
 
-/** Route ids, not pathnames, as body-limit.js's sets are. POST only: a download stays out. */
+/**
+ * Route ids, not pathnames, as body-limit.js's sets are. POST only: a download
+ * stays out. These are the routes whose body the hook puts under the stall
+ * watchdog. The export POST stays listed for that alone (#1774): it claims no
+ * slot now, but a body that stalls would still hold its request open, and its
+ * small JSON body costs the watchdog nothing. Preview and import also claim
+ * the slot, once spooled.
+ */
 export const ARCHIVE_SLOT_ROUTES = new Set([
   "/api/portable-archives/preview",
   "/api/portable-archives/import",
@@ -79,8 +94,11 @@ export const ARCHIVE_BUSY_CODE = "archive_busy";
 export const ARCHIVE_BUSY_RETRY_AFTER_SECONDS = 60;
 export const ARCHIVE_BODY_TIMED_OUT_CODE = "request_timeout";
 export const ARCHIVE_BODY_STALL_MS = 30_000;
-/** How long a spooled upload waits for the slot before its 429 (#1792). */
-export const ARCHIVE_SLOT_WAIT_MS = 600_000;
+/* How long a spooled upload waits for the slot before its 429 (#1792). The
+   slot itself (holder, queue) lives in the engine since #1774
+   (src/server/archive-slot.ts), so the document worker's export job and these
+   requests take turns at one slot. */
+export { ARCHIVE_SLOT_WAIT_MS };
 
 /* The browser shows both verbatim (DeskArchive.svelte, PocketArchive.svelte).
    Both are the owner's words (2026-10-15); the busy one is generic, since
@@ -89,20 +107,10 @@ export const ARCHIVE_BUSY_MESSAGE = "Orbit’s processing another request right 
 export const ARCHIVE_BODY_TIMED_OUT_MESSAGE = "The archive failed to upload, please try again.";
 
 /**
- * The one holder's token, or null. One per process: see docs/architecture.md.
- * @type {object | null}
- */
-let holder = null;
-/**
- * Requests whose slot holdArchiveSlot took, mapped to that claim's token.
- * @type {WeakMap<Request, object>}
+ * Requests whose slot holdArchiveSlot took, mapped to that claim.
+ * @type {WeakMap<Request, import("orbit/server/archive-slot").ArchiveSlotClaim>}
  */
 const heldRequests = new WeakMap();
-/**
- * Spooled uploads waiting for the slot, longest first (#1792).
- * @type {Array<{ hand(token: object): void }>}
- */
-const waiting = [];
 /**
  * Each account's upload in flight, by user id, to its lane token (#1792).
  * @type {Map<string, object>}
@@ -111,7 +119,7 @@ const lanes = new Map();
 
 /** Whether the slot is taken (for tests). */
 export function archiveSlotHeld() {
-  return holder !== null;
+  return coreSlotHeld();
 }
 
 /** Whether this account has a preview or import upload in flight (for tests). */
@@ -184,11 +192,10 @@ export function isArchiveSlotRequest(routeId, request) {
  * @returns {null | { release(): void }}
  */
 export function claimArchiveSlot(request) {
-  if (request !== undefined && heldRequests.has(request) && holder === heldRequests.get(request)) {
+  if (request !== undefined && heldRequests.get(request)?.held()) {
     return { release() {} };
   }
-  const token = takeSlot();
-  return token === null ? null : claimOf(token);
+  return coreClaimSlot();
 }
 
 /**
@@ -208,65 +215,10 @@ export function claimArchiveSlot(request) {
  * @returns {Promise<null | { release(): void }>}
  */
 export function awaitArchiveSlot(request, { waitMs, until } = {}) {
-  if (request !== undefined && heldRequests.has(request) && holder === heldRequests.get(request)) {
+  if (request !== undefined && heldRequests.get(request)?.held()) {
     return Promise.resolve({ release() {} });
   }
-  if (until?.aborted) return Promise.resolve(null);
-  const token = waiting.length === 0 ? takeSlot() : null;
-  if (token !== null) return Promise.resolve(claimOf(token));
-  const wait = milliseconds(waitMs, env.ORBIT_ARCHIVE_SLOT_WAIT_MS, ARCHIVE_SLOT_WAIT_MS);
-  return new Promise((resolve) => {
-    const signal = request?.signal;
-    const leave = () => {
-      clearTimeout(timer);
-      signal?.removeEventListener("abort", leave);
-      until?.removeEventListener("abort", leave);
-      const at = waiting.indexOf(waiter);
-      if (at !== -1) waiting.splice(at, 1);
-      resolve(null);
-    };
-    const waiter = {
-      hand(/** @type {object} */ given) {
-        clearTimeout(timer);
-        signal?.removeEventListener("abort", leave);
-        until?.removeEventListener("abort", leave);
-        resolve(claimOf(given));
-      },
-    };
-    const timer = setTimeout(leave, wait);
-    /* unref: a waiting request must never be what keeps the process alive. */
-    timer.unref?.();
-    signal?.addEventListener("abort", leave, { once: true });
-    until?.addEventListener("abort", leave, { once: true });
-    waiting.push(waiter);
-  });
-}
-
-/** The claim on `token`: its release frees the slot, or hands it to the longest waiter. @param {object} token */
-function claimOf(token) {
-  return {
-    release() {
-      releaseSlot(token);
-    },
-  };
-}
-
-/** @param {object} token */
-function releaseSlot(token) {
-  if (holder !== token) return;
-  holder = null;
-  const next = waiting.shift();
-  if (next === undefined) return;
-  const handed = /** @type {object} */ (takeSlot());
-  next.hand(handed);
-}
-
-/** The new holder's token, or null when the slot is taken. */
-function takeSlot() {
-  if (holder !== null) return null;
-  const token = {};
-  holder = token;
-  return token;
+  return coreAwaitSlot({ waitMs: milliseconds(waitMs, env.ORBIT_ARCHIVE_SLOT_WAIT_MS, ARCHIVE_SLOT_WAIT_MS), until, signal: request?.signal });
 }
 
 /**
@@ -355,9 +307,10 @@ export function watchArchiveBody(request, { stallMs } = {}) {
 
 /**
  * The slot and the watchdog together, for a caller that has already decided
- * the request may hold the slot. It models the export's path and the
- * processing phase (a test or hook helper), not an upload: since #1792 a
- * preview or import spools its file before it claims the slot. It answers
+ * the request may hold the slot. It models the processing phase (a test or
+ * hook helper), not an upload: since #1792 a preview or import spools its
+ * file before it claims the slot, and since #1774 no export request holds it
+ * (the document worker's export job does). It answers
  * null when the request is not an archive request (another route, not a
  * POST, no body), the 429 when the slot is taken (the body is then read
  * away unbuffered), or the watched request and the release the caller must
@@ -371,18 +324,18 @@ export function watchArchiveBody(request, { stallMs } = {}) {
  */
 export function holdArchiveSlot(routeId, request, options = {}) {
   if (!isArchiveSlotRequest(routeId, request)) return null;
-  if (holder !== null) {
+  if (coreSlotHeld()) {
     discardBody(request);
     return archiveBusy();
   }
   const watched = watchArchiveBody(request, options);
   /* Last, so anything above that throws leaves the slot free. */
-  const token = /** @type {object} */ (takeSlot());
-  heldRequests.set(watched, token);
+  const claim = /** @type {import("orbit/server/archive-slot").ArchiveSlotClaim} */ (coreClaimSlot());
+  heldRequests.set(watched, claim);
   return {
     request: watched,
     release() {
-      releaseSlot(token);
+      claim.release();
     },
   };
 }

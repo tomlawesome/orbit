@@ -48,7 +48,7 @@ const mocks = vi.hoisted(() => ({
   getKeyState: vi.fn(),
   requireRecentAuthentication: vi.fn(),
   requirePortableArchiveAccess: vi.fn(),
-  createPortableArchive: vi.fn(),
+  enqueuePortableArchiveExport: vi.fn(),
   importPortableArchive: vi.fn(),
   previewPortableImport: vi.fn(),
   spoolPortableArchiveUpload: vi.fn(),
@@ -67,6 +67,7 @@ vi.mock("orbit/server/maintenance", () => ({
   readEffectiveMaintenance: mocks.readEffectiveMaintenance,
   assertOutsideMaintenance: mocks.assertOutsideMaintenance,
 }));
+vi.mock("orbit/server/document-maintenance/export-jobs", () => ({ notifyExportWorker: vi.fn() }));
 vi.mock("orbit/server/key-state", async (importOriginal) => ({ ...(await importOriginal()), getKeyState: mocks.getKeyState }));
 vi.mock("orbit/server/upload-limit", () => ({ readEffectiveUploadLimit: async () => 50 * MIB }));
 vi.mock("orbit/lib/auth/recent-auth", () => ({ requireRecentAuthentication: mocks.requireRecentAuthentication }));
@@ -80,7 +81,8 @@ vi.mock("orbit/server/portable-archive-repository", async (importOriginal) => {
   mocks.realSpool = real.spoolPortableArchiveUpload;
   return {
     requirePortableArchiveAccess: mocks.requirePortableArchiveAccess,
-    createPortableArchive: mocks.createPortableArchive,
+    enqueuePortableArchiveExport: mocks.enqueuePortableArchiveExport,
+    readPortableArchiveExportState: async () => ({ export: null, latest: null }),
     importPortableArchive: mocks.importPortableArchive,
     previewPortableImport: mocks.previewPortableImport,
     spoolPortableArchiveUpload: mocks.spoolPortableArchiveUpload,
@@ -183,7 +185,7 @@ beforeEach(() => {
   mocks.requirePortableArchiveAccess.mockImplementation(async (userId, householdId) => {
     if (!people[userId]?.owns.includes(householdId)) throw new AppError("household_not_found", "That household is not available", 404);
   });
-  mocks.createPortableArchive.mockResolvedValue({ id: "archive-1", expiresAt: "2026-11-10T00:00:00.000Z", includesDocuments: false });
+  mocks.enqueuePortableArchiveExport.mockResolvedValue({ id: "job-1", status: "pending" });
   mocks.importPortableArchive.mockImplementation(async (input) => {
     engineCalls.push({ userId: input.userId, bytes: await readStream(input.archive) });
     return { importedItems: 1, documentsExcluded: 0 };
@@ -405,7 +407,7 @@ describe("R1: a slow upload does not hold the archive slot", () => {
 
     expect.soft(slot.archiveSlotHeld(), "nothing is processing: the slot is free while the file arrives").toBe(false);
     const exported = await whole(EXPORT, "owner-2", HOUSEHOLD_B);
-    expect.soft(exported.status, "another household's export is not refused as busy").toBe(200);
+    expect.soft(exported.status, "another household's export is not refused as busy").toBe(202);
     const previewed = await whole(PREVIEW, "owner-2", HOUSEHOLD_B);
     expect.soft(previewed.status, "another household's preview is not refused as busy").toBe(200);
 
@@ -524,7 +526,7 @@ describe("L3: one upload in flight per account", () => {
 // --- L4 -----------------------------------------------------------------------
 
 describe("L4: the slot is exclusive during processing, and spooled requests wait for it", () => {
-  it("a spooled preview waits (not 200, not 429) while another import processes, an export is still refused at once, and the waiters are served first come first served", async () => {
+  it("a spooled preview waits (not 200, not 429) while another import processes, an export is queued at once (it no longer takes the slot: the worker does), and the waiters are served first come first served", async () => {
     // Catches a spooled request refused at once (the person would have to upload it all again), two processing at once, or a queue served out of order.
     fakeClock();
     const blocker = blockImportOf("owner-1");
@@ -544,7 +546,7 @@ describe("L4: the slot is exclusive during processing, and spooled requests wait
 
     const exported = track(whole(EXPORT, "owner-3", HOUSEHOLD_C));
     await until(() => exported.settled, "the export is answered without the clock moving");
-    await expectBusy(exported.value);
+    expect(exported.value.status, "the export only queues its job (design 2.1)").toBe(202);
 
     blocker.open();
     await until(() => processing.settled && waiting.settled && later.settled, "all three answers", 10_000);
@@ -639,9 +641,9 @@ describe("L6: the spool preflight is asked for the declared length", () => {
 
 // --- L7 -----------------------------------------------------------------------
 
-describe("L7: the export route is unchanged", () => {
-  it("an export while the slot is held is 429 archive_busy at once, without waiting", async () => {
-    // Pins today's fail-fast export: only bodies already on disk wait.
+describe("L7: the export route no longer touches the slot", () => {
+  it("an export while the slot is held is queued at once (202), without waiting and without claiming the slot", async () => {
+    // Design 2.1: the route no longer claims the slot; the worker waits for it. Only bodies already on disk wait.
     fakeClock();
     const blocker = blockImportOf("owner-1");
     track(whole(IMPORT, "owner-1", HOUSEHOLD_A));
@@ -649,8 +651,8 @@ describe("L7: the export route is unchanged", () => {
     const exported = track(whole(EXPORT, "owner-3", HOUSEHOLD_C));
     vi.advanceTimersByTime(0);
     await until(() => exported.settled, "the export's answer, with the clock still");
-    await expectBusy(exported.value);
-    expect(mocks.createPortableArchive).not.toHaveBeenCalled();
+    expect(exported.value.status).toBe(202);
+    expect(mocks.enqueuePortableArchiveExport).toHaveBeenCalledTimes(1);
     blocker.open();
   });
 });

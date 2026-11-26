@@ -83,6 +83,8 @@ const mocks = vi.hoisted(() => ({
   listQuarantineFiles: vi.fn(),
   sweepTemporaryFiles: vi.fn(),
   purgeExpiredPortableArchives: vi.fn(),
+  requeueExportsAtBoot: vi.fn(),
+  sweepExports: vi.fn(),
   reconcilePortableArchiveStorage: vi.fn(),
   rollBackStaleUnfinishedPortableImports: vi.fn(),
   purgeExpiredHouseholds: vi.fn(),
@@ -314,6 +316,13 @@ vi.mock("@/server/portable-archive-repository", () => ({
   rollBackStaleUnfinishedPortableImports: mocks.rollBackStaleUnfinishedPortableImports,
 }));
 
+/* #1774: the export job's boot requeue and sweep are their own sweeps with their own tests; here they only mark their place in the cycle. */
+vi.mock("@/server/document-maintenance/export-jobs", () => ({
+  requeueInterruptedExportsAtBoot: mocks.requeueExportsAtBoot,
+  sweepPortableArchiveExports: mocks.sweepExports,
+  startExportWorker: vi.fn(),
+}));
+
 /* #1437: the content-index backfill is its own sweep with its own tests. */
 vi.mock("@/server/document-maintenance/content-index-backfill", () => ({ backfillDocumentContentIndexes: async () => 0 }));
 /* #1786: the rejected-row retention sweep is its own sweep with its own tests. */
@@ -513,6 +522,12 @@ beforeEach(() => {
     mocks.steps.push("storage.listQuarantineFiles");
     return [];
   });
+  mocks.requeueExportsAtBoot.mockImplementation(async () => {
+    mocks.steps.push("exports.requeueAtBoot");
+  });
+  mocks.sweepExports.mockImplementation(async () => {
+    mocks.steps.push("exports.sweep");
+  });
   mocks.purgeExpiredPortableArchives.mockImplementation(async () => {
     mocks.steps.push("portableArchives.purgeExpired");
   });
@@ -538,6 +553,8 @@ describe("runDocumentMaintenanceCycle — phase order", () => {
     await runDocumentMaintenanceCycle();
 
     expect(mocks.steps).toEqual([
+      // 0. Exports left processing by a dead process go back to the queue (#1774).
+      "exports.requeueAtBoot",
       // 1. Strand the documents interrupted mid-upload.
       "update:documents",
       // The documents content-index backfill leaves no step here; the next is
@@ -561,6 +578,8 @@ describe("runDocumentMaintenanceCycle — phase order", () => {
       "select:document_staging_objects",
       // 4/5. The other retention sweeps.
       "portableArchives.purgeExpired",
+      // 4a. A failed export's key and a finished export job, swept right after (#1774).
+      "exports.sweep",
       "households.purgeExpired",
       // 6. Storage reconciliation, due because it has never run. It first
       // retires staged uploads no item bound in time (#1316).

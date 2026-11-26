@@ -63,6 +63,7 @@ const actionLabels: Record<string, string> = {
   household_deletion_cancelled: "Household deletion cancelled",
   household_hard_deleted: "Household deleted",
   household_purged: "Household retention completed",
+  portable_archive_export_started: "Archive export started",
   portable_archive_requested: "Archive requested",
   portable_archive_downloaded: "Archive downloaded",
   portable_archive_expired: "Archive expired",

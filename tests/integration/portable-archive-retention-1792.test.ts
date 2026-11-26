@@ -20,6 +20,7 @@ import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { auditLog, portableArchives } from "@/db/schema";
+import { runExportWorkerOnce } from "@/server/document-maintenance/export-jobs";
 import { createPortableArchive, purgeExpiredPortableArchives } from "@/server/portable-archive-repository";
 import { cleanupIntegrationEnvironment, createIntegrationFixture, type IntegrationFixture } from "./support/fixtures";
 import { callRouteForSession, loadRoute } from "./support/request-event";
@@ -62,7 +63,7 @@ const HOUR_MS = 3_600_000;
 const passphrase = "correct-horse-battery-staple";
 
 const { GET: downloadRoute } = await loadRoute("portable-archives/[archiveId]/download");
-const { POST: exportRoute } = await loadRoute("households/[householdId]/portable-archives");
+const { POST: exportRoute, GET: readExportState } = await loadRoute("households/[householdId]/portable-archives");
 
 type Values = { retentionHours: number; keepPerHousehold: number; maxTotalGigabytes: number };
 type Settings = { version: number; defaults: { retentionHours: number; keepPerHousehold: number; maxTotalBytes: number } };
@@ -283,8 +284,17 @@ describe("L14: the export's answer says how many are kept", () => {
       body: JSON.stringify({ passphrase, includeDocuments: false }),
       params: { householdId: fixture.household.id },
     });
-    expect(response.status).toBe(200);
-    return await response.json() as { archive: { keepPerHousehold?: number; expiresAt: string } };
+    // #1774 (design 2.6, 2.4): the start answers 202 with the job; once the worker has written the file,
+    // the household's state route says how many are kept (`latest.keepPerHousehold`).
+    expect(response.status).toBe(202);
+    await runExportWorkerOnce();
+    const state = await callRouteForSession(readExportState, owner, {
+      url: `http://127.0.0.1:3000/api/households/${fixture.household.id}/portable-archives`,
+      params: { householdId: fixture.household.id },
+    });
+    expect(state.status).toBe(200);
+    const { latest } = await state.json() as { latest: { keepPerHousehold?: number; expiresAt: string } };
+    return { archive: latest };
   }
 
   it("carries keepPerHousehold: 2 at the defaults, and 1 once an administrator sets 1", async () => {

@@ -170,7 +170,10 @@ describe("L10: free space is shared by what is in flight", () => {
     // Catches the export preflight ignoring the exports already being written.
     const fixture = await createIntegrationFixture("arch1799-l10-export");
     const sizeOf = async (id: string) => (await getDb().select({ sizeBytes: portableArchives.sizeBytes }).from(portableArchives).where(eq(portableArchives.id, id)))[0].sizeBytes;
+    // #1774 (design 2.1): one live export per household, so the second export comes from another household.
+    const otherFixture = await createIntegrationFixture("arch1799-l10-export-b");
     const input = { userId: fixture.users.owner.id, householdId: fixture.household.id, passphrase, includeDocuments: false };
+    const otherInput = { userId: otherFixture.users.owner.id, householdId: otherFixture.household.id, passphrase, includeDocuments: false };
     const measured = await createPortableArchive(input);
     const fileBytes = await sizeOf(measured.id);
     expect(fileBytes).toBeGreaterThan(0);
@@ -181,13 +184,13 @@ describe("L10: free space is shared by what is in flight", () => {
     first.catch(() => undefined);
     await gate.reached;
     // A second export that is not refused would wait on the held write, so it is given a few seconds to answer.
-    const second = createPortableArchive(input).then(() => "written" as const, (error: unknown) => error);
+    const second = createPortableArchive(otherInput).then(() => "written" as const, (error: unknown) => error);
     const answer = await Promise.race([second, new Promise<string>((resolve) => setTimeout(() => resolve("not refused: waiting on the held write"), 5_000))]);
     gate.open();
     await second;
     expect(answer).toMatchObject({ code: "archive_storage_full", status: 507 });
     await first;
-    await expect(createPortableArchive(input), "the reservation was released when the first finished").resolves.toBeDefined();
+    await expect(createPortableArchive(otherInput), "the reservation was released when the first finished").resolves.toBeDefined();
   }, 120_000);
 });
 
