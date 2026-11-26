@@ -131,7 +131,8 @@ For a promotion into `preview` (`--target preview`):
   three stable tags on GitLab.
 - `slow-gates-green`: on the newest `dev` pipeline (nightly or merge request)
   whose commit has the same tree as the source branch and that ran them,
-  `screens_chromium`, `smoke` and `fast` (coverage floors and headroom) are
+  `screens_chromium`, `smoke`, both `fast` shards and `fast_coverage` (the
+  coverage floors and headroom, measured on the merged shards since #1933) are
   green and no `rig_*` job failed. With none, it says which pipeline to run
   first. It reads the pipelines API with the read-only `ORBIT_REUSE_TOKEN` in CI
   (the job declares the `ci-read-tokens` environment, as `classify` does;

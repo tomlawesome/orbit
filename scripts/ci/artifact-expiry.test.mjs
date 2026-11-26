@@ -6,9 +6,10 @@ import { describe, expect, it } from "vitest";
  * #1608: shorter artifact expiry for the jobs that hold most of the CI
  * artifact storage. Written from the specification alone.
  *
- *   - `fast`, `fast_docker` and the smoke jobs keep their artifacts for exactly
+ *   - `fast_docker` and the smoke jobs keep their artifacts for exactly
  *     7 days (scripts/ci/reuse-lookup.mjs reuses evidence up to 7 days old, so
- *     not shorter).
+ *     not shorter). Since #1933 that is `fast_coverage`, and `fast`'s shard
+ *     blobs keep 8, one day past the reuse window.
  *   - `build_launcher`'s archives expire after 3 days, except on `main`,
  *     `preview` and `hotfix/*`, which keep them 90 days. Hotfix was added at
  *     build time: a hotfix tag is released from its hotfix pipeline exactly as
@@ -332,13 +333,19 @@ const contexts = {
 // ---------------------------------------------------------------------------
 
 describe("#1608 fast and smoke artifacts", () => {
-  const sevenDayJobs = ["fast", "fast_docker", "smoke", "smoke_webkit", "smoke_webkit_mobile", "smoke_local_only"];
+  const sevenDayJobs = ["fast_coverage", "fast_docker", "smoke", "smoke_webkit", "smoke_webkit_mobile", "smoke_local_only"];
 
   it.each(sevenDayJobs)("%s keeps its artifacts for exactly 7 days", (job) => {
     expect(blocks.has(job), `${job} is not defined in .gitlab-ci.yml`).toBe(true);
     const expireIn = artifactField(job, readExpireIn);
     expect(expireIn, `${job} declares no artifacts expire_in`).toBeDefined();
     expect(expiryDays(expireIn), `${job} has expire_in: ${expireIn}`).toBe(7);
+  });
+
+  // #1933: a `fast` shard's blob must outlive the 7-day reuse window by a day,
+  // so fast_coverage can still fetch it for a shard that stood on that run.
+  it("fast keeps its shard blobs for 8 days, one past the reuse window (#1933)", () => {
+    expect(expiryDays(artifactField("fast", readExpireIn))).toBe(8);
   });
 });
 
