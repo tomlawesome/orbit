@@ -43,6 +43,19 @@
 //      differently-suffixed tag (`-rc*`, `-SNAPSHOT`, `-rocm`, `-slim`, ...)
 //      is never offered as the upgrade.
 //
+//      A newer release is required only once its image is at least
+//      MINIMUM_RELEASE_AGE_DAYS old (#1997), the rule version bumps follow: a
+//      minimum release age, as Renovate's `minimumReleaseAge`. The age is the
+//      `created` time in the tag's linux/amd64 image config. Newer releases
+//      are asked about newest first; the first old-enough one is the required
+//      release (`behind`). When every newer release is younger, the status is
+//      `cooling`: not behind and not blind, naming the newest young release
+//      (`coolingVersion`, `coolingTag`) and when it becomes required
+//      (`requiredFrom`). It fails strict: an unreadable build time is
+//      `unreachable`; a missing, unparsable or future time counts as old
+//      enough; after 10 young releases the next is required unasked.
+//      `--red` runs this axis with the age rule switched off.
+//
 // `sync` order (#1551): move the pin first, then sync. `sync` records the tag's
 // current index digest and today's date only when the pinned digest is that
 // index's linux/amd64 manifest. A pin whose manifest is not in the current
@@ -84,6 +97,27 @@ const REGISTRY_FETCH_TIMEOUT_MS = 30_000;
 // tags, so this is a real cap, not a formality, but still far more than any
 // repo here has ever needed.
 const MAX_TAG_LIST_PAGES = 20;
+
+// The standing rule for version bumps: take the newest release that is at
+// least 3 days old, unless a newer one fixes a vulnerability (owner,
+// 2026-10-28). The upstream-release axis follows the same rule (#1997); a
+// vulnerable pin is the image scan's job, not this check's.
+export const MINIMUM_RELEASE_AGE_DAYS = 3;
+const MINIMUM_RELEASE_AGE_MS = MINIMUM_RELEASE_AGE_DAYS * 24 * 60 * 60 * 1000;
+// Fail strict, never open: at most this many newer releases are asked for
+// their build time; if every one is young, the next older is required unasked.
+const MAX_RELEASES_ASKED = 10;
+// An ISO 8601 date-time with an explicit zone; anything else is not trusted.
+const ISO_DATE_TIME_PATTERN =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/iu;
+// Every manifest and index media type a tag can resolve to, so the registry
+// never down-converts or refuses.
+const MANIFEST_ACCEPT = [
+  "application/vnd.oci.image.index.v1+json",
+  "application/vnd.docker.distribution.manifest.list.v2+json",
+  "application/vnd.oci.image.manifest.v1+json",
+  "application/vnd.docker.distribution.manifest.v2+json",
+].join(", ");
 
 // A pre-release marker never worth offering as an upgrade, wherever it lands
 // among a tag's hyphen-separated segments.
@@ -352,8 +386,7 @@ function nextTagsPageUrl(linkHeader, registryHost) {
  * this tool pins is public, so no credential is needed to read its tag list.
  * Works against Docker Hub and GHCR.
  */
-export async function dockerListTags(repository) {
-  const { repoPath, registryHost, tokenUrl } = registryForRepository(repository);
+async function anonymousRegistryToken(repository, tokenUrl) {
   const tokenResponse = await fetch(tokenUrl, {
     signal: AbortSignal.timeout(REGISTRY_FETCH_TIMEOUT_MS),
   });
@@ -367,6 +400,12 @@ export async function dockerListTags(repository) {
   if (!token) {
     throw new Error(`registry did not return an anonymous token for ${repository}`);
   }
+  return token;
+}
+
+export async function dockerListTags(repository) {
+  const { repoPath, registryHost, tokenUrl } = registryForRepository(repository);
+  const token = await anonymousRegistryToken(repository, tokenUrl);
 
   const tags = [];
   let url = `${registryHost}/v2/${repoPath}/tags/list?n=100`;
@@ -385,6 +424,47 @@ export async function dockerListTags(repository) {
     pages += 1;
   }
   return tags;
+}
+
+/**
+ * When a tag's image was built: the `created` field of its linux/amd64 image
+ * config, read through the registry v2 HTTP API with an anonymous token (tag
+ * manifest or index -> linux/amd64 manifest -> config blob). A
+ * single-architecture image (a plain manifest) is read directly. Any HTTP or
+ * network failure throws; a config with no `created` returns "", which the
+ * caller does not trust.
+ */
+export async function dockerTagPublishedAt(repository, tag) {
+  const { repoPath, registryHost, tokenUrl } = registryForRepository(repository);
+  const token = await anonymousRegistryToken(repository, tokenUrl);
+  const getJson = async (path, what) => {
+    const response = await fetch(`${registryHost}/v2/${repoPath}/${path}`, {
+      headers: { Authorization: `Bearer ${token}`, Accept: MANIFEST_ACCEPT },
+      signal: AbortSignal.timeout(REGISTRY_FETCH_TIMEOUT_MS),
+    });
+    if (!response.ok) {
+      throw new Error(`${repository}:${tag} ${what} request failed: HTTP ${response.status}`);
+    }
+    return response.json();
+  };
+
+  let manifest = await getJson(`manifests/${encodeURIComponent(tag)}`, "manifest");
+  if (Array.isArray(manifest?.manifests)) {
+    const platform = manifest.manifests.find(
+      (entry) =>
+        entry?.platform?.os === "linux" && entry?.platform?.architecture === "amd64",
+    );
+    if (typeof platform?.digest !== "string") {
+      throw new Error(`${repository}:${tag} has no linux/amd64 image in its index`);
+    }
+    manifest = await getJson(`manifests/${platform.digest}`, "linux/amd64 manifest");
+  }
+  const configDigest = manifest?.config?.digest;
+  if (typeof configDigest !== "string") {
+    throw new Error(`${repository}:${tag} has a manifest with no image config`);
+  }
+  const config = await getJson(`blobs/${configDigest}`, "image config");
+  return typeof config?.created === "string" ? config.created : "";
 }
 
 // --- Axis 0: drift between the two places a pin lives ------------------------
@@ -597,7 +677,7 @@ async function checkPackages(entry, simulatePackages, exceptions = []) {
  * "there was nothing to compare" are different findings with different
  * remedies (none, versus none needed).
  */
-async function checkRelease(entry, listTags) {
+async function checkRelease(entry, listTags, tagPublishedAt, now) {
   const { repository, tagName } = splitTagReference(entry.tag);
   const pinned = parseVersionTag(tagName);
   if (!pinned.valid) {
@@ -634,6 +714,7 @@ async function checkRelease(entry, listTags) {
     };
   }
   let latest = null;
+  const newer = [];
   for (const candidateTag of tags) {
     const candidate = parseVersionTag(candidateTag);
     // Never a rolling tag, never a pre-release, and only ever the same
@@ -641,11 +722,15 @@ async function checkRelease(entry, listTags) {
     // `-full` tags, never a bare release or a `-rocm`/`-slim` build.
     if (!candidate.valid || candidate.rolling || candidate.prerelease) continue;
     if (candidate.variant !== pinned.variant) continue;
+    const release = { versionParts: candidate.versionParts, tag: candidateTag };
     if (!latest || compareVersionParts(candidate.versionParts, latest.versionParts) > 0) {
-      latest = { versionParts: candidate.versionParts, tag: candidateTag };
+      latest = release;
+    }
+    if (compareVersionParts(candidate.versionParts, pinned.versionParts) > 0) {
+      newer.push(release);
     }
   }
-  if (!latest || compareVersionParts(latest.versionParts, pinned.versionParts) <= 0) {
+  if (newer.length === 0) {
     return {
       status: "current",
       pinnedVersion,
@@ -654,19 +739,102 @@ async function checkRelease(entry, listTags) {
       summary: `${repository} has not published a stable release newer than the pinned ${tagName}`,
     };
   }
+
+  // The minimum release age (#1997): newest first, the first release built at
+  // least MINIMUM_RELEASE_AGE_DAYS ago is the required one.
+  newer.sort((a, b) => compareVersionParts(b.versionParts, a.versionParts));
+  const nowMs = now.getTime();
+  let cooling = null;
+  let required = null;
+  let reason = null;
+  for (const [index, release] of newer.entries()) {
+    if (index >= MAX_RELEASES_ASKED) {
+      required = release;
+      reason = "capped";
+      break;
+    }
+    let builtAt;
+    try {
+      builtAt = await tagPublishedAt(repository, release.tag);
+    } catch (error) {
+      return {
+        status: "unreachable",
+        pinnedVersion,
+        latestVersion: null,
+        latestTag: null,
+        summary: `could not read when ${repository}:${release.tag} was built from its registry: ${
+          error instanceof Error ? error.message : "unknown failure"
+        }`,
+      };
+    }
+    const builtMs =
+      typeof builtAt === "string" && ISO_DATE_TIME_PATTERN.test(builtAt)
+        ? Date.parse(builtAt)
+        : Number.NaN;
+    if (!Number.isFinite(builtMs) || builtMs > nowMs) {
+      required = release;
+      reason = "untrusted";
+      break;
+    }
+    if (nowMs - builtMs >= MINIMUM_RELEASE_AGE_MS) {
+      required = release;
+      break;
+    }
+    cooling ??= { ...release, requiredFrom: new Date(builtMs + MINIMUM_RELEASE_AGE_MS) };
+  }
+
+  const coolingFields = {
+    coolingVersion: cooling ? cooling.versionParts.join(".") : null,
+    coolingTag: cooling ? cooling.tag : null,
+    requiredFrom: cooling ? cooling.requiredFrom.toISOString() : null,
+  };
+  const age = `${MINIMUM_RELEASE_AGE_DAYS} days`;
+  const youngNote = cooling
+    ? `${cooling.tag} was published less than ${age} ago and is not yet required (required from ${minuteOf(cooling.requiredFrom)})`
+    : null;
+  if (!required) {
+    return {
+      status: "cooling",
+      pinnedVersion,
+      latestVersion: pinnedVersion,
+      latestTag: tagName,
+      ...coolingFields,
+      summary: `${repository} published ${cooling.tag} less than ${age} ago; it is not required until ${minuteOf(cooling.requiredFrom)}; the pin ${tagName} is the newest release at least ${age} old`,
+    };
+  }
+  const notes = [];
+  if (reason === "untrusted") {
+    notes.push(`its build time could not be trusted, so it is treated as old enough`);
+  }
+  if (reason === "capped") {
+    notes.push(
+      `the ${MAX_RELEASES_ASKED} newer releases above it are all under ${age} old, so it is required without asking its age`,
+    );
+  }
+  if (youngNote) notes.push(youngNote);
   return {
     status: "behind",
     pinnedVersion,
-    latestVersion: latest.versionParts.join("."),
-    latestTag: latest.tag,
-    summary: `${repository} has published ${latest.tag}, newer than the pinned ${tagName}`,
+    latestVersion: required.versionParts.join("."),
+    latestTag: required.tag,
+    ...coolingFields,
+    summary: `${repository} has published ${required.tag}, newer than the pinned ${tagName}${
+      notes.length > 0 ? `; ${notes.join("; ")}` : ""
+    }`,
   };
+}
+
+/** An ISO 8601 time to the minute, e.g. `2026-11-30T21:00Z`. */
+function minuteOf(date) {
+  return `${date.toISOString().slice(0, 16)}Z`;
 }
 
 // --- The check ---------------------------------------------------------------
 
 const BEHIND_STATUSES = new Set(["drifted", "moved", "index-pin", "stale", "behind"]);
 const BLIND_STATUSES = new Set(["unreachable", "no-package-manager"]);
+// `cooling` is in neither set on purpose: a newer release younger than the
+// minimum release age is not required yet, so the run exits as if current.
 
 const SKIPPED_TAG_AXIS = {
   status: "skipped",
@@ -691,9 +859,9 @@ const SKIPPED_RELEASE_AXIS = {
 };
 
 /**
- * Run the axes over every covered entry. `resolveTag`, `simulatePackages` and
- * `listTags` are injectable so the unit tests can run every axis without
- * docker or a real registry.
+ * Run the axes over every covered entry. `resolveTag`, `simulatePackages`,
+ * `listTags`, `tagPublishedAt` and `now` are injectable so the unit tests can
+ * run every axis without docker, a real registry or the real clock.
  */
 export async function checkPins({
   policy,
@@ -701,6 +869,8 @@ export async function checkPins({
   resolveTag = dockerResolveTag,
   simulatePackages = dockerSimulatePackages,
   listTags = dockerListTags,
+  tagPublishedAt = dockerTagPublishedAt,
+  now = new Date(),
   packages = false,
   offline = false,
   drift = true,
@@ -714,7 +884,9 @@ export async function checkPins({
         ? checkDrift(entry, repoDir)
         : { status: "skipped", files: [], summary: "not checked" },
       tag: offline ? SKIPPED_TAG_AXIS : await checkTag(entry, resolveTag),
-      release: offline ? SKIPPED_RELEASE_AXIS : await checkRelease(entry, listTags),
+      release: offline
+        ? SKIPPED_RELEASE_AXIS
+        : await checkRelease(entry, listTags, tagPublishedAt, now),
       packages:
         offline || !packages
           ? SKIPPED_PACKAGE_AXIS
@@ -808,13 +980,23 @@ export function renderReport(result) {
     }
 
     lines.push(`- **Upstream release**: ${image.axes.release.summary}`);
-    if (image.axes.release.status === "behind") {
-      lines.push(`  - pinned release: \`${image.axes.release.pinnedVersion}\``);
+    const release = image.axes.release;
+    if (release.status === "behind") {
+      lines.push(`  - pinned release: \`${release.pinnedVersion}\``);
       lines.push(
-        `  - latest release: \`${image.axes.release.latestVersion}\` (\`${image.axes.release.latestTag}\`)`,
+        `  - required release: \`${release.latestVersion}\` (\`${release.latestTag}\`), the newest at least ${MINIMUM_RELEASE_AGE_DAYS} days old`,
       );
+      const younger = release.coolingTag
+        ? ` Do not take \`${release.coolingTag}\`: it is newer but not yet required (required from \`${release.requiredFrom}\`).`
+        : "";
       lines.push(
-        "  - Remedy: bump the tag to the new release, resolve its digest, and run `node scripts/sidecar-pins.mjs sync` to pin both places.",
+        `  - Remedy: bump the tag to \`${release.latestTag}\`, resolve its digest, and run \`node scripts/sidecar-pins.mjs sync\` to pin both places.${younger}`,
+      );
+    }
+    if (release.status === "cooling") {
+      lines.push(`  - pinned release: \`${release.pinnedVersion}\``);
+      lines.push(
+        `  - cooling release: \`${release.coolingVersion}\` (\`${release.coolingTag}\`), not required until \`${release.requiredFrom}\``,
       );
     }
 
@@ -852,6 +1034,12 @@ export function renderReport(result) {
             ? "Every checked pin is in step with its upstream tag, the newest release upstream has published, and its own packages."
             : "Every checked pin matches the policy, is still the current manifest of its tag, and is not behind the newest release upstream has published. The packages inside each pin were not checked.",
   );
+  if (!result.behind && result.images.some((image) => image.axes.release.status === "cooling")) {
+    lines.push("");
+    lines.push(
+      `A release published less than ${MINIMUM_RELEASE_AGE_DAYS} days ago is not required yet (#1997); see "cooling release" above for when it will be.`,
+    );
+  }
   lines.push("");
   return `${lines.join("\n")}\n`;
 }
@@ -1022,6 +1210,10 @@ async function runTagRedCheck({ policy, repoDir, resolveTag, entry, today, write
     },
     repoDir,
     resolveTag,
+    // Only the tag axis is under test here; the release axis must not reach
+    // a registry for tags or build times it never looks at.
+    listTags: async () => [],
+    tagPublishedAt: async () => new Date(0).toISOString(),
     drift: false,
     packages: false,
     today,
@@ -1074,12 +1266,15 @@ async function runReleaseRedCheck({ policy, repoDir, listTags, entries, today, w
   const fakeTagName = `${decremented.join(".")}${parsed.variant ? `-${parsed.variant}` : ""}`;
   const fakeTag = `${repository}:${fakeTagName}`;
   write(
-    `sidecar pins: self-test. Pretending ${entry.tag} is pinned to ${fakeTag}, an older release than it really is, and asking the check whether upstream has published something newer. Nothing is written.\n`,
+    `sidecar pins: self-test. Pretending ${entry.tag} is pinned to ${fakeTag}, an older release than it really is, and asking the check whether upstream has published something newer. The minimum release age rule is switched off for this self-test: every release counts as old enough. Nothing is written.\n`,
   );
   const result = await checkPins({
     policy: { ...policy, containerImages: [{ ...entry, tag: fakeTag }] },
     repoDir,
     listTags,
+    // The age rule is switched off: every release reads as built long ago, so
+    // the self-test proves the version comparison, not today's build times.
+    tagPublishedAt: async () => new Date(0).toISOString(),
     // Only the release axis is under test here; give axis 1 a resolver that
     // never shells out to the real docker CLI, so this half of --red does
     // not depend on Docker being present.
@@ -1133,6 +1328,8 @@ export async function runSidecarPins(argv, deps = {}) {
     resolveTag = dockerResolveTag,
     simulatePackages = dockerSimulatePackages,
     listTags = dockerListTags,
+    tagPublishedAt = dockerTagPublishedAt,
+    now = new Date(),
     today = new Date().toISOString().slice(0, 10),
     write = (text) => process.stdout.write(text),
     writeError = (text) => process.stderr.write(text),
@@ -1219,6 +1416,8 @@ export async function runSidecarPins(argv, deps = {}) {
     resolveTag,
     simulatePackages,
     listTags,
+    tagPublishedAt,
+    now,
     packages: options.packages === true,
     offline: options.offline === true,
     only: options.only,

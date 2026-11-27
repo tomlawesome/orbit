@@ -593,11 +593,11 @@
       "image": "postgres:18-alpine",
       "package": "libxml2",
       "installedVersion": "2.13.9-r2",
-      "availableVersion": "2.13.9-r3",
+      "availableVersion": "2.13.9-r5",
       "owner": "Orbit maintainers",
       "expiresOn": "2026-12-07",
       "trackingIssue": 1950,
-      "rationale": "Upstream has not yet rebuilt postgres:18-alpine with libxml2 2.13.9-r3; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced. Renewed 2026-11-25 to 2026-12-07: the pinned image's tag head still carries the package (no upstream rebuild)."
+      "rationale": "Upstream has not yet rebuilt postgres:18-alpine with libxml2 2.13.9-r5; the pin is the newest build of the tag (checked 2026-11-27). Was 2.13.9-r3; Alpine has since published r5. Owner decisions 89a (#1856) and 122a (2026-11-27): named exception until 2026-12-07, with the libxml2 vulnerability entries; remove once upstream rebuilds and the pin is synced."
     },
     {
       "kind": "stale-package",
@@ -736,11 +736,11 @@
       "image": "postgres:18-alpine",
       "package": "libffi",
       "installedVersion": "3.5.2-r1",
-      "availableVersion": "3.8.1-r0",
+      "availableVersion": "3.8.2-r0",
       "owner": "Orbit maintainers",
-      "expiresOn": "2026-12-08",
+      "expiresOn": "2026-12-04",
       "trackingIssue": 1950,
-      "rationale": "Upstream has not yet rebuilt postgres:18-alpine with libffi 3.8.1-r0; the pin is the newest build of the tag. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced. Renewed 2026-11-25 to 2026-12-08: the pinned image's tag head still carries the package (no upstream rebuild)."
+      "rationale": "Upstream has not yet rebuilt postgres:18-alpine with libffi 3.8.2-r0; the pin is the newest build of the tag (checked 2026-11-27). Was 3.8.1-r0; Alpine has since published 3.8.2-r0. Owner decision 89a (#1856): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
     },
     {
       "kind": "stale-package",
@@ -939,6 +939,50 @@
       "expiresOn": "2026-12-02",
       "trackingIssue": 1950,
       "rationale": "Upstream has not yet rebuilt ollama/ollama:0.40.18 with libelf1t64 0.190-1.1ubuntu0.2; the pin is the newest build of the tag (checked 2026-11-25). Owner decision 89a (#1856), as applied in 114a (2026-11-25): named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+    },
+    {
+      "kind": "stale-package",
+      "image": "apache/tika:4.2.0-2-full",
+      "package": "libasound2t64",
+      "installedVersion": "1.2.15.3-1ubuntu1.1",
+      "availableVersion": "1.2.15.3-1ubuntu1.2",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-12-04",
+      "trackingIssue": 1950,
+      "rationale": "Upstream has not yet rebuilt apache/tika:4.2.0-2-full with libasound2t64 1.2.15.3-1ubuntu1.2; the pin is the newest build of the tag (checked 2026-11-27). Owner decisions 89a and 114a: named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+    },
+    {
+      "kind": "stale-package",
+      "image": "apache/tika:4.2.0-2-full",
+      "package": "libasound2-data",
+      "installedVersion": "1.2.15.3-1ubuntu1.1",
+      "availableVersion": "1.2.15.3-1ubuntu1.2",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-12-04",
+      "trackingIssue": 1950,
+      "rationale": "Upstream has not yet rebuilt apache/tika:4.2.0-2-full with libasound2-data 1.2.15.3-1ubuntu1.2; the pin is the newest build of the tag (checked 2026-11-27). Owner decisions 89a and 114a: named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+    },
+    {
+      "kind": "stale-package",
+      "image": "apache/tika:4.2.0-2-full",
+      "package": "libxi6",
+      "installedVersion": "2:1.8.2-2",
+      "availableVersion": "2:1.8.2-2ubuntu0.26.04.1",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-12-04",
+      "trackingIssue": 1950,
+      "rationale": "Upstream has not yet rebuilt apache/tika:4.2.0-2-full with libxi6 2:1.8.2-2ubuntu0.26.04.1; the pin is the newest build of the tag (checked 2026-11-27). Owner decisions 89a and 114a: named, 7-day exception; remove once upstream rebuilds and the pin is synced."
+    },
+    {
+      "kind": "stale-package",
+      "image": "apache/tika:4.2.0-2-full",
+      "package": "python3-jwt",
+      "installedVersion": "2.10.1-4ubuntu1.4",
+      "availableVersion": "2.10.1-4ubuntu1.5",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-12-04",
+      "trackingIssue": 1950,
+      "rationale": "Upstream has not yet rebuilt apache/tika:4.2.0-2-full with python3-jwt 2.10.1-4ubuntu1.5; the pin is the newest build of the tag (checked 2026-11-27). Owner decisions 89a and 114a: named, 7-day exception; remove once upstream rebuilds and the pin is synced."
     }
   ],
   "containerImages": [
