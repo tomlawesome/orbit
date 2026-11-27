@@ -481,6 +481,72 @@
     {
       "kind": "vulnerability",
       "scope": "image",
+      "id": "CVE-2026-11979",
+      "package": "libxml2",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-12-07",
+      "trackingIssue": 1948,
+      "installedVersion": "2.13.9-r2",
+      "rationale": "CVE-2026-11979 is a libxml2 flaw, in Alpine's libxml2 2.13.9-r2 in postgres:18-alpine, first blocked by the 2026-11-27 scan. Fixed in Alpine 2.13.9-r5, but upstream has not rebuilt the image: on 2026-11-27 the pinned amd64 manifest (built 2026-11-18) is still the newest build of the tag. Postgres uses libxml2 only for its SQL XML functions, which no Orbit product code calls; the one caller is the e2e test helper's table count. Owner 122a, 2026-11-27: until 2026-12-07, with the libxml2 stale-package entry; remove once a rebuilt image is pinned."
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-86138",
+      "package": "libxml2",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-12-07",
+      "trackingIssue": 1948,
+      "installedVersion": "2.13.9-r2",
+      "rationale": "CVE-2026-86138 is a libxml2 flaw, in Alpine's libxml2 2.13.9-r2 in postgres:18-alpine, first blocked by the 2026-11-27 scan. Fixed in Alpine 2.13.9-r4, but upstream has not rebuilt the image: on 2026-11-27 the pinned amd64 manifest (built 2026-11-18) is still the newest build of the tag. Postgres uses libxml2 only for its SQL XML functions, which no Orbit product code calls; the one caller is the e2e test helper's table count. Owner 122a, 2026-11-27: until 2026-12-07, with the libxml2 stale-package entry; remove once a rebuilt image is pinned."
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-86139",
+      "package": "libxml2",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-12-07",
+      "trackingIssue": 1948,
+      "installedVersion": "2.13.9-r2",
+      "rationale": "CVE-2026-86139 is a libxml2 flaw, in Alpine's libxml2 2.13.9-r2 in postgres:18-alpine, first blocked by the 2026-11-27 scan. Fixed in Alpine 2.13.9-r4, but upstream has not rebuilt the image: on 2026-11-27 the pinned amd64 manifest (built 2026-11-18) is still the newest build of the tag. Postgres uses libxml2 only for its SQL XML functions, which no Orbit product code calls; the one caller is the e2e test helper's table count. Owner 122a, 2026-11-27: until 2026-12-07, with the libxml2 stale-package entry; remove once a rebuilt image is pinned."
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-86140",
+      "package": "libxml2",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-12-07",
+      "trackingIssue": 1948,
+      "installedVersion": "2.13.9-r2",
+      "rationale": "CVE-2026-86140 is a libxml2 flaw, in Alpine's libxml2 2.13.9-r2 in postgres:18-alpine, first blocked by the 2026-11-27 scan. Fixed in Alpine 2.13.9-r4, but upstream has not rebuilt the image: on 2026-11-27 the pinned amd64 manifest (built 2026-11-18) is still the newest build of the tag. Postgres uses libxml2 only for its SQL XML functions, which no Orbit product code calls; the one caller is the e2e test helper's table count. Owner 122a, 2026-11-27: until 2026-12-07, with the libxml2 stale-package entry; remove once a rebuilt image is pinned."
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-86142",
+      "package": "libxml2",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-12-07",
+      "trackingIssue": 1948,
+      "installedVersion": "2.13.9-r2",
+      "rationale": "CVE-2026-86142 is a libxml2 flaw, in Alpine's libxml2 2.13.9-r2 in postgres:18-alpine, first blocked by the 2026-11-27 scan. Fixed in Alpine 2.13.9-r4, but upstream has not rebuilt the image: on 2026-11-27 the pinned amd64 manifest (built 2026-11-18) is still the newest build of the tag. Postgres uses libxml2 only for its SQL XML functions, which no Orbit product code calls; the one caller is the e2e test helper's table count. Owner 122a, 2026-11-27: until 2026-12-07, with the libxml2 stale-package entry; remove once a rebuilt image is pinned."
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-86143",
+      "package": "libxml2",
+      "owner": "Orbit maintainers",
+      "expiresOn": "2026-12-07",
+      "trackingIssue": 1948,
+      "installedVersion": "2.13.9-r2",
+      "rationale": "CVE-2026-86143 is a libxml2 flaw, in Alpine's libxml2 2.13.9-r2 in postgres:18-alpine, first blocked by the 2026-11-27 scan. Fixed in Alpine 2.13.9-r4, but upstream has not rebuilt the image: on 2026-11-27 the pinned amd64 manifest (built 2026-11-18) is still the newest build of the tag. Postgres uses libxml2 only for its SQL XML functions, which no Orbit product code calls; the one caller is the e2e test helper's table count. Owner 122a, 2026-11-27: until 2026-12-07, with the libxml2 stale-package entry; remove once a rebuilt image is pinned."
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
       "id": "CVE-2026-97054",
       "package": "stdlib",
       "owner": "Orbit maintainers",
