@@ -215,7 +215,14 @@ describe("scan-jscpd.sh", () => {
     const joined = argv.join(" ");
     for (const t of ["src", "web/src", "scripts"]) expect(argv).toContain(t);
     for (const f of ["typescript", "javascript", "svelte"]) expect(joined).toContain(f);
-    for (const ignored of ["test", "drizzle", "tmp"]) expect(joined).toContain(ignored);
+    // Assert on the --ignore value itself: the argv as a whole always holds
+    // "tmp", because --output is a mktemp path under /tmp.
+    const ignoreAt = argv.indexOf("--ignore");
+    expect(ignoreAt).toBeGreaterThanOrEqual(0);
+    const ignores = argv[ignoreAt + 1].split(",");
+    for (const ignored of ["**/*.test.*", "**/*.spec.*", "**/tests/**", "**/drizzle/**", "**/tmp/**"]) {
+      expect(ignores).toContain(ignored);
+    }
   });
 
   it("exits non-zero, without running jscpd, when the tool cannot be fetched or verified", () => {
