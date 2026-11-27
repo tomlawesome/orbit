@@ -555,6 +555,7 @@ timeout on this one case rather than a global raise.
 ## scripts/check-svelte-server-parse.test.mjs "the client output check (#1267) > passes every component in web/src today"
 
 - 2026-11-20 · !1433 80582f500 · pipeline 4912 / fast (job 58965) · the check was killed at its 30 s deadline without exiting on a loaded runner. Passed in the retry (job 59031). First sighting.
+- 2026-11-27 · !1513 15e729057 · pipeline 5687 / fast 1/2 (job 69247) · the check was killed at its 30000 ms deadline without exiting, in a 915.43 s run (the only failure of 8,174 tests); the change is an allow-list file and touches none of it. Passed in the retry (job 69293). Second sighting.
 
 ## src/lib/backup-restore-cli.test.ts "runBackup > O2-R3: a SIGTERM while the adapter is dumping leaves the .orbit-backup.* scratch in place, and the next runBackup removes it"
 
@@ -623,6 +624,7 @@ timeout on this one case rather than a global raise.
 ## scripts/ci/carry-previous-release.test.mjs "sign_evidence still running: a bounded wait on an in-flight dependency (#1607 note 48548, item 3) > a sign_evidence that stays preparing past the poll cap fails, saying it is still running and to run this job again"
 
 - 2026-11-21 · !1447 8264fee23 · pipeline 5072 / fast (job 60738) · the child was killed at its 30 s deadline without exiting, in a 1446 s full run on a loaded runner. The audit fixes don't touch this script or its test. Passed locally at 8264fee23 (377/377), and in job 60610 on the same script. First sighting.
+- 2026-11-27 · !1513 15e729057 · pipeline 5687 / fast 2/2 (job 69248) · the child was killed at its 30000 ms deadline without exiting, in a 1112.32 s run; the change is an allow-list file and touches none of it. Passed in the retry (job 69294). Second sighting.
 
 ## scripts/install.update-prune-undo-copies.test.mjs "install.sh --plain --update: nothing to prune (#1834 slice 5) > prints nothing about old copies when there is no orbit-install-backups folder, with or without the flag"
 
@@ -681,11 +683,6 @@ timeout on this one case rather than a global raise.
 ## scripts/install.update-retire-smtp.test.mjs "removes an inline SMTP_PASSWORD line too, and the password is then in no file of the folder or the installer's state"
 
 - 2026-11-24 · dev 1d397e4a · pipeline 5313 (nightly browsers, started early) / fast (job 63916) · failed after 12 s on a loaded runner, the only failure of 16,661; the change touches none of it. First sighting.
-
-## scripts/repair-held-1915.test.mjs: the O-R2 and O-S2 "lands and then stalls" tests (2 s owner-step limit)
-
-- 2026-11-24 · !1453 fa64d9d8b · pipeline 5319 / fast (job 64034) · `the owner's mv was never run` on a loaded runner: the test gives the owner step 2 s; the change only alters how names are printed in other repair.sh messages. Passed three times in a row locally on the same commit. First sighting.
-- 2026-11-24 · !1453 fffd1ee45 · pipeline 5323 / fast (job 64105) · the file's sibling test, "#1915 O-S2: discard_staging_root counts a timed-out rename that landed as done", failed the same way (`the owner's rename never ran`) in a 30-minute fast job on a loaded runner. Same 2 s step limit; the change touches neither code path. Second sighting of the file.
 
 ## tests/unit/v19-create-check-unavailable.test.mjs: the file's `beforeAll` (compiles the pocket component)
 
@@ -761,3 +758,11 @@ timeout on this one case rather than a global raise.
 ## scripts/ci/carry-previous-release.test.mjs "sign_evidence still running: a bounded wait on an in-flight dependency (#1607 note 48548, item 3) > a sign_evidence that stays running past the poll cap fails, saying it is still running and to run this job again" and "... > a sign_evidence that stays scheduled past the poll cap fails, saying it is still running and to run this job again"
 
 - 2026-11-26 · !1504 e4d396ae · pipeline 5563 / fast 2/2 (job 67213) · both: the child was killed at its 30000 ms deadline (31.9 s, 30.1 s) in a 1210 s run on a slow runner; the change is policy and docs only. Passed on retry (job 67274). First sighting.
+
+## scripts/install.update-retire-smtp.test.mjs "install.sh --plain --update: retire the SMTP lines (#1817) > source=ui imported-from-environment=false > leaves the rest of .env-orbit and the secrets folder alone, keeps mode 600, and keeps commented lines"
+
+- 2026-11-27 · !1513 15e729057 · pipeline 5687 / fast 2/2 (job 69248) · `expected 1 to be +0` at line 153 (the update's exit status), in a 1112.32 s run; the test prints nothing of the child's stderr, so the cause is not shown. The change is an allow-list file and touches none of it. Passed in the retry (job 69294). First sighting.
+
+## tests/unit/pocket-inbox.test.mjs "the inbox on a phone, mounted > review & amend opens create's form pre-filled, and approves the amended values into the chosen section"
+
+- 2026-11-27 · !1513 15e729057 · pipeline 5687 / fast 1/2 retry (job 69293) · `AssertionError: expected 'true' not to be 'true'` at line 148: the send button's aria-disabled stayed 'true' past vi.waitFor, in a 826.02 s run; the same symptom as its sibling test, "#1584 web-wr9-3: an amendment the engine replayed says so, not 'added', and the sheet closes". The change is an allow-list file and touches none of it. Passed in job 69247 (the first run, same code) and in job 69331. First sighting.
