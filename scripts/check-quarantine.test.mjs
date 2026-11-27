@@ -418,7 +418,9 @@ describe("check-quarantine review dates (#1744)", () => {
     expectFails(run(fixture({ [A]: specA }, entry())), A, "review");
   });
 
-  it.each(["2026-13-01", "2026-02-30", "26-11-21", "2026/11/21", "21-11-2026", "soon", "2026-1-5"])(
+  // Impossible days use a future year, so only calendar validation can refuse
+  // them: a past date would be refused as past whether or not the day exists.
+  it.each(["2099-13-01", "2099-02-30", "2099-04-31", "26-11-21", "2026/11/21", "21-11-2026", "soon", "2026-1-5"])(
     "refuses the malformed review date %s",
     (date) => {
       expectFails(run(fixture({ [A]: specA }, entry(date))), A, date);
@@ -453,7 +455,7 @@ describe("check-quarantine review dates (#1744)", () => {
     expectFails(r, A);
   });
 
-  it.each(["soon", "2030-13-01", "2030-6-5"])("exits 2 with a message on QUARANTINE_TODAY=%j", (today) => {
+  it.each(["soon", "2030-13-01", "2030-02-30", "2030-04-31", "2030-6-5"])("exits 2 with a message on QUARANTINE_TODAY=%j", (today) => {
     const r = run(fixture({ [A]: specA }, entry("2099-01-01")), { QUARANTINE_TODAY: today });
     expect(r.error).toBeUndefined();
     expect(r.status).toBe(2);
