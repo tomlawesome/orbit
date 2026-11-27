@@ -8,6 +8,8 @@ dist
 .env-orbit
 .orbit-secrets/
 web/.orbit-card-*/
+.orbit-code-scan/
+.orbit-tools/
 .orbit-cosign/
 .orbit-crane/
 .agents/handoffs/
@@ -181,3 +183,6 @@ quarantine-list.txt
 
 # Vitest blob reports: a `fast` shard's run, merged by fast_coverage (#1933).
 .vitest/
+
+# #1975: archive-controller-1975.test.mjs compiles a copy beside its source for a few ms; a killed run must not leave it committable.
+web/src/**/*.compiled.js

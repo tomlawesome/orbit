@@ -28,6 +28,9 @@
 #                         (#946) -- RUNNER_TEMP itself is wiped at the end of
 #                         every job on that runner, so a cache placed there
 #                         could never survive to the next pipeline.
+#
+# The databases are downloaded in a step of their own, only when the cache
+# holds none, before the scans.
 set -Eeuo pipefail
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
@@ -45,6 +48,19 @@ trivy_cache_dir="${TRIVY_CACHE_DIR:-${runner_temp}/trivy-cache}"
 readonly workspace runner_temp trivy_cache_dir
 
 mkdir -p .orbit-supply-chain "${trivy_cache_dir}"
+# Download the databases in a step of their own, with their own deadline, when
+# the cache holds none: left to the scans, the download runs under their scan
+# timeout. The same check and command as `.trivy_db_warm` in .gitlab-ci.yml,
+# run through the pinned scanner container exactly as the scans are.
+if [ ! -e "${trivy_cache_dir}/db/trivy.db" ]; then
+  bash scripts/trivy-db-retry.sh docker run --rm \
+    --env TRIVY_DB_REPOSITORY --env TRIVY_JAVA_DB_REPOSITORY --env TRIVY_INSECURE \
+    --volume "${trivy_cache_dir}:/root/.cache/trivy" \
+    "${TRIVY_IMAGE}" image --download-db-only --timeout 40m
+fi
+# Each scan runs against a warm database, so it is bounded on its own: 10m is
+# twice Trivy's 5m default, headroom for a slow runner, and keeps each scan
+# well inside the supply_chain_image job's 20m timeout.
 bash scripts/trivy-db-retry.sh docker run --rm \
   --env TRIVY_DB_REPOSITORY \
   --env TRIVY_JAVA_DB_REPOSITORY \
@@ -53,6 +69,7 @@ bash scripts/trivy-db-retry.sh docker run --rm \
   --volume "${workspace}:/workspace" \
   --volume "${trivy_cache_dir}:/root/.cache/trivy" \
   "${TRIVY_IMAGE}" image \
+  --timeout 10m \
   --scanners vuln \
   --format json \
   --output /workspace/.orbit-supply-chain/image-vulnerabilities.json \
@@ -65,6 +82,7 @@ bash scripts/trivy-db-retry.sh docker run --rm \
   --volume "${workspace}:/workspace" \
   --volume "${trivy_cache_dir}:/root/.cache/trivy" \
   "${TRIVY_IMAGE}" image \
+  --timeout 10m \
   --scanners vuln \
   --format spdx-json \
   --output /workspace/.orbit-supply-chain/image.spdx.json \

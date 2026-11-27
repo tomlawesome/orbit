@@ -915,28 +915,29 @@ export async function setupTokenOwner(token: string): Promise<string | null> {
  * read under the credential's row lock in the same transaction that writes
  * the new hash and clears it, so a hold spends once and a stale one buys
  * nothing. A hold whose mark a later refusal replaced, or whose account is
- * disabled, is `password_change_lapsed`. A hold whose mark has been cleared
- * is `password_change_saved` only when `typedPassword` is the stored one --
- * the retry after this hold's own save, whose answer was lost (#1901) -- and
- * `password_change_lapsed` otherwise: a recovery link or a signed-in change
- * cleared it, and the typed password was never saved. Neither writes
- * anything. A save is ADR-0023 §7's change like any other: every session the
- * account held is revoked and `password_changed` recorded.
+ * disabled, is `password_change_lapsed`. So is a hold whose mark has been
+ * cleared, whoever cleared it (#1943 SEC-H3, reversing #1901): the hold was
+ * proof bound to that mark, and it is void once the mark changes. No password
+ * is checked on that path and no failure counted -- a password is only ever
+ * checked at the throttled, recorded sign-in door (OWASP Authentication Cheat
+ * Sheet) -- so the retry after this hold's own save whose answer was lost
+ * reads "sign in again", with the same outcome. `_typedPassword` is kept for
+ * the callers' shape and not read. Neither refusal writes anything. A save is
+ * ADR-0023 §7's change like any other: every session the account held is
+ * revoked and `password_changed` recorded.
  */
 export async function completePasswordRenewal(
   userId: string,
   requiredAt: Date,
   passwordHash: string,
-  typedPassword: string,
+  _typedPassword: string,
 ): Promise<PasswordChangeOutcome> {
   const lapsed = () => new AuthError("password_change_lapsed", "This sign-in has lapsed; sign in again", 400);
-  const answer = await getDb().transaction(async (transaction) => {
+  return getDb().transaction(async (transaction) => {
     const [row] = await transaction
       .select({
         requiredAt: localCredentials.passwordChangeRequiredAt,
         disabledAt: users.disabledAt,
-        passwordHash: localCredentials.passwordHash,
-        lockedUntil: localCredentials.lockedUntil,
       })
       .from(localCredentials)
       .innerJoin(users, eq(users.id, localCredentials.userId))
@@ -945,40 +946,12 @@ export async function completePasswordRenewal(
       .limit(1);
     /* A disabled account's hold changes nothing (#1881 review): disabling
        is an administrator's decision and outranks the reader's renewal. It
-       answers as lapsed, the one word every dead hold gets. */
-    if (!row || row.disabledAt) throw lapsed();
-    if (!row.requiredAt) {
-      /* A password check like the door's, under the door's throttle (#1901,
-         OWASP Authentication Cheat Sheet): a locked credential answers as
-         the door's lock does, before any verify, so there is no oracle while
-         locked; a miss is counted below, outside this transaction. */
-      if (row.lockedUntil && row.lockedUntil > new Date()) {
-        throw new AuthError("too_many_attempts", "Too many sign-in attempts; try again shortly", 429);
-      }
-      /* "Saved" only if what was typed is what is stored (#1901 review):
-         the constant-time verify, never a string compare. */
-      let verified: boolean;
-      try {
-        ({ verified } = await verifyPassword(row.passwordHash, typedPassword));
-      } catch (error) {
-        if (error instanceof VerificationGateRefusedError) {
-          throw new AuthError("too_many_attempts", "Too many attempts at once; try again shortly", 429);
-        }
-        throw error;
-      }
-      return { cleared: true as const, verified };
-    }
+       answers as lapsed, the one word every dead hold gets. A cleared mark
+       is lapsed too (#1943 SEC-H3), and so is one a later refusal replaced. */
+    if (!row || row.disabledAt || !row.requiredAt) throw lapsed();
     if (row.requiredAt.getTime() !== requiredAt.getTime()) throw lapsed();
-    return { cleared: false as const, outcome: await applyPasswordChange(transaction, userId, passwordHash, userId) };
+    return applyPasswordChange(transaction, userId, passwordHash, userId);
   });
-  if (!answer.cleared) return answer.outcome;
-  if (!answer.verified) {
-    /* Counted as a wrong password at the door is, by the door's own helper,
-       and committed: the refusal thrown next must not roll it back. */
-    await recordFailure(userId);
-    throw lapsed();
-  }
-  throw new AuthError("password_change_saved", "Your new password is already saved; sign in with it", 400);
 }
 
 export interface ConsumedSetupToken extends PasswordChangeOutcome {

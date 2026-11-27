@@ -115,7 +115,8 @@ let installedTemplate;
 beforeAll(() => {
   installedTemplate = makeTarget();
   makePreprovisionedDeployment(installedTemplate);
-  expect(runDetached(installedTemplate, {}, ["--plain", "--install"]).status).toBe(0);
+  const installed = runDetached(installedTemplate, {}, ["--plain", "--install"]);
+  expect(installed.status, installed.stderr + installed.stdout).toBe(0);
 });
 
 /** A deployment made by a real plain install, ready to be updated. */
@@ -215,7 +216,7 @@ describe("install.sh --plain --update: old undo copies, unattended (#1834 slice 
     const targetDir = withOldCopies(installedFolder());
     const before = untouched(targetDir);
     const result = update(targetDir);
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expectListed(result.stderr);
     expect(qualifyingLeft(targetDir)).toEqual(Object.keys(QUALIFYING));
     expect(readFileSync(join(backups(targetDir), "20250102T030405Z", ".env-orbit"), "utf8")).toBe(FULL_ENV_COPY);
@@ -243,7 +244,7 @@ describe("install.sh --plain --update: old undo copies, unattended (#1834 slice 
     const lone = join(backups(targetDir), OTHER_FILE);
     writeFolder(lone, { ".env-orbit": FULL_ENV_COPY, "notes.txt": "the operator's own note\n" });
     const result = update(targetDir);
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     const listed = mentioning(result.stderr, OTHER_FILE);
     expect(listed.some((entry) => /not removed/iu.test(entry)), `listed as not removed: ${listed.join(" | ")}`).toBe(true);
     expect(removedLines(result.stderr, OTHER_FILE)).toEqual([]);
@@ -254,8 +255,8 @@ describe("install.sh --plain --update: old undo copies, unattended (#1834 slice 
   it("leaves the update's result and exit code as an update without old copies has them", () => {
     const plain = update(installedFolder());
     const withCopies = update(withOldCopies(installedFolder()));
-    expect(plain.status).toBe(0);
-    expect(withCopies.status).toBe(plain.status);
+    expect(plain.status, plain.stderr + plain.stdout).toBe(0);
+    expect(withCopies.status, withCopies.stderr + withCopies.stdout).toBe(plain.status);
     expect(resultBlock(withCopies.stdout)).toBe(resultBlock(plain.stdout));
     expectListed(withCopies.stderr);
   });
@@ -266,7 +267,7 @@ describe("install.sh --plain --update: old undo copies, on a terminal (#1834 sli
     const targetDir = withOldCopies(installedFolder());
     const before = untouched(targetDir);
     const result = await updateOnTerminal(targetDir, "yes\r");
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     const output = result.stdout.replace(/\r/gu, "");
     expectListed(output);
     expect(cannotLines(output).length).toBeGreaterThanOrEqual(1);
@@ -299,7 +300,7 @@ describe("install.sh --plain --update: old undo copies, on a terminal (#1834 sli
       const targetDir = withOldCopies(installedFolder());
       const before = untouched(targetDir);
       const result = await updateOnTerminal(targetDir, answer);
-      expect(result.status).toBe(0);
+      expect(result.status, result.stderr + result.stdout).toBe(0);
       const output = result.stdout.replace(/\r/gu, "");
       expect(cannotLines(output).length).toBeGreaterThanOrEqual(1);
       expect(result.promptedInteractions).toBe(1);
@@ -371,7 +372,7 @@ describe("install.sh --plain --update: a terminal that does not make the run int
     const errFile = join(mkdtempSync(join(tmpdir(), "orbit-prune-stderr-")), "stderr.log");
     const before = untouched(targetDir);
     const result = await updateOnTerminal(targetDir, "yes\r", {}, [`2>${errFile}`]);
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     const stderr = readOptional(errFile).replace(/\r/gu, "");
     expectListed(stderr);
     expect(lines(stderr).filter((entry) => entry.includes(HINT))).toHaveLength(1);
@@ -384,7 +385,7 @@ describe("install.sh --plain --update: a terminal that does not make the run int
   it("ORBIT_CONFIGURE_PROMPTS=machine on a terminal: unattended, list and hint only, nothing removed", async () => {
     const targetDir = withOldCopies(installedFolder());
     const result = await updateOnTerminal(targetDir, "yes\r", { ORBIT_CONFIGURE_PROMPTS: "machine" });
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     const output = result.stdout.replace(/\r/gu, "");
     expectListed(output);
     expect(lines(output).filter((entry) => entry.includes(HINT))).toHaveLength(1);
@@ -397,7 +398,7 @@ describe("install.sh --plain --update: what typing at the prune prompt does (#18
   it("in --plain mode the typed answer is visible: the characters appear after the prompt", async () => {
     const targetDir = withOldCopies(installedFolder());
     const result = await updateOnTerminal(targetDir, "nope\r");
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     const output = result.stdout.replace(/\r/gu, "");
     const markerAt = output.search(NO_DEFAULT_MARKER);
     expect(markerAt).toBeGreaterThan(-1);
@@ -425,7 +426,7 @@ describe(`install.sh --plain --update with ${ENV_FORM} (#1834 slice 5 review)`, 
     const targetDir = withOldCopies(installedFolder());
     const before = untouched(targetDir);
     const result = update(targetDir, [], { [ENV_FORM]: "yes" });
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expectListed(result.stderr);
     expect(cannotLines(result.stderr).length).toBeGreaterThanOrEqual(1);
     expect(qualifyingLeft(targetDir)).toEqual([]);
@@ -439,7 +440,7 @@ describe(`install.sh --plain --update with ${ENV_FORM} (#1834 slice 5 review)`, 
     it(`${ENV_FORM}=${JSON.stringify(value)} is ignored: list and hint only, nothing removed`, () => {
       const targetDir = withOldCopies(installedFolder());
       const result = update(targetDir, [], { [ENV_FORM]: value });
-      expect(result.status).toBe(0);
+      expect(result.status, result.stderr + result.stdout).toBe(0);
       expectListed(result.stderr);
       expect(lines(result.stderr).filter((entry) => entry.includes(HINT))).toHaveLength(1);
       expect(qualifyingLeft(targetDir)).toEqual(Object.keys(QUALIFYING));
@@ -474,7 +475,7 @@ describe("install.sh --plain --update: removal edge cases (#1834 slice 5 review)
     chmodSync(stuck, 0o500);
     try {
       const result = update(targetDir, [FLAG]);
-      expect(result.status).toBe(0);
+      expect(result.status, result.stderr + result.stdout).toBe(0);
       const said = mentioning(result.stderr, "20250102T030405Z").filter((entry) => /could not be fully removed/iu.test(entry));
       expect(said, mentioning(result.stderr, "20250102T030405Z").join(" | ")).toHaveLength(1);
       expect(said[0]).not.toMatch(/\bkept\b/iu);
@@ -491,7 +492,7 @@ describe(`install.sh --plain --update ${FLAG} (#1834 slice 5)`, () => {
     const targetDir = withOldCopies(installedFolder());
     const before = untouched(targetDir);
     const result = update(targetDir, [FLAG]);
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expectListed(result.stderr);
     expect(cannotLines(result.stderr).length).toBeGreaterThanOrEqual(1);
     expect(qualifyingLeft(targetDir)).toEqual([]);
@@ -508,7 +509,7 @@ describe(`install.sh --plain --update ${FLAG} (#1834 slice 5)`, () => {
     writeFileSync(join(targetDir, ".orbit-smtp-retirement"), `step=backed-up\ncopy=orbit-install-backups/${live}\n`, { mode: 0o600 });
     // No status command (an older image): the retirement waits, its record stays live.
     const result = update(targetDir, [FLAG]);
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(qualifyingLeft(targetDir)).toEqual([]);
     expect(existsSync(join(backups(targetDir), live, ".env-orbit"))).toBe(true);
     expect(removedLines(result.stderr, live)).toEqual([]);
@@ -520,7 +521,7 @@ describe(`install.sh --plain --update ${FLAG} (#1834 slice 5)`, () => {
     writeFolder(join(backups(targetDir), marked), { ".env-orbit": "SMTP_HOST=smtp.example.test\n", ".orbit-smtp-undo": `copy=orbit-install-backups/${marked}\n` });
     withSmtpLines(targetDir);
     const result = update(targetDir, [FLAG]);
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(qualifyingLeft(targetDir)).toEqual([]);
     expect(existsSync(join(backups(targetDir), marked, ".env-orbit"))).toBe(true);
     expect(removedLines(result.stderr, marked)).toEqual([]);
@@ -534,7 +535,7 @@ describe(`install.sh --plain --update ${FLAG} (#1834 slice 5)`, () => {
       FAKE_MAIL_SENDING_STATUS: "mail-sending source=imported imported-from-environment=true",
       FAKE_MAIL_SENDING_STATUS_AFTER_SECRET_GONE: "mail-sending source=none imported-from-environment=false",
     });
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(qualifyingLeft(targetDir)).toEqual([]);
     const record = readFileSync(join(targetDir, ".orbit-smtp-retirement"), "utf8");
     const own = record.match(/^copy=orbit-install-backups\/(\S+)$/mu)?.[1];
@@ -552,7 +553,7 @@ describe("install.sh --plain --update: nothing to prune (#1834 slice 5)", () => 
     const targetDir = installedFolder();
     for (const args of [[], [FLAG]]) {
       const result = update(targetDir, args);
-      expect(result.status).toBe(0);
+      expect(result.status, result.stderr + result.stdout).toBe(0);
       expect(quiet(result.stderr)).toEqual([]);
       expect(quiet(result.stdout)).toEqual([]);
     }
@@ -562,7 +563,7 @@ describe("install.sh --plain --update: nothing to prune (#1834 slice 5)", () => 
     const targetDir = installedFolder();
     mkdirSync(backups(targetDir), { mode: 0o700 });
     const result = update(targetDir, [FLAG]);
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(quiet(result.stderr)).toEqual([]);
     expect(existsSync(backups(targetDir))).toBe(true);
   });

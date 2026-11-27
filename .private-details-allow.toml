@@ -14,6 +14,9 @@ paths = [
   '''^src/server/boot\.test\.ts$''',
   '''^src/server/mail-in/mailbox-settings\.test\.ts$''',
   '''^src/server/notification-worker\.test\.ts$''',
+  # the push address check's blocked ranges and their tests (#1943 SEC-A1, owner 85a)
+  '''^src/server/notification-worker\.push-pinning\.test\.ts$''',
+  '''^src/server/notification-worker\.ts$''',
   '''^src/server/sign-in-approvals\.test\.ts$''',
   '''^src/server/sign-in-approvals\.ts$''',
   # the retired guard's own fixture map, still in the commits the scan covers

@@ -1132,7 +1132,7 @@ describe("scripts/repair.sh --check", () => {
   it("rejects an invocation without --check", () => {
     const targetDir = makeFixture();
     const result = runRepair(targetDir, []);
-    expect(result.status).toBe(2);
+    expect(result.status, result.stderr + result.stdout).toBe(2);
     expect(result.stderr).toContain("Usage:");
     expect(result.stdout).toBe("");
   });
@@ -1140,7 +1140,7 @@ describe("scripts/repair.sh --check", () => {
   it("rejects an unrecognised argument", () => {
     const targetDir = makeFixture();
     const result = runRepair(targetDir, ["--bogus"]);
-    expect(result.status).toBe(2);
+    expect(result.status, result.stderr + result.stdout).toBe(2);
     expect(result.stderr).toContain("Usage:");
   });
 
@@ -1148,8 +1148,8 @@ describe("scripts/repair.sh --check", () => {
     const targetDir = makeFixture();
     const first = runRepair(targetDir, ["--check", "--plain"]);
     const second = runRepair(targetDir, ["--plain", "--check"]);
-    expect(first.status).toBe(0);
-    expect(second.status).toBe(0);
+    expect(first.status, first.stderr + first.stdout).toBe(0);
+    expect(second.status, second.stderr + second.stdout).toBe(0);
     expect(first.stdout).toBe(second.stdout);
   });
 
@@ -1157,7 +1157,7 @@ describe("scripts/repair.sh --check", () => {
     const targetDir = makeFixture();
     const result = runRepair(targetDir, ["--check"]);
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(lines(result.stdout)).toEqual(["diagnosis result=healthy checked=20 skipped=0"]);
   });
 
@@ -1176,7 +1176,7 @@ describe("scripts/repair.sh --check", () => {
     it("treats scanner off by choice as healthy: no finding, exit 0", () => {
       const targetDir = withScannerSettings(["DOCUMENT_SCAN_MODE=disabled", `COMPOSE_FILE=docker-compose.yml:${OVERLAY}`]);
       const result = runRepair(targetDir, ["--check"]);
-      expect(result.status).toBe(0);
+      expect(result.status, result.stderr + result.stdout).toBe(0);
       expect(lines(result.stdout)).toEqual(["diagnosis result=healthy checked=20 skipped=0"]);
     });
 
@@ -1187,13 +1187,14 @@ describe("scripts/repair.sh --check", () => {
 
     it("treats an explicit required mode with no overlay as healthy", () => {
       const targetDir = withScannerSettings(["DOCUMENT_SCAN_MODE=required"]);
-      expect(runRepair(targetDir, ["--check"]).status).toBe(0);
+      const result = runRepair(targetDir, ["--check"]);
+      expect(result.status, result.stderr + result.stdout).toBe(0);
     });
 
     it("reports scanner-configuration-mismatch as a failure when the overlay is listed but the mode is required", () => {
       const targetDir = withScannerSettings(["DOCUMENT_SCAN_MODE=required", `COMPOSE_FILE=docker-compose.yml:${OVERLAY}`]);
       const result = runRepair(targetDir, ["--check"]);
-      expect(result.status).not.toBe(0);
+      expect(result.status, result.stderr + result.stdout).not.toBe(0);
       expect(result.stdout).toMatch(/^finding class=scanner-configuration-mismatch target=\S+ severity=fail$/mu);
     });
 
@@ -1212,7 +1213,7 @@ describe("scripts/repair.sh --check", () => {
     // #1170 review: Compose resolves ./docker-compose.scanner-off.yml to the same file.
     it("recognises the overlay written as ./docker-compose.scanner-off.yml", () => {
       const healthy = runRepair(withScannerSettings(["DOCUMENT_SCAN_MODE=disabled", `COMPOSE_FILE=docker-compose.yml:./${OVERLAY}`]), ["--check"]);
-      expect(healthy.status).toBe(0);
+      expect(healthy.status, healthy.stderr + healthy.stdout).toBe(0);
       expect(healthy.stdout).not.toContain("scanner-configuration-mismatch");
       const mismatch = runRepair(withScannerSettings(["DOCUMENT_SCAN_MODE=required", `COMPOSE_FILE=docker-compose.yml:./${OVERLAY}`]), ["--check"]);
       expect(mismatch.stdout).toContain("finding class=scanner-configuration-mismatch target=configuration severity=fail");
@@ -1221,7 +1222,7 @@ describe("scripts/repair.sh --check", () => {
     it("honours COMPOSE_PATH_SEPARATOR when reading the overlay", () => {
       const targetDir = withScannerSettings(["COMPOSE_PATH_SEPARATOR=;", "DOCUMENT_SCAN_MODE=disabled", `COMPOSE_FILE=docker-compose.yml;${OVERLAY}`]);
       const result = runRepair(targetDir, ["--check"]);
-      expect(result.status).toBe(0);
+      expect(result.status, result.stderr + result.stdout).toBe(0);
       expect(result.stdout).not.toContain("scanner-configuration-mismatch");
     });
 
@@ -1248,12 +1249,12 @@ describe("scripts/repair.sh --check", () => {
     writeFileSync(join(decoyDir, "docker"), "#!/usr/bin/env bash\nexit 99\n", { mode: 0o755 });
 
     const syncResult = runRepair(targetDir, ["--check"], {}, { env: { PATH: `${decoyDir}:${process.env.PATH}` } });
-    expect(syncResult.status).toBe(0);
+    expect(syncResult.status, syncResult.stderr + syncResult.stdout).toBe(0);
     expect(syncResult.stdout).not.toContain("docker-unavailable");
 
     const spawned = spawnRepair(targetDir, ["--check"], {}, { env: { PATH: `${decoyDir}:${process.env.PATH}` } });
     const { status } = await failOnProcessDeadline(spawned.exited, { label: "spawnRepair PATH override" });
-    expect(status).toBe(0);
+    expect(status, spawned.stderrSoFar() + spawned.stdoutSoFar()).toBe(0);
     expect(spawned.stdoutSoFar()).not.toContain("docker-unavailable");
   });
 
@@ -1278,7 +1279,7 @@ describe("scripts/repair.sh --check", () => {
     expect(plain.stdout).toContain("finding class=managed-file-permissions");
     expect(noColor.stdout).toBe(plain.stdout);
     expect(noColor.stderr).toBe(plain.stderr);
-    expect(noColor.status).toBe(plain.status);
+    expect(noColor.status, noColor.stderr + noColor.stdout).toBe(plain.status);
     expect(noColor.stdout).not.toMatch(/\x1b/u);
     expect(noColor.stderr).not.toMatch(/\x1b/u);
   });
@@ -1297,7 +1298,7 @@ describe("scripts/repair.sh --check", () => {
     expect(plain.stdout).toContain("finding class=managed-file-permissions");
     expect(narrow.stdout).toBe(plain.stdout);
     expect(narrow.stderr).toBe(plain.stderr);
-    expect(narrow.status).toBe(plain.status);
+    expect(narrow.status, narrow.stderr + narrow.stdout).toBe(plain.status);
   });
 
   it("produces byte-identical output across repeated runs", () => {
@@ -1305,7 +1306,7 @@ describe("scripts/repair.sh --check", () => {
     const first = runRepair(targetDir, ["--check"]);
     const second = runRepair(targetDir, ["--check"]);
     expect(first.stdout).toBe(second.stdout);
-    expect(first.status).toBe(second.status);
+    expect(first.status, first.stderr + first.stdout).toBe(second.status);
   });
 
   it("never mutates the sandbox tree (identical path/mode/mtime snapshot before and after)", () => {
@@ -1314,7 +1315,7 @@ describe("scripts/repair.sh --check", () => {
     const result = runRepair(targetDir, ["--check"]);
     const after = spawnSync("find", [targetDir, "-printf", "%p %m %T@\n"], { encoding: "utf8" });
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(after.stdout).toBe(before.stdout);
   });
 
@@ -1326,7 +1327,7 @@ describe("scripts/repair.sh --check", () => {
 
     const result = runRepair(targetDir, ["--check"]);
 
-    expect(result.status).toBe(5);
+    expect(result.status, result.stderr + result.stdout).toBe(5);
     expect(lines(result.stdout)).toEqual([
       "finding class=not-orbit-directory target=directory severity=fail",
       "diagnosis result=failed checked=1 skipped=19",
@@ -1339,7 +1340,7 @@ describe("scripts/repair.sh --check", () => {
 
     const result = runRepair(targetDir, ["--check"]);
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain("finding class=managed-file-missing target=environment-file severity=fail");
     expect(result.stdout).toContain("diagnosis result=failed");
   });
@@ -1354,7 +1355,7 @@ describe("scripts/repair.sh --check", () => {
 
     const result = runRepair(targetDir, ["--check"]);
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain("finding class=managed-file-symlink target=environment-file severity=fail");
   });
 
@@ -1364,7 +1365,7 @@ describe("scripts/repair.sh --check", () => {
 
     const result = runRepair(targetDir, ["--check"]);
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain("finding class=managed-file-permissions target=environment-file severity=fail");
   });
 
@@ -1374,7 +1375,7 @@ describe("scripts/repair.sh --check", () => {
 
     const result = runRepair(targetDir, ["--check"]);
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain("finding class=secrets-directory-invalid target=secrets-directory severity=fail");
   });
 
@@ -1387,7 +1388,7 @@ describe("scripts/repair.sh --check", () => {
 
     const result = runRepair(targetDir, ["--check"]);
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain("finding class=secrets-directory-invalid target=secrets-directory severity=fail");
   });
 
@@ -1415,7 +1416,7 @@ describe("scripts/repair.sh --check", () => {
 
     const result = runRepair(targetDir, ["--check"]);
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain("finding class=secret-permissions target=postgres-password severity=fail");
   });
 
@@ -1429,7 +1430,7 @@ describe("scripts/repair.sh --check", () => {
 
     const result = runRepair(targetDir, ["--check"]);
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain("finding class=secret-permissions target=document-kek severity=fail");
   });
 
@@ -1439,7 +1440,7 @@ describe("scripts/repair.sh --check", () => {
 
     const result = runRepair(targetDir, ["--check"]);
 
-    expect(result.status).toBe(3);
+    expect(result.status, result.stderr + result.stdout).toBe(3);
     expect(lines(result.stdout)).toEqual([
       "finding class=staging-evidence-present target=staging severity=warn",
       "diagnosis result=attention checked=20 skipped=0",
@@ -1459,7 +1460,7 @@ describe("scripts/repair.sh --check", () => {
 
     const result = runRepair(targetDir, ["--check"]);
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain("finding class=configuration-incomplete target=configuration severity=fail");
   });
 
@@ -1469,7 +1470,7 @@ describe("scripts/repair.sh --check", () => {
 
     const result = runRepair(targetDir, ["--check"]);
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain("finding class=configuration-invalid target=configuration severity=fail");
   });
 
@@ -1484,7 +1485,7 @@ describe("scripts/repair.sh --check", () => {
 
     const result = runRepair(targetDir, ["--check"]);
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain(
       "finding class=configuration-migration-interrupted target=configuration severity=fail",
     );
@@ -1506,7 +1507,7 @@ describe("scripts/repair.sh --check", () => {
 
     const result = runRepair(targetDir, ["--check"]);
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain(
       "finding class=configuration-migration-interrupted target=configuration severity=fail",
     );
@@ -1519,7 +1520,7 @@ describe("scripts/repair.sh --check", () => {
 
     const result = runRepair(targetDir, ["--check"]);
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain("finding class=configuration-invalid target=configuration severity=fail");
     expect(result.stdout).not.toContain("configuration-migration-interrupted");
   });
@@ -1532,7 +1533,7 @@ describe("scripts/repair.sh --check", () => {
 
     const result = runRepair(targetDir, ["--check"]);
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain("finding class=configuration-invalid target=configuration severity=fail");
     expect(result.stdout).not.toContain("configuration-migration-interrupted");
   });
@@ -1547,7 +1548,7 @@ describe("scripts/repair.sh --check", () => {
 
     const result = runRepair(targetDir, ["--check"]);
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain("finding class=configuration-invalid target=configuration severity=fail");
     expect(result.stdout).not.toContain("configuration-migration-interrupted");
   });
@@ -1560,7 +1561,7 @@ describe("scripts/repair.sh --check", () => {
 
     const result = runRepair(targetDir, ["--check"]);
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(lines(result.stdout)).toEqual(["diagnosis result=healthy checked=20 skipped=0"]);
   });
 
@@ -1593,7 +1594,7 @@ describe("scripts/repair.sh --check", () => {
     const targetDir = makeFixture();
     const result = runRepair(targetDir, ["--check"], { composeFails: true });
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain("finding class=compose-interpolation-failed target=compose severity=fail");
   });
 
@@ -1603,7 +1604,7 @@ describe("scripts/repair.sh --check", () => {
 
     const result = runRepair(targetDir, ["--check"], { volumes: ["repairtest_orbit-db-data"] });
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain("finding class=secret-missing target=postgres-password severity=warn");
     expect(result.stdout).toContain(
       "finding class=volume-retained-without-credentials target=database-volume severity=fail",
@@ -1615,7 +1616,7 @@ describe("scripts/repair.sh --check", () => {
 
     const result = runRepair(targetDir, ["--check"], { volumes: ["repairtest_orbit-db-data"] });
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(result.stdout).not.toContain("volume-retained-without-credentials");
   });
 
@@ -1627,7 +1628,7 @@ describe("scripts/repair.sh --check", () => {
 
     const result = runRepair(targetDir, ["--check"], { volumes: ["repairtest_orbit-documents-data"] });
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain("finding class=secret-missing target=document-kek severity=warn");
     expect(result.stdout).toContain(
       "finding class=document-volume-retained-without-key target=document-volume severity=fail",
@@ -1639,7 +1640,7 @@ describe("scripts/repair.sh --check", () => {
 
     const result = runRepair(targetDir, ["--check"], { volumes: ["repairtest_orbit-documents-data"] });
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(result.stdout).not.toContain("document-volume-retained-without-key");
   });
 
@@ -1650,7 +1651,7 @@ describe("scripts/repair.sh --check", () => {
 
     const result = runRepair(targetDir, ["--check"], { volumes: ["repairtest_orbit-db-data"] });
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain("finding class=volume-retained-without-credentials target=database-volume severity=fail");
     expect(result.stdout).not.toContain("document-volume-retained-without-key");
   });
@@ -1670,7 +1671,7 @@ describe("scripts/repair.sh --check", () => {
 
     const result = runRepair(targetDir, ["--check"], { volumeLsFailFilter: "orbit-documents-data" });
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain("finding class=secret-missing target=document-kek severity=warn");
     expect(result.stdout).toContain(
       "finding class=document-volume-retained-without-key target=document-volume severity=fail",
@@ -1688,7 +1689,7 @@ describe("scripts/repair.sh --check", () => {
 
     const result = runRepair(targetDir, ["--check"], { volumeLsFailFilter: "orbit-documents-data" });
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(result.stdout).not.toContain("document-volume-retained-without-key");
   });
 
@@ -1697,7 +1698,7 @@ describe("scripts/repair.sh --check", () => {
 
     const result = runRepair(targetDir, ["--check"], { volumes: ["someother_orbit-documents-data"] });
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(result.stdout).toContain("finding class=unrelated-resource-present target=document-volume severity=info");
   });
 
@@ -1706,7 +1707,7 @@ describe("scripts/repair.sh --check", () => {
 
     const result = runRepair(targetDir, ["--check"], { volumes: ["someother_orbit-db-data"] });
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(result.stdout).toContain("finding class=unrelated-resource-present target=database-volume severity=info");
   });
 
@@ -1717,7 +1718,7 @@ describe("scripts/repair.sh --check", () => {
       containers: [{ id: "0123456789ab", service: "not-an-orbit-service" }],
     });
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain("finding class=container-foreign-owner target=container severity=fail");
   });
 
@@ -1728,7 +1729,7 @@ describe("scripts/repair.sh --check", () => {
       containers: [{ id: "0123456789ab", service: "orbit-db" }],
     });
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(result.stdout).not.toContain("container-foreign-owner");
   });
 
@@ -1737,7 +1738,7 @@ describe("scripts/repair.sh --check", () => {
 
     const result = runRepair(targetDir, ["--check"], { unavailable: true });
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(result.stdout).toContain("finding class=docker-unavailable target=compose severity=info");
     expect(result.stdout).toContain("finding class=docker-unavailable target=database-volume severity=info");
     expect(result.stdout).toContain("finding class=docker-unavailable target=document-volume severity=info");
@@ -1779,7 +1780,7 @@ describe("scripts/repair.sh --check", () => {
     expect(result.stdout).toContain("finding class=docker-unavailable target=configuration severity=info");
     expect(result.stdout).not.toContain("configuration-invalid");
     expect(result.stdout).not.toContain("configuration-incomplete");
-    expect(result.status).not.toBe(4);
+    expect(result.status, result.stderr + result.stdout).not.toBe(4);
   }
 
   it("records docker-unavailable, not configuration-invalid, and never pulls when the docker daemon is unreachable", () => {
@@ -1867,7 +1868,7 @@ describe("scripts/repair.sh --check", () => {
     expect(wrappedLog).not.toMatch(/^pull(\s|$)/m);
     expect(result.stdout).toContain("finding class=docker-unavailable target=configuration severity=info");
     expect(result.stdout).not.toContain("configuration-invalid");
-    expect(result.status).not.toBe(4);
+    expect(result.status, result.stderr + result.stdout).not.toBe(4);
   });
 
   // The #1316 (B) wrapper: only the image .env-orbit names (FIXTURE_IMAGE_DIGEST)
@@ -1921,7 +1922,7 @@ describe("scripts/repair.sh --check", () => {
     expect(result.stdout).toContain("finding class=docker-unavailable target=configuration severity=info");
     expect(result.stdout).not.toContain("configuration-invalid");
     expect(result.stdout).not.toContain("configuration-incomplete");
-    expect(result.status).not.toBe(4);
+    expect(result.status, result.stderr + result.stdout).not.toBe(4);
   });
 
   it("lets the .orbit-image pin win over an absent exported ORBIT_IMAGE: the check runs on the present pin and nothing is pulled", () => {
@@ -2037,7 +2038,7 @@ describe("scripts/repair.sh --check", () => {
       appSecretDelayCounterPath: attemptCounterPath,
     });
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain("finding class=database-credential-mismatch target=database severity=fail");
     expect(result.stdout).not.toContain("diagnosis result=healthy");
   });
@@ -2068,7 +2069,7 @@ describe("scripts/repair.sh --check", () => {
       { env: { ORBIT_REPAIR_APP_SECRET_BUDGET: "1" } },
     );
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain("finding class=database-credential-unverifiable target=database severity=fail");
     expect(result.stdout).not.toContain("database-credential-mismatch");
     expect(result.stdout).not.toContain("diagnosis result=healthy");
@@ -2116,7 +2117,7 @@ describe("scripts/repair.sh --check", () => {
       appReaderFailCounterPath: readerCounterPath,
     });
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain("finding class=database-credential-mismatch target=database severity=fail");
     expect(result.stdout).not.toContain("diagnosis result=healthy");
   });
@@ -2142,7 +2143,7 @@ describe("scripts/repair.sh --check", () => {
       { env: { ORBIT_REPAIR_APP_SECRET_BUDGET: "1" } },
     );
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain("finding class=database-credential-unverifiable target=database severity=fail");
     expect(result.stdout).not.toContain("diagnosis result=healthy");
   });
@@ -2154,7 +2155,7 @@ describe("scripts/repair.sh --check", () => {
 
     const result = runRepair(targetDir, ["--check"], { db: { present: false } });
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain("finding class=services-not-running target=container severity=fail");
     expect(result.stdout).not.toContain("database-unreachable");
     expect(result.stdout).not.toContain("database-credential-mismatch");
@@ -2165,7 +2166,7 @@ describe("scripts/repair.sh --check", () => {
 
     const result = runRepair(targetDir, ["--check"], { db: { present: true, ready: false } });
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain("finding class=database-unreachable target=database severity=fail");
   });
 
@@ -2179,7 +2180,7 @@ describe("scripts/repair.sh --check", () => {
       db: { present: true, ready: true, authResult: "mismatch" },
     });
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain("finding class=database-credential-mismatch target=database severity=fail");
     expect(result.stdout).not.toContain("database-unreachable");
     expect(result.stdout).not.toContain(distinctPassword);
@@ -2208,7 +2209,7 @@ describe("scripts/repair.sh --check", () => {
       db: { present: true, ready: true, authResult: "ok" },
     });
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(result.stdout).not.toContain("database-unreachable");
     expect(result.stdout).not.toContain("database-credential-mismatch");
   });
@@ -2220,7 +2221,7 @@ describe("scripts/repair.sh --check", () => {
       db: { present: true, ready: true, authResult: "other-error" },
     });
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain("finding class=database-unreachable target=database severity=fail");
     expect(result.stdout).not.toContain("database-credential-mismatch");
   });
@@ -2235,7 +2236,7 @@ describe("scripts/repair.sh --check", () => {
       app: { present: true, image: running, health: "healthy" },
     });
 
-    expect(result.status).toBe(3);
+    expect(result.status, result.stderr + result.stdout).toBe(3);
     expect(result.stdout).toContain("finding class=stale-container target=container severity=warn");
   });
 
@@ -2248,7 +2249,7 @@ describe("scripts/repair.sh --check", () => {
       app: { present: true, image: pinned, health: "healthy" },
     });
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(result.stdout).not.toContain("stale-container");
   });
 
@@ -2263,7 +2264,7 @@ describe("scripts/repair.sh --check", () => {
     const result = runRepair(targetDir, ["--check"], {
       app: { present: true, image: "something-else:latest", health: "healthy" },
     });
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(result.stdout).not.toContain("stale-container");
   });
 
@@ -2275,7 +2276,7 @@ describe("scripts/repair.sh --check", () => {
       app: { present: true, image: "orbit-local:fedcba987654", health: "healthy" },
     });
 
-    expect(result.status).toBe(3);
+    expect(result.status, result.stderr + result.stdout).toBe(3);
     expect(result.stdout).toContain("finding class=stale-container target=container severity=warn");
   });
 
@@ -2298,7 +2299,7 @@ describe("scripts/repair.sh --check", () => {
       imageInspect: { present: true, id: pinnedLocalId },
     });
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain("finding class=image-identity-mismatch target=image severity=fail");
   });
 
@@ -2314,7 +2315,7 @@ describe("scripts/repair.sh --check", () => {
       imageInspect: { present: true, id: sameId },
     });
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(result.stdout).not.toContain("image-identity-mismatch");
   });
 
@@ -2329,7 +2330,7 @@ describe("scripts/repair.sh --check", () => {
       imageInspect: { present: false },
     });
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(result.stdout).not.toContain("image-identity-mismatch");
   });
 
@@ -2346,7 +2347,7 @@ describe("scripts/repair.sh --check", () => {
       imageInspect: { present: true, id: "sha256:" + "2".repeat(64) },
     });
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(result.stdout).not.toContain("image-identity-mismatch");
   });
 
@@ -2362,7 +2363,7 @@ describe("scripts/repair.sh --check", () => {
 
     // #1535: an absent orbit-app is itself services-not-running; this test's
     // own point is only that nothing else is reported.
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain("finding class=services-not-running target=container severity=fail");
     expect(result.stdout).not.toContain("image-identity-mismatch");
   });
@@ -2372,7 +2373,7 @@ describe("scripts/repair.sh --check", () => {
 
     const result = runRepair(targetDir, ["--check"], { app: { present: true, health: "unhealthy" } });
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain("finding class=application-unhealthy target=application severity=fail");
   });
 
@@ -2387,7 +2388,7 @@ describe("scripts/repair.sh --check", () => {
       },
     });
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain("finding class=database-schema-mismatch target=application severity=fail");
     // Reported INSTEAD of, not as well as: restarting cannot change either side.
     expect(result.stdout).not.toContain("application-unhealthy");
@@ -2414,7 +2415,7 @@ describe("scripts/repair.sh --check", () => {
       },
     });
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain("finding class=application-unhealthy target=application severity=fail");
     expect(result.stdout).not.toContain("database-schema-mismatch");
   });
@@ -2435,7 +2436,7 @@ describe("scripts/repair.sh --check", () => {
       },
     });
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain("finding class=database-schema-mismatch target=application severity=fail");
     expect(result.stdout).not.toContain("application-unhealthy");
   });
@@ -2477,7 +2478,7 @@ describe("scripts/repair.sh --check", () => {
       },
     });
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain("finding class=migration-failed target=application severity=fail");
     // Reported INSTEAD of, not as well as (same #437 discipline as the other
     // two sentinel-derived classes).
@@ -2499,7 +2500,7 @@ describe("scripts/repair.sh --check", () => {
       argvLogPath,
     });
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     // The finding comes from the log-sentinel channel (target=application),
     // never the SQL channel (target=database), and only once.
     const migrationFindingLines = lines(result.stdout).filter((line) => line.includes("class=migration-failed"));
@@ -2526,7 +2527,7 @@ describe("scripts/repair.sh --check", () => {
       migrationRun: { outcome: "failed", reason: "migration_error" },
     });
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain("finding class=migration-failed target=database severity=fail");
   });
 
@@ -2538,7 +2539,7 @@ describe("scripts/repair.sh --check", () => {
       migrationRun: { outcome: "failed", reason: "migration_error" },
     });
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain("finding class=migration-failed target=database severity=fail");
   });
 
@@ -2552,7 +2553,7 @@ describe("scripts/repair.sh --check", () => {
 
     // #1535: an absent orbit-app is itself services-not-running; this test's
     // own point is only that nothing else is reported.
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain("finding class=services-not-running target=container severity=fail");
     expect(result.stdout).not.toContain("migration-failed");
   });
@@ -2566,7 +2567,7 @@ describe("scripts/repair.sh --check", () => {
 
     // #1535: an absent orbit-app is itself services-not-running; this test's
     // own point is only that nothing else is reported.
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain("finding class=services-not-running target=container severity=fail");
     expect(result.stdout).not.toContain("migration-failed");
   });
@@ -2581,7 +2582,7 @@ describe("scripts/repair.sh --check", () => {
 
     // #1535: an absent orbit-app is itself services-not-running; this test's
     // own point is only that nothing else is reported.
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain("finding class=services-not-running target=container severity=fail");
     expect(result.stdout).not.toContain("migration-failed");
   });
@@ -2598,7 +2599,7 @@ describe("scripts/repair.sh --check", () => {
       migrationRun: { outcome: "failed", reason: "migration_error" },
     });
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     const migrationFindingLines = lines(result.stdout).filter((line) => line.includes("class=migration-failed"));
     expect(migrationFindingLines).toHaveLength(1);
   });
@@ -2612,7 +2613,7 @@ describe("scripts/repair.sh --check", () => {
 
     const result = runRepair(targetDir, ["--check"], { app: { present: true, health: "starting" } });
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(result.stdout).not.toContain("application-unhealthy");
   });
 
@@ -2621,7 +2622,7 @@ describe("scripts/repair.sh --check", () => {
 
     const result = runRepair(targetDir, ["--check"], { app: { present: true, health: "" } });
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(result.stdout).not.toContain("application-unhealthy");
   });
 
@@ -2632,7 +2633,7 @@ describe("scripts/repair.sh --check", () => {
 
     // #1535: an absent orbit-app is itself services-not-running; this test's
     // own point is only that nothing else is reported.
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain("finding class=services-not-running target=container severity=fail");
     expect(result.stdout).not.toContain("stale-container");
     expect(result.stdout).not.toContain("application-unhealthy");
@@ -2713,7 +2714,7 @@ describe("scripts/repair.sh: the ADR-0016 supported-version gate (#681 criterion
 
     const result = runRepair(targetDir, ["--check"]);
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(result.stdout).not.toContain("deployment-version-unsupported");
   });
 
@@ -2731,7 +2732,7 @@ describe("scripts/repair.sh: the ADR-0016 supported-version gate (#681 criterion
 
     const result = runRepair(targetDir, ["--check"]);
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain("finding class=configuration-invalid target=configuration severity=fail");
   });
 
@@ -2741,7 +2742,7 @@ describe("scripts/repair.sh: the ADR-0016 supported-version gate (#681 criterion
 
     const result = runRepair(targetDir, ["--check"]);
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain("finding class=deployment-version-unsupported target=deployment severity=fail");
   });
 
@@ -2753,7 +2754,7 @@ describe("scripts/repair.sh: the ADR-0016 supported-version gate (#681 criterion
 
       const result = runRepair(targetDir, ["--check"]);
 
-      expect(result.status).toBe(0);
+      expect(result.status, result.stderr + result.stdout).toBe(0);
       expect(result.stdout).not.toContain("deployment-version-unsupported");
     },
   );
@@ -2815,7 +2816,7 @@ describe("scripts/repair.sh: the ADR-0016 supported-version gate (#681 criterion
     const before = treeSnapshot(targetDir);
     const result = runRepair(targetDir, ["--execute", "--safe-only"], {}, { input: "y\n", env: { ORBIT_REPAIR_PROMPTS: "machine" } });
 
-    expect(result.status).toBe(6);
+    expect(result.status, result.stderr + result.stdout).toBe(6);
     expect(result.stdout).toContain("execution result=refused done=0 failed=0 reason=deployment-version-unsupported");
     expect(result.stdout).not.toContain("execute action=");
     expect(treeSnapshot(targetDir)).toBe(before);
@@ -2828,7 +2829,7 @@ describe("scripts/repair.sh: the ADR-0016 supported-version gate (#681 criterion
 
     const result = runRepair(targetDir, ["--execute", "--dangerous"], {}, { input: "y\n", env: { ORBIT_REPAIR_PROMPTS: "machine" } });
 
-    expect(result.status).toBe(6);
+    expect(result.status, result.stderr + result.stdout).toBe(6);
     expect(result.stdout).toContain("execution result=refused done=0 failed=0 reason=deployment-version-unsupported");
     expect(result.stdout).toContain("dangerous result=refused done=0 failed=0 reason=deployment-version-unsupported");
   });
@@ -2846,7 +2847,7 @@ describe("scripts/repair.sh: the ADR-0016 supported-version gate (#681 criterion
 
     const result = runRepair(targetDir, args, {}, { input: "y\n", env: { ORBIT_REPAIR_PROMPTS: "machine" } });
 
-    expect(result.status).toBe(6);
+    expect(result.status, result.stderr + result.stdout).toBe(6);
     expect(result.stdout).toContain("execution result=refused done=0 failed=0 reason=deployment-version-unsupported");
     expectStdoutIsEnumOnly(result.stdout);
   });
@@ -2865,7 +2866,7 @@ describe("scripts/repair.sh --plan", () => {
     const targetDir = makeFixture();
     const result = runRepair(targetDir, ["--check", "--plan"]);
 
-    expect(result.status).toBe(2);
+    expect(result.status, result.stderr + result.stdout).toBe(2);
     expect(result.stderr).toContain("Usage:");
     expect(result.stdout).toBe("");
   });
@@ -2874,7 +2875,7 @@ describe("scripts/repair.sh --plan", () => {
     const targetDir = makeFixture();
     const result = runRepair(targetDir, ["--plan", "--check"]);
 
-    expect(result.status).toBe(2);
+    expect(result.status, result.stderr + result.stdout).toBe(2);
     expect(result.stderr).toContain("Usage:");
   });
 
@@ -2882,7 +2883,7 @@ describe("scripts/repair.sh --plan", () => {
     const targetDir = makeFixture();
     const result = runRepair(targetDir, ["--plan"]);
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(lines(result.stdout)).toEqual(["plan result=empty actions=0 manual=0"]);
     expect(result.stderr).toBe("");
   });
@@ -2891,8 +2892,8 @@ describe("scripts/repair.sh --plan", () => {
     const targetDir = makeFixture();
     const first = runRepair(targetDir, ["--plan", "--plain"]);
     const second = runRepair(targetDir, ["--plain", "--plan"]);
-    expect(first.status).toBe(0);
-    expect(second.status).toBe(0);
+    expect(first.status, first.stderr + first.stdout).toBe(0);
+    expect(second.status, second.stderr + second.stdout).toBe(0);
     expect(first.stdout).toBe(second.stdout);
   });
 
@@ -2908,7 +2909,7 @@ describe("scripts/repair.sh --plan", () => {
     const first = runRepair(targetDir, ["--plan"]);
     const second = runRepair(targetDir, ["--plan"]);
     expect(first.stdout).toBe(second.stdout);
-    expect(first.status).toBe(second.status);
+    expect(first.status, first.stderr + first.stdout).toBe(second.status);
   });
 
   it("never mutates the sandbox tree under --plan (identical path/mode/mtime snapshot before and after)", () => {
@@ -2917,7 +2918,7 @@ describe("scripts/repair.sh --plan", () => {
     const result = runRepair(targetDir, ["--plan"]);
     const after = spawnSync("find", [targetDir, "-printf", "%p %m %T@\n"], { encoding: "utf8" });
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(after.stdout).toBe(before.stdout);
   });
 
@@ -2929,7 +2930,7 @@ describe("scripts/repair.sh --plan", () => {
 
     const result = runRepair(targetDir, ["--plan"]);
 
-    expect(result.status).toBe(5);
+    expect(result.status, result.stderr + result.stdout).toBe(5);
     expect(lines(result.stdout)).toEqual([
       "plan action=manual resolves=not-orbit-directory mutation=none backup=not-required target=directory rollback=not-required expect=operator-action",
       "plan result=manual-required actions=0 manual=1",
@@ -2943,7 +2944,7 @@ describe("scripts/repair.sh --plan", () => {
 
     const result = runRepair(targetDir, ["--plan"]);
 
-    expect(result.status).toBe(3);
+    expect(result.status, result.stderr + result.stdout).toBe(3);
     expect(result.stdout).toContain(
       "plan action=restore-transaction resolves=staging-evidence-present mutation=reversible backup=required",
     );
@@ -2956,7 +2957,7 @@ describe("scripts/repair.sh --plan", () => {
 
     const result = runRepair(targetDir, ["--plan"]);
 
-    expect(result.status).toBe(3);
+    expect(result.status, result.stderr + result.stdout).toBe(3);
     expect(result.stdout).toContain(
       "plan action=fix-permissions resolves=managed-file-permissions mutation=reversible backup=not-required",
     );
@@ -2968,7 +2969,7 @@ describe("scripts/repair.sh --plan", () => {
 
     const result = runRepair(targetDir, ["--plan"]);
 
-    expect(result.status).toBe(3);
+    expect(result.status, result.stderr + result.stdout).toBe(3);
     expect(result.stdout).toContain(
       "plan action=fix-permissions resolves=secrets-directory-invalid mutation=reversible backup=not-required",
     );
@@ -2980,7 +2981,7 @@ describe("scripts/repair.sh --plan", () => {
 
     const result = runRepair(targetDir, ["--plan"]);
 
-    expect(result.status).toBe(3);
+    expect(result.status, result.stderr + result.stdout).toBe(3);
     expect(result.stdout).toContain(
       "plan action=fix-permissions resolves=secret-permissions mutation=reversible backup=not-required",
     );
@@ -2992,7 +2993,7 @@ describe("scripts/repair.sh --plan", () => {
 
     const result = runRepair(targetDir, ["--plan"]);
 
-    expect(result.status).toBe(3);
+    expect(result.status, result.stderr + result.stdout).toBe(3);
     expect(result.stdout).toContain(
       "plan action=regenerate-secret resolves=secret-missing mutation=reversible backup=not-required",
     );
@@ -3005,7 +3006,7 @@ describe("scripts/repair.sh --plan", () => {
     // No `volumes` option passed to the docker shim: nothing is retained.
     const result = runRepair(targetDir, ["--plan"]);
 
-    expect(result.status).toBe(3);
+    expect(result.status, result.stderr + result.stdout).toBe(3);
     expect(result.stdout).toContain(
       "plan action=regenerate-secret resolves=secret-missing mutation=reversible backup=not-required",
     );
@@ -3018,7 +3019,7 @@ describe("scripts/repair.sh --plan", () => {
 
     const result = runRepair(targetDir, ["--plan"], { volumes: ["repairtest_orbit-db-data"] });
 
-    expect(result.status).toBe(3);
+    expect(result.status, result.stderr + result.stdout).toBe(3);
     const planLines = lines(result.stdout).filter((line) => line.startsWith("plan action="));
     expect(planLines).toEqual([
       "plan action=rotate-database-credential resolves=secret-missing mutation=credential-rotation backup=required target=postgres-password rollback=credential-checkpoint expect=authentication-restored",
@@ -3054,7 +3055,7 @@ describe("scripts/repair.sh --plan", () => {
 
     const result = runRepair(targetDir, ["--plan"], { volumes: ["repairtest_orbit-documents-data"] });
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     const planLines = lines(result.stdout).filter((line) => line.startsWith("plan action="));
     expect(planLines).toEqual([
       "plan action=manual resolves=secret-missing mutation=none backup=not-required target=document-kek rollback=not-required expect=operator-action",
@@ -3073,7 +3074,7 @@ describe("scripts/repair.sh --plan", () => {
     // No `volumes` option passed to the docker shim: nothing is retained.
     const result = runRepair(targetDir, ["--plan"]);
 
-    expect(result.status).toBe(3);
+    expect(result.status, result.stderr + result.stdout).toBe(3);
     expect(result.stdout).toContain(
       "plan action=regenerate-secret resolves=secret-missing mutation=reversible backup=not-required",
     );
@@ -3119,7 +3120,7 @@ describe("scripts/repair.sh --plan", () => {
     const targetDir = makeFixture();
     const result = runRepair(targetDir, ["--plan"], { db: { present: true, ready: true, authResult: "mismatch" } });
 
-    expect(result.status).toBe(3);
+    expect(result.status, result.stderr + result.stdout).toBe(3);
     expect(result.stdout).toContain(
       "plan action=rotate-database-credential resolves=database-credential-mismatch mutation=credential-rotation backup=required",
     );
@@ -3129,7 +3130,7 @@ describe("scripts/repair.sh --plan", () => {
     const targetDir = makeFixture();
     const result = runRepair(targetDir, ["--plan"], { app: { present: true, health: "unhealthy" } });
 
-    expect(result.status).toBe(3);
+    expect(result.status, result.stderr + result.stdout).toBe(3);
     expect(result.stdout).toContain(
       "plan action=restart-services resolves=application-unhealthy mutation=service-restart backup=not-required",
     );
@@ -3143,7 +3144,7 @@ describe("scripts/repair.sh --plan", () => {
 
     const result = runRepair(targetDir, ["--plan"], { app: { present: true, image: running, health: "healthy" } });
 
-    expect(result.status).toBe(3);
+    expect(result.status, result.stderr + result.stdout).toBe(3);
     expect(result.stdout).toContain(
       "plan action=restart-services resolves=stale-container mutation=service-restart backup=not-required",
     );
@@ -3159,7 +3160,7 @@ describe("scripts/repair.sh --plan", () => {
 
     const result = runRepair(targetDir, ["--plan"]);
 
-    expect(result.status).toBe(3);
+    expect(result.status, result.stderr + result.stdout).toBe(3);
     expect(result.stdout).toContain(
       "plan action=rerun-configuration resolves=configuration-incomplete mutation=none backup=not-required",
     );
@@ -3171,7 +3172,7 @@ describe("scripts/repair.sh --plan", () => {
 
     const result = runRepair(targetDir, ["--plan"]);
 
-    expect(result.status).toBe(3);
+    expect(result.status, result.stderr + result.stdout).toBe(3);
     expect(result.stdout).toContain(
       "plan action=rerun-configuration resolves=configuration-invalid mutation=none backup=not-required",
     );
@@ -3186,7 +3187,7 @@ describe("scripts/repair.sh --plan", () => {
 
     const result = runRepair(targetDir, ["--plan"]);
 
-    expect(result.status).toBe(3);
+    expect(result.status, result.stderr + result.stdout).toBe(3);
     expect(result.stdout).toContain(
       "plan action=restore-transaction resolves=configuration-migration-interrupted mutation=reversible backup=required",
     );
@@ -3311,7 +3312,7 @@ describe("scripts/repair.sh --plan", () => {
       },
     });
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stderr).toContain("resolves=migration-failed");
     expect(result.stderr.toLowerCase()).toContain("recovery point");
     expect(result.stderr).not.toContain(targetDir);
@@ -3331,7 +3332,7 @@ describe("scripts/repair.sh --plan", () => {
 
     const result = runRepair(targetDir, ["--plan"], { unavailable: true });
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(lines(result.stdout)).toEqual(["plan result=empty actions=0 manual=0"]);
     expect(result.stdout).not.toContain("docker-unavailable");
     expect(result.stderr).toBe("");
@@ -3342,7 +3343,7 @@ describe("scripts/repair.sh --plan", () => {
 
     const result = runRepair(targetDir, ["--plan"], { volumes: ["someother_orbit-db-data"] });
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(lines(result.stdout)).toEqual(["plan result=empty actions=0 manual=0"]);
     expect(result.stdout).not.toContain("unrelated-resource-present");
     expect(result.stderr).toBe("");
@@ -3359,7 +3360,7 @@ describe("scripts/repair.sh --plan", () => {
       db: { present: true, ready: false },
     });
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(lines(result.stdout)).toEqual([
       "plan action=manual resolves=database-unreachable mutation=none backup=not-required target=database rollback=not-required expect=operator-action",
       "plan result=manual-required actions=0 manual=1",
@@ -3380,7 +3381,7 @@ describe("scripts/repair.sh --plan", () => {
     // database container also raises database-volume-missing, a second manual.
     const result = runRepair(targetDir, ["--plan"], { db: { present: false }, volumes: ["repairtest_orbit-db-data"] });
 
-    expect(result.status).toBe(3);
+    expect(result.status, result.stderr + result.stdout).toBe(3);
     const summary = lines(result.stdout).at(-1);
     expect(summary).toBe("plan result=ready actions=1 manual=1");
   });
@@ -3390,7 +3391,7 @@ describe("scripts/repair.sh --plan", () => {
 
     const result = runRepair(targetDir, ["--plan"], { db: { present: true, ready: false } });
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(lines(result.stdout)).toEqual([
       "plan action=manual resolves=database-unreachable mutation=none backup=not-required target=database rollback=not-required expect=operator-action",
       "plan result=manual-required actions=0 manual=1",
@@ -3487,7 +3488,7 @@ describe("scripts/repair.sh --execute --safe-only", () => {
     const targetDir = makeFixture();
     const result = runRepair(targetDir, ["--execute"]);
 
-    expect(result.status).toBe(2);
+    expect(result.status, result.stderr + result.stdout).toBe(2);
     expect(result.stderr).toContain("Usage:");
     expect(result.stderr).toContain("--safe-only");
     expect(result.stdout).toBe("");
@@ -3497,7 +3498,7 @@ describe("scripts/repair.sh --execute --safe-only", () => {
     const targetDir = makeFixture();
     const result = runRepair(targetDir, ["--safe-only"]);
 
-    expect(result.status).toBe(2);
+    expect(result.status, result.stderr + result.stdout).toBe(2);
     expect(result.stderr).toContain("Usage:");
   });
 
@@ -3505,7 +3506,7 @@ describe("scripts/repair.sh --execute --safe-only", () => {
     const targetDir = makeFixture();
     const result = runRepair(targetDir, ["--execute", "--safe-only", "--check"]);
 
-    expect(result.status).toBe(2);
+    expect(result.status, result.stderr + result.stdout).toBe(2);
     expect(result.stderr).toContain("Usage:");
   });
 
@@ -3513,7 +3514,7 @@ describe("scripts/repair.sh --execute --safe-only", () => {
     const targetDir = makeFixture();
     const result = runRepair(targetDir, ["--plan", "--safe-only"]);
 
-    expect(result.status).toBe(2);
+    expect(result.status, result.stderr + result.stdout).toBe(2);
     expect(result.stderr).toContain("Usage:");
   });
 
@@ -3527,7 +3528,7 @@ describe("scripts/repair.sh --execute --safe-only", () => {
 
     const result = runRepair(targetDir, ["--execute", "--safe-only"]);
 
-    expect(result.status).toBe(5);
+    expect(result.status, result.stderr + result.stdout).toBe(5);
     expect(lines(result.stdout)).toEqual([
       "execute action=manual resolves=not-orbit-directory result=skipped",
       "execution result=empty done=0 failed=0",
@@ -3542,7 +3543,7 @@ describe("scripts/repair.sh --execute --safe-only", () => {
     const targetDir = makeFixture();
     const result = runRepair(targetDir, ["--execute", "--safe-only"]);
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(lines(result.stdout)).toEqual([
       "execution result=empty done=0 failed=0",
       "diagnosis result=healthy checked=20 skipped=0",
@@ -3557,7 +3558,7 @@ describe("scripts/repair.sh --execute --safe-only", () => {
 
     const result = runRepair(targetDir, ["--execute", "--safe-only"], { db: { present: true, ready: false } });
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(result.stdout).toContain("execute action=manual resolves=database-unreachable result=skipped");
     expect(result.stdout).toContain("execution result=unactionable done=0 failed=0");
     expect(result.stdout).not.toContain("plan action=");
@@ -3587,7 +3588,7 @@ describe("scripts/repair.sh --execute --safe-only", () => {
 
     const result = runRepair(targetDir, ["--execute", "--safe-only"]);
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(result.stdout).toContain("execute action=fix-permissions resolves=managed-file-permissions result=done");
     expect(result.stdout).toContain("execution result=complete done=1 failed=0");
     expect(mode(join(targetDir, ".env-orbit"))).toBe("600");
@@ -3625,7 +3626,7 @@ describe("scripts/repair.sh --execute --safe-only", () => {
 
     const result = runRepair(targetDir, ["--execute", "--safe-only"]);
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain("execute action=fix-permissions resolves=secret-permissions result=failed");
     expect(result.stdout).toContain("execution result=failed done=0 failed=1");
     const linkStat = statSync(join(targetDir, ".orbit-secrets", "postgres-password"), { throwIfNoEntry: false });
@@ -3755,7 +3756,7 @@ describe("scripts/repair.sh --execute --safe-only", () => {
       chmodSync(join(targetDir, "scripts"), 0o755);
     }
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain(
       "execute action=restore-transaction resolves=staging-evidence-present result=failed",
     );
@@ -3803,7 +3804,7 @@ describe("scripts/repair.sh --execute --safe-only", () => {
 
     const result = runRepair(targetDir, ["--execute", "--safe-only"]);
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain(
       "execute action=restore-transaction resolves=staging-evidence-present result=failed",
     );
@@ -3841,7 +3842,7 @@ describe("scripts/repair.sh --execute --safe-only", () => {
     "docker-compose.yml", "docker-compose.mail.yml", "docker-compose.kek-rotation.yml", "docker-compose.no-document-key.yml",
     "docker-compose.scanner-off.yml", ".env-orbit.example", "config/tika-config.json", "scripts/configure.sh",
     "scripts/installer-ui.sh", "scripts/backup.sh", "scripts/restore.sh", "scripts/repair.sh",
-    "scripts/export-recovery-bundle.sh", "scripts/import-recovery-bundle.sh", "scripts/end-maintenance.sh", "update.sh",
+    "scripts/export-recovery-bundle.sh", "scripts/import-recovery-bundle.sh", "scripts/end-maintenance.sh", "scripts/start-maintenance.sh", "update.sh",
     ".env-orbit", ".orbit-secrets", ".orbit-files",
   ];
   // A staging folder whose rollback/original holds a `cp -a` copy (bytes and modes) of every
@@ -3853,7 +3854,8 @@ describe("scripts/repair.sh --execute --safe-only", () => {
     for (const path of RESTORE_TRANSACTION_PATHS) {
       if (omit.includes(path) || !existsSync(join(targetDir, path))) continue;
       mkdirSync(dirname(join(original, path)), { recursive: true });
-      expect(spawnSync("cp", ["-a", "--", join(targetDir, path), join(original, path)]).status).toBe(0);
+      const copied = spawnSync("cp", ["-a", "--", join(targetDir, path), join(original, path)], { encoding: "utf8" });
+      expect(copied.status, copied.stderr).toBe(0);
     }
     chmodSync(original, 0o700);
     return stagingDir;
@@ -3872,7 +3874,7 @@ describe("scripts/repair.sh --execute --safe-only", () => {
 
     const result = runRepair(targetDir, ["--execute", "--safe-only"]);
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(result.stdout).toContain("execute action=restore-transaction resolves=staging-evidence-present result=done");
     expect(stagingLeft(targetDir)).toBe("");
     expect(liveState(targetDir)).toEqual(before);
@@ -3887,7 +3889,7 @@ describe("scripts/repair.sh --execute --safe-only", () => {
     // No terminal, no ORBIT_REPAIR_PROMPTS: nothing would be restored, so nothing needs confirming.
     const result = runRepair(targetDir, ["--execute", "--safe-only"]);
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(result.stdout).toContain("execute action=restore-transaction resolves=staging-evidence-present result=done");
     expect(result.stderr).not.toContain("this is never automatic");
     expect(stagingLeft(targetDir)).toBe("");
@@ -3999,7 +4001,7 @@ describe("scripts/repair.sh --execute --safe-only", () => {
       input: "y\n",
     });
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(result.stdout).toContain(
       "execute action=restore-transaction resolves=staging-evidence-present result=done",
     );
@@ -4020,7 +4022,7 @@ describe("scripts/repair.sh --execute --safe-only", () => {
 
     const result = runRepair(targetDir, ["--execute", "--safe-only"]);
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(result.stdout).toContain(
       "execute action=restore-transaction resolves=configuration-migration-interrupted result=done",
     );
@@ -4078,7 +4080,7 @@ describe("scripts/repair.sh --execute --safe-only", () => {
       env: { PATH: `${binDir}:${process.env.PATH}`, HOME: process.env.HOME ?? tmpdir() },
     });
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain(
       "execute action=restore-transaction resolves=configuration-migration-interrupted result=failed",
     );
@@ -4157,7 +4159,7 @@ describe("scripts/repair.sh --execute --safe-only", () => {
       restartFails: true,
     });
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain("execute action=restart-services resolves=application-unhealthy result=failed");
     expect(result.stdout).toContain("execution result=failed done=0 failed=1");
   });
@@ -4291,7 +4293,7 @@ describe("scripts/repair.sh --execute --safe-only", () => {
       { input: "n\n", env: { ORBIT_REPAIR_PROMPTS: "machine" } },
     );
 
-    expect(result.status).toBe(1);
+    expect(result.status, result.stderr + result.stdout).toBe(1);
     expect(result.stdout).toContain("prompt-abort field=safe-batch");
     expect(result.stdout).toContain("execute action=fix-permissions resolves=managed-file-permissions result=skipped");
     expect(result.stdout).toContain("execution result=declined done=0 failed=0");
@@ -4310,7 +4312,7 @@ describe("scripts/repair.sh --execute --safe-only", () => {
       { input: "", env: { ORBIT_REPAIR_PROMPTS: "machine" } },
     );
 
-    expect(result.status).toBe(1);
+    expect(result.status, result.stderr + result.stdout).toBe(1);
     expect(result.stdout).toContain("prompt-abort field=safe-batch");
     expect(treeSnapshot(targetDir)).toBe(before);
   });
@@ -4356,7 +4358,7 @@ describe("scripts/repair.sh --execute --safe-only", () => {
     );
 
     // Same decision, same exit code, and both stay enum-only.
-    expect(bare.status).toBe(machine.status);
+    expect(bare.status, bare.stderr + bare.stdout).toBe(machine.status);
     expectStdoutIsEnumOnly(bare.stdout);
     expectStdoutIsEnumOnly(machine.stdout);
 
@@ -4388,7 +4390,7 @@ describe("scripts/repair.sh --execute --safe-only", () => {
 
     const result = runRepair(targetDir, ["--execute", "--safe-only"], {}, { input: "" });
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(result.stdout).toContain(
       "execute action=fix-permissions resolves=managed-file-permissions result=done",
     );
@@ -4411,7 +4413,7 @@ describe("scripts/repair.sh --execute --safe-only", () => {
       { input: "y\n", env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
     );
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(result.stderr).toContain("Proceed?");
     expect(result.stdout).toContain("plan action=fix-permissions resolves=managed-file-permissions");
     expect(mode(join(targetDir, ".env-orbit"))).toBe("600");
@@ -4429,7 +4431,7 @@ describe("scripts/repair.sh --execute --safe-only", () => {
       { input: "n\n", env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
     );
 
-    expect(result.status).toBe(1);
+    expect(result.status, result.stderr + result.stdout).toBe(1);
     expect(result.stdout).toContain("execution result=declined done=0 failed=0");
     expect(treeSnapshot(targetDir)).toBe(before);
   });
@@ -4446,7 +4448,7 @@ describe("scripts/repair.sh --execute --safe-only", () => {
       { input: "", env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
     );
 
-    expect(result.status).toBe(1);
+    expect(result.status, result.stderr + result.stdout).toBe(1);
     expect(treeSnapshot(targetDir)).toBe(before);
   });
 
@@ -4470,7 +4472,7 @@ describe("scripts/repair.sh --execute --safe-only", () => {
     );
 
     expect(first.stdout).toBe(second.stdout);
-    expect(first.status).toBe(second.status);
+    expect(first.status, first.stderr + first.stdout).toBe(second.status);
   });
 
   it("never emits ANSI or cursor-control bytes", () => {
@@ -4570,7 +4572,7 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
     const targetDir = makeFixture();
     const result = runRepair(targetDir, ["--dangerous"]);
 
-    expect(result.status).toBe(2);
+    expect(result.status, result.stderr + result.stdout).toBe(2);
     expect(result.stderr).toContain("Usage:");
   });
 
@@ -4578,7 +4580,7 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
     const targetDir = makeFixture();
     const result = runRepair(targetDir, ["--execute", "--dangerous", "--check"]);
 
-    expect(result.status).toBe(2);
+    expect(result.status, result.stderr + result.stdout).toBe(2);
     expect(result.stderr).toContain("Usage:");
   });
 
@@ -4586,7 +4588,7 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
     const targetDir = makeFixture();
     const result = runRepair(targetDir, ["--plan", "--dangerous"]);
 
-    expect(result.status).toBe(2);
+    expect(result.status, result.stderr + result.stdout).toBe(2);
     expect(result.stderr).toContain("Usage:");
   });
 
@@ -4594,7 +4596,7 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
     const targetDir = makeFixture();
     const result = runRepair(targetDir, ["--execute", "--dangerous"]);
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(result.stdout).toContain("dangerous result=empty done=0 failed=0 reason=none");
   });
 
@@ -4626,7 +4628,7 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
       argvLogPath,
     });
 
-    expect(result.status).toBe(6);
+    expect(result.status, result.stderr + result.stdout).toBe(6);
     expect(result.stdout).toContain("execute action=rotate-database-credential resolves=database-credential-mismatch result=skipped");
     expect(result.stdout).toContain("dangerous result=refused done=0 failed=0 reason=non-interactive");
     expect(result.stdout).not.toContain("prompt field=");
@@ -4644,7 +4646,7 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
       db: { present: true, ready: true, authResult: "mismatch" },
     });
 
-    expect(result.status).toBe(6);
+    expect(result.status, result.stderr + result.stdout).toBe(6);
     expect(result.stdout).toContain("execute action=fix-permissions resolves=managed-file-permissions result=done");
     expect(result.stdout).toContain("execution result=complete done=1 failed=0");
     expect(result.stdout).toContain("dangerous result=refused done=0 failed=0 reason=non-interactive");
@@ -4674,7 +4676,7 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
       { input: "n\n", env: { ORBIT_REPAIR_PROMPTS: "machine" } },
     );
 
-    expect(result.status).toBe(1);
+    expect(result.status, result.stderr + result.stdout).toBe(1);
     expect(result.stdout).toContain("prompt-abort field=safe-batch");
     expect(result.stdout).toContain("execution result=declined done=0 failed=0");
     expect(result.stdout).toContain("dangerous result=refused done=0 failed=0 reason=refused-by-operator");
@@ -4695,7 +4697,7 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
       { input: "\n", env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
     );
 
-    expect(result.status).toBe(6);
+    expect(result.status, result.stderr + result.stdout).toBe(6);
     expect(result.stdout).toContain("dangerous result=refused done=0 failed=0 reason=refused-by-operator");
     expect(treeSnapshot(targetDir)).toBe(before);
   });
@@ -4711,7 +4713,7 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
       { input: "", env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
     );
 
-    expect(result.status).toBe(6);
+    expect(result.status, result.stderr + result.stdout).toBe(6);
     expect(result.stdout).toContain("dangerous result=refused done=0 failed=0 reason=refused-by-operator");
     expect(treeSnapshot(targetDir)).toBe(before);
   });
@@ -4725,7 +4727,7 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
         { db: { present: true, ready: true, authResult: "mismatch" } },
         { input: `${word}\n${word}\n${word}\n`, env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
       );
-      expect(result.status).toBe(6);
+      expect(result.status, result.stderr + result.stdout).toBe(6);
       expect(result.stdout).toContain("dangerous result=refused done=0 failed=0 reason=refused-by-operator");
     }
   });
@@ -4743,7 +4745,7 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
       },
     );
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(result.stdout).toContain("dangerous result=complete done=1 failed=0 reason=none");
     expect(result.stderr).toContain("attempt(s) remaining");
   });
@@ -4799,7 +4801,7 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
       { input: "no\nno\nno\n", env: { ORBIT_REPAIR_PROMPTS: "machine" } },
     );
 
-    expect(result.status).toBe(6);
+    expect(result.status, result.stderr + result.stdout).toBe(6);
     const promptLines = lines(result.stdout).filter((line) => line.startsWith("prompt field=action-word"));
     const rejectLines = lines(result.stdout).filter((line) => line.startsWith("prompt-reject field=action-word"));
     expect(promptLines).toEqual([
@@ -4860,7 +4862,7 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
       { input: `rotate\n${ROTATE_PASSPHRASE}\n${ROTATE_PASSPHRASE}\n`, env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
     );
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(result.stdout).toContain("execute action=rotate-database-credential resolves=database-credential-mismatch result=done");
 
     const restarted = readFileSync(restartLogPath, "utf8").trim().split("\n").filter(Boolean);
@@ -4880,7 +4882,7 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
       { input: `rotate\n${ROTATE_PASSPHRASE}\n${ROTATE_PASSPHRASE}\n`, env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
     );
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(result.stdout).toContain("execute action=rotate-database-credential resolves=database-credential-mismatch result=done");
     expect(result.stdout).toContain("dangerous result=complete done=1 failed=0 reason=none");
     // Post-execution re-diagnosis reflects a REAL rotation (the shim only
@@ -4964,7 +4966,7 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
       { input: `rotate\n${ROTATE_PASSPHRASE}\n${ROTATE_PASSPHRASE}\n`, env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
     );
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain("dangerous result=failed done=0 failed=1 reason=checkpoint-failed");
     expect(result.stdout).toContain("execute action=rotate-database-credential resolves=database-credential-mismatch result=failed");
     expect(
@@ -4999,7 +5001,7 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
       { input: "rotate\n", env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
     );
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(result.stdout).toContain("dangerous result=complete done=1 failed=0 reason=none");
     expect(result.stderr).toContain("proceeding without a content checkpoint");
     expect(result.stderr).not.toContain("checkpoint passphrase");
@@ -5025,7 +5027,7 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
       { input: `rotate\n${ROTATE_PASSPHRASE}\n${ROTATE_PASSPHRASE}\n`, env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
     );
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain("dangerous result=failed done=0 failed=1 reason=step-failed");
     expect(result.stdout).toContain("execute action=rotate-database-credential resolves=database-credential-mismatch result=failed");
 
@@ -5092,7 +5094,7 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
       { input: `rotate\n${ROTATE_PASSPHRASE}\n${ROTATE_PASSPHRASE}\n`, env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
     );
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain("dangerous result=failed done=0 failed=1 reason=step-failed");
     expect(result.stdout).toContain("execute action=rotate-database-credential resolves=database-credential-mismatch result=failed");
     expect(result.stderr).toContain("stage two step 'restart-services' failed");
@@ -5137,7 +5139,7 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
       },
     );
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(result.stdout).toContain("dangerous result=complete done=1 failed=0 reason=none");
     expect(result.stderr).toContain("at least 12 characters");
   });
@@ -5152,7 +5154,7 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
       { input: "rotate\nshort\nshort\nshort\n", env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
     );
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain("dangerous result=failed done=0 failed=1 reason=checkpoint-failed");
     expect(
       readFileSync(join(targetDir, ".orbit-secrets", "postgres-password"), "utf8").trim(),
@@ -5172,7 +5174,7 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
       },
     );
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(result.stdout).toContain("dangerous result=complete done=1 failed=0 reason=none");
     expect(result.stderr).toContain("did not match");
   });
@@ -5195,7 +5197,7 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
       },
     );
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain("dangerous result=failed done=0 failed=1 reason=checkpoint-failed");
   });
 
@@ -5227,7 +5229,7 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
     );
 
     expect(result.stdout).toContain("prompt-reject field=checkpoint-passphrase-confirm reason=mismatch");
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
   });
 
   // --- machine-prompt grammar (#297 style; schema-blind — grammar shape,
@@ -5264,7 +5266,7 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
       { input: "rotate\n", env: { ORBIT_REPAIR_PROMPTS: "machine" } },
     );
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain("prompt-abort field=checkpoint-passphrase");
     expect(result.stdout).toContain("dangerous result=failed done=0 failed=1 reason=checkpoint-failed");
   });
@@ -5356,7 +5358,7 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
       },
     );
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(result.stdout).toContain("execute action=fix-permissions resolves=managed-file-permissions result=done");
     expect(result.stdout).toContain("execution result=complete done=1 failed=0");
     expect(result.stdout).toContain("execute action=rotate-database-credential resolves=database-credential-mismatch result=done");
@@ -5398,7 +5400,7 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
       },
     );
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(result.stdout).toContain("execute action=restart-services resolves=application-unhealthy result=done");
     expect(result.stdout).toContain("execution result=complete done=1 failed=0");
     expect(result.stdout).toContain(
@@ -5449,7 +5451,7 @@ describe("scripts/repair.sh --execute --dangerous: regenerate-secret (#530 slice
 
     const result = runRepair(targetDir, ["--execute", "--dangerous"]);
 
-    expect(result.status).toBe(6);
+    expect(result.status, result.stderr + result.stdout).toBe(6);
     expect(result.stdout).toContain("execute action=regenerate-secret resolves=secret-missing result=skipped");
     expect(result.stdout).toContain("dangerous result=refused done=0 failed=0 reason=non-interactive");
     expect(result.stdout).not.toContain("prompt field=");
@@ -5469,7 +5471,7 @@ describe("scripts/repair.sh --execute --dangerous: regenerate-secret (#530 slice
       { input: "\n", env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
     );
 
-    expect(result.status).toBe(6);
+    expect(result.status, result.stderr + result.stdout).toBe(6);
     expect(result.stdout).toContain("dangerous result=refused done=0 failed=0 reason=refused-by-operator");
     expect(treeSnapshot(targetDir)).toBe(before);
   });
@@ -5486,7 +5488,7 @@ describe("scripts/repair.sh --execute --dangerous: regenerate-secret (#530 slice
       { input: "", env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
     );
 
-    expect(result.status).toBe(6);
+    expect(result.status, result.stderr + result.stdout).toBe(6);
     expect(result.stdout).toContain("dangerous result=refused done=0 failed=0 reason=refused-by-operator");
     expect(treeSnapshot(targetDir)).toBe(before);
   });
@@ -5503,7 +5505,7 @@ describe("scripts/repair.sh --execute --dangerous: regenerate-secret (#530 slice
         { input: `${word}\n${word}\n${word}\n`, env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
       );
 
-      expect(result.status).toBe(6);
+      expect(result.status, result.stderr + result.stdout).toBe(6);
       expect(result.stdout).toContain("dangerous result=refused done=0 failed=0 reason=refused-by-operator");
       expect(existsSync(join(targetDir, ".orbit-secrets", "session-secret"))).toBe(false);
     }
@@ -5520,7 +5522,7 @@ describe("scripts/repair.sh --execute --dangerous: regenerate-secret (#530 slice
       { input: "nope\nregenerate\n", env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
     );
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(result.stdout).toContain("dangerous result=complete done=1 failed=0 reason=none");
     expect(result.stderr).toContain("attempt(s) remaining");
   });
@@ -5536,7 +5538,7 @@ describe("scripts/repair.sh --execute --dangerous: regenerate-secret (#530 slice
       { input: "no\nno\nno\n", env: { ORBIT_REPAIR_PROMPTS: "machine" } },
     );
 
-    expect(result.status).toBe(6);
+    expect(result.status, result.stderr + result.stdout).toBe(6);
     const promptLines = lines(result.stdout).filter((line) => line.startsWith("prompt field=action-word"));
     expect(promptLines).toEqual([
       "prompt field=action-word kind=typed-word required=true attempt=1",
@@ -5558,7 +5560,7 @@ describe("scripts/repair.sh --execute --dangerous: regenerate-secret (#530 slice
       { input: "regenerate\n", env: { ORBIT_REPAIR_PROMPTS: "machine" } },
     );
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(result.stdout).toContain("prompt-accept field=action-word");
     expect(result.stdout).toContain("dangerous result=complete done=1 failed=0 reason=none");
     expect(result.stdout).not.toContain("regenerate\n"); // the typed word itself is never echoed as a value
@@ -5577,7 +5579,7 @@ describe("scripts/repair.sh --execute --dangerous: regenerate-secret (#530 slice
       { input: "regenerate\n", env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
     );
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(result.stdout).toContain("execute action=regenerate-secret resolves=secret-missing result=done");
     expect(result.stdout).toContain("dangerous result=complete done=1 failed=0 reason=none");
 
@@ -5616,7 +5618,7 @@ describe("scripts/repair.sh --execute --dangerous: regenerate-secret (#530 slice
       { input: "regenerate\n", env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
     );
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(result.stdout).toContain("dangerous result=empty done=0 failed=0 reason=none");
     expect(result.stdout).not.toContain("action=regenerate-secret resolves=secret-missing target=oidc-client-secret");
 
@@ -5636,7 +5638,7 @@ describe("scripts/repair.sh --execute --dangerous: regenerate-secret (#530 slice
       { input: "regenerate\n", env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
     );
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     const doneLines = lines(result.stdout).filter(
       (line) => line === "execute action=regenerate-secret resolves=secret-missing result=done",
     );
@@ -5664,7 +5666,7 @@ describe("scripts/repair.sh --execute --dangerous: regenerate-secret (#530 slice
       { input: "regenerate\n", env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
     );
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(result.stdout).toContain("dangerous result=complete done=1 failed=0 reason=none");
     const restarted = readFileSync(restartLogPath, "utf8").trim().split("\n").filter(Boolean);
     expect(restarted).toEqual(["3333bbbb4444"]); // the app container id, exactly once
@@ -5681,7 +5683,7 @@ describe("scripts/repair.sh --execute --dangerous: regenerate-secret (#530 slice
       { input: "regenerate\n", env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
     );
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain("dangerous result=failed done=0 failed=1 reason=step-failed");
     expect(result.stderr).toContain("restarting orbit-app failed");
     expect(result.stderr).toContain("still using the OLD value");
@@ -5714,7 +5716,7 @@ describe("scripts/repair.sh --execute --dangerous: regenerate-secret (#530 slice
 
       const result = await spawned.exited;
 
-      expect(result.status).toBe(4);
+      expect(result.status, result.stderr + result.stdout).toBe(4);
       expect(result.stdoutText()).toContain("dangerous result=failed done=0 failed=1 reason=step-failed");
       expect(result.stdoutText()).toContain(
         "execute action=regenerate-secret resolves=secret-missing result=failed",
@@ -5734,7 +5736,7 @@ describe("scripts/repair.sh --execute --dangerous: regenerate-secret (#530 slice
         {},
         { input: "regenerate\n", env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
       );
-      expect(retry.status).toBe(0);
+      expect(retry.status, retry.stderr + retry.stdout).toBe(0);
       expect(
         readFileSync(join(targetDir, ".orbit-secrets", "session-secret"), "utf8").trim(),
       ).toMatch(HEX_SECRET_PATTERN);
@@ -5761,7 +5763,7 @@ describe("scripts/repair.sh --execute --dangerous: regenerate-secret (#530 slice
     spawned.child.stdin.end();
     const result = await spawned.exited;
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     // The earlier target really was written.
     expect(readFileSync(join(targetDir, ".orbit-secrets", "session-secret"), "utf8").trim()).toMatch(HEX_SECRET_PATTERN);
     // So the operator must not be told nothing changed.
@@ -5805,7 +5807,7 @@ describe("scripts/repair.sh --execute --dangerous: regenerate-secret (#530 slice
       { input: "rotate\nregenerate\n", env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
     );
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(result.stdout).toContain(
       "execute action=rotate-database-credential resolves=secret-missing result=done",
     );
@@ -5849,7 +5851,7 @@ describe("scripts/repair.sh --execute --dangerous: regenerate-secret (#530 slice
       { input: "rotate\nwrong\nwrong\nwrong\n", env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
     );
 
-    expect(result.status).toBe(6);
+    expect(result.status, result.stderr + result.stdout).toBe(6);
     expect(result.stdout).toContain("dangerous result=refused done=0 failed=0 reason=refused-by-operator");
     expect(existsSync(join(targetDir, ".orbit-secrets", "postgres-password"))).toBe(false);
     expect(existsSync(join(targetDir, ".orbit-secrets", "session-secret"))).toBe(false);
@@ -5872,7 +5874,7 @@ describe("scripts/repair.sh --execute --dangerous: regenerate-secret (#530 slice
       { input: "regenerate\n", env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
     );
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     const newSecret = readFileSync(join(targetDir, ".orbit-secrets", "session-secret"), "utf8").trim();
     expect(result.stdout).not.toContain(newSecret);
     expect(result.stderr).not.toContain(newSecret);
@@ -6090,42 +6092,42 @@ describe("scripts/repair.sh --export-diagnostics (issue #531, ADR-0014 decision 
   it("rejects a bare invocation with no mode", () => {
     const targetDir = makeFixture();
     const result = runRepair(targetDir, []);
-    expect(result.status).toBe(2);
+    expect(result.status, result.stderr + result.stdout).toBe(2);
     expect(result.stderr).toContain("Usage:");
   });
 
   it("rejects --export-diagnostics combined with --check", () => {
     const targetDir = makeFixture();
     const result = runRepair(targetDir, ["--export-diagnostics", "--check"]);
-    expect(result.status).toBe(2);
+    expect(result.status, result.stderr + result.stdout).toBe(2);
     expect(result.stderr).toContain("Usage:");
   });
 
   it("rejects --export-diagnostics combined with --plan", () => {
     const targetDir = makeFixture();
     const result = runRepair(targetDir, ["--plan", "--export-diagnostics"]);
-    expect(result.status).toBe(2);
+    expect(result.status, result.stderr + result.stdout).toBe(2);
     expect(result.stderr).toContain("Usage:");
   });
 
   it("rejects --export-diagnostics combined with --execute", () => {
     const targetDir = makeFixture();
     const result = runRepair(targetDir, ["--execute", "--export-diagnostics"]);
-    expect(result.status).toBe(2);
+    expect(result.status, result.stderr + result.stdout).toBe(2);
     expect(result.stderr).toContain("Usage:");
   });
 
   it("rejects --safe-only alongside --export-diagnostics", () => {
     const targetDir = makeFixture();
     const result = runRepair(targetDir, ["--export-diagnostics", "--safe-only"]);
-    expect(result.status).toBe(2);
+    expect(result.status, result.stderr + result.stdout).toBe(2);
     expect(result.stderr).toContain("Usage:");
   });
 
   it("rejects --dangerous alongside --export-diagnostics", () => {
     const targetDir = makeFixture();
     const result = runRepair(targetDir, ["--export-diagnostics", "--dangerous"]);
-    expect(result.status).toBe(2);
+    expect(result.status, result.stderr + result.stdout).toBe(2);
     expect(result.stderr).toContain("Usage:");
   });
 
@@ -6133,8 +6135,8 @@ describe("scripts/repair.sh --export-diagnostics (issue #531, ADR-0014 decision 
     const targetDir = makeFixture();
     const first = runRepair(targetDir, ["--export-diagnostics", "--plain"], {}, DECLINE);
     const second = runRepair(targetDir, ["--plain", "--export-diagnostics"], {}, DECLINE);
-    expect(first.status).toBe(1);
-    expect(second.status).toBe(1);
+    expect(first.status, first.stderr + first.stdout).toBe(1);
+    expect(second.status, second.stderr + second.stdout).toBe(1);
     expect(first.stdout).toBe(second.stdout);
   });
 
@@ -6146,7 +6148,7 @@ describe("scripts/repair.sh --export-diagnostics (issue #531, ADR-0014 decision 
 
     const result = runRepair(targetDir, ["--export-diagnostics"]);
 
-    expect(result.status).toBe(5);
+    expect(result.status, result.stderr + result.stdout).toBe(5);
     expect(lines(result.stdout)).toEqual([
       "finding class=not-orbit-directory target=directory severity=fail",
       "diagnosis result=failed checked=1 skipped=19",
@@ -6182,7 +6184,7 @@ describe("scripts/repair.sh --export-diagnostics (issue #531, ADR-0014 decision 
 
     const result = runRepair(targetDir, ["--export-diagnostics"], HEALTHY_APP_OPTIONS, DECLINE);
 
-    expect(result.status).toBe(1);
+    expect(result.status, result.stderr + result.stdout).toBe(1);
     expect(treeSnapshot(targetDir)).toBe(before);
     expect(readdirSync(targetDir).some((name) => name.startsWith(".orbit-repair-diagnostics."))).toBe(false);
   });
@@ -6194,7 +6196,7 @@ describe("scripts/repair.sh --export-diagnostics (issue #531, ADR-0014 decision 
 
     const result = runRepair(targetDir, ["--export-diagnostics"], HEALTHY_APP_OPTIONS);
 
-    expect(result.status).toBe(1);
+    expect(result.status, result.stderr + result.stdout).toBe(1);
     expect(result.stderr).not.toContain("[y/N]");
     expect(treeSnapshot(targetDir)).toBe(before);
     expect(readdirSync(targetDir).some((name) => name.startsWith(".orbit-repair-diagnostics."))).toBe(false);
@@ -6208,7 +6210,7 @@ describe("scripts/repair.sh --export-diagnostics (issue #531, ADR-0014 decision 
 
     const result = runRepair(targetDir, ["--export-diagnostics"], HEALTHY_APP_OPTIONS, ACCEPT);
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     const written = readdirSync(targetDir).find((name) => name.startsWith(".orbit-repair-diagnostics."));
     expect(written).toBeDefined();
     const writtenPath = join(targetDir, written);
@@ -6243,7 +6245,7 @@ describe("scripts/repair.sh --export-diagnostics (issue #531, ADR-0014 decision 
     writeIdentityEnv(targetDir);
 
     const result = runRepair(targetDir, ["--export-diagnostics"], HEALTHY_APP_OPTIONS, ACCEPT);
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     const written = readdirSync(targetDir).find((name) => name.startsWith(".orbit-repair-diagnostics."));
     const fileContent = readFileSync(join(targetDir, written), "utf8");
 
@@ -6307,7 +6309,7 @@ describe("scripts/repair.sh --export-diagnostics (issue #531, ADR-0014 decision 
     const first = runRepair(targetDir, ["--export-diagnostics"], HEALTHY_APP_OPTIONS, DECLINE);
     const second = runRepair(targetDir, ["--export-diagnostics"], HEALTHY_APP_OPTIONS, DECLINE);
 
-    expect(first.status).toBe(second.status);
+    expect(first.status, first.stderr + first.stdout).toBe(second.status);
     expect(first.stdout).toBe(second.stdout);
   });
 });
@@ -6366,7 +6368,7 @@ describe("scripts/repair.sh: folder-moved and recreate-services (#1576 step 3)",
       const result = world.run(["--check"]);
       expect(result.stdout).toContain(MOVED_FINDING);
       expect(result.stdout).not.toContain("folder-elsewhere");
-      expect(result.status).toBe(4);
+      expect(result.status, result.stderr + result.stdout).toBe(4);
     });
 
     it("counts the new check: totals use 20", () => {
@@ -6488,7 +6490,7 @@ describe("scripts/repair.sh: folder-moved and recreate-services (#1576 step 3)",
         "plan action=recreate-services resolves=folder-moved mutation=containers backup=not-required target=deployment",
       );
       expect(result.stdout).not.toContain("plan action=restart-services");
-      expect(result.status).toBe(3);
+      expect(result.status, result.stderr + result.stdout).toBe(3);
     });
 
     it("recreate-services REPLACES restart-services in a run that also has an unhealthy application", () => {
@@ -6564,7 +6566,7 @@ describe("scripts/repair.sh: folder-moved and recreate-services (#1576 step 3)",
       expect(result.stdout).toContain("execute action=recreate-services resolves=folder-moved result=done");
       expect(result.stdout).toContain("execution result=complete done=1 failed=0");
       expect(result.stdout).not.toContain("prompt");
-      expect(result.status).toBe(0);
+      expect(result.status, result.stderr + result.stdout).toBe(0);
       // One stderr line naming the old folder before it acts.
       expect(result.stderr).toContain(world.oldDir);
       expect(result.stderr).toMatch(/recreate-services/);
@@ -6598,7 +6600,7 @@ describe("scripts/repair.sh: folder-moved and recreate-services (#1576 step 3)",
       const world = movedWorld({ withConfigure: false });
       const result = world.run(["--execute", "--safe-only"], { composeUpFails: true });
       expect(result.stdout).toContain("execute action=recreate-services resolves=folder-moved result=failed");
-      expect(result.status).toBe(4);
+      expect(result.status, result.stderr + result.stdout).toBe(4);
       expectNoDestructiveCommand(world, result);
     });
 
@@ -6871,7 +6873,7 @@ describe("scripts/repair.sh credential checkpoint removal after a clean re-check
       rotateInput,
     );
 
-    expect(result.status).toBe(4);
+    expect(result.status, result.stderr + result.stdout).toBe(4);
     expect(result.stdout).toContain("dangerous result=failed done=0 failed=1 reason=step-failed");
     expect(existsSync(dbAuthMarkerPath)).toBe(true);
     expect(result.stdout).not.toContain("finding class=database-credential-mismatch");
@@ -6893,7 +6895,7 @@ describe("scripts/repair.sh credential checkpoint removal after a clean re-check
       dbAuthMarkerPath,
     });
 
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr + result.stdout).toBe(0);
     expect(lines(result.stdout).at(-1)).toMatch(/^diagnosis result=healthy/);
     expect(checkpointDirs(targetDir)).toEqual([]);
     expect(removalLines(result.stderr)).toHaveLength(1);
@@ -6926,7 +6928,7 @@ describe("scripts/repair.sh credential checkpoint removal after a clean re-check
         dbAuthMarkerPath,
       });
 
-      expect(result.status).toBe(0);
+      expect(result.status, result.stderr + result.stdout).toBe(0);
       expect(checkpointDirs(targetDir)).toEqual([checkpointName]);
       expect(existsSync(join(targetDir, checkpointName, "postgres-password.orbkek"))).toBe(true);
       expect(removalLines(result.stderr)).toEqual([]);
@@ -7074,7 +7076,7 @@ describe("scripts/repair.sh credential checkpoint removal after a clean re-check
 
     const result = runRepair(targetDir, ["--execute", "--safe-only"]);
 
-    expect(result.status).toBe(5);
+    expect(result.status, result.stderr + result.stdout).toBe(5);
     expect(checkpointDirs(targetDir)).toEqual([checkpointName]);
     expectKeptAndNamed(result, checkpointName);
   });
@@ -7089,7 +7091,7 @@ describe("scripts/repair.sh credential checkpoint removal after a clean re-check
       db: { present: true, ready: true, authResult: "mismatch" },
     });
 
-    expect(result.status).toBe(6);
+    expect(result.status, result.stderr + result.stdout).toBe(6);
     expect(checkpointDirs(targetDir)).toEqual([checkpointName]);
     const stderrLines = lines(result.stderr);
     expect(stderrLines.some((line) => line.includes(checkpointName) && /kept/i.test(line))).toBe(true);

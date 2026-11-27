@@ -1340,7 +1340,7 @@ export class RestoreRun {
       return;
     }
     const source = this.rollbackDocumentKekFile ?? this.paths.documentKekFile;
-    const notOwnerOnly = `checkpoint/key failed; the document key file ${source} must be a regular file with mode 0600 (owner read/write only); fix it and run the import again.`;
+    const notOwnerOnly = `checkpoint/key failed; the document key file ${this.paths.documentKekFile} must be a regular file with mode 0600 (owner read/write only); fix it and run the import again.`;
     if (!isRegularNonSymlinkFile(source)) {
       refuse("checkpoint-key-invalid", notOwnerOnly);
     }

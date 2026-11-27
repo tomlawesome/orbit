@@ -51,6 +51,7 @@ import { absoluteAppLink, sendBoundedMail, type InvitationMailer, type Invitatio
 import { sendingConfigured } from "@/server/mail-in/sending-settings";
 import { openInstanceMetadataReader } from "@/server/metadata/fields";
 import type { MetadataExecutor } from "@/server/metadata/keys";
+import type { SessionTransaction } from "@/lib/auth/session";
 import { renderApprovalMail } from "@/server/sign-in-approvals/mail";
 
 /** Ten minutes (ADR-0027 §6): long enough to reach a phone, short enough that
@@ -343,7 +344,10 @@ async function releaseSend(transaction: Transaction, reservationId: string): Pro
  * last mail that actually went. The hour's count row stays (#1879), unless
  * `releaseReservation` names it because no mail was ever handed to the
  * mailer (#1915 A-F1); then it is released in this same locked transaction.
- * The staged link only while it is still this resend's, and the time only
+ * The staged link is put back to the one read under the lock before this
+ * resend staged its own (#1943 A-R3), so an earlier maybe-delivered link
+ * keeps resolving; null when there was none. The staged link only while it
+ * is still this resend's, and the time only
  * while the row still carries this resend's own stamp, so a later resend
  * that committed meanwhile is never undone. Under the same lock as the
  * stamp. A maybe-delivered send never comes here: its link and its minute
@@ -355,13 +359,14 @@ async function restoreSendTime(
   stagedDigest: string,
   stampedAt: Date,
   previousLastSentAt: Date | null,
+  previousStagedDigest: string | null,
   releaseReservation: string | null,
 ): Promise<boolean> {
   return getDb().transaction(async (transaction) => {
     await lockUser(transaction, userId);
     if (releaseReservation) await releaseSend(transaction, releaseReservation);
     await transaction.update(signInApprovals)
-      .set({ stagedTokenHash: null })
+      .set({ stagedTokenHash: previousStagedDigest })
       .where(and(eq(signInApprovals.id, approvalId), eq(signInApprovals.stagedTokenHash, stagedDigest)));
     const restored = await transaction.update(signInApprovals)
       .set({ lastSentAt: previousLastSentAt })
@@ -728,6 +733,13 @@ export async function decideSignInApproval(
   });
 }
 
+/**
+ * Records, in the transaction that writes the session, that this approval's
+ * spend minted it (#1943 SEC-H1). A mint passes it to `createSession` as
+ * `alsoInTransaction`.
+ */
+export type RecordApprovalMint = (transaction: SessionTransaction) => Promise<void>;
+
 /** What a caller's own session mint hands back, once spending the approval has succeeded. */
 export interface MintedApprovalSession {
   token: string;
@@ -767,7 +779,7 @@ export type PendingSignInState =
  */
 export async function collectSignInApproval(
   claim: string,
-  mintSession?: (userId: string) => Promise<MintedApprovalSession>,
+  mintSession?: (userId: string, recordMint: RecordApprovalMint) => Promise<MintedApprovalSession>,
 ): Promise<PendingSignInState> {
   if (claim.length === 0) return { state: "unknown" };
   const db = getDb();
@@ -778,6 +790,7 @@ export async function collectSignInApproval(
       expiresAt: signInApprovals.expiresAt,
       outcome: signInApprovals.outcome,
       consumedAt: signInApprovals.consumedAt,
+      sessionMintedAt: signInApprovals.sessionMintedAt,
     })
     .from(signInApprovals)
     .where(eq(signInApprovals.claimHash, secretDigest(claim)))
@@ -786,6 +799,9 @@ export async function collectSignInApproval(
   if (!row) return { state: "unknown" };
   if (row.outcome === "denied") return { state: "denied" };
   if (row.consumedAt) {
+    /* A spend that minted a session is done for good (#1943 SEC-H1): never a
+       hold on replay, however a refusal's mark and this spend interleaved. */
+    if (row.sessionMintedAt) return { state: "unknown" };
     if (row.outcome === "approved") return reissueFromReceipt(row.userId, row.consumedAt);
     return { state: "unknown" };
   }
@@ -801,8 +817,15 @@ export async function collectSignInApproval(
   if (!claimed) return { state: "unknown" };
   if (!mintSession) return { state: "approved", userId: row.userId };
 
+  /* Written in the mint's own transaction, so the record and the session
+     commit together or not at all (#1943 SEC-H1). */
+  const recordMint: RecordApprovalMint = async (transaction) => {
+    await transaction.update(signInApprovals)
+      .set({ sessionMintedAt: new Date() })
+      .where(and(eq(signInApprovals.id, row.id), eq(signInApprovals.consumedAt, spentAt)));
+  };
   try {
-    const session = await mintSession(row.userId);
+    const session = await mintSession(row.userId, recordMint);
     return { state: "approved", userId: row.userId, session };
   } catch (error) {
     // A marked password (#1881) is an answer too: the approval stays spent --
@@ -852,9 +875,12 @@ export async function collectSignInApproval(
  * change-password hold, not `unknown`. Only while all of these hold, else
  * `unknown` as before:
  *
+ *  - the spend minted no session: the caller has already answered
+ *    `unknown` for one that did (`session_minted_at`, #1943 SEC-H1), which
+ *    is what keeps a minted approval from ever turning into a hold, since a
+ *    refusal's mark can be stamped before the spend and commit after it;
  *  - the account is still marked, and by a refusal no later than the spend:
- *    a mark made after it is not the one this approval was answered with,
- *    and an approval that minted a session must never turn into a hold;
+ *    a mark made after it is not the one this approval was answered with;
  *  - the account is not disabled;
  *  - the spend is under the hold's own ten minutes old.
  *
@@ -909,6 +935,7 @@ export async function resendSignInApproval(
     id: signInApprovals.id,
     userId: signInApprovals.userId,
     tokenHash: signInApprovals.tokenHash,
+    stagedTokenHash: signInApprovals.stagedTokenHash,
     userAgent: signInApprovals.userAgent,
     clientAddress: signInApprovals.clientAddress,
     createdAt: signInApprovals.createdAt,
@@ -1010,13 +1037,16 @@ export async function resendSignInApproval(
       ));
   } else if (!maybeDelivered) {
     /* The provider refused it or was never reached: the new link never
-       arrived and the old one was never replaced, so the staged link is
-       cleared and the send time goes back. The count row stays (#1879)
+       arrived and the old one was never replaced, so the staged link goes
+       back to the one staged before it (#1943 A-R3: an earlier
+       maybe-delivered link keeps resolving), or is cleared when there was
+       none, and the send time goes back. The count row stays (#1879)
        unless no mail was ever handed to the mailer (#1915 A-F1). Once the
        earlier time is back, the next resend runs from it (#1915 A-F2); a
        row with no earlier send may be resent at once. */
     const restored = await restoreSendTime(
-      row.userId, row.id, tokenHash, now, row.lastSentAt, handedOver ? null : reservation,
+      row.userId, row.id, tokenHash, now, row.lastSentAt, row.stagedTokenHash,
+      handedOver ? null : reservation,
     );
     if (restored) sentAt = row.lastSentAt ?? new Date(now.getTime() - APPROVAL_RESEND_INTERVAL_MS);
   }

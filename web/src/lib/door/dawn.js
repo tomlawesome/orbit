@@ -88,24 +88,28 @@ export function mountDawn(host) {
   const alive = (fn) => (...a) => { if (!gone) return fn(...a); };
   /* its pictures decoded ahead of the light (decode-ahead.js, as the dusk's): the glows and the Earth sit invisible until
      body.lit fades them in, and a browser decodes a picture only when it is first drawn, so without this they were all
-     decoded in the frames after the light, the page held until they were (a 25-80 ms stall there, #32) */
+     decoded in the frames after the light, the page held until they were (a 25-80 ms stall there, #32). Held until the
+     reveal has drawn them in (drawnIn, below), and let go then (#76): kept for the whole visit, they were memory a
+     phone could not spare, and once drawn the browser has what it shows. Nothing is held after that point */
   /** @type {ReturnType<typeof decodeAhead>[]} */
-  let held = [];
+  let held = [], letGone = false;
   /* and the glows it rasterises itself (a blob: picture per size), each as it is set: one held per layer, the one it
      shows, so a resize lets the old size's go */
   /** @type {Map<string, { url: string } & ReturnType<typeof decodeAhead>>} */
   const rastered = new Map();
   /** @param {string} url @param {string} name */
-  const holdRaster = (url, name) => { if (!gone && rastered.get(name)?.url !== url) rastered.set(name, { url, ...decodeAhead([url]) }); };
+  const holdRaster = (url, name) => { if (!gone && !letGone && rastered.get(name)?.url !== url) rastered.set(name, { url, ...decodeAhead([url]) }); };
   const start = () => {
     if (started || gone) return; started = true; world.dataset.rasterised = "pending";
-    held.push(decodeAhead(/** @type {string[]} */ ([...world.querySelectorAll("image[href]")].map((im) => im.getAttribute("href")))));
+    if (!letGone) held.push(decodeAhead(/** @type {string[]} */ ([...world.querySelectorAll("image[href]")].map((im) => im.getAttribute("href")))));
     afterFirstFrame(alive(() => {
       const hrefs = /** @type {string[]} */ ([.../** @type {NodeListOf<SVGImageElement>} */ (world.querySelectorAll(".earth image[data-href]"))].map((im) => im.dataset.href));
       loadEarth(); rasters.start();
-      held.push(decodeAhead(hrefs));
+      if (!letGone) held.push(decodeAhead(hrefs));
     }));
   };
+  /* the reveal has drawn them in: the pictures decoded ahead are let go (above) */
+  const letGo = () => { letGone = true; held = []; rastered.clear(); };
   /* the pieces the door is made of, which would change its face as they arrived: the fonts, and the Earth's first picture */
   const critical = () => {
     const pre = world.querySelector(".earth image.pre");
@@ -155,6 +159,7 @@ export function mountDawn(host) {
       onLit();
       if (OPEN_EARLY) go();
       drawnIn().then(alive(() => {
+        letGo();
         if (timing) { timing = false; const s = softRan(); note(`reveal: ${s.n} soft chores ran, ${Math.round(s.ms)} ms; longest frame gap ${gap.toFixed(1)} ms${OPEN_EARLY ? " (the chores open with the reveal)" : " (held to the reveal's end)"}`); }
         if (!OPEN_EARLY) go();
       })); })); });

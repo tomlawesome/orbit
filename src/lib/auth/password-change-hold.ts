@@ -33,6 +33,9 @@ export interface PasswordChangeHold {
   userId: string;
   /** The mark this hold was issued against: the newest refusal's moment. */
   requiredAt: Date;
+  /* When this hold lapses, so a hold re-issued from it keeps the same lapse
+     and never outlives it (#1943 SEC-H2). */
+  lapsesAt: Date;
 }
 
 /**
@@ -90,7 +93,7 @@ export async function openPasswordChangeHold(cookies: CookieReader, config: Auth
   if (typeof payload.lapsesAt !== "number" || !Number.isFinite(payload.lapsesAt) || Date.now() >= payload.lapsesAt) {
     throw lapsed();
   }
-  return { userId: payload.userId, requiredAt };
+  return { userId: payload.userId, requiredAt, lapsesAt: new Date(payload.lapsesAt) };
 }
 
 export { clearPasswordChangeCookie };

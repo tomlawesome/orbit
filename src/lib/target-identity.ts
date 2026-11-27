@@ -86,13 +86,22 @@ function ignorableBackupDirectory(targetDir: string, entry: string): boolean {
 /**
  * #1901 O-R1: the rename-aside a rollback's restore_original_aside leaves
  * only if it was interrupted (".<name>.orbit-restore.<pid>.aside"), which
- * install.sh's snapshot_fresh_target ignores as the installer's own.
+ * install.sh's snapshot_fresh_target ignores as the installer's own -- but
+ * only while its original is in the folder (#1943 O-S1). A lone aside means
+ * a killed restore, so it counts as an entry and the folder is not fresh,
+ * as install.sh stops the run for it.
  */
-const ROLLBACK_ASIDE = /^\.\.(?:env-orbit|orbit-secrets)\.orbit-restore\.\d+\.aside$/u;
+const ROLLBACK_ASIDE = /^\.(\.(?:env-orbit|orbit-secrets))\.orbit-restore\.\d+\.aside$/u;
 
-/** Every entry of the target but an ignorable orbit-install-backups directory or rollback aside. */
+function ignorableRollbackAside(entries: readonly string[], entry: string): boolean {
+  const original = ROLLBACK_ASIDE.exec(entry)?.[1];
+  return original !== undefined && entries.includes(original);
+}
+
+/** Every entry of the target but an ignorable orbit-install-backups directory or a rollback aside beside its original. */
 function targetEntries(targetDir: string): string[] {
-  return readdirSync(targetDir).filter((entry) => !ignorableBackupDirectory(targetDir, entry) && !ROLLBACK_ASIDE.test(entry));
+  const entries = readdirSync(targetDir);
+  return entries.filter((entry) => !ignorableBackupDirectory(targetDir, entry) && !ignorableRollbackAside(entries, entry));
 }
 
 // target_is_empty (install.sh:270-276): `shopt -s nullglob dotglob; entries=(*)`

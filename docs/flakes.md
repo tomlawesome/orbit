@@ -356,6 +356,18 @@ timeout on this one case rather than a global raise.
 
 - 2026-11-01 · 6299c4fa (`deps/1565-sveltekit-3`, #1565; the SvelteKit 3 upgrade, not touching the arrival journey) · browser e2e run on this branch · failed, then passed on a rerun of unchanged code. First sighting.
 
+## scripts/install.interrupts-journal.test.mjs "B19: nothing is written under HOME, XDG_STATE_HOME or TMPDIR, whatever the run"
+
+- 2026-11-23 · !1453 9338b5a3f · pipeline 5244 / fast (job 62788) · `Test timed out in 45000ms` (51.9 s) on a loaded runner; the change touches no installer code. The rerun (job 62838) ran past the job's 30m limit, so it neither passed nor failed. First sighting.
+
+## src/lib/install-transaction.interruption.test.ts "SIGKILL interruption leaves install.sh-equivalent recovery evidence > leaves the target untouched for an uncommitted managed path ..."
+
+- 2026-11-23 · !1453 9338b5a3f · pipeline 5244 / fast (job 62788) · `installer rehearsal never reached the pause`, then the file's clean-up hit `ENOTEMPTY` removing its temp root, on a loaded runner; the change touches no installer code. First sighting.
+
+## tests/unit/archive-slot.test.mjs "an upload that drips for a long time (#1390) > is never cut while it keeps moving, however long it takes, and the slot stays held until the caller releases it"
+
+- 2026-11-21 · local, fix/1943-audit-h-held on 1c35745f (nothing near the archive slot) · full `npx vitest run` with 8 workers, 1668 s on a shared host · the stall timer fired (`The archive failed to upload`, archive-slot.js:314) while the drip was still moving. The file alone passed right after. First sighting.
+
 ## archive-slot.spec.ts:171 "while one archive upload is in progress a second is refused at once, and goes through after it ends" — mobile-webkit
 
 - 2026-11-01 · 6299c4fa (`deps/1565-sveltekit-3`, #1565; the SvelteKit 3 upgrade) · browser e2e run on this branch · failed, then passed on a rerun of unchanged code. First sighting.
@@ -593,6 +605,21 @@ timeout on this one case rather than a global raise.
 
 - 2026-11-21 · !1445 ee011d95c · pipeline 5061 / fast (job 60610) · the send button's aria-disabled stayed 'true' past vi.waitFor's 1 s, in a 1463 s full run on a loaded runner. Passed in jobs 60143, 60215, 60270 and 60418, and locally at ee011d95c six times at once (#1944). First sighting.
 
+## scripts/repair.test.mjs "scripts/repair.sh --execute --dangerous: regenerate-secret (#530 slice) > a permissions change on the secrets directory during the approval window fails the step cleanly: reason=step-failed, exit 4, secret still absent and recoverable on retry"
+
+- 2026-11-21 · !1450 692921fe0 · pipeline 5077 / fast (job 60776) · `Timed out waiting for stderr predicate`, then spawnRepair killed the child after 20 s without output, at the `type 'regenerate'` prompt, in a 1523 s full run on a loaded runner. The change touches none of repair.sh. Passed in job 60770 (pipeline 5076, same batch-a base) and locally. First sighting.
+
+## scripts/repair-retire-privdrop-1848.test.mjs "#1848 FIX-S1 addendum 2, item 3: the group is U's own, not the folder's > with the folder in U's own group, the calls are the same shape (U's gid, --init-groups, no --clear-groups)"
+
+- 2026-11-21 · !1454 51b164933 · pipeline 5109 / fast (job 61066) · the repair diagnosed the retirable SMTP lines but executed nothing (`execution result=empty done=0`), so the expected `execute action=retire-smtp-lines ... result=done` line was missing, in a 1557 s full run on a loaded runner (8.4 s for the test). Passed 3 of 3 locally on unchanged code straight after. First sighting.
+
+## scripts/repair.test.mjs "scripts/repair.sh --export-diagnostics (issue #531, ADR-0014 decision 10) > tolerates --plain in either order around --export-diagnostics"
+
+- 2026-11-21 · !1454 51b164933 · pipeline 5109 / fast (job 61066) · the two runs' output differed: the first reported `finding class=docker-unavailable` (checked=19 skipped=1), the second did not (checked=20), so the docker probe answered differently between two runs a moment apart, in the same 1557 s loaded run (7.2 s for the test). Passed 3 of 3 locally on unchanged code straight after. First sighting.
+
+## tests/integration/mail-relay-sender-check-failures.test.ts:687 "M-R8: a send attempt counts when it starts, and the mailer call holds no lock > the relay settings read for that member resolves within 2 s while the mailer is stuck"
+
+- 2026-11-23 · !1462 b9629da38 (release record only: CHANGELOG, release notes, docs/releases; nothing near mail) · pipeline 5245 / integration 3/4 (job 62806) · `expected 'hung' to be 'read'`: the settings read did not settle inside the test's 2 s window, in a 252 s integration run on a loaded runner; the other 154 tests in the job passed. Wall-clock-under-load shape. First sighting.
 ## scripts/ci/carry-previous-release.test.mjs "sign_evidence still running: a bounded wait on an in-flight dependency (#1607 note 48548, item 3) > a sign_evidence that stays preparing past the poll cap fails, saying it is still running and to run this job again"
 
 - 2026-11-21 · !1447 8264fee23 · pipeline 5072 / fast (job 60738) · the child was killed at its 30 s deadline without exiting, in a 1446 s full run on a loaded runner. The audit fixes don't touch this script or its test. Passed locally at 8264fee23 (377/377), and in job 60610 on the same script. First sighting.
@@ -604,6 +631,7 @@ timeout on this one case rather than a global raise.
 ## src/server/documents/pdf-structure-sandbox-poppler.test.ts "page draws are pdftoppm (real pdftoppm/pdfinfo) > §1.5 line 10: the tiny-step tiling pattern is stopped by the clock (500 ms) with stop timeout ..." (:345)
 
 - 2026-11-21 · !1457 batch-b 1eb93654 · pipeline 5167 / fast (job 61981) · `expected 5194 to be less than 2000` in a 1445 s run on a loaded runner; the change touches none of it. First sighting.
+- 2026-11-25 · !1478 batch-a 767c273f · pipeline 5390 / fast (job 65086) · failed after 2193 ms on a loaded runner, three other pipelines running; the job then hit its 30-minute limit before printing the assertion. The change touches none of it.
 
 ## tests/integration/document-kept-previews.test.ts "pages drawn once and kept, encrypted (#1433 §2.6) (real pdftoppm/pdfinfo) > line 5: a view before the worker ran draws on demand ..." (:277)
 
@@ -654,6 +682,26 @@ timeout on this one case rather than a global raise.
 
 - 2026-11-24 · dev 1d397e4a · pipeline 5313 (nightly browsers, started early) / fast (job 63916) · failed after 12 s on a loaded runner, the only failure of 16,661; the change touches none of it. First sighting.
 
+## scripts/repair-held-1915.test.mjs: the O-R2 and O-S2 "lands and then stalls" tests (2 s owner-step limit)
+
+- 2026-11-24 · !1453 fa64d9d8b · pipeline 5319 / fast (job 64034) · `the owner's mv was never run` on a loaded runner: the test gives the owner step 2 s; the change only alters how names are printed in other repair.sh messages. Passed three times in a row locally on the same commit. First sighting.
+- 2026-11-24 · !1453 fffd1ee45 · pipeline 5323 / fast (job 64105) · the file's sibling test, "#1915 O-S2: discard_staging_root counts a timed-out rename that landed as done", failed the same way (`the owner's rename never ran`) in a 30-minute fast job on a loaded runner. Same 2 s step limit; the change touches neither code path. Second sighting of the file.
+
+## tests/unit/v19-create-check-unavailable.test.mjs: the file's `beforeAll` (compiles the pocket component)
+
+- 2026-11-24 · !1469 274bfc7b3 · pipeline 5325 / fast (job 64148) · `Hook timed out in 10000ms` at line 196 on a loaded runner (load average about 52); the change is CI-only. The file passed locally. First sighting.
+
+## scripts/install.model-and-restarts.test.mjs "install.sh: one or two restarts are not a crash loop; three are (O-S2) > the database running, restart count +3 since the earlier sample: a crash loop, rolled back, `retry`"
+
+- 2026-11-24 · !1469 274bfc7b3 · pipeline 5325 / fast (job 64148) · the result did not deeply equal the expected 3-field outcome, on a loaded runner (load average about 52); the change is CI-only. The file passed locally. First sighting.
+
+## tests/unit/inbox-screens-landed-then-reread.test.mjs (whole file: beforeAll compiling the inbox page, 10 s hook limit)
+
+- 2026-11-25 · !1478 batch-a 24ea50a2 · pipeline 5427 / fast (job 65419) · `Hook timed out in 10000ms` at line 159 (the beforeAll that compiles `routes/inbox/+page.svelte`), on a runner slow enough that the same job hit its 30-minute limit on two earlier runs; the change touches nothing the inbox draws. The file passed locally on the same commit. First sighting.
+
+## scripts/repair-root-left-1897.test.mjs "repair blocked opening the FIFO" (line 247)
+
+- 2026-11-25 · 6bb43c996 (feat/1387-start-maintenance; repair.sh only gained one path in an array) · pipeline 5449 / fast 65681 · `result.hung` was true; the file passed 17/17 three times locally on the same commit and once on batch-a
 ## scripts/install.interrupts-journal.test.mjs "B26: the rollback never reads, runs, moves or deletes anything in an earlier run's folder; its own folder is a sibling"
 
 - 2026-11-26 · !1499 a294def9 · pipeline 5504 / fast (job 66354) · failed after 8.5 s on a loaded runner (no stamp/moved/docker-compose.yml, line 606), the only failure of 16,674; the change touches none of it. Passed 3 of 3 locally on the same commit. First sighting.

@@ -190,6 +190,8 @@ const test: TestUserConfig = {
                 "scripts/app-memory-limit-contract.test.mjs",
                 // #1158, #1445: renders the test bed's `docker compose config`.
                 "scripts/dev/test-bed-compose.test.mjs",
+                // #1489: builds tests/greenmail and runs it.
+                "scripts/greenmail-roots.test.mjs",
               ]
             : []),
         ],

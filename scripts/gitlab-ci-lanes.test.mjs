@@ -56,7 +56,7 @@ const jobs = [...allBlocks].filter(([name]) => !name.startsWith("."));
 // `private-details` (#1562).
 const laneMembers = {
   [CI_LANE.IGNORE_POLICY]: ["gitleaks", "licence_policy", "private-details", "supply_chain_source"],
-  [CI_LANE.CI]: ["fast", "fast_checks", "fast_coverage", "fast_docker", "gitleaks", "private-details", "supply_chain_source"],
+  [CI_LANE.CI]: ["code_scanners", "fast", "fast_checks", "fast_coverage", "fast_docker", "gitleaks", "private-details", "supply_chain_source"],
   // #1597: a proven empty diff runs the same four as the ignore/policy lane.
   // Spelled as a literal, not CI_LANE.NO_CHANGE, so the key means what it says
   // whether or not the classifier exports the constant yet.
@@ -204,6 +204,7 @@ describe("pipeline lanes", () => {
       "build_launcher",
       // #1608: the same build on every ref but the release branches.
       "build_launcher_branch",
+      "code_scanners",
       "fast",
       "fast_checks",
       // #1933: merges fast's shard blobs and runs the floor check.
@@ -1662,6 +1663,8 @@ describe("merge requests run changed-reachable tests, the dev push runs everythi
         mkdirSync(stubs);
         copyFileSync(SCRIPT, join(repo, "scripts", "test-backend.sh"));
         copyFileSync(join(dirname(SCRIPT), "test-load-warning.sh"), join(repo, "scripts", "test-load-warning.sh"));
+        mkdirSync(join(repo, "scripts", "ci"), { recursive: true });
+        copyFileSync(join(dirname(SCRIPT), "ci", "changed-test-tier.sh"), join(repo, "scripts", "ci", "changed-test-tier.sh"));
         writeFileSync(join(repo, "pnpm-lock.yaml"), "");
         const git = (...args) => execFileSync("git", args, { cwd: repo, stdio: "pipe" });
         git("init", "-q");
@@ -3621,5 +3624,46 @@ describe("nightly browser slots and starved-run messages (#1921)", () => {
     expect(guard, `${name}: starved only for 124 or 137`).not.toBeNull();
     expect(guard.index, `${name}: guard before the message`).toBeLessThan(starved);
     expect(handler.indexOf("fi;", starved), `${name}: message inside the if`).toBeGreaterThan(-1);
+  });
+});
+
+// #1943 (owner decision 83a, note 68859): a smoke job's `timeout:` is its inner
+// suite cap plus the 8-minute quarantine run that follows the gate.
+describe("smoke job timeouts (#1943, owner decision 83a)", () => {
+  const smokeJobNames = ["smoke", "smoke_webkit", "smoke_webkit_mobile"];
+  const timeoutText = (name) => allBlocks.get(name).match(/^ {2}timeout: (\S+)\s*$/mu)?.[1];
+  // The suite's own cap: the `timeout -k 30s <N>m bash scripts/test-frontend.sh ||`
+  // line. The quarantine run has `--quarantine` before its `||`, so it does not match.
+  const innerCapMinutes = (name) => {
+    const commands = allBlocks
+      .get(name)
+      .split("\n")
+      .filter((line) => !/^\s*#/u.test(line))
+      .join("\n");
+    const match = commands.match(/timeout -k \S+ (\d+)m bash scripts\/test-frontend\.sh \|\|/u);
+    return match ? Number(match[1]) : null;
+  };
+
+  it("sets each smoke job's timeout to its inner suite cap plus the 8-minute quarantine run", () => {
+    for (const name of smokeJobNames) {
+      const cap = innerCapMinutes(name);
+      expect(cap, `${name}: no inner suite cap found in its script`).not.toBeNull();
+      expect(timeoutText(name), name).toBe(`${cap + 8}m`);
+    }
+  });
+
+  it("pins the smoke timeouts to 43m, 48m and 33m (#1943, owner decision 83a)", () => {
+    expect(timeoutText("smoke")).toBe("43m");
+    expect(timeoutText("smoke_webkit")).toBe("48m");
+    expect(timeoutText("smoke_webkit_mobile")).toBe("33m");
+  });
+
+  it("does not describe the smoke timeout as 30m plus the quarantine run (#1943)", () => {
+    const lines = allBlocks.get("smoke").split("\n");
+    const at = lines.findIndex((line) => /^ {2}timeout: /u.test(line));
+    expect(at, "smoke has a timeout line").toBeGreaterThan(-1);
+    const comment = [];
+    for (let i = at - 1; i >= 0 && /^ {2}#/u.test(lines[i]); i--) comment.unshift(lines[i]);
+    expect(comment.join("\n")).not.toMatch(/30m \+ the quarantine run/u);
   });
 });

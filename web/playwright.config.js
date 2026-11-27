@@ -36,9 +36,10 @@ const RIG_TEST_MS = 60_000;
    (#1964, owner 111a), so no transition stands between a test and the state it
    waits for. A spec about motion opts back in with `reducedMotion:
    "no-preference"`. Each project merges `rig.use` into its own `use`. */
+/* A rig test that fails retries once in CI and, if it then passes, is reported as flaky (#1744, owner decision 124b). */
 const rig = {
   testDir: "./tests/rig", fullyParallel: true, workers: RIG_WORKERS,
-  timeout: RIG_TEST_MS, expect: { timeout: RIG_EXPECT_MS }, use: { reducedMotion: "reduce", actionTimeout: RIG_EXPECT_MS },
+  timeout: RIG_TEST_MS, retries: process.env.CI ? 1 : 0, expect: { timeout: RIG_EXPECT_MS }, use: { reducedMotion: "reduce", actionTimeout: RIG_EXPECT_MS },
 };
 /* The browser CI jobs shard with Playwright's own --shard, set from the
    variables GitLab's `parallel:` gives each job (#1546). GitLab sets the total

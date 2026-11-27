@@ -138,12 +138,18 @@ Merge requests run only the tests that import a changed file (`vitest run
 --changed` against the merge base, for `fast` and `integration`), with no
 coverage, except a merge request from `batch-a` or `batch-b` into `dev`, which
 runs everything with the coverage ratchet (owner, 2026-11-13, #1812); the push
-that lands on `dev` runs everything with the coverage ratchet (#1414). In `fast`, a merge request that changes any file other than
-JavaScript, TypeScript or Svelte source (the CI YAML, a Dockerfile) runs the
-whole suite instead, because `--changed` cannot see who reads such a file.
-Markdown is the exception and keeps the narrow run (owner, 2026-11-03): a docs
-test it breaks fails in the whole-suite run on `dev` instead. `integration`
-keeps `--changed` for every change: none of its tests reads such a file.
+that lands on `dev` runs everything with the coverage ratchet (#1414). In
+`fast` the selection is test impact analysis with conservative over-selection
+by partition (#1934), in two widening tiers chosen by
+`scripts/ci/changed-test-tier.sh`. `whole`: a merge request that changes any
+file other than JavaScript, TypeScript or Svelte source (the CI YAML, a
+Dockerfile) runs the whole suite, because `--changed` cannot see who reads such
+a file. `unit`: a change under `web/src/` or `src/` runs the `--changed`
+selection plus all of `tests/unit/` (about 30 s), because the tests that read
+screens and fixtures as text are not reached through imports. Markdown is the
+exception and keeps the narrow run (owner, 2026-11-03): a docs test it breaks
+fails in the whole-suite run on `dev` instead. `integration` keeps `--changed`
+for every change: none of its tests reads such a file.
 Accepted gap: a test that reads a changed source file without importing it (a
 fixture, a script run as a process) is not selected on the merge request, and
 the `dev` push catches it.
@@ -473,7 +479,7 @@ for each.
 | --- | --- | --- |
 | documentation (`risk=fast`) | prose, issue templates, policy files and unit-only tests | `classify`, `fast`, `base_image`, `gitleaks`, `licence_policy` where the file is one it reads; a change to `supply-chain/licence-policy.yml` also runs the image build (`build_image`) and the system jobs, because the Dockerfile fails the build on an apk licence that file does not allow (#1823) |
 | ignore/policy (#889) | `.gitleaksignore` | `classify`, `gitleaks`, `licence_policy`, `supply_chain_source` |
-| CI definition (#889) | `.gitlab-ci.yml`, `scripts/ci/`, the classifier and the tests that read the pipeline file | `classify`, `fast`, `fast_checks`, `fast_docker`, `gitleaks`, `supply_chain_source` |
+| CI definition (#889) | `.gitlab-ci.yml`, `scripts/ci/`, the classifier and the tests that read the pipeline file | `classify`, `fast`, `fast_checks`, `fast_docker`, `gitleaks`, `supply_chain_source`, `code_scanners` |
 
 The documentation lane is the risk classifier's `fast` result and predates the
 other two: it shortens the pipeline by axis, so a job still runs when its own
@@ -504,7 +510,7 @@ for the same thing.
 `scripts/ci/` sits in the CI lane by the owner's decision on #889. Several of
 those scripts are the acceptance stage's own checks, so a change confined to
 the CI-definition lane's own merge request does not exercise them: that lane
-runs `fast`, `fast_checks`, `fast_docker`, `gitleaks` and `supply_chain_source` only, and
+runs `fast`, `fast_checks`, `fast_docker`, `gitleaks`, `supply_chain_source` and `code_scanners` only, and
 skips the acceptance stage entirely. `scripts/ci/` matches no path in
 `classifyCiRisk`'s `fastPatterns`, `systemPatterns` or `integrationPatterns`,
 so it falls through to the function's catch-all default, `CI_RISK.SYSTEM`

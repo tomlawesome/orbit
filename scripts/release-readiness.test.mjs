@@ -258,6 +258,18 @@ describe("check: contains-target", () => {
   it("fails when the source branch does not contain the target branch", async () => {
     await expectFails("contains-target", "preview", { containsTarget: async () => false });
   });
+  it("names the preview into dev back-merge when the target is preview", async () => {
+    const report = await expectFails("contains-target", "preview", { containsTarget: async () => false });
+    const message = byId(report, "contains-target").message;
+    expect(message).toContain("preview into dev");
+    expect(message).not.toContain("main into preview");
+  });
+  it("names the main into preview back-merge when the target is main", async () => {
+    const report = await expectFails("main-tree-equals-preview", "main", { mainTreeEqualsPreview: async () => false });
+    const message = byId(report, "main-tree-equals-preview").message;
+    expect(message).toContain("main into preview");
+    expect(message).not.toContain("preview into dev");
+  });
 });
 
 describe("check: base-image", () => {

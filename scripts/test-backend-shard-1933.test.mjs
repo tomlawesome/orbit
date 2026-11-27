@@ -28,6 +28,8 @@ function setup({ symlinkedModules = false } = {}) {
   mkdirSync(stubs);
   copyFileSync(join(HERE, "test-backend.sh"), join(repo, "scripts", "test-backend.sh"));
   copyFileSync(join(HERE, "test-load-warning.sh"), join(repo, "scripts", "test-load-warning.sh"));
+  mkdirSync(join(repo, "scripts", "ci"), { recursive: true });
+  copyFileSync(join(HERE, "ci", "changed-test-tier.sh"), join(repo, "scripts", "ci", "changed-test-tier.sh"));
   writeFileSync(join(repo, "pnpm-lock.yaml"), "");
   const git = (...a) => spawnSync("git", a, { cwd: repo, encoding: "utf8" });
   git("init", "-q");
@@ -110,6 +112,27 @@ describe("test-backend.sh with ORBIT_TEST_SHARD (#1933)", { timeout: 75_000 }, (
     const r = run(ctx, { ORBIT_TEST_SHARD: "2/2", ORBIT_TEST_CHANGED_BASE: base });
     expect(r.lines).toContain(`pnpm\texec vitest run --changed ${base} --shard=2/2 --passWithNoTests`);
     expect(r.floor).toEqual([]);
+  });
+
+  it("the unit tier runs tests/unit with the same --shard as the --changed run (#1934)", () => {
+    const unitChange = (c) => {
+      const git = (...a) => spawnSync("git", a, { cwd: c.repo, encoding: "utf8" });
+      const base = git("rev-parse", "HEAD").stdout.trim();
+      mkdirSync(join(c.repo, "web", "src"), { recursive: true });
+      writeFileSync(join(c.repo, "web", "src", "changed.js"), "export {};\n");
+      git("add", "web/src/changed.js");
+      git("-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "change");
+      return base;
+    };
+    const base = unitChange(ctx);
+    const r = run(ctx, { ORBIT_TEST_SHARD: "2/2", ORBIT_TEST_CHANGED_BASE: base });
+    expect(r.lines).toContain(`pnpm\texec vitest run --changed ${base} --shard=2/2 --passWithNoTests`);
+    expect(r.lines).toContain("pnpm\texec vitest run tests/unit --shard=2/2 --passWithNoTests");
+    const fallback = setup({ symlinkedModules: true });
+    const fbase = unitChange(fallback);
+    const f = run(fallback, { ORBIT_TEST_SHARD: "2/2", ORBIT_TEST_CHANGED_BASE: fbase });
+    expect(f.lines).toContain(`node\tnode_modules/vitest/vitest.mjs run --changed ${fbase} --shard=2/2 --passWithNoTests`);
+    expect(f.lines).toContain("node\tnode_modules/vitest/vitest.mjs run tests/unit --shard=2/2 --passWithNoTests");
   });
 
   it("the direct-node fallback mirrors the three branches", () => {

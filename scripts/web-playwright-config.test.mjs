@@ -422,3 +422,51 @@ describe("web/playwright.config.js CI sharding", () => {
     await expect(loadConfig({ CI: "true", CI_NODE_TOTAL: "3", CI_NODE_INDEX: index })).rejects.toThrow(/CI_NODE_INDEX/u);
   });
 });
+
+/*
+ * #1744: in CI each rig project retries a failed test once, so a pass on retry
+ * can be reported as flaky. Local runs and every non-rig project keep zero
+ * retries. A project's own `retries` wins over the config-level one.
+ */
+describe("web/playwright.config.js retries (#1744)", () => {
+  const KEYS = ["CI", "CI_NODE_TOTAL", "CI_NODE_INDEX"];
+  let before;
+  beforeEach(() => {
+    before = Object.fromEntries(KEYS.map((key) => [key, process.env[key]]));
+    for (const key of KEYS) delete process.env[key];
+  });
+  afterEach(() => {
+    for (const key of KEYS) {
+      if (before[key] === undefined) delete process.env[key];
+      else process.env[key] = before[key];
+    }
+  });
+
+  const retries = (config, project) => setting(config, project, "retries") ?? 0;
+
+  it.each(RIG)("%s retries once in CI", async (name) => {
+    const { config, byName } = await loadConfig({ CI: "true" });
+    expect(retries(config, byName.get(name))).toBe(1);
+  });
+
+  it.each(RIG)("%s does not retry on a local run", async (name) => {
+    const { config, byName } = await loadConfig({});
+    expect(retries(config, byName.get(name))).toBe(0);
+  });
+
+  it.each(UNCHANGED)("%s never retries, in CI or locally", async (name) => {
+    for (const env of [{ CI: "true" }, {}]) {
+      for (const key of KEYS) delete process.env[key];
+      const { config, byName } = await loadConfig(env);
+      expect(retries(config, byName.get(name)), `${name} ${JSON.stringify(env)}`).toBe(0);
+    }
+  });
+
+  it("no project outside the rig retries, in CI", async () => {
+    const { config } = await loadConfig({ CI: "true" });
+    for (const project of config.projects) {
+      if (RIG.includes(project.name)) continue;
+      expect(retries(config, project), project.name).toBe(0);
+    }
+  });
+});

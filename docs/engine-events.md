@@ -859,6 +859,32 @@ Additions to this section's `recovery field`, `recovery kind` or
 in the same pull request. Renaming or removing a value is a breaking change
 requiring a version bump and coordination with consumers.
 
+## Maintenance result line (v0)
+
+`orbit start-maintenance` and `orbit end-maintenance` (run by
+`scripts/start-maintenance.sh` and `scripts/end-maintenance.sh`) each print
+one machine-readable line on standard output, last. Read it; do not read the
+prose lines before it.
+
+```
+maintenance action=start result=started|already-active|failed [reason=<reason>] until=<RFC3339>|none
+maintenance action=end   result=ended|not-active|failed   [reason=<reason>] cancelled=<n>
+```
+
+- `until` is the end time of the window this command opened, in UTC. It is
+  `none` when no end was given and for every result but `started`.
+- `cancelled` is how many due scheduled windows `end` cancelled.
+- `reason` appears only with `result=failed`: `database-unavailable`,
+  `notice-invalid` (empty or over 500 characters, more than 8 lines, or a control character), `until-invalid` (not an RFC
+  3339 time with an offset or `Z`, or a date that does not exist such as 02-30) or `until-in-past`. Argument checks run
+  before the database is used.
+
+Exit codes: `0` for every result except `failed` (running it again is safe),
+`1` for `failed`, `2` for a usage error (unknown or incomplete option; no line
+is printed), `5` from the scripts when docker, `.env-orbit` or the Compose
+project is missing (no line), `130` when interrupted. New reasons may be added
+within v0; renaming or removing one needs a version bump.
+
 ## In-container engine invocation (v0)
 
 Engine-delivery architecture (owner decision, 2026-08-13, recorded across

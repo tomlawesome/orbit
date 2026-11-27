@@ -42,8 +42,10 @@ import {
   type PushNotification,
   isAllowedPushEndpoint,
   isBlockedPushAddress,
+  isRevokedPushFailure,
   NOTIFICATION_PROVIDER_TIMEOUT_MS,
 } from "./notification-worker";
+import { log } from "@/lib/logger";
 
 const ENDPOINT = "https://push.services.example.test/sub/abc123";
 const HIDDEN_HOST = "secret-host.push.example.test";
@@ -99,6 +101,12 @@ const BLOCKED: Array<[string, number]> = [
   ["fec0::1", 6],
   ["ff02::1", 6],
   ["::", 6],
+  // #1943 SEC-A1 (CWE-918): the IPv4 documentation ranges (RFC 5737). The
+  // benchmarking range (RFC 2544) follows once this file is on the commit
+  // scan's allow list.
+  ["192.0.2.1", 4],
+  ["198.51.100.1", 4],
+  ["203.0.113.1", 4],
 ];
 // A public IPv4 cannot be written here (the commit scan refuses every IPv4
 // literal outside 127/8 and the documentation ranges, which are reserved), so
@@ -133,6 +141,17 @@ describe("item 1: one address predicate", () => {
     expect(error).toBeInstanceOf(BlockedPushEndpointError);
     expect(addresses).toBeUndefined();
   });
+
+  it.each(BLOCKED.filter(([address, family]) => family === 4 && address !== "127.0.0.1"))(
+    "refuses the IPv4 %s as the resolved address of a hostname (#1943 SEC-A1)",
+    async (address, family) => {
+      const agent = await sendAndCaptureAgent();
+      dnsState.answer = [{ address, family }];
+      const { error, addresses } = await runLookup(agentLookup(agent));
+      expect(error).toBeInstanceOf(BlockedPushEndpointError);
+      expect(addresses).toBeUndefined();
+    },
+  );
 
   it("lets a public resolved address through", async () => {
     const agent = await sendAndCaptureAgent();
@@ -223,9 +242,23 @@ describe("item 4: the error", () => {
 });
 
 describe("item 5: classification", () => {
-  it("categorises a BlockedPushEndpointError as push_unsubscribed, like 401/403/404/410", () => {
-    expect(categorizeProviderError("web_push", new BlockedPushEndpointError())).toBe("push_unsubscribed");
+  /* Flipped by #1943 A-R4 (ruling note 68569): a blocked resolver answer is
+     the network, not the push service, so it is transient. */
+  it("categorises a BlockedPushEndpointError as push_unavailable, while 410 stays push_unsubscribed (#1943 A-R4)", () => {
+    expect(categorizeProviderError("web_push", new BlockedPushEndpointError())).toBe("push_unavailable");
     expect(categorizeProviderError("web_push", { statusCode: 410 })).toBe("push_unsubscribed");
+  });
+
+  it("isRevokedPushFailure is false for a BlockedPushEndpointError, still with its one warn line, and true for 410 (#1943 A-R4)", () => {
+    const warn = vi.spyOn(log, "warn").mockImplementation(() => undefined as never);
+    try {
+      expect(isRevokedPushFailure(new BlockedPushEndpointError(), "sub-1943")).toBe(false);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0]![0]).toMatchObject({ reason: "push_endpoint_blocked" });
+      expect(isRevokedPushFailure({ statusCode: 410 }, "sub-1943")).toBe(true);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 

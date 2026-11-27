@@ -474,7 +474,7 @@ describe("orbit end-maintenance/auth commands keep their dynamic imports inside 
     return match[1];
   }
 
-  it.each(["commandEndMaintenance", "commandAuthRecoveryLink"])(
+  it.each(["commandEndMaintenance", "commandStartMaintenance", "commandAuthRecoveryLink"])(
     "%s's first import( call comes after its first try {",
     (name) => {
       const body = functionBody(name);
@@ -485,4 +485,105 @@ describe("orbit end-maintenance/auth commands keep their dynamic imports inside 
       expect(firstTry).toBeLessThan(firstImport);
     },
   );
+});
+
+// #1387: `orbit start-maintenance [--notice <text>] [--until <RFC 3339>]` and
+// the one machine-readable stdout line both maintenance commands print. These
+// spawn the real CLI. Argument validation happens before any database use, so
+// the failed outcomes need no database; the database-unavailable cases point at
+// a loopback port nothing listens on. The started / already-active outcomes
+// need a database and are proved in tests/integration/maintenance.test.ts.
+// Validation failures print result=failed with exit 1.
+describe("orbit start-maintenance and the maintenance event line (#1387)", () => {
+  const noDatabase = (): NodeJS.ProcessEnv => ({
+    ...process.env,
+    ORBIT_ENGINE_CONTEXT: "container",
+    DATABASE_URL: "postgres://orbit:placeholder@127.0.0.1:1/orbit",
+  });
+  const run = (args: string[]) => runCli(args, { env: noDatabase() });
+  const startLine = /^maintenance action=start result=failed reason=([a-z-]+) until=\S+$/mu;
+
+  it("is a supported command named in the usage list", () => {
+    const result = runCli(["totally-not-a-command"]);
+    expect(result.stderr).toContain("start-maintenance");
+  });
+
+  it.each([
+    [["--bogus"]],
+    [["extra-positional"]],
+    [["--notice"]],
+    [["--until"]],
+  ])("start-maintenance %j is a usage error: exit 2, no event line", (args) => {
+    const result = run(["start-maintenance", ...args]);
+    expect(result.status).toBe(2);
+    expect(result.stdout).not.toContain("maintenance action=");
+    expect(result.stderr).toContain("orbit:");
+  });
+
+  it("end-maintenance with an argument is still a usage error: exit 2", () => {
+    const result = run(["end-maintenance", "--bogus"]);
+    expect(result.status).toBe(2);
+  });
+
+  it.each([
+    ["an empty notice", ["--notice", ""]],
+    ["a 501 character notice", ["--notice", "x".repeat(501)]],
+  ])("%s is reason=notice-invalid, exit 1", (_label, args) => {
+    const result = run(["start-maintenance", ...args]);
+    expect(result.status).toBe(1);
+    expect(startLine.exec(result.stdout)?.[1]).toBe("notice-invalid");
+  });
+
+  it.each(["tomorrow", "2099-01-01", "2099-01-01T12:00:00", "not a time"])(
+    "--until %j is reason=until-invalid, exit 1",
+    (until) => {
+      const result = run(["start-maintenance", "--until", until]);
+      expect(result.status).toBe(1);
+      expect(startLine.exec(result.stdout)?.[1]).toBe("until-invalid");
+    },
+  );
+
+  it.each(["2099-02-30T00:00:00Z", "2099-01-01T24:00:00Z", "2099-13-01T00:00:00Z", "2099-01-01T12:60:00Z", "2099-01-01T12:00:60Z", "2099-01-01T12:00:00+24:00"])(
+    "--until %j (a date or time that rolls over) is reason=until-invalid, exit 1",
+    (until) => {
+      const result = run(["start-maintenance", "--until", until]);
+      expect(result.status).toBe(1);
+      expect(startLine.exec(result.stdout)?.[1]).toBe("until-invalid");
+    },
+  );
+
+  it.each([
+    ["a control character", "bad\u0007bell"],
+    ["more than 8 lines", Array.from({ length: 9 }, (_v, n) => `line ${n}`).join("\n")],
+  ])("a notice with %s is reason=notice-invalid even with the database down", (_label, notice) => {
+    const result = run(["start-maintenance", "--notice", notice]);
+    expect(result.status).toBe(1);
+    expect(startLine.exec(result.stdout)?.[1]).toBe("notice-invalid");
+  });
+
+  it("--until in the past is reason=until-in-past, exit 1", () => {
+    const result = run(["start-maintenance", "--until", "2000-01-01T00:00:00Z"]);
+    expect(result.status).toBe(1);
+    expect(startLine.exec(result.stdout)?.[1]).toBe("until-in-past");
+  });
+
+  it("a 500 character notice and a future offset time pass validation (the failure is then the database)", () => {
+    const result = run(["start-maintenance", "--notice", "x".repeat(500), "--until", "2099-01-01T12:00:00+02:00"]);
+    expect(result.status).toBe(1);
+    expect(startLine.exec(result.stdout)?.[1]).toBe("database-unavailable");
+  });
+
+  it("the default notice is accepted: with no arguments the only failure is the database", () => {
+    const result = run(["start-maintenance"]);
+    expect(result.status).toBe(1);
+    expect(result.stdout).toMatch(/^maintenance action=start result=failed reason=database-unavailable until=none$/mu);
+    expect(result.stdout + result.stderr).not.toContain("placeholder");
+  });
+
+  it("end-maintenance prints its event line when the database is unavailable, and keeps exit 1", () => {
+    const result = run(["end-maintenance"]);
+    expect(result.status).toBe(1);
+    expect(result.stdout).toMatch(/^maintenance action=end result=failed reason=database-unavailable cancelled=0$/mu);
+    expect(result.stdout + result.stderr).not.toContain("placeholder");
+  });
 });

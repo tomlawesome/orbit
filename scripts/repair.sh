@@ -1796,6 +1796,7 @@ readonly -a restore_transaction_paths=(
   scripts/export-recovery-bundle.sh
   scripts/import-recovery-bundle.sh
   scripts/end-maintenance.sh
+  scripts/start-maintenance.sh
   update.sh
   .env-orbit
   .orbit-secrets
@@ -4967,7 +4968,7 @@ do_restore_transaction() {
   # look at, not something this script may ever act on automatically.
   if [[ -e "$staging_root/committed" ]]; then
     printf 'Orbit repair: refusing restore-transaction; %s is marked committed by a completed install.\n' \
-      "$staging_root" >&2
+      "$(clean_name "$staging_root")" >&2
     printf 'Orbit repair: this staging directory was left behind after installation already succeeded; restoring from it would revert that update. Remove it manually once you have confirmed the current deployment is correct.\n' >&2
     return 1
   fi
@@ -4994,7 +4995,7 @@ do_restore_transaction() {
 
     if [[ "$interactive" != 1 && "$machine_prompts" != 1 ]]; then
       printf 'Orbit repair: refusing restore-transaction; %s would restore the live %s from an install-staging snapshot.\n' \
-        "$staging_root" "$live_secret_path" >&2
+        "$(clean_name "$staging_root")" "$live_secret_path" >&2
       printf 'Orbit repair: this is never automatic; re-run with a controlling terminal, or ORBIT_REPAIR_PROMPTS=machine, to confirm it explicitly.\n' >&2
       return 1
     fi
@@ -7403,20 +7404,20 @@ settle_credential_checkpoints() {
     [[ -e "$dir" || -L "$dir" ]] || continue
     if [[ "$clean" == 1 ]] && is_real_non_symlink_directory "$dir" && is_removable_checkpoint_dir "$dir"; then
       if as_folder_owner rm -rf -- "$dir"; then
-        printf 'Orbit repair: the re-check is clean, so the pre-rotation credential checkpoint %s (the old database password) was removed.\n' "$dir" >&2
+        printf 'Orbit repair: the re-check is clean, so the pre-rotation credential checkpoint %s (the old database password) was removed.\n' "$(clean_name "$dir")" >&2
         continue
       fi
     fi
     if [[ "$clean" == 1 ]]; then
-      printf 'Orbit repair: the credential checkpoint %s was kept: it is not the shape repair created, cannot be read, or could not be removed; check its contents and delete it yourself.\n' "$dir" >&2
+      printf 'Orbit repair: the credential checkpoint %s was kept: it is not the shape repair created, cannot be read, or could not be removed; check its contents and delete it yourself.\n' "$(clean_name "$dir")" >&2
     elif [[ "$reason" == docker-unchecked ]]; then
-      printf 'Orbit repair: the pre-rotation credential checkpoint %s was kept, because this run'"'"'s re-check could not check Docker (docker-unavailable), so it could not confirm the rotated database password works.\n' "$dir" >&2
+      printf 'Orbit repair: the pre-rotation credential checkpoint %s was kept, because this run'"'"'s re-check could not check Docker (docker-unavailable), so it could not confirm the rotated database password works.\n' "$(clean_name "$dir")" >&2
       printf 'Orbit repair: next step: ensure the docker CLI is installed and the daemon is reachable, then run repair again; the first run whose re-check is clean removes the checkpoint.\n' >&2
     elif [[ "$reason" == version-unsupported ]]; then
-      printf 'Orbit repair: the pre-rotation credential checkpoint %s was kept, because repair refused to act on this deployment'"'"'s version.\n' "$dir" >&2
+      printf 'Orbit repair: the pre-rotation credential checkpoint %s was kept, because repair refused to act on this deployment'"'"'s version.\n' "$(clean_name "$dir")" >&2
       printf 'Orbit repair: next step: fix the deployment version first (reinstall or update .env-orbit with an Orbit release, see docs/adr/0016); the first repair run after that whose re-check is clean removes the checkpoint.\n' >&2
     else
-      printf 'Orbit repair: the pre-rotation credential checkpoint %s was kept, because this run'"'"'s re-check is not clean.\n' "$dir" >&2
+      printf 'Orbit repair: the pre-rotation credential checkpoint %s was kept, because this run'"'"'s re-check is not clean.\n' "$(clean_name "$dir")" >&2
       printf 'Orbit repair: next step: fix what the re-check reports, then re-run "repair.sh --execute"; a run whose re-check is clean removes the checkpoint.\n' >&2
     fi
   done
