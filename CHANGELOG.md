@@ -4,7 +4,7 @@ What changed in each Orbit release, for the people who run and use it.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and Orbit uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.3.10] - 2026-11-24
+## [0.3.10] - 2026-11-27
 
 ### Added
 
@@ -13,6 +13,7 @@ and Orbit uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The administrator card names the number of damaged document fingerprints, and a stored document fingerprint Orbit cannot read is reported and cleared by the background work (#1931, #1945).
 - `orbit update --preflight` asks the database before an update whether the release can migrate, and the update stops with the reason if it cannot (#1779).
 - Orbit now settles mail transfers left stuck from before the 0.3.9 mail changes, and update checks for any it cannot settle (#1932).
+- `orbit start-maintenance` closes the instance from the host, the counterpart of `end-maintenance`, with an optional notice and end time (#1387).
 
 ### Changed
 
@@ -20,7 +21,7 @@ and Orbit uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - When the server is busy drawing documents, a page is retried once by itself instead of failing, and the queue of waiting pages is limited so one busy moment cannot stall every reader (#1446).
 - Text size, importance and the other tile choices follow the arrow keys, Home and End as one radio group, and the repeat period and section colours do the same (#1494, #1930).
 - A password change now cancels any sign-in approvals still waiting (#1898).
-- After a sign-in is refused for a wrong password, the next sign-in asks for a new password before it opens a session, and the refused password cannot be chosen again (#1881).
+- After you press Deny on a sign-in approval mail, the next sign-in asks for a new password before it opens a session, and the refused password cannot be chosen again (#1881).
 - Restoring an archive no longer puts a waiting hold on a kept document whose item was deleted, and such documents no longer count against a member's limit of 100 waiting uploads (#1871, #1904).
 - The phone Exports kept row in Administration shows its hours and count as the title and the size beneath it (#1913).
 - The v0.3.7 What's new entry for Importance now describes the levels and the size change correctly (#1926).
@@ -28,19 +29,26 @@ and Orbit uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A killed repair no longer leaves its lock held or its recovery copy behind, and a lock recreated under the same inode number is noticed (#1893, #1919, #1906).
 - Repair opens the backup lock read-write only, never creates it as root, holds the compose-restore lock for the whole restore, and keeps the original and its recovery copy when a restore fails (#1890, #1897, #1899, #1902, #1872).
 - Repair keeps its checkpoint encryption in memory so that it no longer counts against the owner step's time limit, and mounts the checkpoint bundle from a private copy outside the folder (#1935, #1875).
+- Repair refuses to checkpoint a document key file whose mode is not exactly 0600, and names the file (#1351).
+- Uses Orbit launcher v0.4.8 (was v0.4.5).
 - `install.sh` takes the backup and restore lock when it retires the `SMTP_*` lines, and writes `.env-orbit` through a fresh temporary name (#1855, #1848).
 - Old installer undo copies are offered for removal on update and removed once the change is confirmed (#1834).
 - The update readiness check bounds its output, uses a safe mount path and cleans up on a time-out or an interrupt, and an install still on 0.3.7 is no longer refused every update (#1842, #1854).
 - A configure `--migrate` that was killed is finished by the next run, and a leftover rollback copy no longer blocks it; a half-removed staging folder is never read as an interrupted install (#1877, #1876).
 - Installer prompts draw wide characters correctly, answers show on a plain terminal, and the terminal is restored when you press Ctrl-C (#1885, #1874).
 - Restore and repair messages are plainer: they name the backups folder, the exact `ORBIT_BACKUP_DIR` when another restore is unfinished, and say to re-enter the SMTP password after a restore (#1848, #1874, #1603).
-- The Orbit base image and the sidecar images are re-pinned: ClamAV 1.5.5, Ollama 0.40.17, the rebuilt Tika 4.2.0-full, and rebuilt Postgres and Node base images (#1856, #1825).
+- The Orbit base image and the sidecar images are re-pinned: ClamAV 1.5.5, Ollama 0.40.18, the rebuilt Tika 4.2.0-full, and rebuilt Postgres and Node base images (#1856, #1825, #1982).
 - GitLab now signs the SBOM as its own attestation, and GitHub verifies each attestation before it is copied to `ghcr.io`, so `cosign verify-attestation` also covers the SBOM; builds attested before this change must be re-validated on GitLab before they publish (#1848, #1862).
 - Reminder catch-up mail is one message per item and channel, About shows a service version only while its last check succeeded, and the scanner's version check is bounded (#1603).
 - The administration draft now carries a time and is dropped after 15 minutes or a plain visit, a search result for an item deleted elsewhere says so, and the browser-alerts words follow the switch (#1604).
 - A new app version now turns your next navigation into a page load, the phone due date can be cleared, and the importance pass saves its picks together (#1738).
 - A backup, restore or import is read before it is sent, a changed file steps back to choosing, one retry press sends one request, and purging old archive jobs drains the whole backlog and stops after three failures in a row (#1605).
 - A retried mail receipt over a lowered size limit is settled as too large, a missing sending password file is recreated empty, and `update.sh` bounds its downloads (#1789).
+- Orbit uses the security fixes in SvelteKit 3.1.1 and its Node adapter 6.0.1.
+- On the relay tab in Settings, the line about an unsigned forward now says why it was not kept and links to the inbox (#1727).
+- A push address that cannot be looked up for the moment is retried later instead of being treated as cancelled (#1943).
+- An install stops and names the backup to use when a rollback copy of `.env-orbit` or `.orbit-secrets` is left without its original (#1943).
+- The sign-in page's door picture is updated (#1740).
 
 ### Fixed
 
@@ -56,6 +64,8 @@ and Orbit uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Checking an upload no longer holds a whole document in the server's memory (#1920).
 - A web-push address that is an IPv4-mapped IPv6 address or a name that resolves to a private one is now refused, and the address the push connects to is the one checked (#1929).
 - Configuration migration writes each managed key once, even when a commented copy exists (#1847).
+- The installer no longer loses a keypress made just as a question times out (#1967).
+- A failed resend of a sign-in approval puts the earlier link back instead of leaving none (#1943).
 
 ## [0.3.9] - 2026-11-16
 
