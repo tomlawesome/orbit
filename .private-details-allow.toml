@@ -24,11 +24,13 @@ paths = [
 ]
 
 [[allowlists]]
-description = "text that only looks like an address: a public DNS resolver in the quality notes, and SVG path data in an old mock-up"
+description = "text that only looks like an address: a public DNS resolver in the quality notes, SVG path data in an old mock-up, and four-part package versions in the supply-chain policy's exceptions"
 targetRules = ["ip-address"]
 paths = [
   '''^docs/quality-strategy\.md$''',
   '''^design/v19/belt-purpose/round-2/e-preview-in-drawer\.html$''',
+  # a stale-package exception must name the exact version, such as ALSA's 1.2.x.y (#1950)
+  '''^\.github/supply-chain-policy\.json$''',
 ]
 
 [[allowlists]]
