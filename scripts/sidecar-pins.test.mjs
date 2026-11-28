@@ -547,6 +547,7 @@ describe("sidecar pins: axis 3, has upstream published a newer release", () => {
         "ollama/ollama:0.33.3": { indexDigest: OLLAMA_INDEX, platformDigest: OLLAMA_DIGEST },
       }),
       listTags: async () => ["0.32.0", "0.33.0", "0.33.1", "0.33.2", "0.33.3", "0.34.0", "0.34.1"],
+      tagPublishedAt: async () => "2000-01-01T00:00:00Z",
       today: TODAY,
     });
 
@@ -616,6 +617,7 @@ describe("sidecar pins: axis 3, has upstream published a newer release", () => {
         "apache/tika:4.0.0-full": { indexDigest: TIKA_INDEX, platformDigest: TIKA_DIGEST },
       }),
       listTags: async () => ["4.0.0-full", "4.1.0-full", "4.1.0-SNAPSHOT-full", "4.1.0-rocm"],
+      tagPublishedAt: async () => "2000-01-01T00:00:00Z",
       today: TODAY,
     });
 

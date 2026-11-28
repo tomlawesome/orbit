@@ -182,6 +182,10 @@ async function run(argv, { repoDir, resolveTag }) {
     repoDir,
     today: TODAY,
     resolveTag,
+    // No call may leave the machine: the release axis lists no tags (so a
+    // versioned pin is "current") and is never asked for a build time.
+    listTags: async () => [],
+    tagPublishedAt: async () => "2000-01-01T00:00:00Z",
     write: (text) => output.push(text),
     writeError: (text) => output.push(text),
   });
