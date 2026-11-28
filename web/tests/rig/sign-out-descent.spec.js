@@ -121,10 +121,28 @@ async function answerSignOut(page) {
 }
 
 /**
+ * Waits until the control is the thing a press at its centre lands on (#2006).
+ * `launching` clears at the climb's `land` beat, which puts on `bare`; under it
+ * the desk's orb is hidden and takes no pointer (home.css, body.bare .desk
+ * .orb) until the `instrument` beat, so the hero beneath takes the press. The
+ * journey's clock holds while a software-drawn world catches up, so on a busy
+ * runner that beat can be many seconds off: the state is waited for, not a time.
+ * @param {Page} page @param {string} selector
+ */
+async function reachable(page, selector) {
+  await expect.poll(() => page.locator(selector).first().evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return !!hit && (hit === el || el.contains(hit));
+  }), { message: `#2006: ${selector} is still covered after the arrival`, timeout: 60_000 }).toBe(true);
+}
+
+/**
  * Opens whichever menu this width draws and returns it and its sign-out control.
  * @param {Page} page @param {boolean} desk @param {string} pocketOrb
  */
 async function openMenu(page, desk, pocketOrb) {
+  await reachable(page, desk ? "button.orb" : pocketOrb);
   if (desk) {
     await page.locator("button.orb").click();
     const menu = page.locator("#account");
